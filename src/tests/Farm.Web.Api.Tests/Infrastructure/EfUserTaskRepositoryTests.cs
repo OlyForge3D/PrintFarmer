@@ -391,11 +391,21 @@ public class EfUserTaskRepositoryTests : IDisposable
         skipped.SourceKind = UserTaskSourceKind.Maintenance;
         skipped.SourceId = "maintenancealert:skip";
         skipped.UpdatedAt = now;
+        skipped.LastMutationSequence = 40;
+
+        // A second, newer terminal row for the SAME key: the projection must collapse to one
+        // entry carrying the GREATEST mutation version (issue #823 replay detection).
+        var skippedAgain = CreateUserTask("SkippedAgain", UserTaskType.MaintenanceDue, UserTaskStatus.Skipped);
+        skippedAgain.SourceKind = UserTaskSourceKind.Maintenance;
+        skippedAgain.SourceId = "maintenancealert:skip";
+        skippedAgain.UpdatedAt = now;
+        skippedAgain.LastMutationSequence = 42;
 
         var dismissed = CreateUserTask("Dismissed", UserTaskType.FailureClear, UserTaskStatus.Dismissed);
         dismissed.SourceKind = UserTaskSourceKind.FailureIncident;
         dismissed.SourceId = "failure:dismiss";
         dismissed.UpdatedAt = now;
+        dismissed.LastMutationSequence = 7;
 
         var completed = CreateUserTask("Completed", UserTaskType.MaintenanceDue, UserTaskStatus.Completed);
         completed.SourceKind = UserTaskSourceKind.Maintenance;
@@ -407,17 +417,22 @@ public class EfUserTaskRepositoryTests : IDisposable
         stale.SourceId = "maintenancealert:stale";
         stale.UpdatedAt = now.AddHours(-2);
 
-        _context.UserTasks.AddRange(skipped, dismissed, completed, stale);
+        _context.UserTasks.AddRange(skipped, skippedAgain, dismissed, completed, stale);
         _ = await _context.SaveChangesAsync();
 
-        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)> result =
             await _repository.GetSuppressedSourceKeysAsync(now.AddHours(-1));
 
+        HashSet<(UserTaskSourceKind, string)> keys = result.Select(r => (r.SourceKind, r.SourceId)).ToHashSet();
         result.Should().HaveCount(2);
-        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:skip"));
-        result.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:dismiss"));
-        result.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:done"));
-        result.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:stale"));
+        keys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:skip"));
+        keys.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:dismiss"));
+        keys.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:done"));
+        keys.Should().NotContain((UserTaskSourceKind.Maintenance, "maintenancealert:stale"));
+
+        // The greatest mutation version per key is surfaced so overlap replay can be detected.
+        result.Single(r => r.SourceId == "maintenancealert:skip").Version.Should().Be(42);
+        result.Single(r => r.SourceId == "failure:dismiss").Version.Should().Be(7);
     }
 
     #endregion
@@ -445,7 +460,7 @@ public class EfUserTaskRepositoryTests : IDisposable
         _context.UserTasks.AddRange(recent, stale);
         _ = await _context.SaveChangesAsync();
 
-        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)> result =
             await _repository.GetOpenSuppressedByKeysAsync(
                 [
                     (UserTaskSourceKind.Maintenance, "maintenancealert:recent"),
@@ -454,7 +469,8 @@ public class EfUserTaskRepositoryTests : IDisposable
                 maxAgeUtc: now.AddDays(-30));
 
         result.Should().ContainSingle();
-        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:recent"));
+        result.Select(r => (r.SourceKind, r.SourceId)).Should()
+            .Contain((UserTaskSourceKind.Maintenance, "maintenancealert:recent"));
     }
 
     /// <summary>
@@ -472,7 +488,7 @@ public class EfUserTaskRepositoryTests : IDisposable
         _context.UserTasks.AddRange(first, second, crossedFirst, crossedSecond);
         _ = await _context.SaveChangesAsync();
 
-        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> result =
+        IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)> result =
             await _repository.GetOpenSuppressedByKeysAsync(
                 [
                     (UserTaskSourceKind.Maintenance, "maintenancealert:one"),
@@ -480,11 +496,12 @@ public class EfUserTaskRepositoryTests : IDisposable
                 ],
                 maxAgeUtc: now.AddDays(-1));
 
+        HashSet<(UserTaskSourceKind, string)> keys = result.Select(r => (r.SourceKind, r.SourceId)).ToHashSet();
         result.Should().HaveCount(2);
-        result.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:one"));
-        result.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:two"));
-        result.Should().NotContain((UserTaskSourceKind.Maintenance, "failure:two"));
-        result.Should().NotContain((UserTaskSourceKind.FailureIncident, "maintenancealert:one"));
+        keys.Should().Contain((UserTaskSourceKind.Maintenance, "maintenancealert:one"));
+        keys.Should().Contain((UserTaskSourceKind.FailureIncident, "failure:two"));
+        keys.Should().NotContain((UserTaskSourceKind.Maintenance, "failure:two"));
+        keys.Should().NotContain((UserTaskSourceKind.FailureIncident, "maintenancealert:one"));
     }
 
     #endregion

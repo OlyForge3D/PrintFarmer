@@ -66,12 +66,19 @@ public interface IUserTaskRepository
     Task<int> GetPendingCountAsync(UserTaskType? taskType, bool includeMaintenance, CancellationToken ct = default);
 
     /// <summary>
-    /// Returns the (SourceKind, SourceId) keys of compiler-owned tasks a user
+    /// Returns the (SourceKind, SourceId, Version) keys of compiler-owned tasks a user
     /// recently Skipped or Dismissed (UpdatedAt &gt;= <paramref name="updatedAfterUtc"/>).
     /// The shift-plan compiler consults this set to avoid resurrecting a task the
     /// user explicitly cleared until the suppression window lapses (issue #713 Fix F).
+    /// <para>
+    /// <c>Version</c> is the greatest <see cref="UserTask.LastMutationSequence"/> among the
+    /// key's terminal rows — a strictly-monotonic per-mutation counter. The compiler uses it
+    /// to distinguish a genuinely newer Skip/Dismiss from a replay of the same row across the
+    /// intentionally overlapped suppression-delta windows (issue #823), so the overlap stays
+    /// idempotent.
+    /// </para>
     /// </summary>
-    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetSuppressedSourceKeysAsync(
+    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)>> GetSuppressedSourceKeysAsync(
         DateTime updatedAfterUtc, CancellationToken ct = default);
 
     /// <summary>
@@ -79,8 +86,13 @@ public interface IUserTaskRepository
     /// source keys. By default, rows older than 30 days are excluded so ancient terminal
     /// rows cannot be rehydrated as current episodes. Used for each source kind until
     /// that source successfully evaluates after compiler process start.
+    /// <para>
+    /// <c>Version</c> is the greatest <see cref="UserTask.LastMutationSequence"/> among the
+    /// key's matching terminal rows, so the compiler can record the durable clear point and
+    /// keep later overlapped deltas idempotent (issue #823).
+    /// </para>
     /// </summary>
-    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
+    Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)>> GetOpenSuppressedByKeysAsync(
         IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
         DateTime? maxAgeUtc = null,
         CancellationToken ct = default);

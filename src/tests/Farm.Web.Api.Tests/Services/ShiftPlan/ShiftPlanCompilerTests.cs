@@ -41,12 +41,12 @@ public class ShiftPlanCompilerTests
             .Returns(Task.CompletedTask);
         // Fix F: default to no suppressed source keys so existing tests behave as before.
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string, long)>());
         _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
                 It.IsAny<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string, long)>());
         // Fix R3-5: default auto-complete to "won the race" so existing auto-complete
         // tests behave as before unless a test explicitly overrides this.
         _tasks.Setup(r => r.TryAutoCompleteAsync(
@@ -443,9 +443,9 @@ public class ShiftPlanCompilerTests
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns((DateTime since, CancellationToken _) =>
             {
-                IReadOnlyCollection<(UserTaskSourceKind, string)> observed = since <= skipUpdatedAt
-                    ? [(UserTaskSourceKind.FailureIncident, "failure:1")]
-                    : Array.Empty<(UserTaskSourceKind, string)>();
+                IReadOnlyCollection<(UserTaskSourceKind, string, long)> observed = since <= skipUpdatedAt
+                    ? [(UserTaskSourceKind.FailureIncident, "failure:1", 1L)]
+                    : Array.Empty<(UserTaskSourceKind, string, long)>();
                 return Task.FromResult(observed);
             });
 
@@ -476,14 +476,14 @@ public class ShiftPlanCompilerTests
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<UserTask>());
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string)>());
+            .ReturnsAsync(Array.Empty<(UserTaskSourceKind, string, long)>());
         _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
                 It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
                     keys.Any(key => key.SourceKind == UserTaskSourceKind.FailureIncident
                         && key.SourceId == "failure:pre-restart")),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, "failure:pre-restart")]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, "failure:pre-restart", 1L)]);
 
         ShiftPlanCompiler failingCompiler = BuildCompiler(
             new ThrowingSource([UserTaskSourceKind.FailureIncident]));
@@ -522,7 +522,7 @@ public class ShiftPlanCompilerTests
                         && key.SourceId == sourceId)),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, sourceId)]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, sourceId, 1L)]);
         ShiftPlanSourceResult incomplete = new([spec], OriginWatermark: 10)
         {
             Authority = new ShiftPlanSourceAuthority(
@@ -616,7 +616,7 @@ public class ShiftPlanCompilerTests
                     keys.Any(k => k.SourceId == keyA)),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA)]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA, 1L)]);
 
         // Pass 1: source produces B twice (persistent collision) and NOT A. A is
         // authoritatively absent -> cleared; B collision keeps the kind unbootstrapped.
@@ -644,33 +644,156 @@ public class ShiftPlanCompilerTests
         Assert.Equal(1, r2.Created);
         Assert.Contains(_tracked, t => t.SourceId == keyA);
         Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+
+        // Exact-key bootstrap must NEVER have been asked about A: its cleared evidence
+        // holds it back, so its stale durable row cannot re-suppress the new episode.
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(k => k.SourceId == keyA)),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        // While A is cleared and B collides, exact-key durable bootstrap never runs at all:
+        // the colliding key B is removed from positive resolution (frozen), and the cleared
+        // key A is held back — so no candidate key remains and A's stale durable Skip row is
+        // never imported. The kind stays fail-closed (unbootstrapped) on its collision.
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.IsAny<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     /// <summary>
-    /// Issue #823 (fresh-dismissal): a fresh Skip/Dismiss of a key that was previously
-    /// cleared this process must re-suppress the key and evict its cleared evidence, so the
-    /// user's new action is honored rather than treated as an already-cleared prior episode.
+    /// Issue #823 (fresh-dismissal): a Skip/Dismiss strictly newer than a key's cleared
+    /// version must re-suppress the key and evict its cleared evidence, so the user's new
+    /// action is honored rather than treated as an already-cleared prior episode.
     /// </summary>
     [Fact]
     public async Task CompileAsync_FreshDismissalOfClearedKey_ReSuppressesAndEvictsClearedEvidence()
     {
         const string keyA = "failure:A";
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        DateTime watermark = t0.UtcDateTime.AddMinutes(-5);
+        MutableClock clock = new(t0);
         ShiftPlanSuppressionState state = new();
-        state.MarkCleared((UserTaskSourceKind.FailureIncident, keyA));
+        // A was authoritatively cleared at dismissal version 3 earlier this process.
+        state.MarkCleared((UserTaskSourceKind.FailureIncident, keyA), version: 3, clearedAtUtc: t0.UtcDateTime.AddMinutes(-10));
         // A prior pass ran, so the live-tracking watermark is set.
-        state.LastPassAtUtc = DateTime.UtcNow.AddMinutes(-5);
+        state.LastPassAtUtc = watermark;
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<UserTask>());
-        // The user freshly dismissed A: its terminal row was just updated.
+        // The user freshly dismissed A: the delta row's mutation version (4) is strictly
+        // newer than the cleared version (3), so it is a genuine new dismissal, not a replay.
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA)]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA, 4L)]);
 
-        ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
+        ShiftPlanCompiler compiler = BuildCompiler(clock, new StubSource("attn",
             [UserTaskSourceKind.FailureIncident], Spec(keyA)));
         ShiftPlanCompileResult result = await compiler.CompileAsync(state);
 
         Assert.Equal(0, result.Created);
         Assert.Empty(_tracked);
+        Assert.Contains((UserTaskSourceKind.FailureIncident, keyA), state.SuppressedKeys);
+        Assert.False(state.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
+        // The delta was observed exactly once, from the retained pass watermark.
+        _tasks.Verify(r => r.GetSuppressedSourceKeysAsync(watermark, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Issue #823 (overlap replay): the suppression-delta windows intentionally overlap by
+    /// 15s, so the SAME durable dismissal row can be returned on consecutive passes. A replay
+    /// (equal mutation version) must be idempotent — it must NOT re-suppress a key that was
+    /// authoritatively cleared, so a genuinely recurring key still materializes. A strictly
+    /// newer dismissal, however, must re-suppress and evict the cleared evidence.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_OverlappedDeltaReplaysClearedDismissal_DoesNotReSuppress_ButStrictlyNewerDoes()
+    {
+        const string keyA = "failure:A";
+        const string keyB = "failure:B";
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        MutableClock clock = new(t0);
+        ShiftPlanSuppressionState state = new();
+        // A prior pass ran, so Path 1 (the overlapped delta) is active from pass 1.
+        state.LastPassAtUtc = t0.UtcDateTime.AddSeconds(-15);
+
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        // The overlapped delta the compiler reads each pass. Mutated between passes to model
+        // an exact replay (same version) then a strictly newer dismissal.
+        (UserTaskSourceKind Kind, string Id, long Version)[] delta =
+            [(UserTaskSourceKind.FailureIncident, keyA, 5L)];
+        _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => delta);
+
+        // A's stale durable Skip row (version 5) is available to exact-key bootstrap — the
+        // test proves it is never imported for A once A is cleared.
+        _tasks.Setup(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(k => k.SourceId == keyA)),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA, 5L)]);
+
+        ShiftPlanTaskSpec bFirst = Spec(keyB, title: "b-first");
+        ShiftPlanTaskSpec bSecond = Spec(keyB, title: "b-second");
+
+        // Pass 1 at t0: delta observes A's dismissal (v5) → A suppressed; source emits B twice
+        // (persistent collision) and NOT A → A is authoritatively cleared (evidence v5); the
+        // B collision keeps the kind unbootstrapped.
+        ShiftPlanCompiler pass1 = BuildCompiler(clock,
+            AuthoritySource("colliding", UserTaskSourceKind.FailureIncident, originWatermark: 10,
+                specs: [bFirst, bSecond]));
+        ShiftPlanCompileResult r1 = await pass1.CompileAsync(state);
+
+        Assert.Equal(0, r1.Created);
+        Assert.True(state.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
+        Assert.True(state.TryGetClearedEvidence((UserTaskSourceKind.FailureIncident, keyA), out ClearedEvidence e1));
+        Assert.Equal(5L, e1.Version);
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+
+        // Pass 2 at t0+15s: the delta REPLAYS the same row (v5). A genuinely recurs while B
+        // still collides. The equal-version replay must NOT re-suppress A, and cleared
+        // evidence excludes A from exact-key bootstrap, so the new A episode materializes.
+        clock.Advance(TimeSpan.FromSeconds(15));
+        ShiftPlanTaskSpec aSpec = Spec(keyA, title: "a-new");
+        ShiftPlanCompiler pass2 = BuildCompiler(clock,
+            AuthoritySource("colliding", UserTaskSourceKind.FailureIncident, originWatermark: 10,
+                specs: [aSpec, bFirst, bSecond]));
+        ShiftPlanCompileResult r2 = await pass2.CompileAsync(state);
+
+        Assert.Equal(1, r2.Created);
+        Assert.Contains(_tracked, t => t.SourceId == keyA);
+        Assert.True(state.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+
+        // The overlapped delta was read once per pass (the replay path): the same v5 row was
+        // returned on both passes 1 and 2.
+        _tasks.Verify(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        // Through passes 1–2 (while A is cleared and B collides) exact-key durable bootstrap
+        // never runs at all — the colliding B is frozen out of positive resolution and the
+        // cleared A is held back — so A's stale durable row is never imported.
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.IsAny<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        // Pass 3 at t0+30s: a STRICTLY NEWER dismissal of A (v6) arrives. It must evict the
+        // cleared evidence and re-suppress A, so A no longer materializes.
+        clock.Advance(TimeSpan.FromSeconds(15));
+        delta = [(UserTaskSourceKind.FailureIncident, keyA, 6L)];
+        _tracked.Clear();
+        ShiftPlanCompiler pass3 = BuildCompiler(clock,
+            AuthoritySource("colliding", UserTaskSourceKind.FailureIncident, originWatermark: 10,
+                specs: [aSpec, bFirst, bSecond]));
+        ShiftPlanCompileResult r3 = await pass3.CompileAsync(state);
+
+        Assert.Equal(0, r3.Created);
+        Assert.DoesNotContain(_tracked, t => t.SourceId == keyA);
         Assert.Contains((UserTaskSourceKind.FailureIncident, keyA), state.SuppressedKeys);
         Assert.False(state.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
     }
@@ -691,17 +814,19 @@ public class ShiftPlanCompilerTests
                     keys.Any(k => k.SourceId == keyA)),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA)]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyA, 5L)]);
 
         // Pre-restart: A had been authoritatively cleared in this process's state.
         ShiftPlanSuppressionState preRestart = new();
-        preRestart.MarkCleared((UserTaskSourceKind.FailureIncident, keyA));
+        preRestart.MarkCleared((UserTaskSourceKind.FailureIncident, keyA), new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
         Assert.True(preRestart.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
 
         // Restart: a fresh state has no in-memory cleared evidence. A recurs and its durable
         // Skip/Dismiss row is recovered, so suppression is fail-closed until the source
         // successfully re-evaluates the key.
         ShiftPlanSuppressionState postRestart = new();
+        Assert.Equal(0, postRestart.ClearedEvidenceCount);
+        Assert.False(postRestart.IsCleared((UserTaskSourceKind.FailureIncident, keyA)));
         ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
             [UserTaskSourceKind.FailureIncident], Spec(keyA)));
         ShiftPlanCompileResult result = await compiler.CompileAsync(postRestart);
@@ -709,6 +834,13 @@ public class ShiftPlanCompilerTests
         Assert.Equal(0, result.Created);
         Assert.Empty(_tracked);
         Assert.Contains((UserTaskSourceKind.FailureIncident, keyA), postRestart.SuppressedKeys);
+        // Fail-closed recovery queried the durable row for exactly {A}, exactly once.
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Count == 1 && keys.Single().SourceKind == UserTaskSourceKind.FailureIncident && keys.Single().SourceId == keyA),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     /// <summary>
@@ -723,7 +855,7 @@ public class ShiftPlanCompilerTests
         const string keyA = "failure:A";
         const string keyC = "failure:C";
         ShiftPlanSuppressionState state = new();
-        state.MarkCleared((UserTaskSourceKind.FailureIncident, keyA));
+        state.MarkCleared((UserTaskSourceKind.FailureIncident, keyA), new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<UserTask>());
         // Only C has a durable Skip row; A is held back by its cleared evidence and never queried.
@@ -732,7 +864,7 @@ public class ShiftPlanCompilerTests
                     keys.Any(k => k.SourceId == keyC)),
                 It.IsAny<DateTime?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyC)]);
+            .ReturnsAsync([(UserTaskSourceKind.FailureIncident, keyC, 5L)]);
 
         ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
             [UserTaskSourceKind.FailureIncident], Spec(keyA, title: "a"), Spec(keyC, title: "c")));
@@ -743,6 +875,96 @@ public class ShiftPlanCompilerTests
         Assert.DoesNotContain(_tracked, t => t.SourceId == keyC);
         Assert.Contains((UserTaskSourceKind.FailureIncident, keyC), state.SuppressedKeys);
         Assert.DoesNotContain((UserTaskSourceKind.FailureIncident, keyA), state.SuppressedKeys);
+        // Exact-key bootstrap queried exactly {C} (A absent because it is cleared), once.
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Count == 1 && keys.Single().SourceKind == UserTaskSourceKind.FailureIncident && keys.Single().SourceId == keyC),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+        _tasks.Verify(r => r.GetOpenSuppressedByKeysAsync(
+                It.Is<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>>(keys =>
+                    keys.Any(k => k.SourceId == keyA)),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    /// <summary>
+    /// Issue #823 (bounded lifecycle — age pruning): under a persistently colliding kind that
+    /// never bootstraps, stale cleared evidence must not accumulate forever. Evidence older
+    /// than the durable-suppression horizon is pruned each pass while active-window evidence
+    /// survives (the kind is still unbootstrapped).
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_PersistentCollision_PrunesAgedClearedEvidence_KeepsActiveEvidence()
+    {
+        const string keyB = "failure:B";
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        MutableClock clock = new(t0);
+        ShiftPlanSuppressionState state = new();
+
+        // Seed one very old cleared key (41 days ago) and one recent cleared key (1 day ago).
+        (UserTaskSourceKind, string) oldKey = (UserTaskSourceKind.FailureIncident, "failure:old");
+        (UserTaskSourceKind, string) recentKey = (UserTaskSourceKind.FailureIncident, "failure:recent");
+        state.MarkCleared(oldKey, version: 1, clearedAtUtc: t0.UtcDateTime.AddDays(-41));
+        state.MarkCleared(recentKey, version: 2, clearedAtUtc: t0.UtcDateTime.AddDays(-1));
+        Assert.Equal(2, state.ClearedEvidenceCount);
+
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        // A persistent collision on B keeps the kind unbootstrapped, so pruning is the only
+        // bound on cleared-evidence growth this pass.
+        ShiftPlanTaskSpec bFirst = Spec(keyB, title: "b-first");
+        ShiftPlanTaskSpec bSecond = Spec(keyB, title: "b-second");
+        ShiftPlanCompiler compiler = BuildCompiler(clock,
+            AuthoritySource("colliding", UserTaskSourceKind.FailureIncident, originWatermark: 10,
+                specs: [bFirst, bSecond]));
+        ShiftPlanCompileResult result = await compiler.CompileAsync(state);
+
+        Assert.Equal(0, result.Created);
+        Assert.False(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+        // The 41-day-old evidence is pruned (older than the 30-day horizon); the 1-day-old
+        // evidence survives while the kind stays unbootstrapped.
+        Assert.False(state.IsCleared(oldKey));
+        Assert.True(state.IsCleared(recentKey));
+        Assert.Equal(1, state.ClearedEvidenceCount);
+    }
+
+    /// <summary>
+    /// Issue #823 (bounded lifecycle — bootstrap drop): once a kind successfully bootstraps,
+    /// its exact-key durable bootstrap no longer runs, so residual cleared evidence for that
+    /// kind is no longer needed and is dropped, bounding growth.
+    /// </summary>
+    [Fact]
+    public async Task CompileAsync_KindBootstraps_DropsResidualClearedEvidenceForThatKind()
+    {
+        const string keyA = "failure:A";
+        DateTimeOffset t0 = new(2026, 8, 1, 12, 0, 0, TimeSpan.Zero);
+        MutableClock clock = new(t0);
+        ShiftPlanSuppressionState state = new();
+        // A residual cleared key of the kind that is about to bootstrap this pass, plus a
+        // cleared key of an unrelated kind that must be untouched.
+        (UserTaskSourceKind, string) residual = (UserTaskSourceKind.FailureIncident, "failure:residual");
+        (UserTaskSourceKind, string) otherKind = (UserTaskSourceKind.Maintenance, "maintenance:x");
+        state.MarkCleared(residual, version: 1, clearedAtUtc: t0.UtcDateTime.AddDays(-1));
+        state.MarkCleared(otherKind, version: 1, clearedAtUtc: t0.UtcDateTime.AddDays(-1));
+
+        _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<UserTask>());
+
+        // A clean (collision-free) authoritative pass over the FailureIncident kind → it
+        // bootstraps, dropping residual FailureIncident cleared evidence.
+        ShiftPlanCompiler compiler = BuildCompiler(clock,
+            AuthoritySource("clean", UserTaskSourceKind.FailureIncident, originWatermark: 10,
+                specs: [Spec(keyA)]));
+        ShiftPlanCompileResult result = await compiler.CompileAsync(state);
+
+        Assert.True(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
+        Assert.False(state.IsCleared(residual));
+        // Evidence for an unrelated, still-unbootstrapped kind is preserved.
+        Assert.True(state.IsCleared(otherKind));
     }
 
     [Fact]
@@ -768,7 +990,7 @@ public class ShiftPlanCompilerTests
         _tasks.Setup(r => r.GetOpenCompilerTasksAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<UserTask>());
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { (UserTaskSourceKind.FailureIncident, "failure:1") });
+            .ReturnsAsync(new[] { (UserTaskSourceKind.FailureIncident, "failure:1", 1L) });
 
         ShiftPlanCompiler compiler = BuildCompiler(new StubSource("attn",
             [UserTaskSourceKind.FailureIncident], Spec("failure:1")));
@@ -795,10 +1017,10 @@ public class ShiftPlanCompilerTests
             .ReturnsAsync(Array.Empty<UserTask>());
 
         int bootstrapCall = 0;
-        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        IReadOnlyCollection<(UserTaskSourceKind, string, long)>[] bootstrapResponses =
         [
-            [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: DB query for "since last pass" finds nothing new
+            [(UserTaskSourceKind.FailureIncident, "failure:1", 1L)], // pass 2: DB reflects the user's skip
+            Array.Empty<(UserTaskSourceKind, string, long)>(), // pass 3: DB query for "since last pass" finds nothing new
         ];
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
@@ -835,11 +1057,11 @@ public class ShiftPlanCompilerTests
             .ReturnsAsync(Array.Empty<UserTask>());
 
         int bootstrapCall = 0;
-        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        IReadOnlyCollection<(UserTaskSourceKind, string, long)>[] bootstrapResponses =
         [
-            [(UserTaskSourceKind.FailureIncident, "failure:1")], // pass 2: DB reflects the user's skip
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 4
+            [(UserTaskSourceKind.FailureIncident, "failure:1", 1L)], // pass 2: DB reflects the user's skip
+            Array.Empty<(UserTaskSourceKind, string, long)>(), // pass 3
+            Array.Empty<(UserTaskSourceKind, string, long)>(), // pass 4
         ];
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
@@ -883,11 +1105,11 @@ public class ShiftPlanCompilerTests
             .ReturnsAsync(Array.Empty<UserTask>());
 
         int bootstrapCall = 0;
-        IReadOnlyCollection<(UserTaskSourceKind, string)>[] bootstrapResponses =
+        IReadOnlyCollection<(UserTaskSourceKind, string, long)>[] bootstrapResponses =
         [
-            [(UserTaskSourceKind.Maintenance, "idle:printer:1")], // pass 2: user dismissed it
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 3: idle window ends (no specs)
-            Array.Empty<(UserTaskSourceKind, string)>(), // pass 4: a new idle window starts
+            [(UserTaskSourceKind.Maintenance, "idle:printer:1", 1L)], // pass 2: user dismissed it
+            Array.Empty<(UserTaskSourceKind, string, long)>(), // pass 3: idle window ends (no specs)
+            Array.Empty<(UserTaskSourceKind, string, long)>(), // pass 4: a new idle window starts
         ];
         _tasks.Setup(r => r.GetSuppressedSourceKeysAsync(It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult(bootstrapResponses[Math.Min(bootstrapCall++, bootstrapResponses.Length - 1)]));
