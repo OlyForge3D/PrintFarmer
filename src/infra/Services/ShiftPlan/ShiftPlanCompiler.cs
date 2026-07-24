@@ -295,6 +295,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 foreach ((UserTaskSourceKind SourceKind, string SourceId) key in changedSinceLastPass)
                 {
                     _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
+
+                    // Issue #823: a fresh Skip/Dismiss overrides any prior cleared-episode
+                    // evidence for the same key so the new dismissal is honored.
+                    suppressionState.EvictCleared((key.SourceKind, key.SourceId));
                 }
             }
 
@@ -308,10 +312,21 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 .ToList();
             foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
             {
-                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
+                // Issue #823: exclude keys authoritatively cleared earlier this process
+                // lifetime. Their stale durable terminal row would otherwise re-suppress a
+                // genuinely new episode while a persistent collision on another key keeps
+                // this kind unbootstrapped. Never-observed and colliding keys are still
+                // recovered — only proven-cleared keys are held back.
+                List<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
                     .Where(key => key.Item1 == sourceKind)
                     .Select(key => (key.Item1, key.Item2))
+                    .Where(key => !suppressionState.IsCleared(key))
                     .ToList();
+                if (activeKeys.Count == 0)
+                {
+                    continue;
+                }
+
                 IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> bootstrapped =
                     await _tasks.GetOpenSuppressedByKeysAsync(
                         activeKeys,
@@ -439,17 +454,26 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             autoCompleted++;
         }
 
-        // Fix R3-6: drop suppression for any key this pass's sources stopped
-        // producing (for a source that itself succeeded this pass) — the user's
-        // dismissal was honored for that condition's episode; if it recurs later it
-        // is a new occurrence, not a resurrection suppressed by a stale rolling window.
+        // Fix R3-6 / issue #823: reconcile episode-scoped suppression at end of pass.
         if (suppressionState is not null)
         {
-            _ = suppressionState.SuppressedKeys.RemoveWhere(
-                key => !specs.ContainsKey(key)
+            // Issue #713 Fix R3-6: identify keys this pass's (successful) sources stopped
+            // producing so the user's dismissal is treated as episode-scoped, not a stale
+            // rolling timer. Issue #823: capture those authoritatively-cleared keys as
+            // per-key cleared evidence so a later, genuinely new episode of the same key is
+            // not re-suppressed by its stale durable row while the kind stays unbootstrapped
+            // (e.g. because another key of the kind persistently collides).
+            List<(UserTaskSourceKind SourceKind, string SourceId)> clearedThisPass = suppressionState.SuppressedKeys
+                .Where(key => !specs.ContainsKey(key)
                     && !collidingKeys.Contains(key)
                     && authoritativeKinds.TryGetValue(key.SourceKind, out AuthoritativeKindObservation? observation)
-                    && !observation.Authority.PreservedSourceIds.Contains(key.SourceId));
+                    && !observation.Authority.PreservedSourceIds.Contains(key.SourceId))
+                .ToList();
+            foreach ((UserTaskSourceKind SourceKind, string SourceId) key in clearedThisPass)
+            {
+                _ = suppressionState.SuppressedKeys.Remove(key);
+                suppressionState.MarkCleared(key);
+            }
 
             // Only a collision-free authoritative observation proves every active key was
             // considered. Incomplete and colliding kinds remain unbootstrapped so future

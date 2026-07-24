@@ -43,6 +43,24 @@ public sealed class ShiftPlanSuppressionState
     private HashSet<UserTaskSourceKind> BootstrappedKinds { get; } = [];
 
     /// <summary>
+    /// Per-key evidence (issue #823) that a specific source key was authoritatively
+    /// cleared during this process lifetime — the source proved the key's condition is
+    /// gone after the user had Skipped/Dismissed it, so its episode is over.
+    /// </summary>
+    /// <remarks>
+    /// A persistent spec collision on one key of a source kind keeps the entire kind
+    /// unbootstrapped, which leaves the per-pass exact-key durable bootstrap permanently
+    /// active for every key of that kind. Without this evidence, a genuinely new episode
+    /// of an already-cleared key would re-import that key's stale durable Skip/Dismiss row
+    /// and be wrongly suppressed. Excluding authoritatively-cleared keys from exact-key
+    /// bootstrap keeps suppression conservative without conflating unrelated keys, while
+    /// never-observed and colliding keys are still recovered. This is intentionally
+    /// in-memory only: a restart resets it, and the durable exact-key bootstrap then
+    /// re-establishes fail-closed suppression.
+    /// </remarks>
+    private HashSet<(UserTaskSourceKind SourceKind, string SourceId)> ClearedKeys { get; } = [];
+
+    /// <summary>
     /// Returns whether durable suppression has been seeded for the source kind.
     /// </summary>
     public bool IsBootstrapped(UserTaskSourceKind sourceKind) => BootstrappedKinds.Contains(sourceKind);
@@ -53,5 +71,30 @@ public sealed class ShiftPlanSuppressionState
     public void MarkBootstrapped(UserTaskSourceKind sourceKind)
     {
         _ = BootstrappedKinds.Add(sourceKind);
+    }
+
+    /// <summary>
+    /// Returns whether the exact source key was authoritatively cleared this process
+    /// lifetime and should therefore be excluded from exact-key durable bootstrap.
+    /// </summary>
+    public bool IsCleared((UserTaskSourceKind SourceKind, string SourceId) key) => ClearedKeys.Contains(key);
+
+    /// <summary>
+    /// Records that the exact source key was authoritatively cleared after a prior
+    /// Skip/Dismiss. Its stale durable terminal row must not re-suppress a later episode.
+    /// </summary>
+    public void MarkCleared((UserTaskSourceKind SourceKind, string SourceId) key)
+    {
+        _ = ClearedKeys.Add(key);
+    }
+
+    /// <summary>
+    /// Evicts cleared evidence for the exact source key — invoked on a fresh user
+    /// dismissal so the new dismissal is honored instead of being treated as a prior,
+    /// already-cleared episode.
+    /// </summary>
+    public void EvictCleared((UserTaskSourceKind SourceKind, string SourceId) key)
+    {
+        _ = ClearedKeys.Remove(key);
     }
 }
