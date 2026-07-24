@@ -3740,6 +3740,196 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
         }
     }
 
+    // MARK: - #781 (F2-R) Attention reconnect-gap integration
+
+    /// End-to-end proof for issue #781 over the REAL `SignalRService`
+    /// (#777 lifecycle foundation): a type-7 server-close followed by an
+    /// immediate receive-error on the replacement transport must yield
+    /// **one** reconnect owner, **one** transport at a time, and — wired
+    /// through the real connection-state hub into an
+    /// `AttentionFeedViewModel` — **exactly one** canonical Attention
+    /// recovery refresh after the single successful reconnect (never
+    /// zero, never two).
+    ///
+    /// Requirement 9 (assignment-gated receive proxy): every failure /
+    /// close frame is delivered ONLY after `waitForReceiveCall()`
+    /// confirms the receive proxy has enrolled its continuation, so the
+    /// test can never pass merely because handler execution outran task
+    /// assignment. Teardown of each registered proxy is then asserted
+    /// explicitly via `receiveLoopExitCount` and per-socket `cancels`.
+    @MainActor
+    func testRealService_type7CloseAndReceiveErrorInterleave_yieldsExactlyOneAttentionRecoveryRefresh() async {
+        let negotiatePayload: [String: Any] = [
+            "connectionId": "conn-781-gap",
+            "connectionToken": "tok-781-gap",
+            "availableTransports": [
+                [
+                    "transport": "WebSockets",
+                    "transferFormats": ["Text", "Binary"]
+                ]
+            ]
+        ]
+        mockSession.requestHandler = { request in
+            let data = try JSONSerialization.data(withJSONObject: negotiatePayload)
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+
+        let mockA = MockSignalRWebSocket()
+        let mockB = MockSignalRWebSocket()
+        let switcher = MockWebSocketSwitcher([mockA, mockB])
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(sleeper: sleeper, sockets: switcher)
+
+        let recorder = LifecycleStateObserver()
+        let stateSubscription = recordStates(service, into: recorder)
+        _ = stateSubscription
+
+        // Wire an Attention feed VM to the REAL service's connection-state
+        // hub. The scripted service returns the post-gap canonical feed;
+        // the item below can ONLY appear via a recovery refetch.
+        let gapFeed = makeAttentionFeed(
+            items: [makeAttentionItem(id: "failure:781-gap", title: "Gap recovery")],
+            healthyPrinterCount: 3
+        )
+        let attentionService = ScriptedAttentionService(steps: [.value(gapFeed)])
+        let callbackQueue = AttentionCallbackQueue()
+        let vm = AttentionFeedViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            attentionService: attentionService,
+            signalRService: service,
+            attentionEnabled: true
+        )
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 20,
+            label: "Type-7 + receive-error interleaving must yield exactly one Attention recovery refresh within 20s",
+            testCase: self,
+            releaseGates: {
+                mockA.completeReceive(with: .string("{}\u{1e}"))
+                mockB.completeReceive(with: .string("{}\u{1e}"))
+                Task { await sleeper.release() }
+            }
+        ) {
+            // Phase 1: cold connect handshake via mockA → `.connected`.
+            let connectTask = Task { try? await service.connect() }
+            await mockA.waitForReceiveCall()
+            mockA.completeReceive(with: .string("{}\u{1e}"))
+            _ = await connectTask.value
+            await recorder.waitFor(state: .connected)
+
+            // Cold connect publishes `.connecting` then `.connected`; both
+            // are no-ops for the gap refresh. Drain the VM's two edges and
+            // assert ZERO reconnect refresh (cold bootstrap owned by #779).
+            await callbackQueue.waitForCount(2)
+            await callbackQueue.runNext() // disconnected -> connecting
+            await callbackQueue.runNext() // connecting -> connected (cold)
+            let coldCalls = await attentionService.loadCallCount
+            XCTAssertEqual(coldCalls, 0, "Cold initial connection → zero reconnect refreshes")
+
+            // Phase 2: type-7 close frame on mockA → `.reconnecting`.
+            await mockA.waitForReceiveCall()
+            mockA.completeReceive(with: .string("{\"type\":7,\"error\":\"server-close\"}\u{1e}"))
+            await recorder.waitFor(state: .reconnecting)
+            await sleeper.waitForNextSleep()
+
+            // VM edge `.connected -> .reconnecting` — no refresh.
+            await callbackQueue.waitForCount(1)
+            await callbackQueue.runNext()
+            let midCalls = await attentionService.loadCallCount
+            XCTAssertEqual(midCalls, 0, "Dropping to reconnecting must not refresh")
+
+            // #777 one-owner/one-transport invariant at handoff-mid.
+            let midInv = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(midInv.activeReconnectOwners, 1,
+                           "exactly one reconnect owner parked after type-7 close; observed \(midInv.activeReconnectOwners)")
+            XCTAssertEqual(midInv.activeTransports, 0,
+                           "previous transport torn down before reconnect installs its own; observed \(midInv.activeTransports)")
+            XCTAssertEqual(midInv.activeReceiveLoops, 0,
+                           "previous receive loop exited; observed \(midInv.activeReceiveLoops)")
+
+            // Phase 3: release sleeper → reconnect installs mockB and
+            // completes the handshake, republishing `.connected`.
+            await sleeper.release()
+            await mockB.waitForReceiveCall()
+            mockB.completeReceive(with: .string("{}\u{1e}"))
+            await recorder.waitFor(state: .connected)
+
+            // VM edge `.reconnecting -> .connected` — EXACTLY ONE refresh.
+            await callbackQueue.waitForCount(1)
+            await callbackQueue.runNext()
+            let recoveredCalls = await attentionService.loadCallCount
+            XCTAssertEqual(recoveredCalls, 1,
+                           "Successful reconnect → exactly one canonical Attention refresh")
+            let recoveredTitle = await MainActor.run { vm.snapshot?.items.first?.title }
+            XCTAssertEqual(recoveredTitle, "Gap recovery",
+                           "Gap mutation surfaces solely through the recovery refetch")
+
+            // Phase 4: immediate receive-error on the new transport (mockB).
+            // Assignment-gate the proxy BEFORE delivering the failure so
+            // the proof cannot depend on handler execution outrunning task
+            // assignment (requirement 9).
+            let baselineSleeps = await sleeper.totalSleepEntries()
+            await mockB.waitForReceiveCall()
+            mockB.failReceive(with: URLError(.networkConnectionLost))
+            await sleeper.waitForSleepAfter(baseline: baselineSleeps)
+            await recorder.waitFor(state: .reconnecting)
+
+            // VM edge `.connected -> .reconnecting` — still NO refresh (no
+            // completed reconnect followed the receive-error in this test).
+            await callbackQueue.waitForCount(1)
+            await callbackQueue.runNext()
+            let afterRecvErr = await attentionService.loadCallCount
+            XCTAssertEqual(afterRecvErr, 1,
+                           "Receive-error drop without a completed reconnect → no second refresh")
+
+            // #777 exact-delta invariants at the second handoff: two
+            // reconnect sequences fired (type-7 + recv-error), the first
+            // exited on success, the second is parked. No duplicate owner /
+            // transport / receive loop ever coexisted.
+            let secondInv = service.lifecycleInvariants.snapshot()
+            XCTAssertEqual(secondInv.reconnectOwnerEnterCount, 2,
+                           "exactly two reconnect owners fired (type-7 + recv-error); observed \(secondInv.reconnectOwnerEnterCount)")
+            XCTAssertEqual(secondInv.reconnectOwnerExitCount, 1,
+                           "first owner exited on success, second parked; observed exit=\(secondInv.reconnectOwnerExitCount)")
+            XCTAssertEqual(secondInv.transportEnterCount, 2,
+                           "exactly two transports (mockA + mockB); observed \(secondInv.transportEnterCount)")
+            XCTAssertEqual(secondInv.transportExitCount, 2,
+                           "both transports torn down; observed \(secondInv.transportExitCount)")
+            XCTAssertEqual(secondInv.receiveLoopEnterCount, 2,
+                           "exactly two receive loops (mockA + mockB); observed \(secondInv.receiveLoopEnterCount)")
+            XCTAssertEqual(secondInv.receiveLoopExitCount, 2,
+                           "both registered receive proxies torn down by teardown; observed \(secondInv.receiveLoopExitCount)")
+            XCTAssertEqual(secondInv.maxReconnectOwners, 1,
+                           "max concurrent reconnect owners must be exactly 1; observed \(secondInv.maxReconnectOwners)")
+            XCTAssertEqual(secondInv.maxTransports, 1,
+                           "max concurrent transports must be exactly 1; observed \(secondInv.maxTransports)")
+            XCTAssertEqual(secondInv.maxReceiveLoops, 1,
+                           "max concurrent receive loops must be exactly 1; observed \(secondInv.maxReceiveLoops)")
+
+            await service.disconnect()
+            await recorder.waitFor(state: .disconnected)
+
+            // Explicit proxy-cancellation proof (requirement 9): teardown
+            // cancelled each socket's registered receive proxy exactly once.
+            XCTAssertEqual(mockA.lifecycleCounts().cancels, 1,
+                           "mockA receive proxy cancelled once by type-7 teardown")
+            XCTAssertEqual(mockB.lifecycleCounts().cancels, 1,
+                           "mockB receive proxy cancelled once by recv-error/disconnect teardown")
+
+            // Final: the whole type-7 + receive-error overlap produced
+            // exactly ONE Attention recovery refresh (not zero, not two).
+            let finalCalls = await attentionService.loadCallCount
+            XCTAssertEqual(finalCalls, 1,
+                           "type-7 + receive-error overlap → exactly one Attention refresh")
+        }
+    }
+
     private func installNegotiateHandler(counter: NegotiateCounter, failFirst: Bool = false) {
         mockSession.requestHandler = { request in
             let call = counter.increment()

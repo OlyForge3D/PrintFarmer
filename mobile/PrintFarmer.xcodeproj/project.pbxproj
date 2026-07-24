@@ -178,6 +178,7 @@
 		A79910000000000000000001 /* AttentionFeedViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79900000000000000000001 /* AttentionFeedViewModel.swift */; };
 		A79910000000000000000002 /* AttentionProofSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79900000000000000000002 /* AttentionProofSupport.swift */; };
 		A79910000000000000000003 /* AttentionFeedViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79900000000000000000003 /* AttentionFeedViewModelTests.swift */; };
+		A79910000000000000000004 /* AttentionReconnectGapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79900000000000000000004 /* AttentionReconnectGapTests.swift */; };
 		F78010000000000000000001 /* AttentionInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78000000000000000000001 /* AttentionInteractionTests.swift */; };
 		A78230000000000000000001 /* ShiftTaskProofSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000001 /* ShiftTaskProofSupport.swift */; };
 		A78230000000000000000002 /* ShiftTaskModelsServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */; };
@@ -646,6 +647,7 @@
 		A79900000000000000000001 /* AttentionFeedViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionFeedViewModel.swift; sourceTree = "<group>"; };
 		A79900000000000000000002 /* AttentionProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionProofSupport.swift; sourceTree = "<group>"; };
 		A79900000000000000000003 /* AttentionFeedViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionFeedViewModelTests.swift; sourceTree = "<group>"; };
+		A79900000000000000000004 /* AttentionReconnectGapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionReconnectGapTests.swift; sourceTree = "<group>"; };
 		F78000000000000000000001 /* AttentionInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionInteractionTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000001 /* ShiftTaskProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskProofSupport.swift; sourceTree = "<group>"; };
 		A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskModelsServiceTests.swift; sourceTree = "<group>"; };
@@ -1090,6 +1092,7 @@
 				F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */,
 				F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */,
 				A79900000000000000000003 /* AttentionFeedViewModelTests.swift */,
+				A79900000000000000000004 /* AttentionReconnectGapTests.swift */,
 				F78000000000000000000001 /* AttentionInteractionTests.swift */,
 			);
 			path = ViewModels;
@@ -1685,6 +1688,7 @@
 				A78230000000000000000002 /* ShiftTaskModelsServiceTests.swift in Sources */,
 				A78230000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift in Sources */,
 				A79910000000000000000003 /* AttentionFeedViewModelTests.swift in Sources */,
+				A79910000000000000000004 /* AttentionReconnectGapTests.swift in Sources */,
 				F78010000000000000000001 /* AttentionInteractionTests.swift in Sources */,
 				A78230000000000000000004 /* ShiftTaskSignalRTests.swift in Sources */,
 				A78230000000000000000005 /* ShiftTaskViewPresentationTests.swift in Sources */,
