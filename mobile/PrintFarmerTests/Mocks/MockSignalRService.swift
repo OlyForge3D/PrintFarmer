@@ -17,6 +17,9 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
     private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
+    private let capturedAttentionLock = NSLock()
+    private var capturedAttentionHandlers:
+        [@Sendable (AttentionChangedEvent) -> Void] = []
 
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
@@ -82,7 +85,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     @discardableResult
     func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
-        attentionChangedHub.subscribe(handler)
+        capturedAttentionLock.lock()
+        capturedAttentionHandlers.append(handler)
+        capturedAttentionLock.unlock()
+        return attentionChangedHub.subscribe(handler)
     }
 
     @discardableResult
@@ -104,6 +110,19 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     /// on return without a fixed sleep.
     func simulateAttentionChanged(_ event: AttentionChangedEvent) {
         attentionChangedHub.deliverSync(event)
+    }
+
+    /// Delivers through the raw handler captured at registration time, even
+    /// after its cancellable hub subscription was removed. This models a
+    /// transport callback already in flight during authority replacement.
+    func simulateCapturedAttentionChanged(
+        at index: Int,
+        event: AttentionChangedEvent
+    ) {
+        capturedAttentionLock.lock()
+        let handler = capturedAttentionHandlers[index]
+        capturedAttentionLock.unlock()
+        handler(event)
     }
 
     /// Simulate a `filamentcoveragechanged` invalidation event for
@@ -141,6 +160,11 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     var connectionStateSubscriberCount: Int { connectionStateHub.handlerCountForTesting }
     var attentionSubscriberCount: Int { attentionChangedHub.handlerCountForTesting }
+    var capturedAttentionHandlerCount: Int {
+        capturedAttentionLock.lock()
+        defer { capturedAttentionLock.unlock() }
+        return capturedAttentionHandlers.count
+    }
     var filamentCoverageSubscriberCount: Int { filamentCoverageChangedHub.handlerCountForTesting }
     var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }

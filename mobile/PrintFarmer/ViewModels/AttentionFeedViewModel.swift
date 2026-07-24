@@ -88,6 +88,86 @@ struct AttentionPaginationFailure: Equatable, Identifiable, Sendable {
     let message: String
 }
 
+struct AttentionActionFailure: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let fingerprint: AttentionOccurrenceFingerprint
+    let action: AttentionAction
+    let snoozedUntilUtc: Date?
+    let message: String
+
+    var itemID: String { fingerprint.itemID }
+}
+
+struct AttentionActionRefreshPending: Equatable, Identifiable, Sendable {
+    let id: UUID
+    let fingerprint: AttentionOccurrenceFingerprint
+    let action: AttentionAction
+    let message: String?
+
+    var itemID: String { fingerprint.itemID }
+}
+
+enum AttentionItemActionState: Equatable, Sendable {
+    case idle
+    case inProgress(AttentionActionKind)
+    case failed(AttentionActionFailure)
+    case refreshPending(AttentionActionRefreshPending)
+}
+
+enum AttentionMediaState: Equatable, Sendable {
+    case idle
+    case loading
+    case available(Data)
+    case unavailable(String)
+}
+
+struct AttentionOccurrenceFingerprint: Hashable, Sendable {
+    let itemID: String
+    let printerID: UUID
+    /// Wire-exact `(epochSeconds, nanosecond)` pair that participates in
+    /// occurrence identity. Storing the exact pair (rather than the
+    /// source `Date` or any lossy scalar) is what guarantees two items
+    /// that decode from equal wire strings produce equal fingerprints —
+    /// even after a decode → encode → decode round trip through
+    /// ``AttentionTimestampCodec``, even for pre-epoch instants, and
+    /// even at the 100 ns tick edges the backend .NET `DateTime`
+    /// contract emits. See the codec's header comment in
+    /// ``AttentionModels.swift``.
+    let occurredAt: AttentionExactTimestamp
+    let jobID: UUID?
+    let toolheadIndex: Int?
+
+    init(item: AttentionItem) {
+        itemID = item.id
+        printerID = item.printerId
+        occurredAt = item.occurredAtExact
+        jobID = item.jobId
+        toolheadIndex = item.toolheadIndex
+    }
+}
+
+typealias AttentionMediaFingerprint = AttentionOccurrenceFingerprint
+
+struct AttentionMediaRequestID: Hashable, Sendable {
+    let fingerprint: AttentionMediaFingerprint?
+    let generation: UInt64
+
+    var itemID: String? { fingerprint?.itemID }
+}
+
+private struct AttentionMutationRefreshRequirement {
+    let id: UUID
+    let fingerprint: AttentionOccurrenceFingerprint
+    let action: AttentionAction
+    let snoozedUntilUtc: Date?
+    let requiredAfterRefreshOrdinal: UInt64
+    var requiredEventSequence: UInt64
+    var awaitingPaginationRefreshOrdinal: UInt64?
+    var message: String?
+
+    var itemID: String { fingerprint.itemID }
+}
+
 /// Opaque token issued by the view model to a caller that intends to
 /// perform an async operation which must not fire if the view model was
 /// deactivated between capture and completion. The view uses this to
@@ -112,39 +192,77 @@ struct AttentionLifecycleToken: Equatable, Sendable {
 /// The class is `Sendable` so it can be captured by closures that
 /// straddle the signalR delivery queue and MainActor. The lock is
 /// sufficient — reads and writes are all short scalar copies.
-final class EventSequenceBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _value: UInt64 = 0
+struct AuthorityEventSequenceSnapshot: Equatable, Sendable {
+    let authority: UInt64
+    let sequence: UInt64
+    let itemSequences: [String: UInt64]
+}
 
-    /// Latest issued sequence, or 0 if none have been issued. Read
-    /// on MainActor at refresh start to snapshot the "cover watermark".
-    var currentValue: UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        return _value
+final class AuthorityEventSequencer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var authority: UInt64
+    private var sequence: UInt64 = 0
+    private var itemSequences: [String: UInt64] = [:]
+
+    init(authority: UInt64) {
+        self.authority = authority
     }
 
-    /// Atomically increment and return the new sequence. Called on the
-    /// signalR delivery queue when an `attentionchanged` event
-    /// arrives, giving every event a unique strictly-increasing id.
-    func issueNext() -> UInt64 {
+    func installNextAuthority() -> UInt64 {
+        lock.lock()
+        authority &+= 1
+        sequence = 0
+        itemSequences = [:]
+        let installedAuthority = authority
+        lock.unlock()
+        return installedAuthority
+    }
+
+    func recordIfCurrent(
+        authority: UInt64,
+        itemID: String
+    ) -> UInt64? {
         lock.lock()
         defer { lock.unlock() }
-        _value &+= 1
-        return _value
+        guard self.authority == authority else { return nil }
+        sequence &+= 1
+        itemSequences[itemID] = max(itemSequences[itemID] ?? 0, sequence)
+        return sequence
+    }
+
+    func currentSequence(authority: UInt64) -> UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.authority == authority else { return nil }
+        return sequence
+    }
+
+    func currentSequence(
+        authority: UInt64,
+        itemID: String
+    ) -> UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard self.authority == authority else { return nil }
+        return itemSequences[itemID] ?? 0
+    }
+
+    func snapshot() -> AuthorityEventSequenceSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return AuthorityEventSequenceSnapshot(
+            authority: authority,
+            sequence: sequence,
+            itemSequences: itemSequences
+        )
     }
 }
 
 // MARK: - View model
 
-/// Feed shell + state model for F2-U1 (issue #779). Owns the generation-
-/// authoritative fetch pipeline against `AttentionServiceProtocol` and
-/// the lowercase `attentionchanged` invalidation subscription.
-///
-/// This view model deliberately stays read-only over the shipped
-/// AttentionService: action execution, snoozes, media capture, and
-/// destination navigation are all owned by F2-U2 (#780). Reconnect-gap
-/// refresh is owned by F2-R (#781). Neither is implemented here.
+/// Canonical Attention feed state plus item-scoped action and failure-media
+/// coordination. Feed replacement remains generation-authoritative; item
+/// operations never mutate server truth locally.
 @MainActor
 @Observable
 final class AttentionFeedViewModel {
@@ -194,13 +312,38 @@ final class AttentionFeedViewModel {
     /// disable the load-more trigger and avoid duplicate requests.
     private(set) var isLoadingMore: Bool = false
 
+    /// Item-scoped mutation state. A request for one item never disables
+    /// actions or recovery on another item.
+    private(set) var actionStates:
+        [AttentionOccurrenceFingerprint: AttentionItemActionState] = [:]
+
+    /// Failure snapshot state keyed by Attention item identity.
+    private(set) var mediaStates: [AttentionMediaFingerprint: AttentionMediaState] = [:]
+
+    /// Canonical replacement/deactivation stamp used by row `.task(id:)`
+    /// and stale media completion fences.
+    private(set) var mediaGeneration: UInt64 = 0
+
     // MARK: Lifecycle plumbing
 
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
+    @ObservationIgnored private let now: @Sendable () -> Date
     @ObservationIgnored private var attentionService: (any AttentionServiceProtocol)?
+    @ObservationIgnored private var printerService: (any PrinterServiceProtocol)?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var serviceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var printerServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRIdentity: ObjectIdentifier?
+    @ObservationIgnored private var actionGeneration: UInt64 = 0
+    @ObservationIgnored private var actionOperationTokens:
+        [AttentionOccurrenceFingerprint: UUID] = [:]
+    @ObservationIgnored private var deferredMutationInvalidationSequences:
+        [AttentionOccurrenceFingerprint: UInt64] = [:]
+    @ObservationIgnored private var mutationRefreshRequirements:
+        [AttentionOccurrenceFingerprint: AttentionMutationRefreshRequirement] = [:]
+    @ObservationIgnored private var refreshRequestOrdinal: UInt64 = 0
+    @ObservationIgnored private var currentSnapshotRefreshOrdinal: UInt64?
+    @ObservationIgnored private var currentSnapshotCoverSequence: UInt64?
     @ObservationIgnored private var attentionEnabled = true
     @ObservationIgnored private var isActive = false
     /// Bumped whenever `configure` replaces the service/signalR pair.
@@ -239,7 +382,8 @@ final class AttentionFeedViewModel {
     /// the current sequence at request-start as its "cover watermark"
     /// — the refresh covers exactly the events whose sequence is ≤
     /// that watermark.
-    @ObservationIgnored private let eventSequenceBox = EventSequenceBox()
+    @ObservationIgnored private let eventSequencer =
+        AuthorityEventSequencer(authority: 0)
     /// The highest event sequence that has been covered by an APPLIED
     /// successful canonical refresh. Advanced only on `applySnapshot`
     /// success; failures and disabled outcomes do NOT advance it, so
@@ -252,6 +396,7 @@ final class AttentionFeedViewModel {
     /// watermark reaches it. Drives the follow-up decision at refresh
     /// completion and the drain decision at reactivation.
     @ObservationIgnored private var pendingCoverageEventSequence: UInt64?
+    @ObservationIgnored private var pendingCoverageByItem: [String: UInt64] = [:]
     /// Authority-scoped ownership set of currently in-flight canonical
     /// refreshes. Every refresh generates a unique `UUID` token at
     /// start and registers it here; only same-authority completions
@@ -300,12 +445,20 @@ final class AttentionFeedViewModel {
     /// The default reproduces production behavior exactly, so this
     /// seam is safe to expose in all build configurations (including
     /// Release build-for-testing).
-    init(callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
-        Task { @MainActor in
-            await operation()
-        }
-    }) {
+    ///
+    /// The `now` seam lets tests supply a deterministic clock for the
+    /// Attention timing arithmetic; production uses the real system
+    /// clock via `Date()`.
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in
+                await operation()
+            }
+        },
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.callbackEnqueuer = callbackEnqueuer
+        self.now = now
     }
 
     // MARK: - Configuration
@@ -373,13 +526,14 @@ final class AttentionFeedViewModel {
 
         let capturedEpoch = authorityEpoch
         let enqueue = callbackEnqueuer
-        let sequenceBox = eventSequenceBox
-        attentionSubscription = signalRService.onAttentionChanged { [weak self] _ in
-            // Issue the event's monotonic sequence at signalR delivery
-            // time. This gives a strict ordering between events and
-            // subsequent refresh-start "cover watermarks", regardless
-            // of when the callback drains on MainActor.
-            let eventSeq = sequenceBox.issueNext()
+        let sequencer = eventSequencer
+        attentionSubscription = signalRService.onAttentionChanged { [weak self] event in
+            guard let eventSeq = sequencer.recordIfCurrent(
+                authority: capturedEpoch,
+                itemID: event.itemId
+            ) else {
+                return
+            }
             enqueue { [weak self] in
                 guard let self,
                       self.matchesAuthorityIgnoringActive(
@@ -389,9 +543,21 @@ final class AttentionFeedViewModel {
                       ) else {
                     return
                 }
-                await self.handleInvalidationDrain(eventSequence: eventSeq)
+                await self.handleInvalidationDrain(
+                    eventSequence: eventSeq,
+                    itemID: event.itemId
+                )
             }
         }
+    }
+
+    func configureSnapshotService(_ printerService: any PrinterServiceProtocol) {
+        let identity = ObjectIdentifier(printerService as AnyObject)
+        guard printerServiceIdentity != identity else { return }
+
+        self.printerService = printerService
+        printerServiceIdentity = identity
+        invalidateMediaState(clearTerminalStates: true)
     }
 
     /// Central invalidation-drain handler with strict request/event
@@ -412,7 +578,10 @@ final class AttentionFeedViewModel {
     ///   without dispatching (the completion path launches a
     ///   follow-up if the in-flight didn't cover us).
     /// * Uncovered event with no refresh in flight → dispatch refresh.
-    private func handleInvalidationDrain(eventSequence eventSeq: UInt64) async {
+    private func handleInvalidationDrain(
+        eventSequence eventSeq: UInt64,
+        itemID: String
+    ) async {
         // Already covered by a completed successful refresh — no work.
         if eventSeq <= lastCoveredEventSequence { return }
 
@@ -421,10 +590,40 @@ final class AttentionFeedViewModel {
         // its own cover watermark. Setting it here is safe even if
         // we ultimately end up dispatching immediately (redundant with
         // the dispatched refresh's cover snapshot).
-        pendingCoverageEventSequence = max(
-            pendingCoverageEventSequence ?? 0,
+        pendingCoverageByItem[itemID] = max(
+            pendingCoverageByItem[itemID] ?? 0,
             eventSeq
         )
+        recomputePendingCoverage()
+
+        if let fingerprint = actionOperationTokens.keys.first(where: {
+            $0.itemID == itemID
+        }) {
+            deferredMutationInvalidationSequences[fingerprint] = max(
+                deferredMutationInvalidationSequences[fingerprint] ?? 0,
+                eventSeq
+            )
+            return
+        }
+
+        if let fingerprint = mutationRefreshRequirements.keys.first(where: {
+            $0.itemID == itemID
+        }), var requirement = mutationRefreshRequirements[fingerprint] {
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                eventSeq
+            )
+            requirement.awaitingPaginationRefreshOrdinal = nil
+            mutationRefreshRequirements[fingerprint] = requirement
+            publishMutationRefreshState(requirement)
+
+            if requirement.message == nil,
+               isActive,
+               activeRequestTokens.isEmpty {
+                _ = await refresh()
+            }
+            return
+        }
 
         if !isActive {
             // Off-screen: drain on activate.
@@ -457,6 +656,11 @@ final class AttentionFeedViewModel {
     /// caller that captured a token before an async await sees the
     /// token become stale and refuses to `bootstrap`.
     func deactivate() {
+        if !actionOperationTokens.isEmpty
+            || !mutationRefreshRequirements.isEmpty {
+            pendingReloadOnActivate = true
+        }
+        invalidateMediaForDeactivation()
         // Preserve `snapshot` so re-entering the view keeps the last
         // rendered content until the queued refresh completes; but drop
         // any in-flight authority so completions can't mutate state.
@@ -483,6 +687,12 @@ final class AttentionFeedViewModel {
     func currentLifecycleToken() -> AttentionLifecycleToken {
         AttentionLifecycleToken(value: lifecycleToken)
     }
+
+    #if DEBUG
+    func eventSequenceSnapshotForTesting() -> AuthorityEventSequenceSnapshot {
+        eventSequencer.snapshot()
+    }
+    #endif
 
     /// Called when the view re-appears. If a `pendingReloadOnActivate`
     /// flag was set (typically by a signalR event that arrived while the
@@ -586,7 +796,8 @@ final class AttentionFeedViewModel {
         attentionService: any AttentionServiceProtocol,
         signalRService: any SignalRServiceProtocol,
         attentionEnabled: Bool,
-        lifecycleToken: AttentionLifecycleToken? = nil
+        lifecycleToken: AttentionLifecycleToken? = nil,
+        printerService: (any PrinterServiceProtocol)? = nil
     ) async -> Bool {
         // #779 blocker 1: refuse to run when the lifecycle has been
         // superseded by a `deactivate`. Any state mutation here would
@@ -614,6 +825,9 @@ final class AttentionFeedViewModel {
             signalRService: signalRService,
             attentionEnabled: attentionEnabled
         )
+        if let printerService {
+            configureSnapshotService(printerService)
+        }
         return await refresh()
     }
 
@@ -659,6 +873,9 @@ final class AttentionFeedViewModel {
             return false
         }
 
+        refreshRequestOrdinal &+= 1
+        let requestOrdinal = refreshRequestOrdinal
+
         // Capture BOTH the load stamp (prevents reverse-order applies
         // within a single activation) and the activation epoch (fences
         // off applies across a deactivate/reactivate boundary). An
@@ -679,7 +896,8 @@ final class AttentionFeedViewModel {
         // whose sequence is ≤ this watermark. Events issued after this
         // point are NOT covered — the completion path will schedule a
         // follow-up refresh for any such pending coverage.
-        let startCoverSnapshot = eventSequenceBox.currentValue
+        let startCoverSnapshot =
+            eventSequencer.currentSequence(authority: authorityEpoch) ?? 0
 
         // Authority-scoped ownership: register this refresh in the
         // current authority's token set. Cross-authority completions
@@ -747,21 +965,41 @@ final class AttentionFeedViewModel {
 
         switch outcome {
         case .success(let feed):
-            applySnapshot(feed, mode: .refresh)
+            applySnapshot(
+                feed,
+                mode: .refresh,
+                refreshOrdinal: requestOrdinal,
+                coverSequence: startCoverSnapshot
+            )
             // Advance coverage. Any event with sequence ≤ startCover is
             // now proven covered by an applied successful refresh.
             lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
-            if let pending = pendingCoverageEventSequence,
-               pending <= lastCoveredEventSequence {
-                pendingCoverageEventSequence = nil
+            pendingCoverageByItem = pendingCoverageByItem.filter {
+                $0.value > lastCoveredEventSequence
             }
-            tryScheduleFollowupIfPending(capturedActivation: stampedActivation)
+            recomputePendingCoverage()
+            pruneCoveredMutationInvalidations()
+            let needsMutationFollowup = reconcileMutationRequirementsAfterCanonicalApply(
+                refreshOrdinal: requestOrdinal,
+                coverSequence: startCoverSnapshot
+            )
+            if needsMutationFollowup {
+                _ = await refresh()
+            } else {
+                tryScheduleFollowupIfPending(
+                    capturedActivation: stampedActivation
+                )
+            }
             return true
         case .featureDisabled:
             applyDisabled()
             return false
         case .failure(let error):
             applyFailure(error)
+            markMutationRefreshFailure(
+                refreshOrdinal: requestOrdinal,
+                error: error
+            )
             return false
         }
     }
@@ -803,6 +1041,7 @@ final class AttentionFeedViewModel {
         guard capturedActivation == activationEpoch else { return }
         guard let pending = pendingCoverageEventSequence,
               pending > lastCoveredEventSequence else { return }
+        guard !isPendingCoverageDeferredToMutation(pending) else { return }
 
         // Cycle 6 blocker B: capture BOTH the authority and activation
         // at schedule time. The queued closure re-checks them at drain
@@ -825,12 +1064,16 @@ final class AttentionFeedViewModel {
             // Authority still valid?
             guard self.isActive, self.attentionEnabled,
                   self.attentionService != nil else { return }
+            guard self.activeRequestTokens.isEmpty else { return }
             // Pending still uncovered under CURRENT authority?
             // (`invalidateAuthority` resets `pendingCoverageEventSequence`
             // so this is implicit after the authority-epoch check,
             // but explicit for defensive clarity.)
             guard let pending = self.pendingCoverageEventSequence,
                   pending > self.lastCoveredEventSequence else { return }
+            guard !self.isPendingCoverageDeferredToMutation(pending) else {
+                return
+            }
             _ = pending
             await self.refresh()
         }
@@ -909,7 +1152,10 @@ final class AttentionFeedViewModel {
 
         switch outcome {
         case .success(let feed):
-            applyAppendedPage(feed)
+            let needsMutationFollowup = applyAppendedPage(feed)
+            if needsMutationFollowup {
+                _ = await refresh()
+            }
             return true
         case .featureDisabled:
             // A backend disable racing pagination collapses to the safe
@@ -943,6 +1189,313 @@ final class AttentionFeedViewModel {
         }
         paginationFailure = nil
         return await loadMore()
+    }
+
+    // MARK: - Item actions
+
+    static let defaultSnoozeInterval: TimeInterval = 60 * 60
+
+    static func supportedActions(in item: AttentionItem) -> [AttentionAction] {
+        var seen: Set<String> = []
+        return item.actions.filter { action in
+            action.kind != .unknown
+                && seen.insert(action.kind.rawValue).inserted
+        }
+    }
+
+    func actionState(for itemID: String) -> AttentionItemActionState {
+        if let item = liveItem(id: itemID) {
+            return actionStates[AttentionOccurrenceFingerprint(item: item)]
+                ?? .idle
+        }
+        return actionStates.first(where: { $0.key.itemID == itemID })?.value
+            ?? .idle
+    }
+
+    func shouldPreserveActionAuthority(
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) -> Bool {
+        if let item = liveItem(id: fingerprint.itemID) {
+            return AttentionOccurrenceFingerprint(item: item) == fingerprint
+        }
+        return snapshot?.nextCursor != nil
+    }
+
+    @discardableResult
+    func performAction(
+        _ action: AttentionAction,
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) async -> Bool {
+        guard let item = liveItem(id: fingerprint.itemID),
+              AttentionOccurrenceFingerprint(item: item) == fingerprint,
+              let currentAction = Self.supportedActions(in: item)
+                .first(where: { $0.kind == action.kind }) else {
+            return false
+        }
+
+        let snoozedUntilUtc = currentAction.kind == .snooze
+            ? now().addingTimeInterval(Self.defaultSnoozeInterval)
+            : nil
+        return await performActionRequest(
+            currentAction,
+            fingerprint: fingerprint,
+            snoozedUntilUtc: snoozedUntilUtc
+        )
+    }
+
+    @discardableResult
+    func retryAction(failureID: UUID) async -> Bool {
+        guard let failedState = actionStates.values.first(where: { state in
+            guard case .failed(let candidate) = state else { return false }
+            return candidate.id == failureID
+        }), case .failed(let failure) = failedState else {
+            return false
+        }
+
+        guard let item = liveItem(id: failure.itemID) else {
+            return false
+        }
+        let currentFingerprint = AttentionOccurrenceFingerprint(item: item)
+        guard currentFingerprint == failure.fingerprint else {
+            revokeActionAuthority(for: failure.fingerprint)
+            return false
+        }
+        guard Self.supportedActions(in: item).contains(where: {
+            $0.kind == failure.action.kind
+        }) else {
+            actionStates[failure.fingerprint] = nil
+            return false
+        }
+
+        return await performActionRequest(
+            failure.action,
+            fingerprint: failure.fingerprint,
+            snoozedUntilUtc: failure.snoozedUntilUtc,
+            isRetry: true
+        )
+    }
+
+    @discardableResult
+    func retryActionRefresh(pendingID: UUID) async -> Bool {
+        guard var requirement = mutationRefreshRequirements.values.first(where: {
+            $0.id == pendingID
+        }) else {
+            return false
+        }
+
+        requirement.message = nil
+        requirement.awaitingPaginationRefreshOrdinal = nil
+        mutationRefreshRequirements[requirement.fingerprint] = requirement
+        publishMutationRefreshState(requirement)
+        return await refresh()
+    }
+
+    @discardableResult
+    private func performActionRequest(
+        _ action: AttentionAction,
+        fingerprint: AttentionOccurrenceFingerprint,
+        snoozedUntilUtc: Date?,
+        isRetry: Bool = false
+    ) async -> Bool {
+        let itemID = fingerprint.itemID
+        guard isActive, attentionEnabled, let service = attentionService else {
+            return false
+        }
+        switch actionStates[fingerprint] ?? .idle {
+        case .inProgress, .refreshPending:
+            return false
+        case .failed(let failure)
+            where failure.action.kind == action.kind && !isRetry:
+            return false
+        case .idle, .failed:
+            break
+        }
+
+        let token = UUID()
+        let capturedActionGeneration = actionGeneration
+        let capturedAuthority = authorityEpoch
+        actionOperationTokens[fingerprint] = token
+        actionStates[fingerprint] = .inProgress(action.kind)
+
+        do {
+            if action.kind == .snooze {
+                guard let snoozedUntilUtc else {
+                    preconditionFailure("Snooze actions require a deadline")
+                }
+                _ = try await service.snooze(
+                    itemId: itemID,
+                    snoozedUntilUtc: snoozedUntilUtc
+                )
+            } else {
+                _ = try await service.executeAction(
+                    itemId: itemID,
+                    actionKind: action.kind
+                )
+            }
+
+            guard matchesActionOperation(
+                fingerprint: fingerprint,
+                token: token,
+                generation: capturedActionGeneration,
+                authority: capturedAuthority
+            ) else {
+                return false
+            }
+
+            let pendingID = UUID()
+            let requirement = AttentionMutationRefreshRequirement(
+                id: pendingID,
+                fingerprint: fingerprint,
+                action: action,
+                snoozedUntilUtc: snoozedUntilUtc,
+                requiredAfterRefreshOrdinal: refreshRequestOrdinal,
+                requiredEventSequence: max(
+                    deferredMutationInvalidationSequences[fingerprint] ?? 0,
+                    eventSequencer.currentSequence(
+                        authority: authorityEpoch,
+                        itemID: itemID
+                    ) ?? 0
+                ),
+                awaitingPaginationRefreshOrdinal: nil,
+                message: nil
+            )
+            actionOperationTokens[fingerprint] = nil
+            deferredMutationInvalidationSequences[fingerprint] = nil
+            mutationRefreshRequirements[fingerprint] = requirement
+            publishMutationRefreshState(requirement)
+
+            _ = await refresh()
+            return true
+        } catch {
+            guard matchesActionOperation(
+                fingerprint: fingerprint,
+                token: token,
+                generation: capturedActionGeneration,
+                authority: capturedAuthority
+            ) else {
+                return false
+            }
+
+            actionOperationTokens[fingerprint] = nil
+            if Self.isCancellation(error) {
+                actionStates[fingerprint] =
+                    liveItem(id: itemID) == nil ? nil : .idle
+            } else {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                let failure = AttentionActionFailure(
+                    id: UUID(),
+                    fingerprint: fingerprint,
+                    action: action,
+                    snoozedUntilUtc: snoozedUntilUtc,
+                    message: message
+                )
+                if let item = liveItem(id: itemID) {
+                    let currentFingerprint = AttentionOccurrenceFingerprint(
+                        item: item
+                    )
+                    if currentFingerprint != fingerprint {
+                        revokeActionAuthority(for: fingerprint)
+                    } else {
+                        actionStates[fingerprint] =
+                            Self.supportedActions(in: item)
+                                .contains(where: { $0.kind == action.kind })
+                            ? .failed(failure)
+                            : .idle
+                    }
+                } else {
+                    actionStates[fingerprint] = .failed(failure)
+                }
+            }
+            if actionOperationTokens.isEmpty,
+               !deferredMutationInvalidationSequences.isEmpty {
+                deferredMutationInvalidationSequences.removeAll()
+                _ = await refresh()
+            }
+            return false
+        }
+    }
+
+    // MARK: - Failure media
+
+    func mediaState(for itemID: String) -> AttentionMediaState {
+        guard let item = liveItem(id: itemID), item.kind == .failure else {
+            return .idle
+        }
+        return mediaStates[AttentionMediaFingerprint(item: item)] ?? .idle
+    }
+
+    func mediaRequestID(for itemID: String) -> AttentionMediaRequestID {
+        let fingerprint = liveItem(id: itemID).map(AttentionMediaFingerprint.init)
+        return AttentionMediaRequestID(
+            fingerprint: fingerprint,
+            generation: mediaGeneration
+        )
+    }
+
+    @discardableResult
+    func loadSnapshot(for itemID: String) async -> Bool {
+        guard isActive,
+              let service = printerService,
+              let printerServiceIdentity,
+              let item = liveItem(id: itemID),
+              item.kind == .failure else {
+            return false
+        }
+        let fingerprint = AttentionMediaFingerprint(item: item)
+        guard (mediaStates[fingerprint] ?? .idle) == .idle else { return false }
+
+        let capturedGeneration = mediaGeneration
+        mediaStates[fingerprint] = .loading
+
+        do {
+            let data = try await service.getSnapshot(id: item.printerId)
+            guard matchesMediaOperation(
+                fingerprint: fingerprint,
+                generation: capturedGeneration,
+                printerServiceIdentity: printerServiceIdentity
+            ) else {
+                return false
+            }
+            mediaStates[fingerprint] = .available(data)
+            return true
+        } catch {
+            guard matchesMediaOperation(
+                fingerprint: fingerprint,
+                generation: capturedGeneration,
+                printerServiceIdentity: printerServiceIdentity
+            ) else {
+                return false
+            }
+
+            if Self.isCancellation(error) {
+                mediaStates[fingerprint] = .idle
+            } else {
+                let message = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                mediaStates[fingerprint] = .unavailable(message)
+            }
+            return false
+        }
+    }
+
+    @discardableResult
+    func retrySnapshot(for itemID: String) async -> Bool {
+        guard let item = liveItem(id: itemID), item.kind == .failure else {
+            return false
+        }
+        let fingerprint = AttentionMediaFingerprint(item: item)
+        switch mediaStates[fingerprint] ?? .idle {
+        case .idle:
+            break
+        case .unavailable:
+            mediaStates[fingerprint] = .idle
+        case .available:
+            mediaStates[fingerprint] = .idle
+        case .loading:
+            return false
+        }
+        return await loadSnapshot(for: itemID)
     }
 
     // MARK: - Reads consumed by the view
@@ -1022,7 +1575,12 @@ final class AttentionFeedViewModel {
         }
     }
 
-    private func applySnapshot(_ feed: AttentionFeed, mode: ApplyMode) {
+    private func applySnapshot(
+        _ feed: AttentionFeed,
+        mode: ApplyMode,
+        refreshOrdinal: UInt64,
+        coverSequence: UInt64
+    ) {
         // Deduplicate defensively — the server should never return
         // duplicates within a page, but a bad cursor would corrupt
         // pagination state if we trusted the payload blindly.
@@ -1039,8 +1597,15 @@ final class AttentionFeedViewModel {
         )
         _ = mode // reserved for future modes; only .refresh today
         snapshot = normalized
+        currentSnapshotRefreshOrdinal = refreshOrdinal
+        currentSnapshotCoverSequence = coverSequence
         knownIDs = seen
         groups = Self.groupBySeverity(ordered)
+        reconcileItemScopedState(
+            with: ordered,
+            hasMorePages: feed.nextCursor != nil,
+            replaceMedia: true
+        )
         loadFailure = nil
         // A canonical refresh success clears any latched pagination
         // failure. The list has been rewritten atomically; the stale
@@ -1050,7 +1615,7 @@ final class AttentionFeedViewModel {
         phase = .loaded
     }
 
-    private func applyAppendedPage(_ feed: AttentionFeed) {
+    private func applyAppendedPage(_ feed: AttentionFeed) -> Bool {
         var appended: [AttentionItem] = []
         var seen = knownIDs
         appended.reserveCapacity(feed.items.count)
@@ -1067,8 +1632,14 @@ final class AttentionFeedViewModel {
         snapshot = merged
         knownIDs = seen
         groups = Self.groupBySeverity(existing)
+        reconcileItemScopedState(
+            with: existing,
+            hasMorePages: feed.nextCursor != nil,
+            replaceMedia: false
+        )
         loadFailure = nil
         // phase stays `.loaded`; pagination does not alter shell phase.
+        return reconcileMutationRequirementsAfterPagination()
     }
 
     private func applyFailure(_ error: Error) {
@@ -1086,6 +1657,7 @@ final class AttentionFeedViewModel {
     }
 
     private func applyDisabled() {
+        resetItemScopedState(clearTerminalMedia: true)
         attentionEnabled = false
         snapshot = nil
         groups = []
@@ -1111,6 +1683,345 @@ final class AttentionFeedViewModel {
             }
             return AttentionSeverityGroup(severity: bucket, items: bucketItems)
         }
+    }
+
+    // MARK: - Item-scoped helpers
+
+    static func isCancellation(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+        if let urlError = error as? URLError {
+            return urlError.code == .cancelled
+        }
+        if let networkError = error as? NetworkError,
+           case .transportError(let urlError) = networkError {
+            return urlError.code == .cancelled
+        }
+        return false
+    }
+
+    private func liveItem(id: String) -> AttentionItem? {
+        snapshot?.items.first(where: { $0.id == id })
+    }
+
+    private func revokeActionAuthority(
+        for fingerprint: AttentionOccurrenceFingerprint
+    ) {
+        actionOperationTokens[fingerprint] = nil
+        actionStates[fingerprint] = nil
+        deferredMutationInvalidationSequences[fingerprint] = nil
+        mutationRefreshRequirements[fingerprint] = nil
+    }
+
+    private func recomputePendingCoverage() {
+        pendingCoverageEventSequence = pendingCoverageByItem.values.max()
+    }
+
+    private func discardPendingCoverage(itemID: String) {
+        pendingCoverageByItem[itemID] = nil
+        recomputePendingCoverage()
+    }
+
+    private func matchesActionOperation(
+        fingerprint: AttentionOccurrenceFingerprint,
+        token: UUID,
+        generation: UInt64,
+        authority: UInt64
+    ) -> Bool {
+        attentionEnabled
+            && authorityEpoch == authority
+            && actionGeneration == generation
+            && actionOperationTokens[fingerprint] == token
+            && liveItem(id: fingerprint.itemID).map {
+                AttentionOccurrenceFingerprint(item: $0)
+            }.map { $0 == fingerprint } != false
+    }
+
+    private func isPendingCoverageDeferredToMutation(_ pending: UInt64) -> Bool {
+        let highestActionDeferredSequence = deferredMutationInvalidationSequences
+            .filter { actionOperationTokens[$0.key] != nil }
+            .values
+            .max()
+        let highestRefreshRequirementSequence = mutationRefreshRequirements
+            .values
+            .map { requirement in
+                max(
+                    requirement.requiredEventSequence,
+                    eventSequencer.currentSequence(
+                        authority: authorityEpoch,
+                        itemID: requirement.itemID
+                    ) ?? 0
+                )
+            }
+            .max()
+        let highestDeferredSequence = max(
+            highestActionDeferredSequence ?? 0,
+            highestRefreshRequirementSequence ?? 0
+        )
+        return highestDeferredSequence > 0 && pending <= highestDeferredSequence
+    }
+
+    private func pruneCoveredMutationInvalidations() {
+        deferredMutationInvalidationSequences = deferredMutationInvalidationSequences
+            .filter { entry in
+                actionOperationTokens[entry.key] != nil
+                    && entry.value > lastCoveredEventSequence
+            }
+    }
+
+    private func publishMutationRefreshState(
+        _ requirement: AttentionMutationRefreshRequirement
+    ) {
+        actionStates[requirement.fingerprint] = .refreshPending(
+            AttentionActionRefreshPending(
+                id: requirement.id,
+                fingerprint: requirement.fingerprint,
+                action: requirement.action,
+                message: requirement.message
+            )
+        )
+    }
+
+    private func clearMutationRefreshRequirement(
+        fingerprint: AttentionOccurrenceFingerprint
+    ) {
+        mutationRefreshRequirements[fingerprint] = nil
+        deferredMutationInvalidationSequences[fingerprint] = nil
+        let currentFingerprint = liveItem(id: fingerprint.itemID).map(
+            AttentionOccurrenceFingerprint.init
+        )
+        actionStates[fingerprint] =
+            currentFingerprint == fingerprint ? .idle : nil
+    }
+
+    private func reconcileMutationRequirementsAfterCanonicalApply(
+        refreshOrdinal: UInt64,
+        coverSequence: UInt64
+    ) -> Bool {
+        var needsFollowup = false
+
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
+                  refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
+                continue
+            }
+
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
+            )
+            requirement.message = nil
+
+            guard coverSequence >= requirement.requiredEventSequence else {
+                requirement.awaitingPaginationRefreshOrdinal = nil
+                mutationRefreshRequirements[fingerprint] = requirement
+                publishMutationRefreshState(requirement)
+                needsFollowup = true
+                continue
+            }
+
+            if liveItem(id: fingerprint.itemID) != nil
+                || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(fingerprint: fingerprint)
+            } else {
+                requirement.awaitingPaginationRefreshOrdinal = refreshOrdinal
+                mutationRefreshRequirements[fingerprint] = requirement
+                publishMutationRefreshState(requirement)
+            }
+        }
+
+        return needsFollowup
+    }
+
+    private func markMutationRefreshFailure(
+        refreshOrdinal: UInt64,
+        error: Error
+    ) {
+        let message = (error as? LocalizedError)?.errorDescription
+            ?? error.localizedDescription
+
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
+                  refreshOrdinal > requirement.requiredAfterRefreshOrdinal else {
+                continue
+            }
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
+            )
+            requirement.awaitingPaginationRefreshOrdinal = nil
+            requirement.message = message
+            mutationRefreshRequirements[fingerprint] = requirement
+            publishMutationRefreshState(requirement)
+        }
+    }
+
+    private func reconcileMutationRequirementsAfterPagination() -> Bool {
+        guard let refreshOrdinal = currentSnapshotRefreshOrdinal,
+              let coverSequence = currentSnapshotCoverSequence else {
+            return false
+        }
+
+        var needsFollowup = false
+        for fingerprint in Array(mutationRefreshRequirements.keys) {
+            guard var requirement = mutationRefreshRequirements[fingerprint],
+                  requirement.awaitingPaginationRefreshOrdinal == refreshOrdinal else {
+                continue
+            }
+
+            requirement.requiredEventSequence = max(
+                requirement.requiredEventSequence,
+                eventSequencer.currentSequence(
+                    authority: authorityEpoch,
+                    itemID: fingerprint.itemID
+                ) ?? 0
+            )
+            guard coverSequence >= requirement.requiredEventSequence else {
+                requirement.awaitingPaginationRefreshOrdinal = nil
+                mutationRefreshRequirements[fingerprint] = requirement
+                publishMutationRefreshState(requirement)
+                needsFollowup = true
+                continue
+            }
+
+            if liveItem(id: fingerprint.itemID) != nil
+                || snapshot?.nextCursor == nil {
+                clearMutationRefreshRequirement(fingerprint: fingerprint)
+            }
+        }
+        return needsFollowup
+    }
+
+    private func matchesMediaOperation(
+        fingerprint: AttentionMediaFingerprint,
+        generation: UInt64,
+        printerServiceIdentity: ObjectIdentifier
+    ) -> Bool {
+        isActive
+            && mediaGeneration == generation
+            && self.printerServiceIdentity == printerServiceIdentity
+            && liveItem(id: fingerprint.itemID)
+                .map(AttentionMediaFingerprint.init) == fingerprint
+    }
+
+    private func reconcileItemScopedState(
+        with items: [AttentionItem],
+        hasMorePages: Bool,
+        replaceMedia: Bool
+    ) {
+        let liveFingerprintsByID = Dictionary(
+            uniqueKeysWithValues: items.map {
+                ($0.id, AttentionOccurrenceFingerprint(item: $0))
+            }
+        )
+        let liveItemsByFingerprint = Dictionary(
+            uniqueKeysWithValues: items.map {
+                (AttentionOccurrenceFingerprint(item: $0), $0)
+            }
+        )
+
+        let ownedFingerprints = Set(actionStates.keys)
+            .union(actionOperationTokens.keys)
+            .union(mutationRefreshRequirements.keys)
+            .union(deferredMutationInvalidationSequences.keys)
+        for fingerprint in ownedFingerprints {
+            if let liveFingerprint = liveFingerprintsByID[fingerprint.itemID],
+               liveFingerprint != fingerprint {
+                revokeActionAuthority(for: fingerprint)
+            } else if liveFingerprintsByID[fingerprint.itemID] == nil,
+                      !hasMorePages {
+                discardPendingCoverage(itemID: fingerprint.itemID)
+                revokeActionAuthority(for: fingerprint)
+            }
+        }
+
+        actionStates = actionStates.filter { entry in
+            liveItemsByFingerprint[entry.key] != nil
+                || actionOperationTokens[entry.key] != nil
+                || mutationRefreshRequirements[entry.key] != nil
+                || (hasMorePages && {
+                    if case .failed = entry.value { return true }
+                    return false
+                }())
+        }
+
+        for (fingerprint, state) in actionStates {
+            guard case .failed(let failure) = state,
+                  let item = liveItemsByFingerprint[fingerprint] else {
+                continue
+            }
+            if !Self.supportedActions(in: item).contains(where: {
+                $0.kind == failure.action.kind
+            }) {
+                actionStates[fingerprint] = nil
+            }
+        }
+
+        if replaceMedia || !hasMorePages {
+            // On a first-page canonical replacement (`replaceMedia`) or the
+            // final page of a pagination sweep (`!hasMorePages`), the
+            // canonical occurrence set is fully known for the items we can
+            // see. Reconcile media entries against it:
+            //
+            //   • Same `itemID` present with the same fingerprint → keep
+            //     the entry (normalising a lingering `.loading` to `.idle`).
+            //   • Same `itemID` present with a contradictory fingerprint →
+            //     drop the stale media immediately, matching the revoke
+            //     path above.
+            //   • `itemID` absent → drop the entry only when pagination is
+            //     complete. During incomplete pagination the missing item
+            //     may still appear on a later page, so we retain the media
+            //     until either a later page restores the same fingerprint
+            //     or the final page confirms the omission.
+            let liveFingerprintsByItemID: [String: AttentionMediaFingerprint] = Dictionary(
+                uniqueKeysWithValues: items
+                    .filter { $0.kind == .failure }
+                    .map { ($0.id, AttentionMediaFingerprint(item: $0)) }
+            )
+            mediaGeneration &+= 1
+            mediaStates = mediaStates.reduce(into: [:]) { result, entry in
+                if let liveFingerprint = liveFingerprintsByItemID[entry.key.itemID] {
+                    guard liveFingerprint == entry.key else { return }
+                } else {
+                    guard hasMorePages else { return }
+                }
+                result[entry.key] = entry.value == .loading ? .idle : entry.value
+            }
+        }
+    }
+
+    private func invalidateMediaState(clearTerminalStates: Bool) {
+        mediaGeneration &+= 1
+        if clearTerminalStates {
+            mediaStates = [:]
+        } else {
+            mediaStates = mediaStates.mapValues { state in
+                state == .loading ? .idle : state
+            }
+        }
+    }
+
+    private func invalidateMediaForDeactivation() {
+        invalidateMediaState(clearTerminalStates: false)
+    }
+
+    private func resetItemScopedState(clearTerminalMedia: Bool) {
+        actionGeneration &+= 1
+        actionOperationTokens = [:]
+        actionStates = [:]
+        deferredMutationInvalidationSequences.removeAll()
+        mutationRefreshRequirements.removeAll()
+        refreshRequestOrdinal = 0
+        currentSnapshotRefreshOrdinal = nil
+        currentSnapshotCoverSequence = nil
+        invalidateMediaState(clearTerminalStates: clearTerminalMedia)
     }
 
     // MARK: - Authority helpers
@@ -1140,7 +2051,8 @@ final class AttentionFeedViewModel {
     }
 
     private func invalidateAuthority(resetState: Bool) {
-        authorityEpoch &+= 1
+        authorityEpoch = eventSequencer.installNextAuthority()
+        resetItemScopedState(clearTerminalMedia: true)
         activationEpoch &+= 1
         lifecycleToken &+= 1
         loadStamp &+= 1
@@ -1155,6 +2067,7 @@ final class AttentionFeedViewModel {
         // coverage from the old authority is meaningless once the
         // service/signalR pair has been replaced.
         pendingCoverageEventSequence = nil
+        pendingCoverageByItem = [:]
         lastCoveredEventSequence = 0
         activeRequestTokens = []
 

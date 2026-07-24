@@ -2,6 +2,16 @@
 
 All notable changes to PrintFarmer iOS will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Actionable Attention cards** — Server-provided actions now run in place
+  with item-scoped progress, retry, and canonical refresh. Failure cards load
+  camera snapshots independently, and every card links to its printer and
+  related job by stable identity with complete VoiceOver and Dynamic Type
+  support on iPhone and iPad.
+
 ## [v1.0-beta.78] — 2026-07-05
 
 ### Fixed

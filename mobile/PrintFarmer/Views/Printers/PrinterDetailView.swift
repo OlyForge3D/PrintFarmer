@@ -430,6 +430,10 @@ struct PrinterDetailView: View {
                         .font(.title2.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(1)
+                        .accessibilityLabel("\(printer.name), printer detail")
+                        .accessibilityIdentifier(
+                            "printer.detail.destination.\(printer.id.uuidString.lowercased())"
+                        )
 
                     if let manufacturer = printer.manufacturerName,
                        let model = printer.modelName {
