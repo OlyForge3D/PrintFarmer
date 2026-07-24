@@ -10,25 +10,63 @@ import XCTest
 /// Demo job `30000000-0003-0000-0000-000000000007` (`DemoData.job7ID`) is
 /// seeded as `Completed`, giving a deterministic target without depending
 /// on Recent-page sort order.
-final class HarvestUITests: PrintFarmerUITestCase {
+final class HarvestUITests: ShiftTasksUITestBase {
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
 
-    /// Navigates Tasks → Recent page → the seeded completed demo job.
-    private func openCompletedJobDetail() {
-        let tasksTab = app.tabBars.buttons["Tasks"]
-        XCTAssertTrue(tasksTab.waitForExistence(timeout: 5), "Tasks tab should exist in the operator shell")
-        tasksTab.tap()
+    /// Navigates the operator shell to the seeded completed demo job's
+    /// detail view, device-adaptively:
+    /// Tasks destination → Print queue (`JobListView`) → Recent → the
+    /// seeded completed job. Since #782 the Tasks destination presents the
+    /// anchor-grouped checklist (`ShiftTasksView`), so the preserved queue
+    /// is reached through the explicit `shiftTasks.printQueue` link on both
+    /// iPhone (tab bar) and iPad (sidebar). The final `jobDetail.*` assertion
+    /// proves `JobDetailView` is presented in the FOREGROUND navigation
+    /// context on both device classes (issue #794).
+    func openCompletedJobDetail(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        openTasksDestination(file: file, line: line)
 
-        let recentPageLabel = app.buttons["Recent"]
-        XCTAssertTrue(recentPageLabel.waitForExistence(timeout: 5),
-                      "Tasks tab should expose a Recent page for completed/failed/cancelled jobs")
-        recentPageLabel.tap()
+        let printQueue = app.buttons["shiftTasks.printQueue"]
+        XCTAssertTrue(printQueue.waitForExistence(timeout: 8),
+                      "Tasks destination must expose the preserved Print queue link",
+                      file: file, line: line)
+        printQueue.tap()
+
+        // iPhone paginates the queue and exposes a "Recent" page control;
+        // iPad renders a single List with a Recent section. Reveal the
+        // Recent jobs on whichever layout is active before selecting.
+        revealRecentJobs()
 
         let jobRow = app.buttons[completedJobIdentifier]
-        XCTAssertTrue(jobRow.waitForExistence(timeout: 5),
-                      "Seeded completed demo job should render in the Recent page")
+        XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
+                      "Seeded completed demo job should render in the Recent list",
+                      file: file, line: line)
         jobRow.tap()
+    }
+
+    /// Reveals the Recent (completed/failed/cancelled) jobs in the preserved
+    /// `JobListView`, handling both the iPhone paged layout (a "Recent" page
+    /// button) and the iPad List layout (a "Recent" section, which may be
+    /// collapsed by default).
+    private func revealRecentJobs() {
+        let jobRow = app.buttons[completedJobIdentifier]
+        if jobRow.waitForExistence(timeout: 3) { return }
+
+        // iPhone: swipeable pages expose a "Recent" page control.
+        let recentPage = app.buttons["Recent"]
+        if recentPage.waitForExistence(timeout: 2) {
+            recentPage.tap()
+            if jobRow.waitForExistence(timeout: 3) { return }
+        }
+
+        // iPad: the Recent section header can be collapsed; tap it to expand.
+        let recentHeader = app.staticTexts["Recent"]
+        if recentHeader.waitForExistence(timeout: 2) {
+            recentHeader.tap()
+        }
     }
 
     func testCompletedJobExposesHarvestAction() {
