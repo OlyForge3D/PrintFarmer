@@ -180,7 +180,7 @@ struct HarvestSheetView: View {
                     // double-tap (or a race with the wrong-bin override
                     // button) can never schedule a second submit `Task`.
                     guard viewModel.beginSubmit() else { return }
-                    let task = Task { await viewModel.submit(partsInventoryService: services.partsInventoryService) }
+                    let task = Task { await viewModel.submit(partsInventoryService: services.partsInventoryService, offlineQueue: services.offlineWriteQueue) }
                     activeTasks.append(task)
                 } label: {
                     if viewModel.isSubmitting {

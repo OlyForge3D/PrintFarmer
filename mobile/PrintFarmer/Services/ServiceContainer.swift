@@ -100,6 +100,63 @@ final class ServiceContainer: @unchecked Sendable {
     /// Shared monotonic auth-operation epoch fencing late login/restore vs logout (H2).
     @ObservationIgnored let authOperationEpoch = AuthOperationEpoch()
 
+    // MARK: Durable offline write queue (issue #787, F10-Q1)
+    /// The single, actor-isolated outbox for offline part-adjustment / harvest
+    /// writes. Lazily built (file-backed, Application Support) with a transport
+    /// that resolves the CURRENT `partsInventoryService` at replay time so a
+    /// server switch never replays through a stale client. Bound to the active
+    /// `(serverID, userID)` namespace via `syncOfflineWriteQueue()`.
+    @ObservationIgnored private(set) lazy var offlineWriteQueue: OfflineWriteQueue = {
+        let store = FileOfflineWriteQueueStore(directory: Self.offlineWriteQueueDirectory())
+        let transport = DynamicPartsInventoryReplayTransport { [weak self] in
+            self?.partsInventoryService
+        }
+        return OfflineWriteQueue(store: store, transport: transport)
+    }()
+
+    private static func offlineWriteQueueDirectory() -> URL {
+        let base = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("OfflineWriteQueue", isDirectory: true)
+    }
+
+    /// Reconciles the outbox with the current identity + operator gate, then
+    /// drives one replay pass. Binds to the active `(serverID, userID)`
+    /// namespace (or unbinds when there is no verified active identity), applies
+    /// `offlineWriteReplayEnabled`, and triggers a single serialized replay.
+    /// Safe to call repeatedly — duplicate calls collapse to one replay owner.
+    func syncOfflineWriteQueue() async {
+        let queue = offlineWriteQueue
+        guard let serverRegistry,
+              let active = serverRegistry.activeServer,
+              let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
+            await queue.unbind()
+            return
+        }
+        await queue.bind(serverID: active.id, userID: ownerID)
+        await queue.setReplayEnabled(capabilitiesService.resolved.offlineWriteReplayEnabled)
+        await queue.replayPending()
+    }
+
+    /// Immediately abandons any in-flight replay and unbinds the outbox (logout
+    /// / server teardown). Retained items stay on disk but are never replayed
+    /// until a matching identity is bound again.
+    func unbindOfflineWriteQueue() async {
+        await offlineWriteQueue.unbind()
+    }
+
+    /// Builds the operator-facing status view model for the outbox.
+    func makeOfflineQueueStatusViewModel() -> OfflineQueueStatusViewModel {
+        OfflineQueueStatusViewModel(
+            queue: offlineWriteQueue,
+            partsInventoryService: partsInventoryService
+        )
+    }
+
     init(
         baseURL: URL? = nil,
         serverRegistry: ServerRegistry = ServerRegistry(),
@@ -264,6 +321,9 @@ final class ServiceContainer: @unchecked Sendable {
         // independently of (and before) any activation.
         let startupStore = self.farmSnapshotStore
         Task { await startupStore.prepareStartup() }
+        // #787: bind the durable outbox to the (restored) active identity and
+        // drive an initial replay pass on launch.
+        Task { await self.syncOfflineWriteQueue() }
     }
 
     /// Route registry deletion through the store's awaited purge (Gate E). Wired
@@ -676,6 +736,12 @@ final class ServiceContainer: @unchecked Sendable {
         if !transitionEpoch.isCurrent(epoch) || signalRService !== connectingSignalR {
             await connectingSignalR.disconnect()
         }
+        // #787: rebind the outbox to the newly-active identity and replay its
+        // non-expired items. Epoch-guarded so a superseded switch never binds a
+        // stale identity. A change of identity abandons any prior in-flight
+        // replay inside `bind`.
+        guard transitionEpoch.isCurrent(epoch) else { return }
+        await syncOfflineWriteQueue()
     }
 
     /// Bind the snapshot to a specific captured server + generation for a switch
@@ -727,6 +793,10 @@ final class ServiceContainer: @unchecked Sendable {
         }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
+        // #787: logout / no active server — immediately abandon any in-flight
+        // replay and unbind. Retained items stay on disk, never replayed under a
+        // different identity.
+        await unbindOfflineWriteQueue()
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the
