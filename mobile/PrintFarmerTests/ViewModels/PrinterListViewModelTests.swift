@@ -60,6 +60,7 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(oldPrinterService.listPrintersCallCount, 0)
         oldSignalR.simulateConnectionStateChange(.connected)
         await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
         XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
         XCTAssertEqual(vm.printers.first?.name, "Prusa MK4")
 
@@ -87,10 +88,173 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
         currentSignalR.simulateConnectionStateChange(.connected)
         await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
 
         XCTAssertEqual(currentPrinterService.listPrintersCallCount, 1)
         XCTAssertEqual(vm.printers.first?.name, "Ender 3")
         XCTAssertEqual(callbackQueue.count, 0)
+    }
+
+    func testCanonicalListRejectsReconfiguredInFlightData() async throws {
+        let oldGate = ShiftTaskResultGate<[Printer]>()
+        let oldScript = ScriptedCanonicalResult<[Printer]>([.gated(oldGate)])
+        mockService.listHandler = { _ in try await oldScript.next() }
+        let currentService = MockPrinterService()
+        currentService.printersToReturn = [
+            try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        ]
+
+        let oldRequest = Task { await viewModel.loadPrinters() }
+        await oldScript.waitForCallCount(1)
+        viewModel.configure(
+            printerService: currentService,
+            autoPrintService: mockAutoDispatchService
+        )
+        await viewModel.loadPrinters()
+        XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading)
+
+        await oldGate.succeed([try TestData.decodePrinter()])
+        await viewModel.waitForSupersededCanonicalLoads()
+        await oldRequest.value
+
+        XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCanonicalListRejectsReconfiguredInFlightError() async throws {
+        let oldGate = ShiftTaskResultGate<[Printer]>()
+        let oldScript = ScriptedCanonicalResult<[Printer]>([.gated(oldGate)])
+        mockService.listHandler = { _ in try await oldScript.next() }
+        let currentService = MockPrinterService()
+        currentService.printersToReturn = [
+            try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        ]
+
+        let oldRequest = Task { await viewModel.loadPrinters() }
+        await oldScript.waitForCallCount(1)
+        viewModel.configure(
+            printerService: currentService,
+            autoPrintService: mockAutoDispatchService
+        )
+        await viewModel.loadPrinters()
+        await oldGate.fail(.forced("stale list failure"))
+        await viewModel.waitForSupersededCanonicalLoads()
+        await oldRequest.value
+
+        XCTAssertEqual(viewModel.printers.first?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testManualListRefreshCoalescesReconnectIntoOneAuthoritativeFollowUp() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let firstGate = ShiftTaskResultGate<[Printer]>()
+        let stale = [try TestData.decodePrinter()]
+        let current = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        let script = ScriptedCanonicalResult<[Printer]>([
+            .gated(firstGate),
+            .value(current)
+        ])
+        mockService.listHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let vm = PrinterListViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(signalR)
+
+        let manualRefresh = Task { await vm.loadPrinters() }
+        await script.waitForCallCount(1)
+        signalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        signalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        let countBeforeRelease = await script.callCount
+        XCTAssertEqual(countBeforeRelease, 1)
+
+        await firstGate.succeed(stale)
+        await script.waitForCallCount(2)
+        await manualRefresh.value
+
+        let finalCount = await script.callCount
+        XCTAssertEqual(finalCount, 2)
+        XCTAssertEqual(vm.printers.first?.name, "Ender 3")
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        let repeatedConnectedCount = await script.callCount
+        XCTAssertEqual(repeatedConnectedCount, 2)
+    }
+
+    func testSameServiceReconfigurePreservesQueuedListReconnectEdge() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let current = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        let script = ScriptedCanonicalResult<[Printer]>([.value(current)])
+        mockService.listHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let vm = PrinterListViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(signalR)
+
+        signalR.simulateConnectionStateChange(.reconnecting)
+        signalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        vm.configureSignalR(signalR)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        await script.waitForCallCount(1)
+        await vm.waitForCanonicalLoadToBecomeIdle()
+
+        let callCount = await script.callCount
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Ender 3")
+    }
+
+    func testInactiveListFencesReconnectAndReactivationRestoresOneOwner() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let current = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        let script = ScriptedCanonicalResult<[Printer]>([.value(current)])
+        mockService.listHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let vm = PrinterListViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(signalR)
+        vm.deactivate()
+
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        var callCount = await script.callCount
+        XCTAssertEqual(callCount, 0)
+        XCTAssertTrue(vm.printers.isEmpty)
+
+        vm.activate()
+        vm.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(signalR)
+        signalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        signalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        await script.waitForCallCount(1)
+        await vm.waitForCanonicalLoadToBecomeIdle()
+
+        callCount = await script.callCount
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Ender 3")
     }
 
     // MARK: - Load Printers

@@ -23,7 +23,9 @@ final class PrinterDetailViewModel {
     var isViewActive = true {
         didSet {
             if oldValue && !isViewActive {
-                signalRAuthorityEpoch &+= 1
+                invalidateCanonicalLoad()
+                tearDownSignalR()
+                stopSnapshotPolling()
             }
         }
     }
@@ -96,6 +98,15 @@ final class PrinterDetailViewModel {
     @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
     @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
+    @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
+    @ObservationIgnored private var canonicalLoadToken: UUID?
+    @ObservationIgnored private var canonicalLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var canonicalLoadRequested = false
+    @ObservationIgnored private var canonicalLoadWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+#if DEBUG
+    @ObservationIgnored private var canonicalIdleWaiters: [CheckedContinuation<Void, Never>] = []
+    @ObservationIgnored private var retiredCanonicalLoadTasks: [Task<Void, Never>] = []
+#endif
     private var predictiveService: (any PredictiveServiceProtocol)?
     private var failureDetectionService: (any FailureDetectionServiceProtocol)?
     private var snapshotPollingTask: Task<Void, Never>?
@@ -142,6 +153,9 @@ final class PrinterDetailViewModel {
     }
 
     func configure(printerService: any PrinterServiceProtocol) {
+        if !Self.identical(self.printerService, printerService) {
+            invalidateCanonicalLoad()
+        }
         self.printerService = printerService
     }
 
@@ -152,6 +166,11 @@ final class PrinterDetailViewModel {
         jobService: any JobServiceProtocol,
         maintenanceService: any MaintenanceServiceProtocol
     ) {
+        let changed = !Self.identical(self.jobService, jobService)
+            || !Self.identical(self.maintenanceService, maintenanceService)
+        if changed {
+            invalidateCanonicalLoad()
+        }
         self.jobService = jobService
         self.maintenanceService = maintenanceService
     }
@@ -165,20 +184,29 @@ final class PrinterDetailViewModel {
     }
 
     func configurePredictive(_ service: any PredictiveServiceProtocol) {
+        if !Self.identical(predictiveService, service) {
+            invalidateCanonicalLoad()
+        }
         self.predictiveService = service
     }
 
     func configureFailureDetection(_ service: any FailureDetectionServiceProtocol) {
+        if !Self.identical(failureDetectionService, service) {
+            invalidateCanonicalLoad()
+        }
         self.failureDetectionService = service
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        if signalRServiceIdentity == serviceIdentity, !signalRSubscriptions.isEmpty {
+            return
+        }
+        invalidateCanonicalLoad()
+        tearDownSignalR()
         self.signalRService = service
-        for subscription in signalRSubscriptions { subscription.cancel() }
-        signalRSubscriptions.removeAll(keepingCapacity: true)
         signalRAuthorityEpoch &+= 1
         let authorityEpoch = signalRAuthorityEpoch
-        let serviceIdentity = ObjectIdentifier(service as AnyObject)
         signalRServiceIdentity = serviceIdentity
         let enqueue = callbackEnqueuer
         signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
@@ -208,11 +236,20 @@ final class PrinterDetailViewModel {
                 guard previous == .reconnecting, state == .connected else {
                     return
                 }
-                await self.loadPrinter()
+                self.requestCanonicalLoad()
             }
         }
         lastObservedConnectionState = connectionRegistration.initial
         signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func tearDownSignalR() {
+        signalRAuthorityEpoch &+= 1
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRService = nil
+        signalRServiceIdentity = nil
+        lastObservedConnectionState = nil
     }
 
     private func hasSignalRAuthority(
@@ -441,77 +478,487 @@ final class PrinterDetailViewModel {
     }
 
     func loadPrinter() async {
-        guard isViewActive else { return }
+        guard canLoadPrinter else {
+            if isViewActive, printerService == nil {
+                errorMessage = "Printer service not available"
+            }
+            return
+        }
+        let waiterID = UUID()
+        await withCheckedContinuation { continuation in
+            canonicalLoadWaiters[waiterID] = continuation
+            requestCanonicalLoad()
+        }
+    }
+
+    private var canLoadPrinter: Bool {
+        isViewActive && printerService != nil
+    }
+
+    private func requestCanonicalLoad() {
+        guard canLoadPrinter else { return }
+        canonicalLoadRequested = true
+        guard canonicalLoadTask == nil else { return }
+
+        let token = UUID()
+        canonicalLoadToken = token
+        canonicalLoadRequested = false
         isLoading = true
         errorMessage = nil
-
-        cameraRotation = UserDefaults.standard.integer(forKey: "cameraRotation-\(printerId.uuidString)")
-
-        guard let printerService else {
-            errorMessage = "Printer service not available"
-            isLoading = false
-            return
+        let authority = makeCanonicalAuthority(token: token)
+        canonicalLoadTask = Task { [weak self] in
+            await self?.runCanonicalLoad(authority: authority)
         }
+    }
 
-        do {
-            printer = try await printerService.get(id: printerId)
-        } catch {
-            errorMessage = error.localizedDescription
-            isLoading = false
-            return
-        }
-
-        do {
-            statusDetail = try await printerService.getStatus(id: printerId)
-            if let detail = statusDetail {
-                applyStatusDetail(detail)
+    private func runCanonicalLoad(authority: CanonicalAuthority) async {
+        while isCanonicalLoadCurrent(authority) {
+            let result = await loadCanonicalPrinter(authority: authority)
+            guard isCanonicalLoadCurrent(authority) else { return }
+            if canonicalLoadRequested {
+                canonicalLoadRequested = false
+                continue
             }
+
+            switch result {
+            case .success(let snapshot):
+                publish(snapshot)
+            case .failure(let error):
+                errorMessage = error.localizedDescription
+            case .superseded:
+                continue
+            }
+            finishCanonicalLoad(authority: authority)
+            return
+        }
+    }
+
+    private func loadCanonicalPrinter(authority: CanonicalAuthority) async -> CanonicalLoadResult {
+        guard let printerService else { return .superseded }
+
+        let loadedPrinter: Printer
+        do {
+            loadedPrinter = try await printerService.get(id: printerId)
+        } catch {
+            guard isCanonicalPassCurrent(authority) else { return .superseded }
+            return .failure(error)
+        }
+        guard isCanonicalPassCurrent(authority) else { return .superseded }
+
+        async let statusTask = fetchStatus(using: printerService)
+        async let cameraTask = fetchCamera(using: printerService)
+        async let currentJobTask = fetchCurrentJob(using: printerService)
+        async let operatorTask = fetchOperatorSnapshot(
+            printerService: printerService,
+            jobService: jobService,
+            maintenanceService: maintenanceService
+        )
+        let (statusResult, cameraResult, jobResult, operatorSnapshot) = await (
+            statusTask,
+            cameraTask,
+            currentJobTask,
+            operatorTask
+        )
+        guard isCanonicalPassCurrent(authority) else { return .superseded }
+
+        var canonicalPrinter = loadedPrinter
+        var loadedStatus = statusDetail
+        if case .value(let detail) = statusResult {
+            loadedStatus = detail
+            canonicalPrinter = Self.applying(detail, to: canonicalPrinter)
+        }
+        if case .value(let camera) = cameraResult {
+            canonicalPrinter = Self.applying(camera, to: canonicalPrinter)
+        }
+
+        let previewMode = Self.cameraPreviewMode(for: canonicalPrinter)
+        var loadedSnapshotData = snapshotData
+        let shouldFetchSnapshot = previewMode == .snapshotPolling
+            || (previewMode == .directSnapshot && loadedSnapshotData == nil)
+        if shouldFetchSnapshot {
+            do {
+                loadedSnapshotData = try await printerService.getSnapshot(id: printerId)
+            } catch {
+                guard isCanonicalPassCurrent(authority) else { return .superseded }
+                logger.warning("Failed to refresh snapshot: \(error.localizedDescription)")
+            }
+            guard isCanonicalPassCurrent(authority) else { return .superseded }
+        }
+
+        var loadedFailureStatus = failureDetectionStatus
+        var loadedAlerts = activeAlerts
+        if canonicalPrinter.obicoEnabled && Self.isActivelyPrinting(canonicalPrinter) {
+            async let failureTask = fetchFailureDetectionStatus(using: failureDetectionService)
+            async let alertsTask = fetchActiveAlerts(using: predictiveService)
+            let (failureResult, alertsResult) = await (failureTask, alertsTask)
+            guard isCanonicalPassCurrent(authority) else { return .superseded }
+            if case .value(let status) = failureResult {
+                loadedFailureStatus = status
+            }
+            if case .value(let alerts) = alertsResult {
+                loadedAlerts = alerts
+            }
+        } else {
+            loadedFailureStatus = nil
+            loadedAlerts = []
+        }
+
+        return .success(
+            CanonicalSnapshot(
+                printer: canonicalPrinter,
+                statusDetail: loadedStatus,
+                currentJob: jobResult.value(or: currentJob),
+                snapshotData: loadedSnapshotData,
+                showLivestream: Self.isActivelyPrinting(canonicalPrinter)
+                    && previewMode == .mjpegStream,
+                activeAlerts: loadedAlerts,
+                failureDetectionStatus: loadedFailureStatus,
+                toolheads: operatorSnapshot.toolheads ?? toolheads,
+                assignedQueue: operatorSnapshot.assignedQueue ?? assignedQueue,
+                printerStatistics: operatorSnapshot.printerStatistics ?? printerStatistics,
+                upcomingMaintenance: operatorSnapshot.upcomingMaintenance ?? upcomingMaintenance,
+                history: operatorSnapshot.history ?? history,
+                cameraRotation: UserDefaults.standard.integer(
+                    forKey: "cameraRotation-\(printerId.uuidString)"
+                )
+            )
+        )
+    }
+
+    private func publish(_ snapshot: CanonicalSnapshot) {
+        printer = snapshot.printer
+        statusDetail = snapshot.statusDetail
+        currentJob = snapshot.currentJob
+        snapshotData = snapshot.snapshotData
+        showLivestream = snapshot.showLivestream
+        activeAlerts = snapshot.activeAlerts
+        failureDetectionStatus = snapshot.failureDetectionStatus
+        toolheads = snapshot.toolheads
+        assignedQueue = snapshot.assignedQueue
+        printerStatistics = snapshot.printerStatistics
+        upcomingMaintenance = snapshot.upcomingMaintenance
+        history = snapshot.history
+        cameraRotation = snapshot.cameraRotation
+        errorMessage = nil
+        startSnapshotPollingIfNeeded()
+    }
+
+    private func finishCanonicalLoad(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        isLoading = false
+        resumeCanonicalWaiters()
+        resumeCanonicalIdleWaiters()
+    }
+
+    private func invalidateCanonicalLoad() {
+        canonicalLifecycleEpoch &+= 1
+#if DEBUG
+        if let canonicalLoadTask {
+            retiredCanonicalLoadTasks.append(canonicalLoadTask)
+        }
+#endif
+        canonicalLoadTask?.cancel()
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        isLoading = false
+        resumeCanonicalWaiters()
+        resumeCanonicalIdleWaiters()
+    }
+
+    private func resumeCanonicalWaiters() {
+        let waiters = canonicalLoadWaiters.values
+        canonicalLoadWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func makeCanonicalAuthority(token: UUID) -> CanonicalAuthority {
+        CanonicalAuthority(
+            token: token,
+            lifecycleEpoch: canonicalLifecycleEpoch,
+            printerServiceIdentity: Self.identity(printerService),
+            jobServiceIdentity: Self.identity(jobService),
+            maintenanceServiceIdentity: Self.identity(maintenanceService),
+            predictiveServiceIdentity: Self.identity(predictiveService),
+            failureDetectionServiceIdentity: Self.identity(failureDetectionService)
+        )
+    }
+
+    private func isCanonicalLoadCurrent(_ authority: CanonicalAuthority) -> Bool {
+        isViewActive
+            && canonicalLoadToken == authority.token
+            && canonicalLifecycleEpoch == authority.lifecycleEpoch
+            && Self.identity(printerService) == authority.printerServiceIdentity
+            && Self.identity(jobService) == authority.jobServiceIdentity
+            && Self.identity(maintenanceService) == authority.maintenanceServiceIdentity
+            && Self.identity(predictiveService) == authority.predictiveServiceIdentity
+            && Self.identity(failureDetectionService) == authority.failureDetectionServiceIdentity
+    }
+
+    private func isCanonicalPassCurrent(_ authority: CanonicalAuthority) -> Bool {
+        isCanonicalLoadCurrent(authority) && !canonicalLoadRequested
+    }
+
+    private static func identity<T>(_ value: T?) -> ObjectIdentifier? {
+        value.map { ObjectIdentifier($0 as AnyObject) }
+    }
+
+    private static func identical<T>(_ lhs: T?, _ rhs: T?) -> Bool {
+        identity(lhs) == identity(rhs)
+    }
+
+#if DEBUG
+    func waitForCanonicalLoadToBecomeIdle() async {
+        guard canonicalLoadTask != nil else { return }
+        await withCheckedContinuation { continuation in
+            canonicalIdleWaiters.append(continuation)
+        }
+    }
+
+    func waitForSupersededCanonicalLoads() async {
+        for task in retiredCanonicalLoadTasks {
+            await task.value
+        }
+        retiredCanonicalLoadTasks.removeAll(keepingCapacity: true)
+    }
+
+    private func resumeCanonicalIdleWaiters() {
+        let waiters = canonicalIdleWaiters
+        canonicalIdleWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+#else
+    private func resumeCanonicalIdleWaiters() {}
+#endif
+
+    private func fetchStatus(
+        using service: any PrinterServiceProtocol
+    ) async -> CanonicalValue<PrinterStatusDetail> {
+        do {
+            return .value(try await service.getStatus(id: printerId))
         } catch {
             logger.warning("Failed to load printer status: \(error.localizedDescription)")
+            return .unavailable
         }
+    }
 
+    private func fetchCamera(
+        using service: any PrinterServiceProtocol
+    ) async -> CanonicalValue<PrinterCameraUrl> {
         do {
-            let cameraUrl = try await printerService.getCameraUrl(id: printerId)
-            applyCameraUrl(cameraUrl)
+            return .value(try await service.getCameraUrl(id: printerId))
         } catch {
             logger.warning("Failed to load camera URL metadata: \(error.localizedDescription)")
+            return .unavailable
         }
+    }
 
+    private func fetchCurrentJob(
+        using service: any PrinterServiceProtocol
+    ) async -> CanonicalValue<PrintJobStatusInfo?> {
         do {
-            currentJob = try await printerService.getCurrentJob(id: printerId)
+            return .value(try await service.getCurrentJob(id: printerId))
         } catch {
             logger.warning("Failed to load current job: \(error.localizedDescription)")
+            return .unavailable
         }
+    }
 
-        await loadOperatorSections()
+    private func fetchOperatorSnapshot(
+        printerService: any PrinterServiceProtocol,
+        jobService: (any JobServiceProtocol)?,
+        maintenanceService: (any MaintenanceServiceProtocol)?
+    ) async -> OperatorSnapshot {
+        async let toolheadsTask = fetchCanonicalToolheads(using: printerService)
+        async let queueTask = fetchCanonicalQueue(using: jobService)
+        async let maintenanceTask = fetchCanonicalMaintenance(using: maintenanceService)
+        async let historyTask = fetchCanonicalHistory(using: printerService)
+        let (loadedToolheads, loadedQueue, loadedMaintenance, loadedHistory) = await (
+            toolheadsTask,
+            queueTask,
+            maintenanceTask,
+            historyTask
+        )
+        return OperatorSnapshot(
+            toolheads: loadedToolheads,
+            assignedQueue: loadedQueue,
+            printerStatistics: loadedMaintenance.statistics,
+            upcomingMaintenance: loadedMaintenance.upcoming,
+            history: loadedHistory
+        )
+    }
 
-        if shouldLoadInitialSnapshot {
-            _ = await refreshSnapshot()
+    private func fetchCanonicalToolheads(
+        using service: any PrinterServiceProtocol
+    ) async -> [Toolhead]? {
+        do {
+            return try await service.getDetails(id: printerId).toolheads
+        } catch {
+            logger.warning("Failed to load toolheads: \(error.localizedDescription)")
+            return nil
         }
+    }
 
-        // Auto-enable livestream when printer is actively printing
-        if canShowLivestream {
-            showLivestream = true
-        } else if cameraPreviewMode != .mjpegStream {
-            showLivestream = false
+    private func fetchCanonicalQueue(
+        using service: (any JobServiceProtocol)?
+    ) async -> [QueuedPrintJobResponse]? {
+        guard let service else { return nil }
+        do {
+            return Self.filterAssignedQueue(
+                try await service.listAllJobs(),
+                printerId: printerId
+            )
+        } catch {
+            logger.warning("Failed to load assigned queue: \(error.localizedDescription)")
+            return nil
         }
+    }
 
-        // Load failure detection status when printing with Obico enabled
-        if printer?.obicoEnabled == true, isActivelyPrinting {
-            await loadFailureDetection()
-        } else {
-            activeAlerts = []
-            failureDetectionStatus = nil
+    private func fetchCanonicalMaintenance(
+        using service: (any MaintenanceServiceProtocol)?
+    ) async -> MaintenanceSnapshot {
+        guard let service else { return MaintenanceSnapshot() }
+        async let statisticsTask = fetchCanonicalStatistics(using: service)
+        async let upcomingTask = fetchCanonicalUpcomingMaintenance(using: service)
+        let (statistics, upcoming) = await (statisticsTask, upcomingTask)
+        return MaintenanceSnapshot(statistics: statistics, upcoming: upcoming)
+    }
+
+    private func fetchCanonicalStatistics(
+        using service: any MaintenanceServiceProtocol
+    ) async -> PrinterMaintenanceStatistics? {
+        do {
+            return try await service.getPrinterStatistics(printerId: printerId)
+        } catch {
+            logger.warning("Failed to load printer statistics: \(error.localizedDescription)")
+            return nil
         }
+    }
 
-        isLoading = false
-        startSnapshotPollingIfNeeded()
+    private func fetchCanonicalUpcomingMaintenance(
+        using service: any MaintenanceServiceProtocol
+    ) async -> [UpcomingMaintenanceTask]? {
+        do {
+            return try await service.getUpcoming(
+                lookaheadDays: nil,
+                includeOverdue: true,
+                printerId: printerId
+            )
+        } catch {
+            logger.warning("Failed to load upcoming maintenance: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func fetchCanonicalHistory(
+        using service: any PrinterServiceProtocol
+    ) async -> [PrinterHistoryJob]? {
+        do {
+            return Self.sortedHistory(try await service.getHistory(id: printerId, limit: nil).jobs)
+        } catch {
+            logger.warning("Failed to load printer history: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    private func fetchFailureDetectionStatus(
+        using service: (any FailureDetectionServiceProtocol)?
+    ) async -> CanonicalValue<FailureDetectionPrinterStatus?> {
+        guard let service else { return .unavailable }
+        do {
+            let status = try await service.getStatus()
+            return .value(status.printers.first { $0.printerId == printerId })
+        } catch {
+            logger.warning("Failed to load failure detection status: \(error.localizedDescription)")
+            return .unavailable
+        }
+    }
+
+    private func fetchActiveAlerts(
+        using service: (any PredictiveServiceProtocol)?
+    ) async -> CanonicalValue<[PredictiveAlert]> {
+        guard let service else { return .unavailable }
+        do {
+            return .value(try await service.getActiveAlerts(printerId: printerId))
+        } catch {
+            logger.warning("Failed to load active alerts: \(error.localizedDescription)")
+            return .unavailable
+        }
+    }
+
+    private struct CanonicalAuthority {
+        let token: UUID
+        let lifecycleEpoch: UInt64
+        let printerServiceIdentity: ObjectIdentifier?
+        let jobServiceIdentity: ObjectIdentifier?
+        let maintenanceServiceIdentity: ObjectIdentifier?
+        let predictiveServiceIdentity: ObjectIdentifier?
+        let failureDetectionServiceIdentity: ObjectIdentifier?
+    }
+
+    private struct CanonicalSnapshot {
+        let printer: Printer
+        let statusDetail: PrinterStatusDetail?
+        let currentJob: PrintJobStatusInfo?
+        let snapshotData: Data?
+        let showLivestream: Bool
+        let activeAlerts: [PredictiveAlert]
+        let failureDetectionStatus: FailureDetectionPrinterStatus?
+        let toolheads: [Toolhead]
+        let assignedQueue: [QueuedPrintJobResponse]
+        let printerStatistics: PrinterMaintenanceStatistics?
+        let upcomingMaintenance: [UpcomingMaintenanceTask]
+        let history: [PrinterHistoryJob]
+        let cameraRotation: Int
+    }
+
+    private struct OperatorSnapshot {
+        let toolheads: [Toolhead]?
+        let assignedQueue: [QueuedPrintJobResponse]?
+        let printerStatistics: PrinterMaintenanceStatistics?
+        let upcomingMaintenance: [UpcomingMaintenanceTask]?
+        let history: [PrinterHistoryJob]?
+    }
+
+    private struct MaintenanceSnapshot {
+        var statistics: PrinterMaintenanceStatistics?
+        var upcoming: [UpcomingMaintenanceTask]?
+    }
+
+    private enum CanonicalValue<Value: Sendable>: Sendable {
+        case value(Value)
+        case unavailable
+
+        func value(or fallback: Value) -> Value {
+            if case .value(let value) = self {
+                return value
+            }
+            return fallback
+        }
+    }
+
+    private enum CanonicalLoadResult {
+        case success(CanonicalSnapshot)
+        case failure(Error)
+        case superseded
     }
 
     /// Keep the UI-facing printer state aligned with the dedicated status endpoint.
     /// This prevents detail/list mismatches when `/api/printers/{id}` and `/status` are briefly out of sync.
     private func applyStatusDetail(_ detail: PrinterStatusDetail) {
-        guard var current = printer else { return }
+        guard let current = printer else { return }
+        printer = Self.applying(detail, to: current)
+    }
+
+    private static func applying(_ detail: PrinterStatusDetail, to printer: Printer) -> Printer {
+        var current = printer
         current.isOnline = detail.isOnline
         current.state = detail.state
         current.progress = detail.progress
@@ -528,17 +975,22 @@ final class PrinterDetailViewModel {
         current.bedTarget = detail.bedTarget
         if let homed = detail.homedAxes { current.homedAxes = homed }
         current.spoolInfo = detail.spoolInfo
-        printer = current
+        return current
     }
 
     private func applyCameraUrl(_ cameraUrl: PrinterCameraUrl) {
-        guard var current = printer else { return }
+        guard let current = printer else { return }
+        printer = Self.applying(cameraUrl, to: current)
+    }
+
+    private static func applying(_ cameraUrl: PrinterCameraUrl, to printer: Printer) -> Printer {
+        var current = printer
         current.cameraStreamUrl = cameraUrl.streamUrl
         current.cameraSnapshotUrl = cameraUrl.snapshotUrl
         current.cameraAccessMode = cameraUrl.accessMode
         current.cameraStreamFormat = cameraUrl.streamFormat
         current.cameraSnapshotStrategy = cameraUrl.snapshotStrategy
-        printer = current
+        return current
     }
 
     func loadFailureDetection() async {
@@ -811,7 +1263,7 @@ final class PrinterDetailViewModel {
             return
         }
         guard snapshotPollingTask == nil else { return }
-        snapshotPollingGeneration += 1
+        snapshotPollingGeneration &+= 1
         let generation = snapshotPollingGeneration
         snapshotPollingTask = Task { [weak self] in
             await self?.runSnapshotPollingLoop(generation: generation)
@@ -819,7 +1271,7 @@ final class PrinterDetailViewModel {
     }
 
     func stopSnapshotPolling() {
-        snapshotPollingGeneration += 1
+        snapshotPollingGeneration &+= 1
         snapshotPollingTask?.cancel()
         snapshotPollingTask = nil
         isLoadingSnapshot = false
@@ -891,7 +1343,10 @@ final class PrinterDetailViewModel {
 
     var cameraPreviewMode: CameraPreviewMode {
         guard let printer else { return .none }
+        return Self.cameraPreviewMode(for: printer)
+    }
 
+    private static func cameraPreviewMode(for printer: Printer) -> CameraPreviewMode {
         switch printer.cameraAccessMode {
         case .snapshotOnly:
             if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
@@ -934,12 +1389,12 @@ final class PrinterDetailViewModel {
         }
     }
 
-    private func hasUsableMjpegStream(_ printer: Printer) -> Bool {
+    private static func hasUsableMjpegStream(_ printer: Printer) -> Bool {
         guard printer.cameraStreamUrl != nil else { return false }
         return printer.cameraStreamFormat == .mjpeg || printer.cameraStreamFormat == .unknown
     }
 
-    private func snapshotFallbackMode(for printer: Printer) -> CameraPreviewMode? {
+    private static func snapshotFallbackMode(for printer: Printer) -> CameraPreviewMode? {
         if printer.cameraSnapshotStrategy == .snapmakerU1MonitorJpeg {
             return .snapshotPolling
         }
@@ -949,9 +1404,14 @@ final class PrinterDetailViewModel {
         return nil
     }
 
-    private func hasDirectSnapshot(_ printer: Printer) -> Bool {
+    private static func hasDirectSnapshot(_ printer: Printer) -> Bool {
         guard let snapshotUrl = printer.cameraSnapshotUrl else { return false }
         return !snapshotUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private static func isActivelyPrinting(_ printer: Printer) -> Bool {
+        guard let state = printer.state?.lowercased() else { return false }
+        return ["printing", "starting", "paused"].contains(state)
     }
 
     var isIdle: Bool {

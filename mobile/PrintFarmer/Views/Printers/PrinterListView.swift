@@ -71,6 +71,7 @@ struct PrinterListView: View {
             }
         }
         .task {
+            viewModel.activate()
             viewModel.configure(printerService: services.printerService, autoPrintService: services.autoPrintService)
             viewModel.configureSignalR(services.signalRService)
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
@@ -84,6 +85,7 @@ struct PrinterListView: View {
         }
         .onDisappear {
             retryTask?.cancel()
+            viewModel.deactivate()
             coverageViewModel.tearDownSignalR()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
