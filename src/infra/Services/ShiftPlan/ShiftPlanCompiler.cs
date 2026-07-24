@@ -297,11 +297,12 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 {
                     // Issue #823: the suppression-delta windows intentionally overlap by
                     // SuppressionWatermarkOverlap, so the same durable Skip/Dismiss row can
-                    // reappear on consecutive passes. Only a mutation strictly newer than what
-                    // was already observed/cleared for this key counts as a fresh dismissal —
-                    // that (re-)suppresses and evicts cleared evidence. An equal-version replay
-                    // is idempotent, preserving cleared evidence recorded on the prior pass.
-                    _ = suppressionState.ObserveDismissal((key.SourceKind, key.SourceId), key.Version);
+                    // reappear on consecutive passes. Only a mutation strictly newer than the
+                    // key's highest observed version counts as a fresh dismissal — that
+                    // (re-)suppresses, evicts bootstrap-exclusion evidence, and advances the
+                    // replay tombstone. An equal/older replay is idempotent, so a genuine
+                    // recurrence of an already-cleared key is not wrongly re-suppressed.
+                    _ = suppressionState.ObserveDismissal((key.SourceKind, key.SourceId), key.Version, now);
                 }
             }
 
@@ -315,15 +316,15 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 .ToList();
             foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
             {
-                // Issue #823: exclude keys authoritatively cleared earlier this process
-                // lifetime. Their stale durable terminal row would otherwise re-suppress a
-                // genuinely new episode while a persistent collision on another key keeps
-                // this kind unbootstrapped. Never-observed and colliding keys are still
-                // recovered — only proven-cleared keys are held back.
+                // Issue #823: hold back keys with bootstrap-exclusion evidence — authoritatively
+                // cleared earlier this process lifetime. Their stale durable terminal row would
+                // otherwise re-suppress a genuinely new episode while a persistent collision on
+                // another key keeps this kind unbootstrapped. Never-observed and colliding keys
+                // are still recovered — only proven-cleared keys are held back.
                 List<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
                     .Where(key => key.Item1 == sourceKind)
                     .Select(key => (key.Item1, key.Item2))
-                    .Where(key => !suppressionState.IsCleared(key))
+                    .Where(key => !suppressionState.IsExcludedFromBootstrap(key))
                     .ToList();
                 if (activeKeys.Count == 0)
                 {
@@ -337,9 +338,10 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                         ct: ct).ConfigureAwait(false);
                 foreach ((UserTaskSourceKind SourceKind, string SourceId, long Version) key in bootstrapped)
                 {
-                    // Record the durable row's version so a later overlapped delta of the same
-                    // row is a replay, and the clear point is captured if the key is cleared.
-                    suppressionState.RecoverSuppression((key.SourceKind, key.SourceId), key.Version);
+                    // Record the durable row's version in the replay tombstone so a later
+                    // overlapped delta of the same row is a replay, and the clear point is
+                    // captured if the key is cleared.
+                    suppressionState.RecoverSuppression((key.SourceKind, key.SourceId), key.Version, now);
                 }
             }
 
@@ -490,12 +492,16 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 suppressionState.MarkBootstrapped(successfulKind);
             }
 
-            // Issue #823: bound cleared-evidence growth under a persistently colliding kind
-            // with many unique IDs. Evidence for a kind is already dropped when it bootstraps;
-            // this prunes evidence for kinds that stay unbootstrapped once it ages past the
-            // durable-suppression horizon it guards against (the terminal row it protects
-            // against is itself no longer eligible for exact-key recovery beyond this age).
-            suppressionState.PruneClearedEvidence(now - SuppressionBootstrapMaximumAge);
+            // Issue #823: bound both per-key collections independently against the durable-
+            // suppression horizon. Bootstrap-exclusion evidence for a kind is already dropped
+            // when it bootstraps; this prunes exclusions for kinds that stay unbootstrapped
+            // (e.g. a persistent collision with many unique IDs) once they age out. Replay
+            // tombstones survive bootstrap — they are pruned only here, and never expire while
+            // the durable row they guard against can still appear in an overlapped delta (both
+            // are bounded by the same horizon, so a pruned tombstone's row is no longer eligible
+            // for exact-key recovery or delta replay either).
+            suppressionState.PruneBootstrapExclusions(now - SuppressionBootstrapMaximumAge);
+            suppressionState.PruneReplayTombstones(now - SuppressionBootstrapMaximumAge);
 
             // Fix R4-3: advance the watermark to now MINUS a safety overlap rather than
             // exactly now, so a user Skip/Dismiss committed just after this pass's
