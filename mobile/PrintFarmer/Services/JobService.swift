@@ -52,4 +52,15 @@ actor JobService: JobServiceProtocol {
     func resume(id: UUID) async throws {
         try await apiClient.postVoid("/api/job-queue-analytics/jobs/\(id)/resume")
     }
+
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate] {
+        try await apiClient.get("/api/job-queue/\(jobId)/candidates")
+    }
+
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws {
+        try await apiClient.postVoid(
+            "/api/job-queue/\(jobId)/dispatch-to",
+            body: DispatchToRequest(printerId: printerId)
+        )
+    }
 }

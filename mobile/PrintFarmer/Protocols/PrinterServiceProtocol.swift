@@ -17,6 +17,10 @@ protocol PrinterServiceProtocol: Sendable {
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl
     func getSnapshot(id: UUID) async throws -> Data
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo?
+    /// Recent job history from `GET /api/printers/{id}/history` (Moonraker-style
+    /// snake_case payload). Used by the Printer Detail v2 history tail (issue
+    /// #712). `limit` caps the number of returned jobs when supported.
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList
     func pause(id: UUID) async throws -> CommandResult
     func resume(id: UUID) async throws -> CommandResult
     func cancel(id: UUID) async throws -> CommandResult
@@ -82,5 +86,9 @@ extension PrinterServiceProtocol {
 
     func getQueueOverview() async throws -> [QueueOverview] {
         try await getQueueOverview(model: nil, nozzle: nil, material: nil)
+    }
+
+    func getHistory(id: UUID) async throws -> PrinterHistoryList {
+        try await getHistory(id: id, limit: nil)
     }
 }

@@ -81,6 +81,11 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.get("/api/printers/\(id)/printjob")
     }
 
+    func getHistory(id: UUID, limit: Int? = nil) async throws -> PrinterHistoryList {
+        let query = limit.map { "?limit=\($0)" } ?? ""
+        return try await apiClient.get("/api/printers/\(id)/history\(query)")
+    }
+
     // MARK: - Queue Overview
 
     func getQueueOverview(model: String? = nil, nozzle: Double? = nil, material: String? = nil) async throws -> [QueueOverview] {

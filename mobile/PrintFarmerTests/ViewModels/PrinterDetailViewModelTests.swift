@@ -422,3 +422,383 @@ final class PrinterDetailViewModelTests: XCTestCase {
                        "Foreign-printer update must not overwrite this view's printer state")
     }
 }
+
+// MARK: - F7 Printer Detail v2 (issue #712)
+
+/// Fixed instant for deterministic ETA assertions. Declared at file scope so it
+/// is nonisolated and safe to capture inside the `@Sendable` clock closure.
+private let f7FixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+/// Operator-section coverage for Printer Detail v2: queue filtering / match
+/// state, ETA formatting off the backend `printTimeLeftSeconds` (deterministic
+/// via injected clock), odometer due logic, history mapping, the Mainsail deep
+/// link, dispatch-to and maintenance-log actions, and empty/absent states.
+/// All deterministic — no sleeps, polling, or retries.
+extension PrinterDetailViewModelTests {
+
+    private static let fixedNow = f7FixedNow
+
+    private func makeOperatorViewModel(
+        jobService: MockJobService = MockJobService(),
+        maintenanceService: MockMaintenanceService = MockMaintenanceService()
+    ) -> PrinterDetailViewModel {
+        let vm = PrinterDetailViewModel(printerId: TestData.testUUID, now: { f7FixedNow })
+        vm.configure(printerService: mockService)
+        vm.configureOperatorServices(jobService: jobService, maintenanceService: maintenanceService)
+        return vm
+    }
+
+    private func makeToolhead(index: Int, material: String?) -> Toolhead {
+        Toolhead(
+            id: UUID(),
+            name: "Tool \(index)",
+            index: index,
+            isPrimary: index == 0,
+            currentMaterial: material
+        )
+    }
+
+    private func makeQueuedJob(
+        id: String,
+        assignedTo: UUID?,
+        status: String,
+        position: Int,
+        material: String? = nil
+    ) -> QueuedPrintJobResponse {
+        let job = QueuedJobInfo(
+            id: id,
+            name: "job-\(id)",
+            fileName: "job-\(id).gcode",
+            assignedPrinterId: assignedTo?.uuidString,
+            printerName: nil,
+            printerModel: nil,
+            status: status,
+            priority: 1,
+            queuePosition: position,
+            estimatedPrintTimeSeconds: nil,
+            actualStartTimeUtc: nil,
+            actualEndTimeUtc: nil,
+            actualPrintTimeSeconds: nil,
+            failureReason: nil,
+            createdAtUtc: Self.fixedNow,
+            updatedAtUtc: nil,
+            thumbnailUrl: nil,
+            filamentName: nil,
+            filamentColor: nil,
+            copies: 1,
+            completedCopies: 0,
+            remainingCopies: 1
+        )
+        let gcode = material.map { material in
+            QueueGcodeFileMeta(
+                id: "g-\(id)",
+                name: "job-\(id)",
+                fileName: "job-\(id).gcode",
+                fileSizeBytes: nil,
+                materialType: material,
+                nozzleDiameter: nil,
+                estimatedPrintTimeSeconds: nil,
+                estimatedFilamentUsageGrams: nil,
+                thumbnailUrl: nil
+            )
+        }
+        return QueuedPrintJobResponse(
+            job: job,
+            gcodeFile: gcode,
+            assignedPrinter: nil,
+            estimatedStartTime: nil,
+            estimatedCompletionTime: nil
+        )
+    }
+
+    private func makeHistoryJob(id: String, status: String, end: Double?) -> PrinterHistoryJob {
+        PrinterHistoryJob(
+            jobId: id,
+            status: status,
+            filename: "\(id).gcode",
+            startTime: 100,
+            endTime: end,
+            printDuration: 10,
+            totalDuration: 12,
+            filamentUsed: 5,
+            thumbnailUrl: nil
+        )
+    }
+
+    private func makeUpcoming(
+        name: String,
+        hoursUntilDue: Double?,
+        isOverdue: Bool = false,
+        isDueToday: Bool = false
+    ) -> UpcomingMaintenanceTask {
+        UpcomingMaintenanceTask(
+            id: name,
+            taskId: UUID(),
+            printerId: TestData.testUUID,
+            printerName: "Prusa MK4",
+            taskName: name,
+            component: "Nozzle",
+            description: nil,
+            priority: 1,
+            intervalType: "hours",
+            intervalValue: 100,
+            dueDate: nil,
+            daysUntilDue: nil,
+            hoursUntilDue: hoursUntilDue,
+            isOverdue: isOverdue,
+            isDueToday: isDueToday,
+            lastPerformedAt: nil
+        )
+    }
+
+    // MARK: Queue filtering + match state
+
+    func testFilterAssignedQueueKeepsAssignedNonTerminalSortedByPosition() {
+        let jobs = [
+            makeQueuedJob(id: "a", assignedTo: TestData.testUUID, status: "Queued", position: 3),
+            makeQueuedJob(id: "b", assignedTo: TestData.testUUID, status: "Printing", position: 1),
+            makeQueuedJob(id: "c", assignedTo: TestData.testUUID, status: "Queued", position: 2)
+        ]
+        let filtered = PrinterDetailViewModel.filterAssignedQueue(jobs, printerId: TestData.testUUID)
+        XCTAssertEqual(filtered.map(\.id), ["b", "c", "a"], "Assigned jobs must sort by queue position")
+    }
+
+    func testFilterAssignedQueueExcludesTerminalAndForeign() {
+        let jobs = [
+            makeQueuedJob(id: "mine", assignedTo: TestData.testUUID, status: "Queued", position: 1),
+            makeQueuedJob(id: "done", assignedTo: TestData.testUUID, status: "Completed", position: 2),
+            makeQueuedJob(id: "cancelled", assignedTo: TestData.testUUID, status: "Cancelled", position: 3),
+            makeQueuedJob(id: "foreign", assignedTo: TestData.testUUID2, status: "Queued", position: 4),
+            makeQueuedJob(id: "unassigned", assignedTo: nil, status: "Queued", position: 5)
+        ]
+        let filtered = PrinterDetailViewModel.filterAssignedQueue(jobs, printerId: TestData.testUUID)
+        XCTAssertEqual(filtered.map(\.id), ["mine"], "Only non-terminal jobs assigned to this printer survive")
+    }
+
+    func testNextQueuedJobsCapsAtThree() {
+        let vm = makeOperatorViewModel()
+        vm.assignedQueue = (0..<5).map {
+            makeQueuedJob(id: "\($0)", assignedTo: TestData.testUUID, status: "Queued", position: $0)
+        }
+        XCTAssertEqual(vm.nextQueuedJobs.count, 3, "Queue section shows at most three jobs")
+    }
+
+    func testMatchStateMatchMismatchUnknown() {
+        let vm = makeOperatorViewModel()
+        vm.toolheads = [makeToolhead(index: 0, material: "PLA")]
+
+        let matching = makeQueuedJob(id: "m", assignedTo: TestData.testUUID, status: "Queued", position: 1, material: "pla")
+        XCTAssertEqual(vm.matchState(for: matching), .match, "Case-insensitive material match")
+
+        let mismatched = makeQueuedJob(id: "x", assignedTo: TestData.testUUID, status: "Queued", position: 2, material: "PETG")
+        XCTAssertEqual(vm.matchState(for: mismatched), .mismatch)
+
+        let noMeta = makeQueuedJob(id: "u", assignedTo: TestData.testUUID, status: "Queued", position: 3, material: nil)
+        XCTAssertEqual(vm.matchState(for: noMeta), .unknown, "No required material ⇒ unknown")
+
+        vm.toolheads = []
+        XCTAssertEqual(vm.matchState(for: matching), .unknown, "No loaded material ⇒ unknown")
+    }
+
+    // MARK: ETA formatting (deterministic clock)
+
+    func testCurrentJobEtaUsesInjectedClockAndBackendSeconds() async throws {
+        let vm = makeOperatorViewModel()
+        mockService.printerToReturn = try TestData.decodePrinter() // state: printing
+        await vm.loadPrinter()
+        vm.statusDetail = PrinterStatusDetail(
+            id: TestData.testUUID, isOnline: true, state: "printing", progress: 0.5,
+            jobName: "benchy", thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            spoolInfo: nil, mmuStatus: nil, printTimeLeftSeconds: 4500
+        )
+
+        XCTAssertEqual(vm.currentJobRemainingSeconds, 4500)
+        XCTAssertEqual(vm.currentJobEtaDate, Self.fixedNow.addingTimeInterval(4500))
+        XCTAssertNotNil(vm.formattedTimeRemaining)
+        XCTAssertNotNil(vm.formattedEtaClock)
+    }
+
+    func testCurrentJobEtaNilWhenNotPrintingOrNoBackendSeconds() {
+        // No printer loaded ⇒ isActivelyPrinting is false regardless of a
+        // backend-supplied remaining-seconds value.
+        let vm = makeOperatorViewModel()
+        vm.statusDetail = PrinterStatusDetail(
+            id: TestData.testUUID, isOnline: false, state: "idle", progress: nil,
+            jobName: nil, thumbnailUrl: nil, cameraStreamUrl: nil, cameraSnapshotUrl: nil,
+            x: nil, y: nil, z: nil, hotendTemp: nil, bedTemp: nil, hotendTarget: nil, bedTarget: nil,
+            spoolInfo: nil, mmuStatus: nil, printTimeLeftSeconds: 4500
+        )
+        XCTAssertNil(vm.currentJobRemainingSeconds, "Not actively printing ⇒ no ETA")
+        XCTAssertNil(vm.currentJobEtaDate)
+        XCTAssertNil(vm.formattedTimeRemaining)
+    }
+
+    // MARK: Odometer due logic
+
+    func testOdometerRowsDeriveThresholdAndDueState() {
+        let vm = makeOperatorViewModel()
+        vm.printerStatistics = PrinterMaintenanceStatistics(printerId: TestData.testUUID, totalPrintHours: 120)
+        vm.upcomingMaintenance = [
+            makeUpcoming(name: "OnSchedule", hoursUntilDue: 30),
+            makeUpcoming(name: "Overdue", hoursUntilDue: -5, isOverdue: true),
+            makeUpcoming(name: "DueToday", hoursUntilDue: 2, isDueToday: true)
+        ]
+
+        let rows = vm.odometerRows
+        // Overdue sorts first.
+        XCTAssertEqual(rows.first?.title, "Overdue")
+
+        let onSchedule = rows.first { $0.title == "OnSchedule" }
+        XCTAssertEqual(onSchedule?.thresholdHours, 150, "threshold = current 120h + 30h until due")
+        XCTAssertEqual(onSchedule?.currentHours, 120)
+        XCTAssertFalse(onSchedule?.isDue ?? true)
+        XCTAssertEqual(onSchedule?.stateLabel, "In 30 h")
+
+        let overdue = rows.first { $0.title == "Overdue" }
+        XCTAssertTrue(overdue?.isDue ?? false)
+        XCTAssertEqual(overdue?.stateLabel, "Overdue")
+
+        let dueToday = rows.first { $0.title == "DueToday" }
+        XCTAssertTrue(dueToday?.isDue ?? false)
+        XCTAssertEqual(dueToday?.stateLabel, "Due today")
+    }
+
+    // MARK: History mapping
+
+    func testSortedHistoryNewestFirstAndTailCapsAtFive() {
+        let jobs = (1...7).map { makeHistoryJob(id: "j\($0)", status: "completed", end: Double($0 * 100)) }
+        let vm = makeOperatorViewModel()
+        vm.history = PrinterDetailViewModel.sortedHistory(jobs)
+        XCTAssertEqual(vm.history.first?.id, "j7", "Newest (largest endTime) first")
+        XCTAssertEqual(vm.historyTail.count, 5, "History tail capped at five")
+        XCTAssertEqual(vm.historyTail.map(\.id), ["j7", "j6", "j5", "j4", "j3"])
+    }
+
+    func testHistoryOutcomeMapping() {
+        XCTAssertEqual(makeHistoryJob(id: "a", status: "completed", end: 1).outcome, .completed)
+        XCTAssertEqual(makeHistoryJob(id: "b", status: "aborted", end: 1).outcome, .cancelled)
+        XCTAssertEqual(makeHistoryJob(id: "c", status: "klippy_shutdown", end: 1).outcome, .failed)
+        XCTAssertEqual(makeHistoryJob(id: "d", status: "printing", end: nil).outcome, .inProgress)
+        XCTAssertEqual(makeHistoryJob(id: "e", status: "weird", end: 1).outcome, .unknown)
+    }
+
+    // MARK: Mainsail deep link
+
+    func testMainsailUrlValidHttpOnly() async throws {
+        let vm = makeOperatorViewModel()
+        mockService.printerToReturn = try TestData.decodePrinter() // has backendUrl
+        await vm.loadPrinter()
+        // backendUrl comes from the fixture; assert scheme guard behavior explicitly.
+        if let url = vm.mainsailUrl {
+            XCTAssertTrue(url.scheme?.hasPrefix("http") ?? false)
+        }
+    }
+
+    // MARK: Section population + empty/absent states
+
+    func testLoadOperatorSectionsPopulatesEverySection() async {
+        let jobService = MockJobService()
+        jobService.queuedJobResponsesToReturn = [
+            makeQueuedJob(id: "q1", assignedTo: TestData.testUUID, status: "Queued", position: 1, material: "PLA")
+        ]
+        let maintenance = MockMaintenanceService()
+        maintenance.printerStatisticsToReturn = PrinterMaintenanceStatistics(printerId: TestData.testUUID, totalPrintHours: 88)
+        maintenance.upcomingTasksToReturn = [makeUpcoming(name: "Lube", hoursUntilDue: 10)]
+        mockService.detailsToReturn = PrinterDetails(
+            id: TestData.testUUID, name: "Prusa MK4", backend: .moonraker,
+            toolheads: [makeToolhead(index: 0, material: "PLA")]
+        )
+        mockService.historyToReturn = PrinterHistoryList(count: 1, jobs: [makeHistoryJob(id: "h1", status: "completed", end: 500)])
+
+        let vm = makeOperatorViewModel(jobService: jobService, maintenanceService: maintenance)
+        await vm.loadOperatorSections()
+
+        XCTAssertEqual(vm.toolheads.count, 1)
+        XCTAssertEqual(vm.assignedQueue.count, 1)
+        XCTAssertEqual(vm.printerStatistics?.totalPrintHours, 88)
+        XCTAssertEqual(vm.upcomingMaintenance.count, 1)
+        XCTAssertEqual(vm.history.count, 1)
+        XCTAssertEqual(maintenance.getUpcomingCalledWith?.printerId, TestData.testUUID, "Upcoming must be scoped to this printer")
+        XCTAssertEqual(mockService.getHistoryCalledWith?.id, TestData.testUUID)
+    }
+
+    func testOperatorSectionsEmptyWhenServicesReturnNothing() async {
+        let vm = makeOperatorViewModel()
+        await vm.loadOperatorSections() // all mocks empty / stubbed to throw
+        XCTAssertTrue(vm.toolheads.isEmpty)
+        XCTAssertTrue(vm.assignedQueue.isEmpty)
+        XCTAssertTrue(vm.nextQueuedJobs.isEmpty)
+        XCTAssertTrue(vm.odometerRows.isEmpty)
+        XCTAssertTrue(vm.historyTail.isEmpty)
+        XCTAssertNil(vm.printerStatistics)
+    }
+
+    func testMainsailUrlNilWithoutBackendUrl() {
+        let vm = makeOperatorViewModel()
+        XCTAssertNil(vm.printer, "No printer loaded ⇒ no deep link")
+        XCTAssertNil(vm.mainsailUrl)
+    }
+
+    // MARK: Dispatch-to action
+
+    func testBeginDispatchLoadsCandidatesSortedByScore() async {
+        let jobService = MockJobService()
+        jobService.candidatesToReturn = [
+            DispatchCandidate(printerId: TestData.testUUID, printerName: "Low", score: 10, eliminated: false, eliminationReasons: []),
+            DispatchCandidate(printerId: TestData.testUUID2, printerName: "High", score: 90, eliminated: false, eliminationReasons: [])
+        ]
+        let vm = makeOperatorViewModel(jobService: jobService)
+        let job = makeQueuedJob(id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued", position: 1)
+
+        await vm.beginDispatch(for: job)
+
+        XCTAssertEqual(vm.dispatchTargetJob?.id, job.id)
+        XCTAssertEqual(vm.dispatchCandidates.map(\.printerName), ["High", "Low"], "Candidates sorted by descending score")
+        XCTAssertEqual(jobService.getCandidatesCalledWith, job.job.jobUUID)
+        XCTAssertFalse(vm.isLoadingCandidates)
+    }
+
+    func testDispatchToCallsServiceAndClearsTarget() async {
+        let jobService = MockJobService()
+        let vm = makeOperatorViewModel(jobService: jobService)
+        let job = makeQueuedJob(id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued", position: 1)
+        vm.dispatchTargetJob = job
+
+        await vm.dispatch(job, to: TestData.testUUID2)
+
+        XCTAssertEqual(jobService.dispatchToCalledWith?.jobId, job.job.jobUUID)
+        XCTAssertEqual(jobService.dispatchToCalledWith?.printerId, TestData.testUUID2)
+        XCTAssertNil(vm.dispatchTargetJob, "Successful dispatch clears the sheet")
+        XCTAssertFalse(vm.isDispatching)
+    }
+
+    // MARK: Maintenance log completion
+
+    func testLogMaintenanceCompletionPostsRequestAndRecordsTask() async {
+        let maintenance = MockMaintenanceService()
+        let taskId = UUID()
+        maintenance.createdLogToReturn = MaintenanceLog(
+            id: UUID(), printerId: TestData.testUUID, printerMaintenanceScheduleId: nil,
+            resolvedAlertId: nil, maintenanceTaskId: taskId, taskName: "Nozzle swap",
+            notes: nil, component: "Nozzle", performedBy: "op", performedAt: Self.fixedNow,
+            durationMinutes: nil, cost: nil, partsReplaced: nil, printerHoursAtMaintenance: nil,
+            createdAt: Self.fixedNow
+        )
+        let vm = makeOperatorViewModel(maintenanceService: maintenance)
+        let row = PrinterDetailViewModel.OdometerRow(
+            id: "r", title: "Nozzle swap", component: "Nozzle", taskId: taskId,
+            currentHours: 120, thresholdHours: 120, hoursUntilDue: 0,
+            isOverdue: true, isDueToday: false
+        )
+
+        await vm.logMaintenanceCompletion(row, performedBy: "op")
+
+        XCTAssertEqual(maintenance.createLogCalledWith?.printerId, TestData.testUUID)
+        XCTAssertEqual(maintenance.createLogCalledWith?.taskId, taskId)
+        XCTAssertEqual(maintenance.createLogCalledWith?.taskName, "Nozzle swap")
+        XCTAssertEqual(maintenance.createLogCalledWith?.performedBy, "op")
+        XCTAssertEqual(vm.lastLoggedMaintenanceTaskId, taskId)
+        XCTAssertNil(vm.actionError)
+    }
+}

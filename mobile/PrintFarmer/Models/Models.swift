@@ -432,6 +432,10 @@ struct PrinterStatusDetail: Codable, Sendable {
     let homedAxes: String?
     let spoolInfo: PrinterSpoolInfo?
     let mmuStatus: MmuStatus?
+    /// Seconds until the active print finishes, as computed by the backend
+    /// (`PrinterStatusDto.PrintTimeLeftSeconds`). Surfaced for the Printer
+    /// Detail v2 current-job ETA (issue #712) so the app never recomputes it.
+    let printTimeLeftSeconds: Double?
 
     init(
         id: UUID,
@@ -451,7 +455,8 @@ struct PrinterStatusDetail: Codable, Sendable {
         bedTarget: Double?,
         homedAxes: String? = nil,
         spoolInfo: PrinterSpoolInfo?,
-        mmuStatus: MmuStatus?
+        mmuStatus: MmuStatus?,
+        printTimeLeftSeconds: Double? = nil
     ) {
         self.id = id
         self.isOnline = isOnline
@@ -471,6 +476,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.homedAxes = homedAxes
         self.spoolInfo = spoolInfo
         self.mmuStatus = mmuStatus
+        self.printTimeLeftSeconds = printTimeLeftSeconds
     }
 }
 

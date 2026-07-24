@@ -216,6 +216,7 @@
 		C0CF42E5C08F7567EDD6E459 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B16CA4D9FC52BF34ADB51B /* DashboardView.swift */; };
 		C168511ECD1BDBD8B1E68370 /* PartAdjustmentViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */; };
 		C31B17605CE275A98D53A86C /* DispatchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEDC1F2F6909E556EA2FB598 /* DispatchModels.swift */; };
+		5456C95E6B5D4B588B68BF24 /* PrinterHistoryModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 819AAA098A0347629E03F9E8 /* PrinterHistoryModels.swift */; };
 		C36E71E0B8D651B87256150D /* PrinterCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57A3A3E21352CC6A4514221E /* PrinterCardView.swift */; };
 		C3C22EFA772CBD5125E9F2FE /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 007F057316513D6585B3D53A /* NotificationService.swift */; };
 		C430B04AC7A42EFDBFD47538 /* FailureDetectionModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F8B5C6B605BB5B8AE7E1BF3 /* FailureDetectionModels.swift */; };
@@ -703,6 +704,7 @@
 		CB279A2CAF8BE1C1BD61D6B2 /* JobDetailViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobDetailViewModelTests.swift; sourceTree = "<group>"; };
 		CD9A3AD3F5C5DD33CAF7C6CB /* SpoolInventoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpoolInventoryView.swift; sourceTree = "<group>"; };
 		CEDC1F2F6909E556EA2FB598 /* DispatchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DispatchModels.swift; sourceTree = "<group>"; };
+		819AAA098A0347629E03F9E8 /* PrinterHistoryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterHistoryModels.swift; sourceTree = "<group>"; };
 		CEF704D6157DB730DA925AD5 /* MockPartsInventoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockPartsInventoryService.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0002 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBar.swift; sourceTree = "<group>"; };
@@ -1002,6 +1004,7 @@
 				6208E685EEDD0498124C143A /* SignalRModels.swift */,
 				B7D1020247C4116936C828DD /* AutoDispatchModels.swift */,
 				CEDC1F2F6909E556EA2FB598 /* DispatchModels.swift */,
+				819AAA098A0347629E03F9E8 /* PrinterHistoryModels.swift */,
 				051CF8A25906AE585EC15D70 /* JobAnalyticsModels.swift */,
 				CA7BCA96F36B67682F5623A0 /* MaintenanceModels.swift */,
 				DE816C8D542C6E41C7743FF9 /* PredictiveModels.swift */,
@@ -1876,6 +1879,7 @@
 				E1E5F6A7B8C9D0E1F2A3B4C5 /* NFCWriteView.swift in Sources */,
 				E02BCD8D6DB753506D437BF5 /* AutoDispatchModels.swift in Sources */,
 				C31B17605CE275A98D53A86C /* DispatchModels.swift in Sources */,
+				5456C95E6B5D4B588B68BF24 /* PrinterHistoryModels.swift in Sources */,
 				5B9EEBAC73AA153E37C05095 /* JobAnalyticsModels.swift in Sources */,
 				0B3949F0DF6634129AE4352E /* MaintenanceModels.swift in Sources */,
 				A70A710000000000A0000001 /* AttentionModels.swift in Sources */,

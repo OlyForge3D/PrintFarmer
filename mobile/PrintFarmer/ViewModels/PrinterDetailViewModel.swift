@@ -20,6 +20,29 @@ final class PrinterDetailViewModel {
     var activeAlerts: [PredictiveAlert] = []
     var failureDetectionStatus: FailureDetectionPrinterStatus?
 
+    // MARK: - F7 Printer Detail v2 (issue #712)
+    /// F6 toolhead/slot roster for this printer (`GET /api/printers/{id}/details`).
+    var toolheads: [Toolhead] = []
+    /// Next jobs explicitly assigned to this printer (current + queued), capped
+    /// downstream to three for the operator queue section.
+    var assignedQueue: [QueuedPrintJobResponse] = []
+    /// Cumulative odometer reading for the maintenance section.
+    var printerStatistics: PrinterMaintenanceStatistics?
+    /// Upcoming/overdue maintenance tasks scoped to this printer.
+    var upcomingMaintenance: [UpcomingMaintenanceTask] = []
+    /// Recent job history (newest first) for the history tail.
+    var history: [PrinterHistoryJob] = []
+
+    // Dispatch-to flow state.
+    var dispatchTargetJob: QueuedPrintJobResponse?
+    var dispatchCandidates: [DispatchCandidate] = []
+    var isLoadingCandidates = false
+    var isDispatching = false
+    var dispatchError: String?
+    /// Set after a successful maintenance log so the view can surface a
+    /// transient confirmation without color-only signalling.
+    var lastLoggedMaintenanceTaskId: UUID?
+
     private let logger = Logger(subsystem: "com.printfarmer.ios", category: "PrinterDetail")
 
     enum DestructiveAction: Identifiable {
@@ -70,6 +93,10 @@ final class PrinterDetailViewModel {
 
     let printerId: UUID
     private var printerService: (any PrinterServiceProtocol)?
+    private var jobService: (any JobServiceProtocol)?
+    private var maintenanceService: (any MaintenanceServiceProtocol)?
+    /// Injectable clock so absolute-ETA formatting is deterministic in tests.
+    private let nowProvider: @Sendable () -> Date
 
     var cameraRotation: Int = 0
 
@@ -85,17 +112,30 @@ final class PrinterDetailViewModel {
         printerId: UUID,
         snapshotPollInterval: Duration = .seconds(5),
         snapshotErrorBackoffBaseSeconds: Int = 5,
-        snapshotErrorBackoffMaxSeconds: Int = 30
+        snapshotErrorBackoffMaxSeconds: Int = 30,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.printerId = printerId
         self.snapshotPollInterval = snapshotPollInterval
         self.snapshotErrorBackoffBaseSeconds = snapshotErrorBackoffBaseSeconds
         self.snapshotErrorBackoffMaxSeconds = snapshotErrorBackoffMaxSeconds
+        self.nowProvider = now
         self.cameraRotation = UserDefaults.standard.integer(forKey: "cameraRotation-\(printerId.uuidString)")
     }
 
     func configure(printerService: any PrinterServiceProtocol) {
         self.printerService = printerService
+    }
+
+    /// Injects the job and maintenance services used by the F7 operator
+    /// sections (queue/dispatch, odometer, history). Optional so existing
+    /// call sites and previews that only need printer control keep working.
+    func configureOperatorServices(
+        jobService: any JobServiceProtocol,
+        maintenanceService: any MaintenanceServiceProtocol
+    ) {
+        self.jobService = jobService
+        self.maintenanceService = maintenanceService
     }
 
     func configureNFCScanner(_ scanner: any SpoolScannerProtocol) {
@@ -179,7 +219,8 @@ final class PrinterDetailViewModel {
             bedTarget: update.bedTarget ?? statusDetail?.bedTarget,
             homedAxes: update.homedAxes ?? statusDetail?.homedAxes,
             spoolInfo: update.spoolInfo ?? statusDetail?.spoolInfo,
-            mmuStatus: update.mmuStatus ?? statusDetail?.mmuStatus
+            mmuStatus: update.mmuStatus ?? statusDetail?.mmuStatus,
+            printTimeLeftSeconds: statusDetail?.printTimeLeftSeconds
         )
     }
 
@@ -385,6 +426,8 @@ final class PrinterDetailViewModel {
             logger.warning("Failed to load current job: \(error.localizedDescription)")
         }
 
+        await loadOperatorSections()
+
         if shouldLoadInitialSnapshot {
             _ = await refreshSnapshot()
         }
@@ -458,6 +501,171 @@ final class PrinterDetailViewModel {
                 logger.warning("Failed to load active alerts: \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - F7 Operator Sections (issue #712)
+
+    /// Loads the operator-facing sections (toolhead slots, assigned queue,
+    /// maintenance odometer, history) in parallel. Every load is independent
+    /// and non-fatal: a failure clears only its own slice and is logged, so a
+    /// single degraded endpoint never blanks the whole screen. Deterministic —
+    /// all child loads are awaited before returning.
+    func loadOperatorSections() async {
+        guard isViewActive else { return }
+
+        async let toolheadsResult = loadToolheads()
+        async let queueResult = loadAssignedQueue()
+        async let statsResult = loadMaintenance()
+        async let historyResult = loadHistory()
+
+        _ = await (toolheadsResult, queueResult, statsResult, historyResult)
+    }
+
+    private func loadToolheads() async {
+        guard let printerService else { return }
+        do {
+            let details = try await printerService.getDetails(id: printerId)
+            guard isViewActive else { return }
+            toolheads = details.toolheads
+        } catch {
+            logger.warning("Failed to load toolheads: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadAssignedQueue() async {
+        guard let jobService else { return }
+        do {
+            let all = try await jobService.listAllJobs()
+            guard isViewActive else { return }
+            assignedQueue = Self.filterAssignedQueue(all, printerId: printerId)
+        } catch {
+            logger.warning("Failed to load assigned queue: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadMaintenance() async {
+        guard let maintenanceService else { return }
+        do {
+            printerStatistics = try await maintenanceService.getPrinterStatistics(printerId: printerId)
+        } catch {
+            logger.warning("Failed to load printer statistics: \(error.localizedDescription)")
+        }
+        guard isViewActive else { return }
+        do {
+            upcomingMaintenance = try await maintenanceService.getUpcoming(
+                lookaheadDays: nil,
+                includeOverdue: true,
+                printerId: printerId
+            )
+        } catch {
+            logger.warning("Failed to load upcoming maintenance: \(error.localizedDescription)")
+        }
+    }
+
+    private func loadHistory() async {
+        guard let printerService else { return }
+        do {
+            let list = try await printerService.getHistory(id: printerId, limit: nil)
+            guard isViewActive else { return }
+            history = Self.sortedHistory(list.jobs)
+        } catch {
+            logger.warning("Failed to load printer history: \(error.localizedDescription)")
+        }
+    }
+
+    /// Queue scope per triage: jobs explicitly assigned to *this* printer that
+    /// are still active or waiting (not terminal), ordered by queue position.
+    /// Pure/static so it is unit-testable without a live service.
+    static func filterAssignedQueue(
+        _ all: [QueuedPrintJobResponse],
+        printerId: UUID
+    ) -> [QueuedPrintJobResponse] {
+        let target = printerId.uuidString.lowercased()
+        let terminal: Set<String> = ["completed", "failed", "cancelled", "canceled", "aborted"]
+        return all
+            .filter { response in
+                let assigned = (response.job.assignedPrinterId ?? response.assignedPrinter?.id)?.lowercased()
+                guard assigned == target else { return false }
+                return !terminal.contains(response.job.status.lowercased())
+            }
+            .sorted { $0.job.queuePosition < $1.job.queuePosition }
+    }
+
+    static func sortedHistory(_ jobs: [PrinterHistoryJob]) -> [PrinterHistoryJob] {
+        jobs.sorted { lhs, rhs in
+            (lhs.endTime ?? lhs.startTime) > (rhs.endTime ?? rhs.startTime)
+        }
+    }
+
+    // MARK: - Dispatch-to
+
+    func beginDispatch(for job: QueuedPrintJobResponse) async {
+        guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
+        dispatchTargetJob = job
+        dispatchCandidates = []
+        dispatchError = nil
+        isLoadingCandidates = true
+        do {
+            let candidates = try await jobService.getCandidates(jobId: jobUUID)
+            guard isViewActive else { return }
+            dispatchCandidates = candidates.sorted { $0.score > $1.score }
+        } catch {
+            guard isViewActive else { return }
+            dispatchError = error.localizedDescription
+        }
+        guard isViewActive else { return }
+        isLoadingCandidates = false
+    }
+
+    func dispatch(_ job: QueuedPrintJobResponse, to targetPrinterId: UUID) async {
+        guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
+        isDispatching = true
+        dispatchError = nil
+        do {
+            try await jobService.dispatchTo(jobId: jobUUID, printerId: targetPrinterId)
+            guard isViewActive else { return }
+            dispatchTargetJob = nil
+            dispatchCandidates = []
+            await loadAssignedQueue()
+        } catch {
+            guard isViewActive else { return }
+            dispatchError = error.localizedDescription
+        }
+        guard isViewActive else { return }
+        isDispatching = false
+    }
+
+    func cancelDispatch() {
+        dispatchTargetJob = nil
+        dispatchCandidates = []
+        dispatchError = nil
+        isLoadingCandidates = false
+    }
+
+    // MARK: - Maintenance log completion
+
+    func logMaintenanceCompletion(_ row: OdometerRow, performedBy: String) async {
+        guard isViewActive, let maintenanceService else { return }
+        isPerformingAction = true
+        actionError = nil
+        let request = CreateMaintenanceLogRequest(
+            printerId: printerId,
+            performedBy: performedBy,
+            taskId: row.taskId,
+            taskName: row.title,
+            componentName: row.component
+        )
+        do {
+            _ = try await maintenanceService.createLog(request)
+            guard isViewActive else { return }
+            lastLoggedMaintenanceTaskId = row.taskId
+            await loadMaintenance()
+        } catch {
+            guard isViewActive else { return }
+            actionError = error.localizedDescription
+        }
+        guard isViewActive else { return }
+        isPerformingAction = false
     }
 
     // MARK: - Actions
@@ -697,6 +905,162 @@ final class PrinterDetailViewModel {
     var isOnline: Bool {
         printer?.isOnline ?? false
     }
+
+    // MARK: - F7 Computed State (issue #712)
+
+    /// Remaining print seconds surfaced additively from the backend
+    /// `printTimeLeftSeconds`. Never recomputed on-device — nil unless the
+    /// printer is actively printing and the backend supplied a positive value.
+    var currentJobRemainingSeconds: Double? {
+        guard isActivelyPrinting,
+              let seconds = statusDetail?.printTimeLeftSeconds,
+              seconds > 0 else { return nil }
+        return seconds
+    }
+
+    /// Absolute estimated completion instant (now + remaining). Uses the
+    /// injected clock so tests are deterministic.
+    var currentJobEtaDate: Date? {
+        guard let seconds = currentJobRemainingSeconds else { return nil }
+        return nowProvider().addingTimeInterval(seconds)
+    }
+
+    /// Human "time remaining" string (e.g. "1h 12m"). Deterministic — depends
+    /// only on the remaining seconds, not wall-clock time.
+    var formattedTimeRemaining: String? {
+        guard let seconds = currentJobRemainingSeconds else { return nil }
+        return Self.remainingFormatter.string(from: seconds)
+    }
+
+    /// Absolute completion clock time (e.g. "3:45 PM").
+    var formattedEtaClock: String? {
+        guard let eta = currentJobEtaDate else { return nil }
+        return eta.formatted(date: .omitted, time: .shortened)
+    }
+
+    /// Thumbnail for the running job, if the model file carries one; falls
+    /// back to the printer thumbnail, and is omitted gracefully when absent.
+    var currentJobThumbnailUrl: String? {
+        let candidates = [currentJob?.thumbnailUrl, printer?.thumbnailUrl]
+        return candidates
+            .compactMap { $0 }
+            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    /// The operator queue section shows at most three assigned jobs.
+    var nextQueuedJobs: [QueuedPrintJobResponse] {
+        Array(assignedQueue.prefix(3))
+    }
+
+    /// Per-job compatibility verdict derived read-only from the loaded
+    /// toolheads vs the job's required material/nozzle. No per-tool candidate
+    /// DTO exists; this is advisory only and never blocks dispatch.
+    enum QueueMatchState: String {
+        case match
+        case mismatch
+        case unknown
+
+        var label: String {
+            switch self {
+            case .match: "Loaded filament matches"
+            case .mismatch: "Filament mismatch"
+            case .unknown: "Match unknown"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .match: "checkmark.circle"
+            case .mismatch: "exclamationmark.triangle"
+            case .unknown: "questionmark.circle"
+            }
+        }
+    }
+
+    func matchState(for job: QueuedPrintJobResponse) -> QueueMatchState {
+        guard let required = job.gcodeFile?.materialType?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !required.isEmpty else { return .unknown }
+        let loaded = toolheads.compactMap {
+            $0.currentMaterial?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }.filter { !$0.isEmpty }
+        guard !loaded.isEmpty else { return .unknown }
+        return loaded.contains(required.lowercased()) ? .match : .mismatch
+    }
+
+    /// Maintenance odometer rows: current hours vs the derived threshold, with
+    /// due/overdue state announced as text.
+    struct OdometerRow: Identifiable, Equatable {
+        let id: String
+        let title: String
+        let component: String?
+        let taskId: UUID?
+        let currentHours: Double
+        let thresholdHours: Double?
+        let hoursUntilDue: Double?
+        let isOverdue: Bool
+        let isDueToday: Bool
+
+        var isDue: Bool {
+            isOverdue || isDueToday || (hoursUntilDue.map { $0 <= 0 } ?? false)
+        }
+
+        /// State announced without relying on color alone.
+        var stateLabel: String {
+            if isOverdue { return "Overdue" }
+            if isDueToday { return "Due today" }
+            if let hours = hoursUntilDue {
+                if hours <= 0 { return "Due now" }
+                return "In \(Int(hours.rounded())) h"
+            }
+            return "On schedule"
+        }
+    }
+
+    var odometerRows: [OdometerRow] {
+        let currentHours = printerStatistics?.totalPrintHours ?? 0
+        return upcomingMaintenance
+            .sorted { lhs, rhs in
+                if lhs.isOverdue != rhs.isOverdue { return lhs.isOverdue }
+                return (lhs.hoursUntilDue ?? .greatestFiniteMagnitude) < (rhs.hoursUntilDue ?? .greatestFiniteMagnitude)
+            }
+            .map { task in
+                let threshold = task.hoursUntilDue.map { currentHours + $0 }
+                return OdometerRow(
+                    id: task.id,
+                    title: task.taskName,
+                    component: task.component,
+                    taskId: task.taskId,
+                    currentHours: currentHours,
+                    thresholdHours: threshold,
+                    hoursUntilDue: task.hoursUntilDue,
+                    isOverdue: task.isOverdue,
+                    isDueToday: task.isDueToday
+                )
+            }
+    }
+
+    /// Last five completed/terminal jobs for the history tail.
+    var historyTail: [PrinterHistoryJob] {
+        Array(history.prefix(5))
+    }
+
+    /// Deep link to the printer's native web UI (Mainsail/Fluidd/etc.), shown
+    /// only when the backend URL is present and parseable.
+    var mainsailUrl: URL? {
+        guard let raw = printer?.backendUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty,
+              let url = URL(string: raw),
+              url.scheme?.hasPrefix("http") == true else { return nil }
+        return url
+    }
+
+    private static let remainingFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
+        formatter.zeroFormattingBehavior = .dropLeading
+        return formatter
+    }()
 
     // MARK: - Private
 

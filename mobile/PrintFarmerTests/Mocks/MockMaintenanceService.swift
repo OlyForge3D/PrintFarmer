@@ -11,6 +11,8 @@ final class MockMaintenanceService: MaintenanceServiceProtocol, @unchecked Senda
     var costsToReturn: [MaintenanceCost] = []
     var uptimeToReturn: [PrinterUptime] = []
     var fleetStatsToReturn: [FleetPrinterStatistics] = []
+    var printerStatisticsToReturn: PrinterMaintenanceStatistics?
+    var createdLogToReturn: MaintenanceLog?
     var errorToThrow: Error?
     
     // Call tracking
@@ -25,6 +27,8 @@ final class MockMaintenanceService: MaintenanceServiceProtocol, @unchecked Senda
     var getCostCalledWith: Int?
     var getUptimeCalled = false
     var getFleetStatisticsCalled = false
+    var getPrinterStatisticsCalledWith: UUID?
+    var createLogCalledWith: CreateMaintenanceLogRequest?
     
     func getAlerts() async throws -> [MaintenanceAlert] {
         getAlertsCalled = true
@@ -93,5 +97,19 @@ final class MockMaintenanceService: MaintenanceServiceProtocol, @unchecked Senda
         getFleetStatisticsCalled = true
         if let error = errorToThrow { throw error }
         return fleetStatsToReturn
+    }
+
+    func getPrinterStatistics(printerId: UUID) async throws -> PrinterMaintenanceStatistics {
+        getPrinterStatisticsCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        guard let stats = printerStatisticsToReturn else { throw NetworkError.notFound }
+        return stats
+    }
+
+    func createLog(_ request: CreateMaintenanceLogRequest) async throws -> MaintenanceLog {
+        createLogCalledWith = request
+        if let error = errorToThrow { throw error }
+        guard let log = createdLogToReturn else { throw NetworkError.notFound }
+        return log
     }
 }

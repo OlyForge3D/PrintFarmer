@@ -110,6 +110,26 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
             jobName: p.jobName, thumbnailUrl: p.thumbnailUrl, error: nil)
     }
 
+    func getHistory(id: UUID, limit: Int? = nil) async throws -> PrinterHistoryList {
+        let now = Date().timeIntervalSince1970
+        let jobs = [
+            PrinterHistoryJob(
+                jobId: UUID().uuidString, status: "completed", filename: "bracket_v3.gcode",
+                startTime: now - 7200, endTime: now - 3600,
+                printDuration: 3300, totalDuration: 3600, filamentUsed: 12.4),
+            PrinterHistoryJob(
+                jobId: UUID().uuidString, status: "completed", filename: "gear_mount.gcode",
+                startTime: now - 18000, endTime: now - 12600,
+                printDuration: 5100, totalDuration: 5400, filamentUsed: 24.1),
+            PrinterHistoryJob(
+                jobId: UUID().uuidString, status: "cancelled", filename: "prototype.gcode",
+                startTime: now - 90000, endTime: now - 88200,
+                printDuration: 1500, totalDuration: 1800, filamentUsed: 4.2),
+        ]
+        let limited = limit.map { Array(jobs.prefix($0)) } ?? jobs
+        return PrinterHistoryList(count: limited.count, jobs: limited)
+    }
+
     func pause(id: UUID) async throws -> CommandResult {
         CommandResult(success: true, message: "Printer paused (demo)")
     }

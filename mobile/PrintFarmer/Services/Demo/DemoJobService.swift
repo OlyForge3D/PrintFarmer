@@ -175,4 +175,7 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     func abort(id: UUID) async throws {}
     func pause(id: UUID) async throws {}
     func resume(id: UUID) async throws {}
+
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate] { [] }
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws {}
 }
