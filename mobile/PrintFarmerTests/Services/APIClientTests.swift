@@ -891,6 +891,142 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(secondMockAPIClient.capturedRequests.first?.url?.host, "second.mock.invalid")
     }
 
+    // MARK: - Issue #812: session ordering & cancellation regressions
+
+    /// Same-session handlers must run FIFO on one serial queue: request #1 fully
+    /// completes before request #2 begins. Against the rejected concurrent
+    /// global-queue dispatch, #2 would start while #1 is still parked, so
+    /// "start2" would appear before "end1" and this exact-sequence assertion
+    /// fails. Bounded semaphore waits only fail fast; correctness never depends
+    /// on elapsed time, sleeps, polling, or retries.
+    func testSameSessionHandlersRunSeriallyInFIFOOrder() async throws {
+        let session = MockURLProtocol.makeSession()
+        let firstURL = URL(string: "https://mock.invalid/serial-1")!
+        let secondURL = URL(string: "https://mock.invalid/serial-2")!
+
+        let events = OrderedEventLog()
+        let firstEntered = DispatchSemaphore(value: 0)
+        let firstMayFinish = DispatchSemaphore(value: 0)
+        let completions = CompletionLog()
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        session.onCompletion = { delivered in completions.record(delivered: delivered) }
+
+        session.requestHandler = { request in
+            if request.url == firstURL {
+                events.append("start1")
+                firstEntered.signal()
+                if firstMayFinish.wait(timeout: barrierTimeout) == .timedOut {
+                    throw URLError(.timedOut)
+                }
+                events.append("end1")
+                return (TestData.httpResponse(url: request.url, statusCode: 200), Data("1".utf8))
+            } else {
+                events.append("start2")
+                events.append("end2")
+                return (TestData.httpResponse(url: request.url, statusCode: 200), Data("2".utf8))
+            }
+        }
+
+        async let firstData: Data = session.urlSession.data(from: firstURL).0
+
+        // Wait until request #1 is provably running inside the serial queue.
+        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: firstEntered.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(entered, "Request #1 handler must enter the serial queue before #2 is submitted.")
+
+        // Submit #2 while #1 holds the serial queue, then release #1.
+        async let secondData: Data = session.urlSession.data(from: secondURL).0
+        firstMayFinish.signal()
+
+        let firstBody = String(decoding: try await firstData, as: UTF8.self)
+        let secondBody = String(decoding: try await secondData, as: UTF8.self)
+
+        XCTAssertEqual(firstBody, "1")
+        XCTAssertEqual(secondBody, "2")
+        XCTAssertEqual(
+            events.snapshot(),
+            ["start1", "end1", "start2", "end2"],
+            "Same-session handlers must execute serially in FIFO order. Interleaving (e.g. start2 before end1) means the per-session queue is not serial."
+        )
+        XCTAssertEqual(completions.deliveredCount(), 2, "Each request must deliver its terminal callback exactly once.")
+        XCTAssertEqual(completions.suppressedCount(), 0)
+    }
+
+    /// Cancelling a request after its handler has entered `startLoading` but
+    /// before it releases must suppress the terminal callback: the fence set by
+    /// `stopLoading()` drops every later `URLProtocolClient` callback. The
+    /// `onStopLoading` seam orders the stop strictly before the release, so the
+    /// suppression is deterministic. Against the rejected unfenced dispatch the
+    /// terminal callback would be delivered after cancellation instead of
+    /// suppressed, so `deliveredCount == 0` / `suppressedCount == 1` fails.
+    func testStopLoadingSuppressesCompletionAfterHandlerEntry() async throws {
+        let session = MockURLProtocol.makeSession()
+        let url = URL(string: "https://mock.invalid/cancel")!
+
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let stopLatch = DispatchSemaphore(value: 0)
+        let completions = CompletionLog()
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        session.onStopLoading = { stopLatch.signal() }
+        session.onCompletion = { delivered in completions.record(delivered: delivered) }
+
+        session.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data("late".utf8))
+        }
+
+        let task = Task { () -> Data in
+            try await session.urlSession.data(from: url).0
+        }
+
+        // Handler is provably parked inside startLoading.
+        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: entryLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(entered, "Handler must enter startLoading before cancellation.")
+
+        // Cancel while the handler is parked, then wait until stopLoading fences.
+        task.cancel()
+        let fenced: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: stopLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(fenced, "stopLoading() must fence the load after cancellation.")
+
+        // Release the parked handler; its terminal callback must be suppressed.
+        releaseLatch.signal()
+
+        do {
+            let data = try await task.value
+            XCTFail("Cancelled request must not deliver a completed response; got \(String(decoding: data, as: UTF8.self)).")
+        } catch {
+            // Expected: cancellation propagates.
+        }
+
+        // The handler's terminal callback must reach the fence and be suppressed.
+        let sawTerminal: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: completions.terminalLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(sawTerminal, "The handler's terminal callback must reach the lifecycle fence.")
+        XCTAssertEqual(completions.deliveredCount(), 0, "stopLoading() must suppress the terminal callback after cancellation.")
+        XCTAssertEqual(completions.suppressedCount(), 1, "Exactly one terminal callback must be fenced/suppressed.")
+        XCTAssertEqual(session.capturedRequests.count, 1)
+    }
+
     func testLiveHTTPSLoginAgainstRealServer() async throws {
         let environment = ProcessInfo.processInfo.environment
         guard let rawURL = environment["PFARM_LIVE_LOGIN_URL"],
@@ -912,5 +1048,56 @@ final class APIClientTests: XCTestCase {
         XCTAssertTrue(response.success)
         XCTAssertNotNil(response.token)
         XCTAssertEqual(response.user?.username, username)
+    }
+}
+
+// MARK: - Issue #812 regression support (thread-safe recorders)
+
+/// Ordered, synchronized event recorder used to assert same-session FIFO
+/// serialization from inside sync `MockURLProtocol` handlers running on the
+/// per-session serial queue.
+private final class OrderedEventLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [String] = []
+
+    func append(_ event: String) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
+
+/// Records the delivered/suppressed outcome of each terminal `MockURLProtocol`
+/// callback via the session's `onCompletion` seam. `terminalLatch` lets a test
+/// causally await the fenced terminal decision with a fail-fast timeout.
+private final class CompletionLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var delivered = 0
+    private var suppressed = 0
+    let terminalLatch = DispatchSemaphore(value: 0)
+
+    func record(delivered isDelivered: Bool) {
+        lock.lock()
+        if isDelivered { delivered += 1 } else { suppressed += 1 }
+        lock.unlock()
+        terminalLatch.signal()
+    }
+
+    func deliveredCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return delivered
+    }
+
+    func suppressedCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return suppressed
     }
 }
