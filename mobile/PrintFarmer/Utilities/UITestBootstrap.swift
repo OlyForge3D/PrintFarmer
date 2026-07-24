@@ -91,6 +91,17 @@ enum UITestBootstrap {
     static let coldOfflineShellLaunchArgument =
         "--uitesting-cold-offline-shell"
 
+    #if DEBUG
+    /// Seeds the #788 task-action routing scenario: a dedicated shift-task
+    /// feed whose harvest / filament-runout / maintenance rows each target a
+    /// REAL demo entity (existing completed job, existing printer) so the
+    /// shipped destination flow can load its context. All three rows share a
+    /// duplicated display name, so XCUI proves routing keys off stable IDs and
+    /// never titles. Production code never touches this argument.
+    static let taskActionRoutingLaunchArgument =
+        "--uitesting-task-action-routing"
+    #endif
+
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
         /// Pre-authenticated demo operator shell (default).
@@ -107,6 +118,9 @@ enum UITestBootstrap {
         #if DEBUG
         case authenticatedShiftTaskMutationError
         case authenticatedShiftTaskInitialLoadFailure
+        /// #788: dedicated task-action routing feed (harvest/swap/maintenance
+        /// rows targeting real demo entities) for handoff XCUI.
+        case authenticatedTaskActionRouting
         #endif
         /// Authenticated operator shell with a deterministic fleet
         /// coverage snapshot injected (F4-M #778 UI tests).
@@ -169,6 +183,9 @@ enum UITestBootstrap {
         }
         if arguments.contains(shiftTaskInitialLoadFailureLaunchArgument) {
             return .authenticatedShiftTaskInitialLoadFailure
+        }
+        if arguments.contains(taskActionRoutingLaunchArgument) {
+            return .authenticatedTaskActionRouting
         }
         #endif
         return arguments.contains(unauthenticatedLaunchArgument) ? .unauthenticated : .authenticated
@@ -280,6 +297,11 @@ enum UITestBootstrap {
                 scenario: .initialLoadFailureThenSuccess
             )
         }
+        if mode == .authenticatedTaskActionRouting {
+            services.shiftTaskService = DemoShiftTaskService(
+                scenario: .taskActionRouting
+            )
+        }
         #endif
         // #817: force the attention gate off (so the `DashboardView` surface
         // is reachable via the legacy fallback) and make the canonical fleet
@@ -302,6 +324,8 @@ enum UITestBootstrap {
         case .authenticatedShiftTaskMutationError:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         case .authenticatedShiftTaskInitialLoadFailure:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        case .authenticatedTaskActionRouting:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         #endif
         case .authenticatedFilamentCoverageScenario:

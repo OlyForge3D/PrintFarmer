@@ -7,6 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		F78800000000000000000101 /* TaskActionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000001 /* TaskActionRoute.swift */; };
+		F78800000000000000000102 /* TaskActionRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000002 /* TaskActionRouter.swift */; };
+		F78800000000000000000103 /* TaskActionRouteResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000003 /* TaskActionRouteResolverTests.swift */; };
+		F78800000000000000000104 /* TaskActionRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000004 /* TaskActionRouterTests.swift */; };
+		F78800000000000000000105 /* TaskActionRoutingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000005 /* TaskActionRoutingUITests.swift */; };
 		AF7870000000000000000001 /* OfflineWriteQueueModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7870000000000000000000 /* OfflineWriteQueueModels.swift */; };
 		AF7870000000000000000003 /* OfflineWriteQueueStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7870000000000000000002 /* OfflineWriteQueueStore.swift */; };
 		AF7870000000000000000005 /* OfflineWriteReplayTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF7870000000000000000004 /* OfflineWriteReplayTransport.swift */; };
@@ -494,6 +499,11 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		F78800000000000000000001 /* TaskActionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRoute.swift; sourceTree = "<group>"; };
+		F78800000000000000000002 /* TaskActionRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRouter.swift; sourceTree = "<group>"; };
+		F78800000000000000000003 /* TaskActionRouteResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRouteResolverTests.swift; sourceTree = "<group>"; };
+		F78800000000000000000004 /* TaskActionRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRouterTests.swift; sourceTree = "<group>"; };
+		F78800000000000000000005 /* TaskActionRoutingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRoutingUITests.swift; sourceTree = "<group>"; };
 		AF7870000000000000000000 /* OfflineWriteQueueModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteQueueModels.swift; path = PrintFarmer/Services/OfflineQueue/OfflineWriteQueueModels.swift; sourceTree = SOURCE_ROOT; };
 		AF7870000000000000000002 /* OfflineWriteQueueStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteQueueStore.swift; path = PrintFarmer/Services/OfflineQueue/OfflineWriteQueueStore.swift; sourceTree = SOURCE_ROOT; };
 		AF7870000000000000000004 /* OfflineWriteReplayTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OfflineWriteReplayTransport.swift; path = PrintFarmer/Services/OfflineQueue/OfflineWriteReplayTransport.swift; sourceTree = SOURCE_ROOT; };
@@ -1086,6 +1096,7 @@
 		4D7DEC203F06522448F70C97 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				F78800000000000000000004 /* TaskActionRouterTests.swift */,
 				F2B1C2D3E4F5A6B7C8D9E0F1 /* AddSpoolViewModelTests.swift */,
 				BC2000000000000000000009 /* BarcodeIntakeViewModelTests.swift */,
 				1706B0E2CB9F9ADFA2B914EB /* AuthViewModelTests.swift */,
@@ -1179,6 +1190,7 @@
 				E83CE3867D23C7CA26C423AB /* AppDestination.swift */,
 				AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */,
 				4FD237969E9A136249F6351A /* AppRouter.swift */,
+				F78800000000000000000001 /* TaskActionRoute.swift */,
 			);
 			path = Navigation;
 			sourceTree = "<group>";
@@ -1428,6 +1440,7 @@
 		E26E1BBC87C8546803F01CA4 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
+				F78800000000000000000002 /* TaskActionRouter.swift */,
 				34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */,
 				BC2000000000000000000006 /* BarcodeIntakeViewModel.swift */,
 				AC9740564FFEA02088E0E2C8 /* AuthViewModel.swift */,
@@ -1524,6 +1537,7 @@
 			children = (
 				F7060001000000000000B001 /* AppRouterTests.swift */,
 				C7D2128F28601E1ED8FEE835 /* DeepLinkHandlerTests.swift */,
+				F78800000000000000000003 /* TaskActionRouteResolverTests.swift */,
 			);
 			path = Navigation;
 			sourceTree = "<group>";
@@ -1543,6 +1557,7 @@
 				F7778BD6000000000000C001 /* FilamentCoverageUITests.swift */,
 				F7778BD7000000000000C001 /* ColdOfflineShellUITests.swift */,
 				F78000000000000000000002 /* AttentionActionsUITests.swift */,
+				F78800000000000000000005 /* TaskActionRoutingUITests.swift */,
 			);
 			path = PrintFarmerUITests;
 			sourceTree = "<group>";
@@ -1658,6 +1673,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F78800000000000000000103 /* TaskActionRouteResolverTests.swift in Sources */,
+				F78800000000000000000104 /* TaskActionRouterTests.swift in Sources */,
 				AF787000000000000000000D /* OfflineWriteQueueTests.swift in Sources */,
 				AF787000000000000000000F /* OfflineWriteQueueStoreTests.swift in Sources */,
 				AF7870000000000000000011 /* OfflineWriteAllowlistTests.swift in Sources */,
@@ -1779,6 +1796,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F78800000000000000000101 /* TaskActionRoute.swift in Sources */,
+				F78800000000000000000102 /* TaskActionRouter.swift in Sources */,
 				AF7870000000000000000001 /* OfflineWriteQueueModels.swift in Sources */,
 				AF7870000000000000000003 /* OfflineWriteQueueStore.swift in Sources */,
 				AF7870000000000000000005 /* OfflineWriteReplayTransport.swift in Sources */,
@@ -2002,6 +2021,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F78800000000000000000105 /* TaskActionRoutingUITests.swift in Sources */,
 				F7060002000000000000C012 /* PrintFarmerUITests.swift in Sources */,
 				F7060002000000000000C022 /* LoginFlowUITests.swift in Sources */,
 				F7060002000000000000C032 /* PrinterListUITests.swift in Sources */,

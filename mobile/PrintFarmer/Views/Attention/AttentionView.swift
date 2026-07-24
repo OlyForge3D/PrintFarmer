@@ -404,6 +404,16 @@ struct AttentionView: View {
         .onChange(of: showingSettings) { _, isPresented in
             if !isPresented { router.resetLegacySheet(.settings) }
         }
+        .onChange(of: router.sheetDismissalNonce) { _, _ in
+            // #726 sheet-safe routing: a task-action handoff requested that any
+            // active operator/legacy sheet be dismissed before the destination
+            // is applied. Close every legacy sheet; the per-sheet `.onChange`
+            // handlers above reset their stacks as they transition to false.
+            showingSettings = false
+            showingDashboard = false
+            showingMaintenance = false
+            showingNotifications = false
+        }
     }
 
     private var feedItemCount: Int {
