@@ -5,10 +5,50 @@ enum SignalRFrameParserError: Error, Equatable, Sendable {
 }
 
 struct SignalRFrameParser {
+    struct AppendDecision: Equatable, Sendable {
+        let bufferedBytes: Int
+        let incomingBytes: Int
+        let maximumBytes: Int
+        let canAppend: Bool
+    }
+
+#if DEBUG
+    struct DebugAppendObservation: Equatable, Sendable {
+        let decision: AppendDecision
+        let bufferedBytesBeforeMutation: Int
+    }
+#endif
+
     static let recordSeparator: UInt8 = 0x1E
     static let maximumFrameBytes = 1_048_576
 
     private var buffer = Data()
+#if DEBUG
+    private(set) var debugAppendObservations: [DebugAppendObservation] = []
+    var debugBufferedBytes: Int { buffer.count }
+#endif
+
+    static func appendDecision(
+        bufferedBytes: Int,
+        incomingBytes: Int,
+        maximumBytes: Int = maximumFrameBytes
+    ) -> AppendDecision {
+        let canAppend: Bool
+        if bufferedBytes < 0
+            || incomingBytes < 0
+            || maximumBytes < 0
+            || bufferedBytes > maximumBytes {
+            canAppend = false
+        } else {
+            canAppend = incomingBytes <= maximumBytes - bufferedBytes
+        }
+        return AppendDecision(
+            bufferedBytes: bufferedBytes,
+            incomingBytes: incomingBytes,
+            maximumBytes: maximumBytes,
+            canAppend: canAppend
+        )
+    }
 
     mutating func append(_ chunk: Data) throws -> [Data] {
         var frames: [Data] = []
@@ -28,7 +68,19 @@ struct SignalRFrameParser {
     }
 
     private mutating func appendBounded(_ segment: Data.SubSequence) throws {
-        guard segment.count <= Self.maximumFrameBytes - buffer.count else {
+        let decision = Self.appendDecision(
+            bufferedBytes: buffer.count,
+            incomingBytes: segment.count
+        )
+#if DEBUG
+        debugAppendObservations.append(
+            DebugAppendObservation(
+                decision: decision,
+                bufferedBytesBeforeMutation: buffer.count
+            )
+        )
+#endif
+        guard decision.canAppend else {
             reset()
             throw SignalRFrameParserError.frameTooLarge(
                 maximumBytes: Self.maximumFrameBytes

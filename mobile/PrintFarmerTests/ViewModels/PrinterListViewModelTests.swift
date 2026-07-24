@@ -35,6 +35,64 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedStatus, .all)
     }
 
+    func testReconnectRecoveryRefreshesCanonicalListOnceAndFencesStaleService() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let oldPrinterService = MockPrinterService()
+        oldPrinterService.printersToReturn = [try TestData.decodePrinter()]
+        let oldSignalR = MockSignalRService()
+        let currentPrinterService = MockPrinterService()
+        currentPrinterService.printersToReturn = [
+            try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        ]
+        let currentSignalR = MockSignalRService()
+        let vm = PrinterListViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: oldPrinterService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(oldSignalR)
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 0)
+        oldSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 0)
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Prusa MK4")
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+
+        vm.configure(
+            printerService: currentPrinterService,
+            autoPrintService: mockAutoDispatchService
+        )
+        vm.configureSignalR(currentSignalR)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Ender 3")
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
     // MARK: - Load Printers
 
     func testLoadPrintersSuccessPopulatesList() async throws {

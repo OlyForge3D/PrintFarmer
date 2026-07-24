@@ -2,6 +2,10 @@ import Foundation
 
 @MainActor @Observable
 final class PrinterListViewModel {
+    typealias CallbackEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () async -> Void
+    ) -> Void
+
     var printers: [Printer] = []
     var locations: [Location] = []
     var autoDispatchStatuses: [UUID: AutoDispatchStatus] = [:]
@@ -25,6 +29,18 @@ final class PrinterListViewModel {
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
+
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in await operation() }
+        }
+    ) {
+        self.callbackEnqueuer = callbackEnqueuer
+    }
 
     func configure(printerService: any PrinterServiceProtocol, autoPrintService: any AutoDispatchServiceProtocol) {
         self.printerService = printerService
@@ -35,11 +51,50 @@ final class PrinterListViewModel {
         self.signalRService = service
         for subscription in signalRSubscriptions { subscription.cancel() }
         signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRAuthorityEpoch &+= 1
+        let authorityEpoch = signalRAuthorityEpoch
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        signalRServiceIdentity = serviceIdentity
+        let enqueue = callbackEnqueuer
         signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
-            Task { @MainActor [weak self] in
-                self?.applyListUpdate(update)
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                self.applyListUpdate(update)
             }
         })
+        let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                await self.loadPrinters()
+            }
+        }
+        lastObservedConnectionState = connectionRegistration.initial
+        signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func hasSignalRAuthority(
+        epoch: UInt64,
+        serviceIdentity: ObjectIdentifier
+    ) -> Bool {
+        signalRAuthorityEpoch == epoch
+            && signalRServiceIdentity == serviceIdentity
     }
 
     private func applyListUpdate(_ update: PrinterStatusUpdate) {

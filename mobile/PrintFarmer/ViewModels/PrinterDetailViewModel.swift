@@ -4,6 +4,10 @@ import os
 
 @MainActor @Observable
 final class PrinterDetailViewModel {
+    typealias CallbackEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () async -> Void
+    ) -> Void
+
     var printer: Printer?
     var statusDetail: PrinterStatusDetail?
     var currentJob: PrintJobStatusInfo?
@@ -16,7 +20,13 @@ final class PrinterDetailViewModel {
     var showConfirmation = false
     var pendingAction: DestructiveAction?
     var actionError: String?
-    var isViewActive = true
+    var isViewActive = true {
+        didSet {
+            if oldValue && !isViewActive {
+                signalRAuthorityEpoch &+= 1
+            }
+        }
+    }
     var activeAlerts: [PredictiveAlert] = []
     var failureDetectionStatus: FailureDetectionPrinterStatus?
 
@@ -82,6 +92,10 @@ final class PrinterDetailViewModel {
     private var autoDispatchService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
     private var predictiveService: (any PredictiveServiceProtocol)?
     private var failureDetectionService: (any FailureDetectionServiceProtocol)?
     private var snapshotPollingTask: Task<Void, Never>?
@@ -113,13 +127,17 @@ final class PrinterDetailViewModel {
         snapshotPollInterval: Duration = .seconds(5),
         snapshotErrorBackoffBaseSeconds: Int = 5,
         snapshotErrorBackoffMaxSeconds: Int = 30,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in await operation() }
+        }
     ) {
         self.printerId = printerId
         self.snapshotPollInterval = snapshotPollInterval
         self.snapshotErrorBackoffBaseSeconds = snapshotErrorBackoffBaseSeconds
         self.snapshotErrorBackoffMaxSeconds = snapshotErrorBackoffMaxSeconds
         self.nowProvider = now
+        self.callbackEnqueuer = callbackEnqueuer
         self.cameraRotation = UserDefaults.standard.integer(forKey: "cameraRotation-\(printerId.uuidString)")
     }
 
@@ -158,13 +176,52 @@ final class PrinterDetailViewModel {
         self.signalRService = service
         for subscription in signalRSubscriptions { subscription.cancel() }
         signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRAuthorityEpoch &+= 1
+        let authorityEpoch = signalRAuthorityEpoch
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        signalRServiceIdentity = serviceIdentity
+        let enqueue = callbackEnqueuer
         signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
-            guard update.id == self?.printerId else { return }
-            Task { @MainActor [weak self] in
-                guard let self, self.isViewActive else { return }
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ),
+                      update.id == self.printerId else {
+                    return
+                }
                 self.applyLiveUpdate(update)
             }
         })
+        let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                await self.loadPrinter()
+            }
+        }
+        lastObservedConnectionState = connectionRegistration.initial
+        signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func hasSignalRAuthority(
+        epoch: UInt64,
+        serviceIdentity: ObjectIdentifier
+    ) -> Bool {
+        isViewActive
+            && signalRAuthorityEpoch == epoch
+            && signalRServiceIdentity == serviceIdentity
     }
 
     private func applyLiveUpdate(_ update: PrinterStatusUpdate) {

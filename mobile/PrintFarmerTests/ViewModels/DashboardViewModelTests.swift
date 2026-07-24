@@ -47,6 +47,83 @@ final class DashboardViewModelTests: XCTestCase {
         XCTAssertNil(viewModel.summary)
     }
 
+    func testReconnectRecoveryRefreshesCanonicalDashboardOnceAndFencesStaleService() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let oldPrinterService = MockPrinterService()
+        oldPrinterService.printersToReturn = [try TestData.decodePrinter()]
+        let oldSignalR = MockSignalRService()
+        let currentPrinterService = MockPrinterService()
+        currentPrinterService.printersToReturn = [
+            try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        ]
+        let currentSignalR = MockSignalRService()
+        let vm = DashboardViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: oldPrinterService,
+            jobService: mockJobService,
+            statisticsService: mockStatsService,
+            jobAnalyticsService: mockJobAnalyticsService
+        )
+        vm.configureSignalR(oldSignalR)
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 1)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 0)
+
+        oldSignalR.simulateConnectionStateChange(.reconnecting)
+        XCTAssertEqual(callbackQueue.count, 1)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 0)
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 1)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Prusa MK4")
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+
+        vm.configure(
+            printerService: currentPrinterService,
+            jobService: mockJobService,
+            statisticsService: mockStatsService,
+            jobAnalyticsService: mockJobAnalyticsService
+        )
+        vm.configureSignalR(currentSignalR)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        vm.isViewActive = false
+        await callbackQueue.runNext()
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 0)
+
+        vm.isViewActive = true
+        vm.configureSignalR(currentSignalR)
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+
+        XCTAssertEqual(currentPrinterService.listPrintersCallCount, 1)
+        XCTAssertEqual(vm.printers.first?.name, "Ender 3")
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
     // MARK: - Successful Load
 
     func testLoadDashboardPopulatesData() async throws {

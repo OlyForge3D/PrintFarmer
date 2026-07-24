@@ -25,6 +25,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getCameraUrlCalledWith: UUID?
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
+    var listPrintersCallCount = 0
+    var getPrinterCallCount = 0
     var getCurrentJobCalledWith: UUID?
     var getHistoryCalledWith: (id: UUID, limit: Int?)?
     var pauseCalledWith: UUID?
@@ -48,6 +50,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
+        listPrintersCallCount += 1
         listIncludeDisabledArg = includeDisabled
         if let error = errorToThrow { throw error }
         return printersToReturn
@@ -55,6 +58,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func get(id: UUID) async throws -> Printer {
         getPrinterCalledWith = id
+        getPrinterCallCount += 1
         if let error = errorToThrow { throw error }
         guard let printer = printerToReturn else { throw NetworkError.notFound }
         return printer

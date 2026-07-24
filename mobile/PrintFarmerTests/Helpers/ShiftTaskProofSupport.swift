@@ -175,14 +175,14 @@ actor ScriptedShiftTaskService: ShiftTaskServiceProtocol {
 }
 
 final class ShiftTaskCallbackQueue: @unchecked Sendable {
-    private typealias Operation = @MainActor @Sendable () async -> Void
+    typealias Operation = @MainActor @Sendable () async -> Void
 
     private let lock = NSLock()
     private var operations: [Operation] = []
     private var countWaiters:
         [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
 
-    var enqueuer: ShiftTasksViewModel.CallbackEnqueuer {
+    var enqueuer: @Sendable (@escaping Operation) -> Void {
         { [weak self] operation in
             self?.append(operation)
         }

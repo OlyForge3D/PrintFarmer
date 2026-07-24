@@ -4137,6 +4137,36 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
     }
 
     func testMalformedAndNegativeHandshakeFailuresRemainTyped() async {
+        let missingDataSeparatorSocket = MockSignalRWebSocket()
+        let missingDataSeparatorService = makeService(
+            sockets: MockWebSocketSwitcher([missingDataSeparatorSocket])
+        )
+        let missingDataSeparatorResult = await connect(
+            missingDataSeparatorService,
+            socket: missingDataSeparatorSocket,
+            handshake: .data(Data("{}".utf8))
+        )
+        assertInvalidResponse(
+            missingDataSeparatorResult,
+            context: "Data handshake without RS"
+        )
+        await missingDataSeparatorService.disconnect()
+
+        let missingStringSeparatorSocket = MockSignalRWebSocket()
+        let missingStringSeparatorService = makeService(
+            sockets: MockWebSocketSwitcher([missingStringSeparatorSocket])
+        )
+        let missingStringSeparatorResult = await connect(
+            missingStringSeparatorService,
+            socket: missingStringSeparatorSocket,
+            handshake: .string("{}")
+        )
+        assertInvalidResponse(
+            missingStringSeparatorResult,
+            context: "String handshake without RS"
+        )
+        await missingStringSeparatorService.disconnect()
+
         let malformedSocket = MockSignalRWebSocket()
         let malformedService = makeService(
             sockets: MockWebSocketSwitcher([malformedSocket])
@@ -4187,7 +4217,11 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
 
     func testCancelledHandshakeCannotPublishTrailingInvocation() async {
         let socket = MockSignalRWebSocket()
-        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socket]),
+            sleeper: sleeper
+        )
         let states = LifecycleStateObserver()
         let (initial, stateSubscription) = service.onConnectionStateChanged {
             states.append($0)
@@ -4227,6 +4261,92 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         )
         XCTAssertTrue(recorder.snapshot().isEmpty)
         XCTAssertFalse(states.snapshot().contains(.connected))
+        let lifecycle = service.lifecycleInvariants.snapshot()
+        let sleepEntries = await sleeper.totalSleepEntries()
+        XCTAssertEqual(mockSession.capturedRequests.count, 1)
+        XCTAssertEqual(lifecycle.transportEnterCount, 1)
+        XCTAssertEqual(lifecycle.reconnectOwnerEnterCount, 0)
+        XCTAssertEqual(lifecycle.reconnectAttemptCount, 0)
+        XCTAssertEqual(sleepEntries, 0)
+        XCTAssertEqual(socket.lifecycleCounts().cancels, 1)
+
+        await service.disconnect()
+        payloadSubscription.cancel()
+        stateSubscription.cancel()
+    }
+
+    func testCancelledHandshakeTeardownCannotAffectNewerSuccessfulConnect() async throws {
+        let firstSocket = MockSignalRWebSocket()
+        let secondSocket = MockSignalRWebSocket()
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([firstSocket, secondSocket]),
+            sleeper: sleeper
+        )
+        let states = LifecycleStateObserver()
+        let (initial, stateSubscription) = service.onConnectionStateChanged {
+            states.append($0)
+        }
+        states.append(initial)
+        let recorder = SignalRPrinterIDRecorder()
+        let payloadSubscription = service.onPrinterUpdated {
+            recorder.append($0.id)
+        }
+        let printerID = UUID(
+            uuidString: "81500000-0000-0000-0000-000000000033"
+        )!
+
+        let firstConnect = Task { try await service.connect() }
+        await firstSocket.waitForReceiveCall()
+        let cancellationWatermark = states.count()
+        firstConnect.cancel()
+        let firstResult = await firstConnect.result
+        await firstSocket.waitForCancellations()
+        await states.waitFor(
+            state: .disconnected,
+            afterCount: cancellationWatermark
+        )
+        guard case .failure(let error) = firstResult, error is CancellationError else {
+            XCTFail("First connect must finish with CancellationError")
+            await service.disconnect()
+            return
+        }
+
+        let secondConnect = Task { try await service.connect() }
+        await secondSocket.waitForReceiveCall()
+        secondSocket.completeReceive(
+            with: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [makeSignalRPrinterInvocation(id: printerID)]
+                )
+            )
+        )
+        try await secondConnect.value
+        await recorder.waitForCount(1)
+
+        firstSocket.completeReceive(
+            with: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [
+                        makeSignalRPrinterInvocation(
+                            id: UUID(
+                                uuidString: "81500000-0000-0000-0000-000000000034"
+                            )!
+                        )
+                    ]
+                )
+            )
+        )
+        let lifecycle = service.lifecycleInvariants.snapshot()
+        let sleepEntries = await sleeper.totalSleepEntries()
+        XCTAssertEqual(recorder.snapshot(), [printerID])
+        XCTAssertEqual(mockSession.capturedRequests.count, 2)
+        XCTAssertEqual(lifecycle.transportEnterCount, 2)
+        XCTAssertEqual(lifecycle.reconnectOwnerEnterCount, 0)
+        XCTAssertEqual(lifecycle.reconnectAttemptCount, 0)
+        XCTAssertEqual(sleepEntries, 0)
+        XCTAssertEqual(firstSocket.lifecycleCounts().cancels, 1)
+        XCTAssertEqual(secondSocket.lifecycleCounts().cancels, 0)
 
         await service.disconnect()
         payloadSubscription.cancel()
@@ -4362,13 +4482,40 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         stateSubscription.cancel()
     }
 
-    func testFrameParserEnforcesOneMiBBoundBeforeAppendingExistingPartial() throws {
+    func testFrameParserPreAppendDecisionEnforcesOneMiBBoundAndRecovers() throws {
         let maximum = SignalRFrameParser.maximumFrameBytes
+        XCTAssertTrue(
+            SignalRFrameParser.appendDecision(
+                bufferedBytes: maximum - 1,
+                incomingBytes: 1
+            ).canAppend
+        )
+        XCTAssertFalse(
+            SignalRFrameParser.appendDecision(
+                bufferedBytes: maximum,
+                incomingBytes: 1
+            ).canAppend
+        )
+        XCTAssertFalse(
+            SignalRFrameParser.appendDecision(
+                bufferedBytes: maximum + 1,
+                incomingBytes: 0
+            ).canAppend,
+            "A corrupted oversized buffered count must reject without subtracting"
+        )
+
         var parser = SignalRFrameParser()
         let prefix = Data(repeating: 0x61, count: maximum - 1)
 
         XCTAssertTrue(try parser.append(prefix).isEmpty)
         XCTAssertTrue(try parser.append(Data([0x62])).isEmpty)
+#if DEBUG
+        let acceptedObservation = try XCTUnwrap(parser.debugAppendObservations.last)
+        XCTAssertEqual(acceptedObservation.bufferedBytesBeforeMutation, maximum - 1)
+        XCTAssertEqual(acceptedObservation.decision.incomingBytes, 1)
+        XCTAssertTrue(acceptedObservation.decision.canAppend)
+        XCTAssertEqual(parser.debugBufferedBytes, maximum)
+#endif
         let boundaryFrames = try parser.append(
             Data([SignalRFrameParser.recordSeparator])
         )
@@ -4388,10 +4535,55 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         } catch {
             XCTFail("Unexpected parser error: \(error)")
         }
+#if DEBUG
+        let rejectedObservation = try XCTUnwrap(parser.debugAppendObservations.last)
+        XCTAssertEqual(rejectedObservation.bufferedBytesBeforeMutation, maximum)
+        XCTAssertEqual(rejectedObservation.decision.incomingBytes, 1)
+        XCTAssertFalse(rejectedObservation.decision.canAppend)
+        XCTAssertEqual(parser.debugBufferedBytes, 0)
+#endif
 
         var recovery = Data("{}".utf8)
         recovery.append(SignalRFrameParser.recordSeparator)
         XCTAssertEqual(try parser.append(recovery), [Data("{}".utf8)])
+
+        var multiSegmentParser = SignalRFrameParser()
+        let maximumFrame = Data(repeating: 0x65, count: maximum)
+        var legalMultiSegmentChunk = maximumFrame
+        legalMultiSegmentChunk.append(SignalRFrameParser.recordSeparator)
+        legalMultiSegmentChunk.append(Data("{}".utf8))
+        legalMultiSegmentChunk.append(SignalRFrameParser.recordSeparator)
+        XCTAssertEqual(
+            try multiSegmentParser.append(legalMultiSegmentChunk),
+            [maximumFrame, Data("{}".utf8)]
+        )
+
+        var rejectingMultiSegmentParser = SignalRFrameParser()
+        var oversizedLaterSegment = Data("first".utf8)
+        oversizedLaterSegment.append(SignalRFrameParser.recordSeparator)
+        oversizedLaterSegment.append(
+            Data(repeating: 0x66, count: maximum + 1)
+        )
+        XCTAssertThrowsError(try rejectingMultiSegmentParser.append(oversizedLaterSegment)) {
+            XCTAssertEqual(
+                $0 as? SignalRFrameParserError,
+                .frameTooLarge(maximumBytes: maximum)
+            )
+        }
+#if DEBUG
+        let laterSegmentObservation = try XCTUnwrap(
+            rejectingMultiSegmentParser.debugAppendObservations.last
+        )
+        XCTAssertEqual(laterSegmentObservation.bufferedBytesBeforeMutation, 0)
+        XCTAssertEqual(laterSegmentObservation.decision.incomingBytes, maximum + 1)
+        XCTAssertFalse(laterSegmentObservation.decision.canAppend)
+        XCTAssertEqual(rejectingMultiSegmentParser.debugBufferedBytes, 0)
+#endif
+        XCTAssertEqual(
+            try rejectingMultiSegmentParser.append(recovery),
+            [Data("{}".utf8)],
+            "The earlier local frame and oversized segment must not leak after reset"
+        )
     }
 
     private func connect(
@@ -4403,6 +4595,24 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         await socket.waitForReceiveCall()
         socket.completeReceive(with: handshake)
         return await task.result
+    }
+
+    private func assertInvalidResponse(
+        _ result: Result<Void, Error>,
+        context: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case .failure(let error) = result,
+              let networkError = error as? NetworkError,
+              case .invalidResponse = networkError else {
+            XCTFail(
+                "\(context) must fail with NetworkError.invalidResponse",
+                file: file,
+                line: line
+            )
+            return
+        }
     }
 
     private func installNegotiateHandler() {

@@ -3,6 +3,10 @@ import os
 
 @MainActor @Observable
 final class DashboardViewModel {
+    typealias CallbackEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () async -> Void
+    ) -> Void
+
     var printers: [Printer] = []
     var queueOverview: [QueueOverview] = []
     var activeJobs: [QueuedPrintJobResponse] = []
@@ -12,7 +16,13 @@ final class DashboardViewModel {
     var upcomingJobs: [QueuedJobWithMeta] = []
     var isLoading = false
     var errorMessage: String?
-    var isViewActive = true
+    var isViewActive = true {
+        didSet {
+            if oldValue && !isViewActive {
+                signalRAuthorityEpoch &+= 1
+            }
+        }
+    }
 
     // MARK: - Cold-offline farm snapshot state (F10-C1b, #817)
 
@@ -64,10 +74,22 @@ final class DashboardViewModel {
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
 
     // Snapshot lifecycle authority (#816), consumed unchanged.
     @ObservationIgnored private var snapshotStore: (any FarmSnapshotStoring)?
     @ObservationIgnored private var now: @Sendable () -> Date = { Date() }
+
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in await operation() }
+        }
+    ) {
+        self.callbackEnqueuer = callbackEnqueuer
+    }
 
     func configure(
         printerService: any PrinterServiceProtocol,
@@ -98,11 +120,51 @@ final class DashboardViewModel {
         self.signalRService = service
         for subscription in signalRSubscriptions { subscription.cancel() }
         signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRAuthorityEpoch &+= 1
+        let authorityEpoch = signalRAuthorityEpoch
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        signalRServiceIdentity = serviceIdentity
+        let enqueue = callbackEnqueuer
         signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
-            Task { @MainActor [weak self] in
-                self?.applyPrinterUpdate(update)
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                self.applyPrinterUpdate(update)
             }
         })
+        let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                await self.loadDashboard()
+            }
+        }
+        lastObservedConnectionState = connectionRegistration.initial
+        signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func hasSignalRAuthority(
+        epoch: UInt64,
+        serviceIdentity: ObjectIdentifier
+    ) -> Bool {
+        isViewActive
+            && signalRAuthorityEpoch == epoch
+            && signalRServiceIdentity == serviceIdentity
     }
 
     private func applyPrinterUpdate(_ update: PrinterStatusUpdate) {
