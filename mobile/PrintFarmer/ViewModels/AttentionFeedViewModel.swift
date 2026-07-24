@@ -376,6 +376,20 @@ final class AttentionFeedViewModel {
     /// older completion that fires after a newer request has taken over.
     @ObservationIgnored private var loadMoreOwnerStamp: UInt64 = 0
     @ObservationIgnored private var attentionSubscription: SignalRSubscription?
+    /// #781 (F2-R): serialized, cancellable connection-state observer
+    /// from #777's SignalR lifecycle foundation. Registered alongside
+    /// `attentionSubscription` on every authority (re)build and torn
+    /// down atomically in `invalidateAuthority`, so a server swap can
+    /// never leave a live observer on the old service.
+    @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
+    /// #781 (F2-R): the previous connection state observed for the
+    /// CURRENT authority. Seeded synchronously at registration from
+    /// #777's returned initial snapshot (never fabricates a transition)
+    /// and advanced on every delivered transition. The gap-closing
+    /// refresh fires on exactly one edge: `.reconnecting -> .connected`.
+    /// `nil` before any authority has been configured and reset on
+    /// authority replacement.
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
     /// Sendable, lock-protected monotonic event sequence issuer. Each
     /// SignalR `attentionchanged` event is stamped with a strictly
     /// increasing sequence at delivery time. Every refresh captures
@@ -549,6 +563,34 @@ final class AttentionFeedViewModel {
                 )
             }
         }
+
+        // #781 (F2-R): register the gap-closing connection-state
+        // observer on the SAME authority. The handler hops onto the
+        // MainActor through the shared `callbackEnqueuer` so tests can
+        // drive the edge deterministically (no fixed sleeps) and so
+        // production ordering matches the invalidation path. The
+        // returned `initial` snapshot seeds `lastObservedConnectionState`
+        // synchronously below — this atomically observes the current
+        // state (requirement 4) WITHOUT fabricating a transition, so a
+        // registration that lands while the service is already
+        // `.reconnecting` still fires exactly one refresh on the NEXT
+        // `.connected`.
+        let (initialConnectionState, connectionSubscription) =
+            signalRService.onConnectionStateChanged { [weak self] newState in
+                enqueue { [weak self] in
+                    guard let self,
+                          self.matchesAuthorityIgnoringActive(
+                            epoch: capturedEpoch,
+                            serviceIdentity: newServiceIdentity,
+                            signalRIdentity: newSignalRIdentity
+                          ) else {
+                        return
+                    }
+                    await self.handleConnectionStateEdge(newState)
+                }
+            }
+        connectionStateSubscription = connectionSubscription
+        lastObservedConnectionState = initialConnectionState
     }
 
     func configureSnapshotService(_ printerService: any PrinterServiceProtocol) {
@@ -647,6 +689,48 @@ final class AttentionFeedViewModel {
         // watermark will include this event (since it starts after
         // the event was received) and its success completion will
         // clear the pending coverage requirement.
+        await refresh()
+    }
+
+    /// #781 (F2-R): gap-closing connection-state edge handler. Runs on
+    /// the MainActor via `callbackEnqueuer`; the enqueue closure has
+    /// already fenced this delivery against authority drift (a
+    /// superseded service's late transition cannot reach here).
+    ///
+    /// Detects EXACTLY the real recovery edge `.reconnecting ->
+    /// .connected` and enqueues exactly one canonical
+    /// `GET /api/attention` refresh through the existing #779 queue
+    /// (`refresh()`), which stays authoritative for
+    /// inactive/loading/queued/feature-disabled/pagination-reset/
+    /// stale-generation handling. Every other transition — the cold
+    /// `.disconnected -> .connected` bootstrap edge, a redundant
+    /// `.connected -> .connected`, and all non-recovery transitions —
+    /// is a no-op for the gap refresh.
+    ///
+    /// The refresh does NOT optimistically clear a latched
+    /// `loadFailure` before the fetch completes (`clearError: false`):
+    /// `refresh()` only mutates the error surface at completion, so a
+    /// visible error persists until the recovery fetch actually
+    /// resolves.
+    ///
+    /// Coalescing: if a canonical refresh is already in flight,
+    /// `refresh()`'s load-stamp last-wins semantics guarantee this
+    /// single recovery edge produces at most one additional applied
+    /// request — never a reload storm.
+    private func handleConnectionStateEdge(
+        _ newState: SignalRConnectionState
+    ) async {
+        let previous = lastObservedConnectionState
+        lastObservedConnectionState = newState
+
+        // Only the real reconnect recovery edge closes the gap. The
+        // initial cold connect (`.disconnected`/`.connecting ->
+        // .connected`) is owned by #779's bootstrap; a redundant
+        // `.connected -> .connected` is not a recovery.
+        guard previous == .reconnecting, newState == .connected else {
+            return
+        }
+
         await refresh()
     }
 
@@ -2059,6 +2143,15 @@ final class AttentionFeedViewModel {
         loadMoreOwnerStamp = loadStamp
         attentionSubscription?.cancel()
         attentionSubscription = nil
+        // #781 (F2-R): tear down the gap-closing observer atomically
+        // with the attention subscription. After a server/service swap
+        // the old service must hold zero live observers, and a late
+        // old-authority transition (already fenced by the enqueue
+        // closure's authority check) must find no seeded prior state to
+        // act on.
+        connectionStateSubscription?.cancel()
+        connectionStateSubscription = nil
+        lastObservedConnectionState = nil
         isRefreshing = false
         isLoadingMore = false
         pendingReloadOnActivate = false
