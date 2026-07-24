@@ -2143,10 +2143,17 @@ final class PredictiveViewModelTests: XCTestCase {
         let gate = AsyncGate()
         let observerTask = Task { await gate.waitForEntry() }
         let waiterTask = Task { await gate.wait() }
-        await observerTask.value        // resumed by the wait's entry signal
+        // #866: unconditional release + terminal close BEFORE draining the
+        // convenience retrievals. The observer is normally resumed by the
+        // entry signal that `wait()`'s registerWaiter emits, and the waiter by
+        // open(); both resumes are concurrent with these awaits. Draining the
+        // gate first means a resume regression is rescued by close()
+        // (.closedWhileParked) so this test fails fast instead of stranding on
+        // the token-less `observerTask.value`.
         await gate.open()
-        await waiterTask.value
         await gate.close()
+        await observerTask.value        // resumed by the wait's entry signal
+        await waiterTask.value
     }
 
     func testAsyncGateConvenienceWaitBeforeEntryObserverIsObserved() async {
@@ -2157,10 +2164,16 @@ final class PredictiveViewModelTests: XCTestCase {
         // synchronously drains any prior mailbox items on the actor
         // executor. No polling.
         _ = await gate.snapshot()
-        await gate.waitForEntry()       // consumes the pending signal
+        // #866: wrap the token-less convenience observer so its terminal
+        // retrieval can be drained AFTER an unconditional teardown. In normal
+        // flow it is resumed by the waiter's entry signal; a resume regression
+        // is rescued by close() (.closedWhileParked) so the test fails fast
+        // instead of stranding on the token-less `waitForEntry()`.
+        let observerTask = Task { await gate.waitForEntry() }   // consumes the pending signal
         await gate.open()
-        await waiterTask.value
         await gate.close()
+        await observerTask.value
+        await waiterTask.value
     }
 
     // MARK: - Hicks A: bounded park-ACK results
