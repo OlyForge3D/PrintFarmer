@@ -324,6 +324,21 @@ final class AttentionFeedViewModel {
     /// and stale media completion fences.
     private(set) var mediaGeneration: UInt64 = 0
 
+    // MARK: Read-cache (issue #789, F10-C2) — additive, optional-guarded.
+    /// True exactly while the on-screen feed is UNCONFIRMED cached data (offline
+    /// hydrate not yet confirmed by a canonical refresh). Drives the stale banner
+    /// and disables load-more (offline pagination is refused — criterion 3).
+    private(set) var isShowingStaleCache: Bool = false
+    /// Epoch-millis of the cached snapshot's originating canonical completion.
+    private(set) var cacheLastUpdatedAtMillis: Int64?
+    /// The cached feed's last-updated instant, for the shared stale banner.
+    var cacheLastUpdatedAt: Date? {
+        cacheLastUpdatedAtMillis.map { Date(timeIntervalSince1970: Double($0) / 1000.0) }
+    }
+    /// Typed Attention read-cache facade. `nil` in every pre-#789 test, so every
+    /// cache hook below is skipped and behaviour is byte-for-byte unchanged.
+    @ObservationIgnored private var attentionCache: AttentionReadCacheAdapter?
+
     // MARK: Lifecycle plumbing
 
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
@@ -600,6 +615,58 @@ final class AttentionFeedViewModel {
         self.printerService = printerService
         printerServiceIdentity = identity
         invalidateMediaState(clearTerminalStates: true)
+    }
+
+    /// Wire the #789 Attention read-cache. Additive: when never called the view
+    /// model behaves exactly as it did pre-#789. Safe to call repeatedly.
+    func configureCache(_ cache: AttentionReadCacheAdapter) {
+        self.attentionCache = cache
+    }
+
+    /// Hydrate the active namespace's cached feed BEFORE the first canonical
+    /// refresh, so a cold/offline launch shows honestly-stale Attention
+    /// immediately, preserving #779 ordering, id-dedupe, and healthy count.
+    /// Never downgrades a feed that has already been populated by a live refresh,
+    /// and honours a cached feature-disabled tombstone (criterion 7). Load-more
+    /// stays refused while `isShowingStaleCache` is set (criterion 3).
+    func hydrateFromCache() async {
+        guard let cache = attentionCache, isActive else { return }
+        // Only hydrate a never-populated feed; never override live or a shown feed.
+        guard snapshot == nil, phase == .idle || phase == .loading else { return }
+        let hydration = await cache.loadCached()
+        guard isActive, snapshot == nil else { return }
+        switch hydration {
+        case .snapshot(let payload, let millis):
+            var seen: Set<String> = []
+            var ordered: [AttentionItem] = []
+            ordered.reserveCapacity(payload.items.count)
+            for item in payload.items where seen.insert(item.id).inserted {
+                ordered.append(item)
+            }
+            let normalized = AttentionFeedSnapshot(
+                items: ordered,
+                nextCursor: payload.nextCursor,
+                healthyPrinterCount: payload.healthyPrinterCount
+            )
+            snapshot = normalized
+            knownIDs = seen
+            groups = Self.groupBySeverity(ordered)
+            loadFailure = nil
+            paginationFailure = nil
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+            phase = .loaded
+        case .disabled(let millis):
+            attentionEnabled = false
+            snapshot = nil
+            groups = []
+            knownIDs = []
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+            phase = .disabled
+        case .inactive, .absent, .recovered, .unreadable:
+            break
+        }
     }
 
     /// Central invalidation-drain handler with strict request/event
@@ -912,6 +979,11 @@ final class AttentionFeedViewModel {
         if let printerService {
             configureSnapshotService(printerService)
         }
+        // #789: hydrate honestly-stale cached Attention (if any) AFTER activation
+        // but BEFORE the canonical refresh, so a cold/offline launch shows the
+        // last-confirmed feed immediately. No-op when no cache is wired or when a
+        // feed is already present (re-appear with preserved snapshot).
+        await hydrateFromCache()
         return await refresh()
     }
 
@@ -996,6 +1068,11 @@ final class AttentionFeedViewModel {
             isRefreshing = true
         }
 
+        // #789: capture the cache session BEFORE the network round-trip so a
+        // mid-flight server/user switch cannot land this write in the new
+        // namespace. `nil` (no suspension) whenever no cache is wired.
+        let capturedCacheSession = await attentionCache?.currentSession()
+
         let outcome = await Self.fetchFirstPage(service: service)
 
         // Cross-authority completion: this refresh started under a
@@ -1055,6 +1132,9 @@ final class AttentionFeedViewModel {
                 refreshOrdinal: requestOrdinal,
                 coverSequence: startCoverSnapshot
             )
+            // #789: a confirmed-live snapshot is now on screen — it is no longer
+            // unconfirmed cached data. Pure state flip, no suspension.
+            isShowingStaleCache = false
             // Advance coverage. Any event with sequence ≤ startCover is
             // now proven covered by an applied successful refresh.
             lastCoveredEventSequence = max(lastCoveredEventSequence, startCoverSnapshot)
@@ -1073,10 +1153,30 @@ final class AttentionFeedViewModel {
                 tryScheduleFollowupIfPending(
                     capturedActivation: stampedActivation
                 )
+                // #789: persist the applied canonical snapshot exactly once,
+                // AFTER all synchronous completion work, so no suspension is
+                // introduced into the critical section. Only the newest
+                // response reaches here (older generations dropped above), so
+                // an older success cannot overwrite newer cache (criterion 6).
+                // Skipped entirely when no cache is wired (pre-#789 tests).
+                if let cache = attentionCache, let session = capturedCacheSession,
+                   let applied = snapshot {
+                    _ = await cache.recordRefresh(
+                        items: applied.items,
+                        nextCursor: applied.nextCursor,
+                        healthyPrinterCount: applied.healthyPrinterCount,
+                        capturedSession: session
+                    )
+                }
             }
             return true
         case .featureDisabled:
             applyDisabled()
+            // #789: record a feature-disabled tombstone so older cached
+            // Attention data cannot resurface (criterion 7).
+            if let cache = attentionCache, let session = capturedCacheSession {
+                _ = await cache.recordDisabled(capturedSession: session)
+            }
             return false
         case .failure(let error):
             applyFailure(error)
@@ -1196,6 +1296,11 @@ final class AttentionFeedViewModel {
         guard isActive, attentionEnabled, let service = attentionService else {
             return false
         }
+        // #789 (criterion 3): while showing unconfirmed cached data offline,
+        // the feed is NOT a complete live list — pagination is refused so the
+        // stale snapshot is never presented as an exhaustible live feed. A
+        // canonical refresh clears `isShowingStaleCache` and re-enables paging.
+        guard !isShowingStaleCache else { return false }
         guard let cursor = snapshot?.nextCursor, !cursor.isEmpty else {
             return false
         }

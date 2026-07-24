@@ -465,6 +465,10 @@
 		FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000004 /* FarmSnapshotSession.swift */; };
 		FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */; };
 		FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A00000000000000000008 /* FarmSnapshotStore.swift */; };
+		F789000000000000000001 /* FeatureReadCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F789000000000000000002 /* FeatureReadCacheStore.swift */; };
+		F789000000000000000003 /* FeatureReadCacheAdapters.swift in Sources */ = {isa = PBXBuildFile; fileRef = F789000000000000000004 /* FeatureReadCacheAdapters.swift */; };
+		F789000000000000000005 /* FeatureReadCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F789000000000000000006 /* FeatureReadCacheTests.swift */; };
+		F789000000000000000007 /* FeatureReadCacheVMTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F789000000000000000008 /* FeatureReadCacheVMTests.swift */; };
 		FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */; };
 		FA5A00000000000000000009 /* FarmSnapshotEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */; };
 		FA5A0000000000000000000B /* FarmSnapshotTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */; };
@@ -840,6 +844,10 @@
 		FA5A00000000000000000004 /* FarmSnapshotSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotSession.swift; sourceTree = "<group>"; };
 		FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotOwnerStore.swift; sourceTree = "<group>"; };
 		FA5A00000000000000000008 /* FarmSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotStore.swift; sourceTree = "<group>"; };
+		F789000000000000000002 /* FeatureReadCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureReadCacheStore.swift; sourceTree = "<group>"; };
+		F789000000000000000004 /* FeatureReadCacheAdapters.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureReadCacheAdapters.swift; sourceTree = "<group>"; };
+		F789000000000000000006 /* FeatureReadCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureReadCacheTests.swift; sourceTree = "<group>"; };
+		F789000000000000000008 /* FeatureReadCacheVMTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureReadCacheVMTests.swift; sourceTree = "<group>"; };
 		FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotDomainCoordinator.swift; sourceTree = "<group>"; };
 		FA5A0000000000000000000A /* FarmSnapshotEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotEnvelopeTests.swift; sourceTree = "<group>"; };
 		FA5A0000000000000000000C /* FarmSnapshotTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmSnapshotTestSupport.swift; sourceTree = "<group>"; };
@@ -974,6 +982,8 @@
 				FA5A00000000000000000004 /* FarmSnapshotSession.swift */,
 				FA5A00000000000000000006 /* FarmSnapshotOwnerStore.swift */,
 				FA5A00000000000000000008 /* FarmSnapshotStore.swift */,
+				F789000000000000000002 /* FeatureReadCacheStore.swift */,
+				F789000000000000000004 /* FeatureReadCacheAdapters.swift */,
 				FADC00000000000000000002 /* FarmSnapshotDomainCoordinator.swift */,
 				9FB00D1FA66F23705042FF95 /* Demo */,
 				BC2000000000000000000004 /* BarcodeIntakeService.swift */,
@@ -1131,6 +1141,7 @@
 				F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */,
 				F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */,
 				A79900000000000000000003 /* AttentionFeedViewModelTests.swift */,
+				F789000000000000000008 /* FeatureReadCacheVMTests.swift */,
 				A79900000000000000000004 /* AttentionReconnectGapTests.swift */,
 				F78000000000000000000001 /* AttentionInteractionTests.swift */,
 			);
@@ -1397,6 +1408,7 @@
 				FC7A00000000000000000006 /* FarmSnapshotStartupFailureRetryTests.swift */,
 				FC7A00000000000000000008 /* FarmSnapshotMoveOrderTests.swift */,
 				FA5A00000000000000000010 /* FarmSnapshotStoreTests.swift */,
+				F789000000000000000006 /* FeatureReadCacheTests.swift */,
 				FA5A00000000000000000012 /* FarmSnapshotConcurrencyTests.swift */,
 				FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */,
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
@@ -1694,6 +1706,8 @@
 				FC7A00000000000000000005 /* FarmSnapshotStartupFailureRetryTests.swift in Sources */,
 				FC7A00000000000000000007 /* FarmSnapshotMoveOrderTests.swift in Sources */,
 				FA5A0000000000000000000F /* FarmSnapshotStoreTests.swift in Sources */,
+				F789000000000000000005 /* FeatureReadCacheTests.swift in Sources */,
+				F789000000000000000007 /* FeatureReadCacheVMTests.swift in Sources */,
 				FA5A00000000000000000011 /* FarmSnapshotConcurrencyTests.swift in Sources */,
 				FA5A00000000000000000013 /* FarmSnapshotContainerAuthorityTests.swift in Sources */,
 				G1C5E77D0F5644239382149E /* MockMaintenanceService.swift in Sources */,
@@ -1812,6 +1826,8 @@
 				FA5A00000000000000000003 /* FarmSnapshotSession.swift in Sources */,
 				FA5A00000000000000000005 /* FarmSnapshotOwnerStore.swift in Sources */,
 				FA5A00000000000000000007 /* FarmSnapshotStore.swift in Sources */,
+				F789000000000000000001 /* FeatureReadCacheStore.swift in Sources */,
+				F789000000000000000003 /* FeatureReadCacheAdapters.swift in Sources */,
 				FADC00000000000000000001 /* FarmSnapshotDomainCoordinator.swift in Sources */,
 				BC1000000000000000000001 /* BarcodeScannerProtocol.swift in Sources */,
 				BC1000000000000000000002 /* BarcodeIntakeServiceProtocol.swift in Sources */,

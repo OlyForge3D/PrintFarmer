@@ -100,6 +100,20 @@ final class ServiceContainer: @unchecked Sendable {
     /// Shared monotonic auth-operation epoch fencing late login/restore vs logout (H2).
     @ObservationIgnored let authOperationEpoch = AuthOperationEpoch()
 
+    // MARK: Feature read-cache adapters (issue #789, F10-C2)
+    /// Typed read-cache store for Attention (#779) and filament-coverage (#778),
+    /// layered on the SAME #785 authority + root as `farmSnapshotStore`. Adds no
+    /// second engine or namespace scheme — feature records live under the same
+    /// `(serverID, userID)` server directory, so #785's purge/tombstone/switch
+    /// fencing covers them for free.
+    @ObservationIgnored let featureReadCacheStore: any FeatureReadCacheStoring
+    /// Shared Attention read-cache facade. Stateless wrapper over the store.
+    @ObservationIgnored private(set) lazy var attentionReadCache =
+        AttentionReadCacheAdapter(store: featureReadCacheStore)
+    /// Shared filament-coverage read-cache facade (fleet + per-printer detail).
+    @ObservationIgnored private(set) lazy var filamentCoverageReadCache =
+        FilamentCoverageReadCacheAdapter(store: featureReadCacheStore)
+
     // MARK: Durable offline write queue (issue #787, F10-Q1)
     /// The single, actor-isolated outbox for offline part-adjustment / harvest
     /// writes. Lazily built (file-backed, Application Support) with a transport
@@ -248,6 +262,13 @@ final class ServiceContainer: @unchecked Sendable {
             authority: authority,
             rootURL: effectiveRootURL,
             ownerStore: ownerStore
+        )
+        // #789: the feature read-cache reuses the SAME authority + root so a
+        // server/user switch, logout, or stale generation fences these records
+        // exactly as it does the base snapshot record.
+        self.featureReadCacheStore = FeatureReadCacheStore(
+            authority: authority,
+            rootURL: effectiveRootURL
         )
 
         let activeServer = serverRegistry.activeServer
@@ -973,6 +994,8 @@ final class ServiceContainer: @unchecked Sendable {
         let demoOwnerStore = farmSnapshotOwnerStore ?? FarmSnapshotOwnerStore()
         self.farmSnapshotOwnerStore = demoOwnerStore
         self.farmSnapshotStore = farmSnapshotStore ?? FarmSnapshotStore(authority: authority, ownerStore: demoOwnerStore)
+        // #789: feature read-cache reuses the same authority (default root).
+        self.featureReadCacheStore = FeatureReadCacheStore(authority: authority)
         self.activeServerID = nil
         self.apiClient = nil
         self.authService = authService

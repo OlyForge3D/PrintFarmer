@@ -286,11 +286,24 @@ struct AttentionView: View {
         @Bindable var router = router
 
         NavigationStack(path: $router.notificationsPath) {
-            Group {
-                if !attentionEnabled || feedViewModel.phase == .disabled {
-                    disabledFallback
-                } else {
-                    feedContent
+            VStack(spacing: 0) {
+                // #789: shared stale/degraded banner — text + accessibility carry
+                // the honestly-stale state (never color alone), identical on
+                // iPhone and iPad. Only shown while offline cached data is on
+                // screen (cleared the moment a canonical refresh confirms live).
+                if feedViewModel.isShowingStaleCache {
+                    ConnectionStatusBar(
+                        status: .offline,
+                        lastConfirmedAt: feedViewModel.cacheLastUpdatedAt,
+                        hasCache: true
+                    )
+                }
+                Group {
+                    if !attentionEnabled || feedViewModel.phase == .disabled {
+                        disabledFallback
+                    } else {
+                        feedContent
+                    }
                 }
             }
             .onChange(of: feedViewModel.mediaGeneration) { _, _ in
@@ -335,6 +348,10 @@ struct AttentionView: View {
             if Task.isCancelled { return }
 
             attentionEnabled = services.capabilitiesService.resolved.attentionEnabled
+
+            // #789: wire the read-cache before bootstrap so hydrate can surface
+            // honestly-stale Attention on a cold/offline launch. Idempotent.
+            feedViewModel.configureCache(services.attentionReadCache)
 
             // Single canonical GET per re-entry: bootstrap consumes any
             // queued drain (from a signalR event while off-screen) and

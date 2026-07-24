@@ -38,6 +38,15 @@ final class PrinterFilamentCoverageViewModel {
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var hasSeenAnyConnected: Bool = false
 
+    // MARK: Read-cache (issue #789, F10-C2) — additive, optional-guarded.
+    @ObservationIgnored private var coverageCache: FilamentCoverageReadCacheAdapter?
+    /// True exactly while the on-screen detail is UNCONFIRMED cached data.
+    private(set) var isShowingStaleCache: Bool = false
+    private(set) var cacheLastUpdatedAtMillis: Int64?
+    var cacheLastUpdatedAt: Date? {
+        cacheLastUpdatedAtMillis.map { Date(timeIntervalSince1970: Double($0) / 1000.0) }
+    }
+
     init(printerId: UUID) {
         self.printerId = printerId
     }
@@ -47,6 +56,39 @@ final class PrinterFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
+    }
+
+    /// Wire the #789 per-printer read-cache. Additive; safe to call repeatedly.
+    func configureCache(_ cache: FilamentCoverageReadCacheAdapter) {
+        self.coverageCache = cache
+    }
+
+    /// Hydrate this printer's cached coverage BEFORE the first canonical load.
+    /// Never downgrades confirmed-live data; honours `unknown` verbatim and a
+    /// cached feature-disabled tombstone.
+    func hydrateFromCache() async {
+        guard let cache = coverageCache else { return }
+        guard lastCommittedGeneration == 0, coverage == nil, !isFeatureDisabled, !isPrinterNotFound else { return }
+        let hydration = await cache.loadCachedPrinter(id: printerId)
+        guard lastCommittedGeneration == 0 else { return }
+        switch hydration {
+        case .snapshot(let snapshot, let millis):
+            coverage = snapshot
+            isFeatureDisabled = false
+            isPrinterNotFound = false
+            lastLoadError = nil
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+        case .disabled(let millis):
+            coverage = nil
+            isFeatureDisabled = true
+            isPrinterNotFound = false
+            lastLoadError = nil
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+        case .inactive, .absent, .recovered, .unreadable:
+            break
+        }
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
@@ -147,19 +189,44 @@ final class PrinterFilamentCoverageViewModel {
 
     private func load(underCoverageEpoch cvEpoch: UInt64) async {
         guard cvEpoch == coverageAuthorityEpoch, let coverageService else { return }
+
+        // Capture the cache session BEFORE the round-trip so a mid-flight switch
+        // cannot land this write in the new namespace. `nil` when no cache wired.
+        let capturedCacheSession = await coverageCache?.currentSession()
+
         requestGeneration &+= 1
         let myGen = requestGeneration
         do {
             let snapshot = try await coverageService.getForPrinter(id: printerId)
             guard cvEpoch == coverageAuthorityEpoch else { return }
             commitSuccess(snapshot: snapshot, generation: myGen)
+            if lastCommittedGeneration == myGen {
+                isShowingStaleCache = false
+                if let cache = coverageCache, let session = capturedCacheSession {
+                    _ = await cache.recordPrinter(snapshot, capturedSession: session)
+                }
+            }
         } catch let error as NetworkError {
             guard cvEpoch == coverageAuthorityEpoch else { return }
             switch error {
             case .featureDisabled:
                 commitFeatureDisabled(generation: myGen)
+                if lastCommittedGeneration == myGen {
+                    isShowingStaleCache = false
+                    if let cache = coverageCache, let session = capturedCacheSession {
+                        _ = await cache.recordPrinterDisabled(id: printerId, capturedSession: session)
+                    }
+                }
             case .notFound:
                 commitNotFound(generation: myGen)
+                // A gated-404 records a disabled tombstone so older cached
+                // coverage cannot resurface (criterion 7).
+                if lastCommittedGeneration == myGen {
+                    isShowingStaleCache = false
+                    if let cache = coverageCache, let session = capturedCacheSession {
+                        _ = await cache.recordPrinterDisabled(id: printerId, capturedSession: session)
+                    }
+                }
             default:
                 commitError(error, generation: myGen)
             }

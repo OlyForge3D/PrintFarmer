@@ -87,7 +87,19 @@ final class FarmFilamentCoverageViewModel {
     @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
     @ObservationIgnored private var hasSeenAnyConnected: Bool = false
 
-    // MARK: - Public API
+    // MARK: Read-cache (issue #789, F10-C2) — additive, optional-guarded.
+    /// Typed fleet read-cache facade. `nil` in every pre-#789 test, so all
+    /// cache hooks below are skipped and behaviour is byte-for-byte unchanged.
+    @ObservationIgnored private var coverageCache: FilamentCoverageReadCacheAdapter?
+    /// True exactly while the on-screen fleet is UNCONFIRMED cached data (offline
+    /// hydrate not yet replaced by a canonical response). Drives the stale banner.
+    private(set) var isShowingStaleCache: Bool = false
+    /// Epoch-millis of the cached fleet's originating canonical completion.
+    private(set) var cacheLastUpdatedAtMillis: Int64?
+    /// The cached fleet's last-updated instant, for the shared stale banner.
+    var cacheLastUpdatedAt: Date? {
+        cacheLastUpdatedAtMillis.map { Date(timeIntervalSince1970: Double($0) / 1000.0) }
+    }
 
     func coverage(for printerId: UUID) -> PrinterFilamentCoverage? {
         coverageByPrinter[printerId]
@@ -102,6 +114,43 @@ final class FarmFilamentCoverageViewModel {
     func configure(coverageService: any FilamentCoverageServiceProtocol) {
         self.coverageService = coverageService
         coverageAuthorityEpoch &+= 1
+    }
+
+    /// Wire the #789 fleet read-cache. Additive: when never called the view model
+    /// behaves exactly as it did pre-#789. Safe to call more than once.
+    func configureCache(_ cache: FilamentCoverageReadCacheAdapter) {
+        self.coverageCache = cache
+    }
+
+    /// Hydrate the active namespace's cached fleet BEFORE the first canonical
+    /// load, so a cold/offline launch shows honestly-stale coverage immediately.
+    /// Never downgrades confirmed-live data (no-op once any canonical commit has
+    /// landed), and honours a cached feature-disabled tombstone (criterion 7).
+    func hydrateFromCache() async {
+        guard let cache = coverageCache else { return }
+        guard lastCommittedGeneration == 0, coverageByPrinter.isEmpty, !isFeatureDisabled else { return }
+        let hydration = await cache.loadCachedFleet()
+        // A canonical load may have committed during the await; never override it.
+        guard lastCommittedGeneration == 0 else { return }
+        switch hydration {
+        case .snapshot(let fleet, let millis):
+            coverageByPrinter = Dictionary(uniqueKeysWithValues:
+                fleet.printers.map { ($0.printerId, $0) }
+            )
+            isFeatureDisabled = false
+            lastLoadError = nil
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+        case .disabled(let millis):
+            // A gated feature must not resurface older cached coverage.
+            coverageByPrinter = [:]
+            isFeatureDisabled = true
+            lastLoadError = nil
+            isShowingStaleCache = true
+            cacheLastUpdatedAtMillis = millis
+        case .inactive, .absent, .recovered, .unreadable:
+            break
+        }
     }
 
     /// Register `filamentcoveragechanged` + connection-state
@@ -229,6 +278,11 @@ final class FarmFilamentCoverageViewModel {
         // under us.
         guard cvEpoch == coverageAuthorityEpoch, let coverageService else { return }
 
+        // Capture the cache session BEFORE the network round-trip (mirrors the
+        // #817 discipline) so a mid-flight server/user switch cannot make this
+        // write land in the new namespace. `nil` when no cache is wired.
+        let capturedCacheSession = await coverageCache?.currentSession()
+
         requestGeneration &+= 1
         let myGen = requestGeneration
         do {
@@ -237,11 +291,26 @@ final class FarmFilamentCoverageViewModel {
             // coverage owner moved on during the network round-trip.
             guard cvEpoch == coverageAuthorityEpoch else { return }
             commitSuccess(fleet: fleet, generation: myGen)
+            // Only persist when the in-VM commit actually applied (this response
+            // was the newest), so an older success can never overwrite newer
+            // cache state (criterion 6).
+            if lastCommittedGeneration == myGen {
+                isShowingStaleCache = false
+                if let cache = coverageCache, let session = capturedCacheSession {
+                    _ = await cache.recordFleet(fleet, capturedSession: session)
+                }
+            }
         } catch let error as NetworkError {
             guard cvEpoch == coverageAuthorityEpoch else { return }
             switch error {
             case .featureDisabled:
                 commitFeatureDisabled(generation: myGen)
+                if lastCommittedGeneration == myGen {
+                    isShowingStaleCache = false
+                    if let cache = coverageCache, let session = capturedCacheSession {
+                        _ = await cache.recordFleetDisabled(capturedSession: session)
+                    }
+                }
             default:
                 commitError(error, generation: myGen)
             }
