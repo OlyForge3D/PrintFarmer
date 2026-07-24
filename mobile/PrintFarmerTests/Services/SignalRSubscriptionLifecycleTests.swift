@@ -3992,6 +3992,532 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
 
 }
 
+// MARK: - #815 handshake trailing-record reliability
+
+/// Production-transport regressions for the handshake/receive-loop boundary.
+///
+/// `sendHandshake` owns the first WebSocket receive while the long-lived
+/// receive task owns every later receive. These tests prove that exactly the
+/// first RS-delimited response is consumed as the handshake and that every
+/// later byte crosses that ownership boundary through the service's one shared
+/// bounded `SignalRFrameParser`.
+@MainActor
+final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
+    nonisolated(unsafe) private var mockSession: MockURLProtocol.Session!
+    nonisolated(unsafe) private var session: URLSession!
+    private let testURL = URL(string: "https://signalr-handshake.test.invalid")!
+
+    override func setUp() {
+        super.setUp()
+        mockSession = MockURLProtocol.makeSession()
+        session = mockSession.urlSession
+    }
+
+    override func tearDown() {
+        session = nil
+        mockSession = nil
+        super.tearDown()
+    }
+
+    func testCompleteInvocationTrailingHandshakeIsDeliveredExactlyOnce() async throws {
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let recorder = SignalRPrinterIDRecorder()
+        let subscription = service.onPrinterUpdated { recorder.append($0.id) }
+        let printerID = UUID(uuidString: "81500000-0000-0000-0000-000000000001")!
+
+        let result = await connect(
+            service,
+            socket: socket,
+            handshake: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [makeSignalRPrinterInvocation(id: printerID)]
+                )
+            )
+        )
+        try result.get()
+        await recorder.waitForCount(1)
+
+        XCTAssertEqual(recorder.snapshot(), [printerID])
+        await service.disconnect()
+        subscription.cancel()
+    }
+
+    func testPartialInvocationTrailingHandshakeCompletesOnNextReceiveExactlyOnce() async throws {
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let recorder = SignalRPrinterIDRecorder()
+        let subscription = service.onPrinterUpdated { recorder.append($0.id) }
+        let printerID = UUID(uuidString: "81500000-0000-0000-0000-000000000002")!
+        let invocation = makeSignalRPrinterInvocation(id: printerID)
+        let splitIndex = invocation.index(
+            invocation.startIndex,
+            offsetBy: invocation.count / 2
+        )
+
+        let result = await connect(
+            service,
+            socket: socket,
+            handshake: .data(
+                makeSignalRHandshakeData(
+                    trailingPartial: Data(invocation[..<splitIndex])
+                )
+            )
+        )
+        try result.get()
+        XCTAssertTrue(recorder.snapshot().isEmpty)
+
+        await socket.waitForReceiveEnrollments(count: 2)
+        var completion = Data(invocation[splitIndex...])
+        completion.append(SignalRFrameParser.recordSeparator)
+        socket.completeReceive(with: .data(completion))
+        await recorder.waitForCount(1)
+
+        XCTAssertEqual(recorder.snapshot(), [printerID])
+        await service.disconnect()
+        subscription.cancel()
+    }
+
+    func testMultipleInvocationsTrailingHandshakeRemainFIFOAndExactlyOnce() async throws {
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let recorder = SignalRPrinterIDRecorder()
+        let subscription = service.onPrinterUpdated { recorder.append($0.id) }
+        let printerIDs = [
+            UUID(uuidString: "81500000-0000-0000-0000-000000000011")!,
+            UUID(uuidString: "81500000-0000-0000-0000-000000000012")!,
+            UUID(uuidString: "81500000-0000-0000-0000-000000000013")!,
+        ]
+
+        let result = await connect(
+            service,
+            socket: socket,
+            handshake: .string(
+                String(
+                    decoding: makeSignalRHandshakeData(
+                        trailingRecords: printerIDs.map(makeSignalRPrinterInvocation)
+                    ),
+                    as: UTF8.self
+                )
+            )
+        )
+        try result.get()
+        await recorder.waitForCount(printerIDs.count)
+
+        XCTAssertEqual(recorder.snapshot(), printerIDs)
+        await service.disconnect()
+        subscription.cancel()
+    }
+
+    func testMalformedTrailingRecordIsDroppedWithoutBlockingFollowingInvocation() async throws {
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let recorder = SignalRPrinterIDRecorder()
+        let subscription = service.onPrinterUpdated { recorder.append($0.id) }
+        let printerID = UUID(uuidString: "81500000-0000-0000-0000-000000000021")!
+
+        let result = await connect(
+            service,
+            socket: socket,
+            handshake: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [
+                        Data("not-json".utf8),
+                        makeSignalRPrinterInvocation(id: printerID),
+                    ]
+                )
+            )
+        )
+        try result.get()
+        await recorder.waitForCount(1)
+
+        XCTAssertEqual(recorder.snapshot(), [printerID])
+        await service.disconnect()
+        subscription.cancel()
+    }
+
+    func testMalformedAndNegativeHandshakeFailuresRemainTyped() async {
+        let malformedSocket = MockSignalRWebSocket()
+        let malformedService = makeService(
+            sockets: MockWebSocketSwitcher([malformedSocket])
+        )
+        let malformedResult = await connect(
+            malformedService,
+            socket: malformedSocket,
+            handshake: .string("not-json\u{1e}")
+        )
+
+        guard case .failure(let malformedError) = malformedResult,
+              let malformedNetworkError = malformedError as? NetworkError else {
+            XCTFail("Malformed handshake must fail with NetworkError.invalidResponse")
+            await malformedService.disconnect()
+            return
+        }
+        guard case .invalidResponse = malformedNetworkError else {
+            XCTFail("Malformed handshake must fail with NetworkError.invalidResponse")
+            await malformedService.disconnect()
+            return
+        }
+        await malformedService.disconnect()
+
+        let rejectedSocket = MockSignalRWebSocket()
+        let rejectedService = makeService(
+            sockets: MockWebSocketSwitcher([rejectedSocket])
+        )
+        let rejectedResult = await connect(
+            rejectedService,
+            socket: rejectedSocket,
+            handshake: .string("{\"error\":\"denied\"}\u{1e}")
+        )
+
+        guard case .failure(let rejectedError) = rejectedResult,
+              let rejectedNetworkError = rejectedError as? NetworkError else {
+            XCTFail("Negative handshake must fail with NetworkError.authFailed")
+            await rejectedService.disconnect()
+            return
+        }
+        guard case .authFailed(let message) = rejectedNetworkError else {
+            XCTFail("Negative handshake must fail with NetworkError.authFailed")
+            await rejectedService.disconnect()
+            return
+        }
+        XCTAssertEqual(message, "SignalR handshake failed: denied")
+        await rejectedService.disconnect()
+    }
+
+    func testCancelledHandshakeCannotPublishTrailingInvocation() async {
+        let socket = MockSignalRWebSocket()
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let states = LifecycleStateObserver()
+        let (initial, stateSubscription) = service.onConnectionStateChanged {
+            states.append($0)
+        }
+        states.append(initial)
+        let recorder = SignalRPrinterIDRecorder()
+        let payloadSubscription = service.onPrinterUpdated {
+            recorder.append($0.id)
+        }
+
+        let connectTask = Task { try await service.connect() }
+        await socket.waitForReceiveCall()
+        let disconnectWatermark = states.count()
+        connectTask.cancel()
+        let result = await connectTask.result
+        await socket.waitForCancellations()
+        await states.waitFor(
+            state: .disconnected,
+            afterCount: disconnectWatermark
+        )
+
+        guard case .failure(let error) = result, error is CancellationError else {
+            XCTFail("Cancelled handshake must finish with CancellationError")
+            await service.disconnect()
+            return
+        }
+        socket.completeReceive(
+            with: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [
+                        makeSignalRPrinterInvocation(
+                            id: UUID(uuidString: "81500000-0000-0000-0000-000000000031")!
+                        )
+                    ]
+                )
+            )
+        )
+        XCTAssertTrue(recorder.snapshot().isEmpty)
+        XCTAssertFalse(states.snapshot().contains(.connected))
+
+        await service.disconnect()
+        payloadSubscription.cancel()
+        stateSubscription.cancel()
+    }
+
+    func testStoppedGenerationRejectsStaleHandshakeAndTrailingInvocation() async {
+        let socket = MockSignalRWebSocket(
+            cancellationMode: .preservePendingReceiveForStaleHandshake
+        )
+        let service = makeService(sockets: MockWebSocketSwitcher([socket]))
+        let states = LifecycleStateObserver()
+        let (initial, stateSubscription) = service.onConnectionStateChanged {
+            states.append($0)
+        }
+        states.append(initial)
+        let recorder = SignalRPrinterIDRecorder()
+        let payloadSubscription = service.onPrinterUpdated {
+            recorder.append($0.id)
+        }
+
+        let connectTask = Task { try await service.connect() }
+        await socket.waitForReceiveCall()
+        let disconnectWatermark = states.count()
+        await service.disconnect()
+        socket.completeReceive(
+            with: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [
+                        makeSignalRPrinterInvocation(
+                            id: UUID(uuidString: "81500000-0000-0000-0000-000000000032")!
+                        )
+                    ]
+                )
+            )
+        )
+        _ = await connectTask.result
+        await states.waitFor(
+            state: .disconnected,
+            afterCount: disconnectWatermark
+        )
+
+        XCTAssertTrue(recorder.snapshot().isEmpty)
+        XCTAssertFalse(states.snapshot().contains(.connected))
+        payloadSubscription.cancel()
+        stateSubscription.cancel()
+    }
+
+    func testAcceptedReconnectDeliversTrailingInvocationAndRefreshesAuthorityOnce() async throws {
+        let firstSocket = MockSignalRWebSocket()
+        let secondSocket = MockSignalRWebSocket()
+        let sleeper = LifecycleControlledSleeper()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([firstSocket, secondSocket]),
+            sleeper: sleeper
+        )
+        let states = LifecycleStateObserver()
+        let (initial, stateSubscription) = service.onConnectionStateChanged {
+            states.append($0)
+        }
+        states.append(initial)
+
+        let trailingRecorder = SignalRPrinterIDRecorder()
+        let trailingSubscription = service.onPrinterUpdated {
+            trailingRecorder.append($0.id)
+        }
+        let trailingPrinterID = UUID(
+            uuidString: "81500000-0000-0000-0000-000000000041"
+        )!
+
+        let attentionService = ScriptedAttentionService(
+            steps: [.value(makeAttentionFeed(healthyPrinterCount: 8))]
+        )
+        let callbackQueue = AttentionCallbackQueue()
+        let viewModel = AttentionFeedViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        viewModel.configure(
+            attentionService: attentionService,
+            signalRService: service,
+            attentionEnabled: true
+        )
+
+        let coldConnect = Task { try await service.connect() }
+        await firstSocket.waitForReceiveCall()
+        firstSocket.completeReceive(with: .string("{}\u{1e}"))
+        try await coldConnect.value
+        await states.waitFor(state: .connected)
+        await callbackQueue.waitForCount(2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        let coldLoadCount = await attentionService.loadCallCount
+        XCTAssertEqual(coldLoadCount, 0)
+
+        await firstSocket.waitForReceiveEnrollments(count: 2)
+        firstSocket.failReceive(with: URLError(.networkConnectionLost))
+        await states.waitFor(state: .reconnecting)
+        await sleeper.waitForNextSleep()
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        let reconnectingLoadCount = await attentionService.loadCallCount
+        XCTAssertEqual(reconnectingLoadCount, 0)
+
+        let reconnectWatermark = states.count()
+        await sleeper.release()
+        await secondSocket.waitForReceiveCall()
+        secondSocket.completeReceive(
+            with: .data(
+                makeSignalRHandshakeData(
+                    trailingRecords: [
+                        makeSignalRPrinterInvocation(id: trailingPrinterID)
+                    ]
+                )
+            )
+        )
+        await states.waitFor(
+            state: .connected,
+            afterCount: reconnectWatermark
+        )
+        await trailingRecorder.waitForCount(1)
+        await callbackQueue.waitForCount(1)
+        await callbackQueue.runNext()
+        await attentionService.waitForLoadCount(1)
+
+        let recoveredLoadCount = await attentionService.loadCallCount
+        XCTAssertEqual(trailingRecorder.snapshot(), [trailingPrinterID])
+        XCTAssertEqual(recoveredLoadCount, 1)
+        XCTAssertEqual(viewModel.snapshot?.healthyPrinterCount, 8)
+        XCTAssertEqual(callbackQueue.count, 0)
+
+        await service.disconnect()
+        trailingSubscription.cancel()
+        stateSubscription.cancel()
+    }
+
+    func testFrameParserEnforcesOneMiBBoundBeforeAppendingExistingPartial() throws {
+        let maximum = SignalRFrameParser.maximumFrameBytes
+        var parser = SignalRFrameParser()
+        let prefix = Data(repeating: 0x61, count: maximum - 1)
+
+        XCTAssertTrue(try parser.append(prefix).isEmpty)
+        XCTAssertTrue(try parser.append(Data([0x62])).isEmpty)
+        let boundaryFrames = try parser.append(
+            Data([SignalRFrameParser.recordSeparator])
+        )
+        XCTAssertEqual(boundaryFrames, [prefix + Data([0x62])])
+
+        XCTAssertTrue(
+            try parser.append(Data(repeating: 0x63, count: maximum)).isEmpty
+        )
+        do {
+            _ = try parser.append(Data([0x64]))
+            XCTFail("Appending past 1 MiB must throw before growing the buffer")
+        } catch let error as SignalRFrameParserError {
+            XCTAssertEqual(
+                error,
+                .frameTooLarge(maximumBytes: maximum)
+            )
+        } catch {
+            XCTFail("Unexpected parser error: \(error)")
+        }
+
+        var recovery = Data("{}".utf8)
+        recovery.append(SignalRFrameParser.recordSeparator)
+        XCTAssertEqual(try parser.append(recovery), [Data("{}".utf8)])
+    }
+
+    private func connect(
+        _ service: SignalRService,
+        socket: MockSignalRWebSocket,
+        handshake: URLSessionWebSocketTask.Message
+    ) async -> Result<Void, Error> {
+        let task = Task { try await service.connect() }
+        await socket.waitForReceiveCall()
+        socket.completeReceive(with: handshake)
+        return await task.result
+    }
+
+    private func installNegotiateHandler() {
+        mockSession.requestHandler = { request in
+            let payload: [String: Any] = [
+                "connectionId": "conn-815",
+                "connectionToken": "token-815",
+                "negotiateVersion": 1,
+                "availableTransports": [[
+                    "transport": "WebSockets",
+                    "transferFormats": ["Text", "Binary"],
+                ]],
+            ]
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                try JSONSerialization.data(withJSONObject: payload)
+            )
+        }
+    }
+
+    private func makeService(
+        sockets: MockWebSocketSwitcher,
+        sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper()
+    ) -> SignalRService {
+        installNegotiateHandler()
+        return SignalRService(
+            serverURL: testURL,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 1 },
+            reconnectSleeper: sleeper.makeSleeper(),
+            webSocketFactory: { _ in sockets.next() }
+        )
+    }
+}
+
+private func makeSignalRHandshakeData(
+    trailingRecords: [Data] = [],
+    trailingPartial: Data = Data()
+) -> Data {
+    var data = Data("{}".utf8)
+    data.append(SignalRFrameParser.recordSeparator)
+    for record in trailingRecords {
+        data.append(record)
+        data.append(SignalRFrameParser.recordSeparator)
+    }
+    data.append(trailingPartial)
+    return data
+}
+
+private func makeSignalRPrinterInvocation(id: UUID) -> Data {
+    Data(
+        """
+        {"type":1,"target":"printerupdated","arguments":[{"id":"\(id.uuidString)","isOnline":true}]}
+        """.utf8
+    )
+}
+
+private final class SignalRPrinterIDRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var ids: [UUID] = []
+    private var waiters: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    func append(_ id: UUID) {
+        lock.lock()
+        ids.append(id)
+        let count = ids.count
+        var continuations: [CheckedContinuation<Void, Never>] = []
+        waiters.removeAll { waiter in
+            if waiter.target <= count {
+                continuations.append(waiter.continuation)
+                return true
+            }
+            return false
+        }
+        lock.unlock()
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    func snapshot() -> [UUID] {
+        lock.lock()
+        defer { lock.unlock() }
+        return ids
+    }
+
+    func waitForCount(_ target: Int) async {
+        if count() >= target {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if ids.count >= target {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            waiters.append((target, continuation))
+            lock.unlock()
+        }
+    }
+
+    private func count() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return ids.count
+    }
+}
+
 @MainActor
 final class SignalRSubscriptionOwnerLifecycleTests: XCTestCase {
     func testSubscriptionOwner_reconfigureThenDeinit_restoresBaselineWithoutExplicitTestCancellation() async {

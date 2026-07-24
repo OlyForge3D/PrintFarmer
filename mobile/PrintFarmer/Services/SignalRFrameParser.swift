@@ -11,34 +11,30 @@ struct SignalRFrameParser {
     private var buffer = Data()
 
     mutating func append(_ chunk: Data) throws -> [Data] {
-        buffer.append(chunk)
         var frames: [Data] = []
+        var segmentStart = chunk.startIndex
 
-        while let separator = buffer.firstIndex(of: Self.recordSeparator) {
-            let frameLength = buffer.distance(
-                from: buffer.startIndex,
-                to: separator
-            )
-            guard frameLength <= Self.maximumFrameBytes else {
-                reset()
-                throw SignalRFrameParserError.frameTooLarge(
-                    maximumBytes: Self.maximumFrameBytes
-                )
+        while let separator = chunk[segmentStart...].firstIndex(of: Self.recordSeparator) {
+            try appendBounded(chunk[segmentStart..<separator])
+            if !buffer.isEmpty {
+                frames.append(buffer)
+                buffer = Data()
             }
-            let frame = Data(buffer[..<separator])
-            buffer.removeSubrange(...separator)
-            if !frame.isEmpty {
-                frames.append(frame)
-            }
+            segmentStart = chunk.index(after: separator)
         }
 
-        guard buffer.count <= Self.maximumFrameBytes else {
+        try appendBounded(chunk[segmentStart...])
+        return frames
+    }
+
+    private mutating func appendBounded(_ segment: Data.SubSequence) throws {
+        guard segment.count <= Self.maximumFrameBytes - buffer.count else {
             reset()
             throw SignalRFrameParserError.frameTooLarge(
                 maximumBytes: Self.maximumFrameBytes
             )
         }
-        return frames
+        buffer.append(contentsOf: segment)
     }
 
     mutating func reset() {
