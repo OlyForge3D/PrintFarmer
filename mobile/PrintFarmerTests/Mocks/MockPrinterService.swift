@@ -8,6 +8,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var cameraUrlsToReturn: [PrinterCameraUrls] = []
     var cameraUrlToReturn: PrinterCameraUrl?
     var currentJobToReturn: PrintJobStatusInfo?
+    var historyToReturn = PrinterHistoryList(count: 0, jobs: [])
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
     var snapshotHandler: (@Sendable (UUID) async throws -> Data)?
@@ -25,6 +26,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
     var getCurrentJobCalledWith: UUID?
+    var getHistoryCalledWith: (id: UUID, limit: Int?)?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
     var cancelCalledWith: UUID?
@@ -91,6 +93,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getCurrentJobCalledWith = id
         if let error = errorToThrow { throw error }
         return currentJobToReturn
+    }
+
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList {
+        getHistoryCalledWith = (id, limit)
+        if let error = errorToThrow { throw error }
+        return historyToReturn
     }
 
     func pause(id: UUID) async throws -> CommandResult {
@@ -210,6 +218,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         cameraUrlsToReturn = []
         cameraUrlToReturn = nil
         currentJobToReturn = nil
+        historyToReturn = PrinterHistoryList(count: 0, jobs: [])
         commandResultToReturn = CommandResult(success: true, message: nil)
         errorToThrow = nil
         listPrintersCalled = false
@@ -222,6 +231,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getSnapshotCallCount = 0
         snapshotHandler = nil
         getCurrentJobCalledWith = nil
+        getHistoryCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
         cancelCalledWith = nil

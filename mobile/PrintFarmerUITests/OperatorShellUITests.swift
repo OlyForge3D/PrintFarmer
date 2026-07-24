@@ -636,4 +636,90 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
             "Reopened fallback Notifications sheet retained the pushed job-detail child (global 'Notifications' back button still present) — #727 regression"
         )
     }
+
+    // MARK: - Printer Detail v2 operator-first order + Advanced demotion (#712)
+    //
+    // Best-effort like the other operator-shell tests: without demo data the
+    // detail targets may not render, so every step falls back gracefully. When
+    // data IS present the test asserts the F7 contract — operator sections are
+    // reachable immediately while temperatures/console/jog stay demoted inside
+    // a collapsed Advanced disclosure until explicitly expanded.
+
+    /// Navigate Farm → first printer detail. Returns false (skip) if demo data
+    /// is unavailable in this environment.
+    private func openFirstPrinterDetail() -> Bool {
+        guard app.tabBars.buttons["Farm"].waitForExistence(timeout: 5) else { return false }
+        app.tabBars.buttons["Farm"].tap()
+
+        // Prefer the stable demo farm-card wrapper; fall back to the first
+        // collection cell, mirroring testAdvancedControlsGatedBehindPrinterDetail.
+        let farmCard = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "farm-card-"))
+            .firstMatch
+        if farmCard.waitForExistence(timeout: 5) {
+            farmCard.tap()
+            return true
+        }
+        let firstPrinter = app.collectionViews.cells.firstMatch
+        guard firstPrinter.waitForExistence(timeout: 5) else { return false }
+        firstPrinter.tap()
+        return true
+    }
+
+    func testPrinterDetailV2OperatorFirstOrderAndAdvancedDemotion() {
+        guard openFirstPrinterDetail() else { return }
+
+        // The header controls block anchors the operator layout; if the detail
+        // rendered at all it must be reachable without scrolling gymnastics.
+        let headerControls = app.otherElements["printer.detail.header.controls"]
+        guard headerControls.waitForExistence(timeout: 5) else {
+            // Detail did not present rich content in this environment — skip.
+            return
+        }
+
+        // Advanced is demoted into a collapsed DisclosureGroup. Its inner entry
+        // (`printer.detail.advanced`) must NOT be in the accessibility tree
+        // until the operator explicitly expands the disclosure.
+        let disclosure = app.buttons["printer.detail.advanced.disclosure"]
+        guard disclosure.waitForExistence(timeout: 5) else {
+            XCTFail("Advanced disclosure must exist in Printer Detail v2")
+            return
+        }
+        XCTAssertFalse(app.buttons["printer.detail.advanced"].exists,
+                       "Advanced controls entry must stay collapsed (demoted) until the disclosure is expanded")
+
+        // Tap-to-live camera toggle lives at the top of the operator layout.
+        let liveToggle = app.buttons["printer.detail.camera.livetoggle"]
+        if liveToggle.exists {
+            liveToggle.tap() // toggles snapshot ⇄ live; must not crash or navigate away
+            XCTAssertTrue(headerControls.exists,
+                          "Camera tap-to-live must stay within the detail view")
+        }
+
+        // Expanding the disclosure surfaces the demoted advanced entry.
+        disclosure.tap()
+        let advanced = app.buttons["printer.detail.advanced"]
+        XCTAssertTrue(advanced.waitForExistence(timeout: 5),
+                      "Expanding the Advanced disclosure must reveal the advanced controls entry")
+    }
+
+    func testPrinterDetailV2DispatchOpensSheet() {
+        guard openFirstPrinterDetail() else { return }
+        guard app.otherElements["printer.detail.header.controls"].waitForExistence(timeout: 5) else { return }
+
+        // Dispatch-to is only offered when this printer has assigned queue jobs;
+        // both presence and absence are acceptable in the demo environment.
+        let dispatchButton = app.buttons
+            .matching(NSPredicate(format: "identifier BEGINSWITH %@", "printer.detail.queue.dispatch."))
+            .firstMatch
+        guard dispatchButton.waitForExistence(timeout: 3) else { return }
+        dispatchButton.tap()
+
+        let sheet = app.otherElements["printer.detail.dispatch.sheet"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 5),
+                      "Tapping dispatch-to must present the candidate sheet")
+
+        let cancel = app.buttons["printer.detail.dispatch.cancel"]
+        if cancel.exists { cancel.tap() }
+    }
 }

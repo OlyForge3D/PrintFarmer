@@ -218,6 +218,7 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { throw NetworkError.notFound }
     func getSnapshot(id: UUID) async throws -> Data { Data() }
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? { nil }
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList { PrinterHistoryList(count: 0, jobs: []) }
     func pause(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func resume(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func cancel(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }

@@ -14,6 +14,14 @@ protocol MaintenanceServiceProtocol: Sendable {
     func getCost(months: Int?) async throws -> [MaintenanceCost]
     func getUptime() async throws -> [PrinterUptime]
     func getFleetStatistics() async throws -> [FleetPrinterStatistics]
+
+    // MARK: - Printer Detail v2 (issue #712, F7)
+    //
+    // Per-printer odometer reading and completion logging. `getPrinterStatistics`
+    // reads cumulative print hours (`GET /api/maintenance/printers/{id}/statistics`);
+    // `createLog` records completion of a due item (`POST /api/maintenance/logs`).
+    func getPrinterStatistics(printerId: UUID) async throws -> PrinterMaintenanceStatistics
+    func createLog(_ request: CreateMaintenanceLogRequest) async throws -> MaintenanceLog
 }
 
 extension MaintenanceServiceProtocol {
