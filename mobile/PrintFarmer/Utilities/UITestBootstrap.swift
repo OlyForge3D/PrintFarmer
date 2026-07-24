@@ -77,6 +77,19 @@ enum UITestBootstrap {
     static let filamentCoverageScenarioLaunchArgument =
         "--uitesting-filament-coverage-scenario"
 
+    /// Seeds the cold-offline read-only farm shell scenario (#817 F10-C1b):
+    /// a stub `FarmSnapshotStoring` whose `hydrateActive()` returns a
+    /// present snapshot of the demo fleet with a fixed past `lastUpdatedAt`,
+    /// combined with an offline `printerService` whose `list(...)` throws.
+    /// On launch `DashboardViewModel` hydrates the cached fleet, the
+    /// canonical load then fails, and the cache is preserved — so XCUI can
+    /// prove the read-only stale shell, cached card projection, and the
+    /// visible last-confirmed timestamp. Also forces the attention gate off
+    /// so the `DashboardView` surface is reachable. Production code never
+    /// touches this argument.
+    static let coldOfflineShellLaunchArgument =
+        "--uitesting-cold-offline-shell"
+
     /// Deterministic launch modes selectable from the UI-test harness.
     enum Mode: Equatable {
         /// Pre-authenticated demo operator shell (default).
@@ -94,6 +107,10 @@ enum UITestBootstrap {
         /// Authenticated operator shell with a deterministic fleet
         /// coverage snapshot injected (F4-M #778 UI tests).
         case authenticatedFilamentCoverageScenario
+        /// Authenticated shell seeded with a cached farm snapshot + offline
+        /// printer service so the cold-offline read-only stale shell renders
+        /// (#817). Implies the attention gate is disabled.
+        case authenticatedColdOfflineShell
     }
 
     /// Dedicated `UserDefaults` suite. Isolated from `.standard` so a
@@ -130,6 +147,9 @@ enum UITestBootstrap {
     /// Pure overload: resolves the launch mode from an explicit argument
     /// list so unit tests can exercise it without `CommandLine`.
     static func mode(in arguments: [String]) -> Mode {
+        if arguments.contains(coldOfflineShellLaunchArgument) {
+            return .authenticatedColdOfflineShell
+        }
         if arguments.contains(filamentCoverageScenarioLaunchArgument) {
             return .authenticatedFilamentCoverageScenario
         }
@@ -190,7 +210,18 @@ enum UITestBootstrap {
         // protocol the operator shell needs without hitting the network.
         // In the unauthenticated mode they also keep `LoginView`'s
         // sign-in path off the network (DemoAuthService).
-        let services = ServiceContainer.demo()
+        //
+        // #817: the cold-offline shell needs a `FarmSnapshotStoring` whose
+        // `hydrateActive()` returns a present cached snapshot. Because the
+        // store is `let` on `ServiceContainer`, it must be injected through
+        // the demo factory rather than reassigned afterwards.
+        let injectedSnapshotStore: (any FarmSnapshotStoring)?
+        if mode == .authenticatedColdOfflineShell {
+            injectedSnapshotStore = Self.coldOfflineSnapshotStore(registry: registry)
+        } else {
+            injectedSnapshotStore = nil
+        }
+        let services = ServiceContainer.demo(farmSnapshotStore: injectedSnapshotStore)
 
         // #727: `.authenticatedAttentionDisabled` swaps the demo
         // capabilities service for one whose resolved snapshot has
@@ -229,6 +260,16 @@ enum UITestBootstrap {
             )
         }
         #endif
+        // #817: force the attention gate off (so the `DashboardView` surface
+        // is reachable via the legacy fallback) and make the canonical fleet
+        // load fail offline, so the pre-seeded cached snapshot is preserved as
+        // the read-only stale shell instead of being replaced by live data.
+        if mode == .authenticatedColdOfflineShell {
+            var disabled = ResolvedSystemCapabilities.defaults
+            disabled.attentionEnabled = false
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: disabled)
+            services.printerService = DemoPrinterService(offlineError: NetworkError.noConnection)
+        }
 
         let auth = AuthViewModel(services: services)
         switch mode {
@@ -243,6 +284,8 @@ enum UITestBootstrap {
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         #endif
         case .authenticatedFilamentCoverageScenario:
+            auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
+        case .authenticatedColdOfflineShell:
             auth.markAuthenticatedForUITesting(user: DemoData.demoUser)
         }
 
@@ -485,5 +528,59 @@ enum UITestBootstrap {
             assignedQueuedJobCount: 0,
             evaluatedAtUtc: evaluatedAt
         )
+    }
+
+    // MARK: - Cold-offline shell (#817)
+
+    /// Fixed last-confirmed instant for the cold-offline snapshot, so the
+    /// "last updated" banner text is deterministic across launches.
+    /// 2024-01-01T00:00:00Z.
+    static let coldOfflineConfirmedMillis: Int64 = 1_704_067_200_000
+
+    /// Builds the stub snapshot store seeded with a present cached fleet for
+    /// the active namespace. `hydrateActive()` returns it verbatim so the
+    /// `DashboardView` renders the cached read-only cards immediately.
+    static func coldOfflineSnapshotStore(registry: ServerRegistry) -> any FarmSnapshotStoring {
+        let serverID = registry.activeServer?.id ?? UUID()
+        let namespace = FarmSnapshotNamespace(serverID: serverID, userID: DemoData.demoUserID)
+        let envelope = FarmSnapshotEnvelope(
+            namespace: namespace,
+            printers: DemoData.printers,
+            pendingReadyPrinterIDs: [],
+            lastUpdatedAtMillis: coldOfflineConfirmedMillis
+        )
+        let session = FarmSnapshotSession(
+            serverID: serverID,
+            userID: DemoData.demoUserID,
+            generation: 0,
+            token: 1
+        )
+        return UITestColdOfflineSnapshotStore(
+            hydration: .snapshot(envelope),
+            session: session
+        )
+    }
+
+    /// UI-test-only `FarmSnapshotStoring` that always hydrates a preset
+    /// snapshot for the active namespace. It performs no persistence — it
+    /// exists solely so XCUI can drive the #817 cold-offline shell without a
+    /// real disk-backed store. Commits are accepted but discarded because the
+    /// offline canonical load never succeeds in this scenario.
+    private final class UITestColdOfflineSnapshotStore: FarmSnapshotStoring, @unchecked Sendable {
+        private let hydration: FarmSnapshotHydration
+        private let session: FarmSnapshotSession?
+
+        init(hydration: FarmSnapshotHydration, session: FarmSnapshotSession?) {
+            self.hydration = hydration
+            self.session = session
+        }
+
+        func prepareStartup() async -> Bool { true }
+        func activate(session: FarmSnapshotSession) async -> Bool { true }
+        func deactivate(session: FarmSnapshotSession) async -> Bool { true }
+        func currentSession() async -> FarmSnapshotSession? { session }
+        func hydrateActive() async -> FarmSnapshotHydration { hydration }
+        func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult { .committed }
+        func purge(serverID: UUID) async -> FarmSnapshotPurgeResult { .purged }
     }
 }
