@@ -604,3 +604,56 @@ enum FarmSnapshotFixtures {
         }
     }
 }
+
+// MARK: - In-memory fake store for C1b (#817) ViewModel tests
+
+/// Deterministic in-memory `FarmSnapshotStoring` for cold-offline shell tests.
+///
+/// Presets the hydration outcome + current session and captures commits, with no
+/// file IO and no #816 internals — the published protocol is consumed exactly as
+/// production does. `onHydrateActive` provides a seam to interleave a canonical
+/// load between the hydrate call and its returned result, so the "never downgrade
+/// a live fleet back to cached" ordering can be exercised without sleeps.
+final class FakeFarmSnapshotStore: FarmSnapshotStoring, @unchecked Sendable {
+    var hydration: FarmSnapshotHydration
+    var session: FarmSnapshotSession?
+    var commitResult: FarmSnapshotCommitResult = .committed
+
+    private(set) var hydrateActiveCallCount = 0
+    private(set) var committedEnvelopes: [FarmSnapshotEnvelope] = []
+    private(set) var committedSessions: [FarmSnapshotSession] = []
+
+    /// Async hook invoked inside `hydrateActive()` before it returns, used to
+    /// model a canonical load resolving mid-hydration.
+    var onHydrateActive: (@Sendable () async -> Void)?
+
+    init(hydration: FarmSnapshotHydration = .inactive, session: FarmSnapshotSession? = nil) {
+        self.hydration = hydration
+        self.session = session
+    }
+
+    func prepareStartup() async -> Bool { true }
+
+    func activate(session: FarmSnapshotSession) async -> Bool {
+        self.session = session
+        return true
+    }
+
+    func deactivate(session: FarmSnapshotSession) async -> Bool { true }
+
+    func currentSession() async -> FarmSnapshotSession? { session }
+
+    func hydrateActive() async -> FarmSnapshotHydration {
+        hydrateActiveCallCount += 1
+        if let onHydrateActive { await onHydrateActive() }
+        return hydration
+    }
+
+    func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult {
+        committedEnvelopes.append(envelope)
+        committedSessions.append(capturedSession)
+        return commitResult
+    }
+
+    func purge(serverID: UUID) async -> FarmSnapshotPurgeResult { .purged }
+}

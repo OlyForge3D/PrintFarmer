@@ -4,12 +4,17 @@ import Foundation
 
 final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     private let printers: [Printer]
+    /// When set, `list(...)` throws it. Used by the cold-offline UI-test mode
+    /// (#817) to force a canonical load failure so the cached read-only shell
+    /// persists. Non-Farm demo behavior is unaffected.
+    private let listError: Error?
     private let snapshots: [UUID: Data]
 
     /// Default demo constructor (all callers except UI-test bootstrap):
     /// exposes exactly the demo fleet from `DemoData.printers`.
     init() {
         self.printers = DemoData.printers
+        self.listError = nil
         self.snapshots = [:]
     }
 
@@ -23,11 +28,22 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         snapshots: [UUID: Data] = [:]
     ) {
         self.printers = DemoData.printers + additionalPrinters
+        self.listError = nil
         self.snapshots = snapshots
     }
 
+    /// UI-test offline constructor (#817): `list(...)` throws `offlineError`
+    /// so `DashboardViewModel.loadDashboard()` fails and the cold-offline
+    /// cached shell stays read-only/stale.
+    init(offlineError: Error) {
+        self.printers = DemoData.printers
+        self.listError = offlineError
+        self.snapshots = [:]
+    }
+
     func list(includeDisabled: Bool) async throws -> [Printer] {
-        printers
+        if let listError { throw listError }
+        return printers
     }
 
     func get(id: UUID) async throws -> Printer {

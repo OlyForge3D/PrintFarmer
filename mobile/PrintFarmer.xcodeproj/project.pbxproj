@@ -160,6 +160,7 @@
 		F7778AA8000000000000A008 /* FilamentCoverageDetailSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB8000000000000A008 /* FilamentCoverageDetailSection.swift */; };
 		F7778AA9000000000000A009 /* StubFilamentCoverageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BB9000000000000A009 /* StubFilamentCoverageService.swift */; };
 		F7778AC6000000000000C001 /* FilamentCoverageUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD6000000000000C001 /* FilamentCoverageUITests.swift */; };
+		F7778AC7000000000000C001 /* ColdOfflineShellUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD7000000000000C001 /* ColdOfflineShellUITests.swift */; };
 		F7778AC1000000000000B001 /* FilamentCoverageModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */; };
 		F7778AC2000000000000B002 /* FilamentCoverageServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */; };
 		F7778AC3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */; };
@@ -626,6 +627,7 @@
 		F7778BB8000000000000A008 /* FilamentCoverageDetailSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageDetailSection.swift; sourceTree = "<group>"; };
 		F7778BB9000000000000A009 /* StubFilamentCoverageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubFilamentCoverageService.swift; sourceTree = "<group>"; };
 		F7778BD6000000000000C001 /* FilamentCoverageUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageUITests.swift; sourceTree = "<group>"; };
+		F7778BD7000000000000C001 /* ColdOfflineShellUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColdOfflineShellUITests.swift; sourceTree = "<group>"; };
 		F7778BD1000000000000B001 /* FilamentCoverageModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageModelsTests.swift; sourceTree = "<group>"; };
 		F7778BD2000000000000B002 /* FilamentCoverageServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilamentCoverageServiceTests.swift; sourceTree = "<group>"; };
 		F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FarmFilamentCoverageViewModelTests.swift; sourceTree = "<group>"; };
@@ -1503,6 +1505,7 @@
 				E4CEAA262B2FBAD6A10FFE98 /* HarvestUITests.swift */,
 				A78220000000000000000006 /* ShiftTasksUITests.swift */,
 				F7778BD6000000000000C001 /* FilamentCoverageUITests.swift */,
+				F7778BD7000000000000C001 /* ColdOfflineShellUITests.swift */,
 				F78000000000000000000002 /* AttentionActionsUITests.swift */,
 			);
 			path = PrintFarmerUITests;
@@ -1961,6 +1964,7 @@
 				57BE3B9845FCAC77AC338A43 /* HarvestUITests.swift in Sources */,
 				A78230000000000000000006 /* ShiftTasksUITests.swift in Sources */,
 				F7778AC6000000000000C001 /* FilamentCoverageUITests.swift in Sources */,
+				F7778AC7000000000000C001 /* ColdOfflineShellUITests.swift in Sources */,
 				F78010000000000000000002 /* AttentionActionsUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
