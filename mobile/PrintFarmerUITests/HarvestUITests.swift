@@ -13,6 +13,8 @@ import XCTest
 final class HarvestUITests: ShiftTasksUITestBase {
 
     private let completedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000007"
+    private let failedJobIdentifier = "job.row.30000000-0003-0000-0000-000000000009"
+    private let cancelledJobIdentifier = "job.row.30000000-0003-0000-0000-000000000011"
 
     /// Navigates the operator shell to the seeded completed demo job's
     /// detail view, device-adaptively:
@@ -27,6 +29,19 @@ final class HarvestUITests: ShiftTasksUITestBase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
+        openRecentJobs(file: file, line: line)
+
+        let jobRow = app.buttons[completedJobIdentifier]
+        XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
+                      "Seeded completed demo job should render in the Recent list",
+                      file: file, line: line)
+        jobRow.tap()
+    }
+
+    private func openRecentJobs(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
         openTasksDestination(file: file, line: line)
 
         let printQueue = app.buttons["shiftTasks.printQueue"]
@@ -35,16 +50,9 @@ final class HarvestUITests: ShiftTasksUITestBase {
                       file: file, line: line)
         printQueue.tap()
 
-        // iPhone paginates the queue and exposes a "Recent" page control;
-        // iPad renders a single List with a Recent section. Reveal the
-        // Recent jobs on whichever layout is active before selecting.
+        // iPhone paginates the queue and exposes a Recent page control;
+        // iPad renders a single List with an always-visible Recent section.
         revealRecentJobs()
-
-        let jobRow = app.buttons[completedJobIdentifier]
-        XCTAssertTrue(jobRow.waitForExistence(timeout: 8),
-                      "Seeded completed demo job should render in the Recent list",
-                      file: file, line: line)
-        jobRow.tap()
     }
 
     /// Reveals the Recent (completed/failed/cancelled) jobs in the preserved
@@ -56,9 +64,15 @@ final class HarvestUITests: ShiftTasksUITestBase {
         if jobRow.waitForExistence(timeout: 3) { return }
 
         // iPhone: swipeable pages expose a "Recent" page control.
-        let recentPage = app.buttons["Recent"]
+        let recentPage = app.buttons["jobList.page.recent"]
         if recentPage.waitForExistence(timeout: 2) {
+            XCTAssertEqual(recentPage.label, "Recent")
+            XCTAssertGreaterThanOrEqual(recentPage.frame.width, 44)
+            XCTAssertGreaterThanOrEqual(recentPage.frame.height, 44)
+            XCTAssertTrue(recentPage.isEnabled)
+            XCTAssertTrue(recentPage.isHittable)
             recentPage.tap()
+            XCTAssertTrue(recentPage.isSelected)
             if jobRow.waitForExistence(timeout: 3) { return }
         }
 
@@ -67,6 +81,50 @@ final class HarvestUITests: ShiftTasksUITestBase {
         if recentHeader.waitForExistence(timeout: 2) {
             recentHeader.tap()
         }
+    }
+
+    func testRecentPageExposesCompletedFailedAndCancelledJobs() {
+        openRecentJobs()
+
+        assertRecentJob(
+            identifier: completedJobIdentifier,
+            name: "benchy_calibration.gcode",
+            status: "Completed"
+        )
+        assertRecentJob(
+            identifier: failedJobIdentifier,
+            name: "vase_mode_spiral.gcode",
+            status: "Failed"
+        )
+        assertRecentJob(
+            identifier: cancelledJobIdentifier,
+            name: "test_cube_20mm.gcode",
+            status: "Cancelled"
+        )
+    }
+
+    private func assertRecentJob(
+        identifier: String,
+        name: String,
+        status: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let row = app.buttons[identifier]
+        if !row.exists {
+            let combinedList = app.collectionViews["jobList.combined.list"]
+            if combinedList.exists {
+                combinedList.swipeUp()
+            }
+        }
+        XCTAssertTrue(
+            row.waitForExistence(timeout: 5),
+            "Recent must expose the seeded \(status.lowercased()) job",
+            file: file,
+            line: line
+        )
+        XCTAssertTrue(row.label.contains(name), file: file, line: line)
+        XCTAssertTrue(row.label.contains("\(status) status"), file: file, line: line)
     }
 
     func testCompletedJobExposesHarvestAction() {

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
 
 /// Production-safe test-only bootstrap for `PrintFarmerUITests`.
 ///
@@ -208,6 +211,9 @@ enum UITestBootstrap {
     ///     hermetic.
     @discardableResult
     static func makeBundle(mode: Mode = .authenticated, defaults: UserDefaults? = nil) -> Environment {
+        if defaults == nil {
+            clearSystemNotificationState()
+        }
         let resolvedDefaults = defaults ?? makeUserDefaults()
 
         let registry = ServerRegistry(
@@ -347,6 +353,14 @@ enum UITestBootstrap {
         let defaults = UserDefaults(suiteName: userDefaultsSuiteName) ?? .standard
         defaults.removePersistentDomain(forName: userDefaultsSuiteName)
         return defaults
+    }
+
+    private static func clearSystemNotificationState() {
+        #if canImport(UserNotifications)
+        let center = UNUserNotificationCenter.current()
+        center.removeAllDeliveredNotifications()
+        center.removeAllPendingNotificationRequests()
+        #endif
     }
 
     // MARK: - F2-U2 #780 UI-test scenario

@@ -50,7 +50,6 @@ struct ContentView: View {
             InventoryView()
                 .tabItem { Label("Inventory", systemImage: "cylinder.fill") }
                 .tag(AppTab.inventory)
-                .accessibilityIdentifier("tab.inventory")
         }
     }
 
