@@ -51,17 +51,26 @@ final class ShiftTasksViewModel {
     @ObservationIgnored private var isActive = false
     @ObservationIgnored private var taskInvalidationSubscription: SignalRSubscription?
 
+    /// Bounded, thread-safe coalescing mailbox for supported invalidations. The
+    /// SignalR hub delivers events synchronously on its serial coordinator queue;
+    /// a burst of N events schedules AT MOST ONE MainActor drain task via this
+    /// mailbox instead of one hop task per event (issue #814, blocker 1). Recreated
+    /// per lifecycle in `configure` so a stale drain can never touch fresh state.
+    @ObservationIgnored private var invalidationMailbox: ShiftTaskInvalidationMailbox?
+
     @ObservationIgnored private var refreshOwnerToken: UUID?
     @ObservationIgnored private var refreshOwnerTask: Task<Void, Never>?
 
-    /// Parked continuations awaiting a canonical pass, bucketed by the generation
-    /// they target. Only explicit callers (refresh / retry / post-mutation load)
-    /// and the single pass-initiating invalidation ever park here. Sustained storm
-    /// invalidations coalesce WITHOUT parking a continuation, so the parked count
-    /// is bounded by the number of concurrent explicit callers and is independent
-    /// of invalidation volume (issue #814).
-    @ObservationIgnored private var refreshWaiters:
-        [RefreshGeneration: [UUID: CheckedContinuation<Bool, Never>]] = [:]
+    /// One shared completion per live generation. Every explicit caller (refresh /
+    /// retry / post-mutation load) and the single pass-initiating invalidation that
+    /// target the same generation await the SAME object and receive the identical
+    /// result exactly once. Adding the 2nd..Nth caller for a generation adds NO new
+    /// entry here — the coalescer's per-generation state is O(live generations),
+    /// never O(caller count N), and sustained storm invalidations park nothing at
+    /// all (they coalesce into `coalescedDemand`). Bounded by concurrent user
+    /// actions and live generations, both independent of invalidation volume.
+    @ObservationIgnored private var generationCompletions:
+        [RefreshGeneration: GenerationCompletion] = [:]
 
     /// Generations that have coalesced fire-and-forget demand from supported
     /// invalidations that did not park a continuation. Keyed by generation so the
@@ -100,18 +109,96 @@ final class ShiftTasksViewModel {
     /// registration without sleeps or polling.
     @ObservationIgnored
     var refreshWaiterRegistrationObserver: (@MainActor @Sendable () -> Void)?
+
+    /// Deterministic test seam awaited by the refresh owner immediately BEFORE it
+    /// marks its pass begun and issues `loadSnapshot`. Production never assigns it
+    /// (a single `?.` nil check). Tests use it to hold the owner in the
+    /// reserved-but-not-begun window so real callers can register against the same
+    /// first pass (issue #814, blocker 2/4).
+    @ObservationIgnored
+    var ownerPassWillBeginHook: (@MainActor @Sendable () async -> Void)?
+
+    /// Deterministic test seam fired with the result of the single pass-initiating
+    /// invalidation's awaited generation, so tests can count that terminal path
+    /// exactly once (issue #814, blocker 4). Production never assigns it.
+    @ObservationIgnored
+    var invalidationCompletionObserver: (@MainActor @Sendable (Bool) -> Void)?
     #endif
 
     /// Overflow-safe, totally-ordered refresh generation. Ordering is lexicographic
-    /// on `(epoch, sequence)`; when `sequence` saturates, the epoch increments and
-    /// the sequence restarts, so a later generation always compares strictly
-    /// greater than an earlier one without any wrapping arithmetic (issue #814).
+    /// on `(epoch, sequence)`. Allocation increments `sequence`; on `sequence`
+    /// saturation it rolls into the next `epoch`; and if BOTH fields saturate, the
+    /// coalescer renormalizes the bounded live-generation set back onto a compact
+    /// low range (see `renormalizeGenerations`), so a later generation always
+    /// compares strictly greater than an earlier one with no wrapping and no trap
+    /// (issue #814, blocker 3).
     private struct RefreshGeneration: Comparable, Hashable {
         var epoch: UInt64
         var sequence: UInt64
 
         static func < (lhs: RefreshGeneration, rhs: RefreshGeneration) -> Bool {
             (lhs.epoch, lhs.sequence) < (rhs.epoch, rhs.sequence)
+        }
+    }
+
+    /// One shared completion object per live generation. All callers targeting a
+    /// generation await this single object and observe the identical result exactly
+    /// once, including late joiners (via the cached `resolvedResult`). A per-caller
+    /// continuation is retained ONLY to honor INDEPENDENT caller cancellation — a
+    /// single caller abandoning must resolve to `false` immediately without
+    /// disturbing the shared result its peers still await, a semantic the shipped
+    /// `testP2Cancellation` itself requires. The shared RESULT is computed once and
+    /// fanned out, so N callers never create N distinct results or N coalescer
+    /// entries.
+    @MainActor
+    private final class GenerationCompletion {
+        private var awaiters: [UUID: CheckedContinuation<Bool, Never>] = [:]
+        private(set) var resolvedResult: Bool?
+
+        var awaiterCount: Int { awaiters.count }
+        var isResolved: Bool { resolvedResult != nil }
+
+        /// Registers a caller. If the generation already resolved, resumes the
+        /// caller immediately with the shared result and stores nothing.
+        func addAwaiter(_ id: UUID, _ continuation: CheckedContinuation<Bool, Never>) {
+            if let resolvedResult {
+                continuation.resume(returning: resolvedResult)
+                return
+            }
+            awaiters[id] = continuation
+        }
+
+        /// Publishes the shared result once, resuming every awaiter with the SAME
+        /// value. Drains the map before resuming so re-entrancy cannot double-resume.
+        func resolve(_ value: Bool) {
+            guard resolvedResult == nil else { return }
+            resolvedResult = value
+            let pending = awaiters
+            awaiters.removeAll()
+            for continuation in pending.values {
+                continuation.resume(returning: value)
+            }
+        }
+
+        /// Removes a single cancelled caller, resuming ONLY it with `false`. Returns
+        /// whether the caller was present so the coalescer can update its
+        /// abandon-on-empty accounting.
+        @discardableResult
+        func cancelAwaiter(_ id: UUID) -> Bool {
+            guard let continuation = awaiters.removeValue(forKey: id) else { return false }
+            continuation.resume(returning: false)
+            return true
+        }
+
+        /// Teardown / stale replacement: resume every awaiter with `false` exactly
+        /// once WITHOUT marking the generation resolved, so no stale success is ever
+        /// published.
+        func resumeAllForTeardown() {
+            let pending = awaiters
+            awaiters.removeAll()
+            for continuation in pending.values {
+                continuation.resume(returning: false)
+            }
         }
     }
 
@@ -156,18 +243,20 @@ final class ShiftTasksViewModel {
 
         let epoch = lifecycleEpoch
         let enqueue = callbackEnqueuer
+        let mailbox = ShiftTaskInvalidationMailbox()
+        self.invalidationMailbox = mailbox
         taskInvalidationSubscription = signalRService.onTaskInvalidated { [weak self] invalidation in
+            // Runs on the SignalR hub's serial coordinator queue (off the
+            // MainActor). Filter unsupported targets and coalesce into the bounded
+            // mailbox HERE, so a synchronous burst of N events schedules AT MOST ONE
+            // MainActor drain task — never one hop task per event (issue #814).
+            guard ShiftTaskInvalidation.supportedTargets.contains(invalidation.target) else {
+                return
+            }
+            guard mailbox.deposit() else { return }
             enqueue { [weak self] in
-                guard let self,
-                      self.matchesAuthority(
-                        epoch: epoch,
-                        taskIdentity: newTaskIdentity,
-                        signalRIdentity: newSignalRIdentity
-                      ),
-                      ShiftTaskInvalidation.supportedTargets.contains(invalidation.target) else {
-                    return
-                }
-                await self.ingestSupportedInvalidation(
+                await self?.drainInvalidationMailbox(
+                    mailbox: mailbox,
                     epoch: epoch,
                     service: taskService,
                     shiftPlanEnabled: shiftPlanEnabled
@@ -310,7 +399,39 @@ final class ShiftTasksViewModel {
             return
         }
 
-        _ = await awaitGeneration(reservation.generation, epoch: epoch)
+        let result = await awaitGeneration(reservation.generation, epoch: epoch)
+        #if DEBUG
+        invalidationCompletionObserver?(result)
+        #endif
+    }
+
+    /// Drains the bounded invalidation mailbox on the MainActor. Exactly one drain
+    /// task is ever scheduled per not-draining → draining transition (see
+    /// `ShiftTaskInvalidationMailbox`); this loop then services all coalesced demand
+    /// and atomically ends the drain when none remains, so demand raised during the
+    /// loop is never lost yet no second task is spawned. Authority is fenced before
+    /// each ingest so a stale drain (post-reconfigure / teardown) does no work.
+    private func drainInvalidationMailbox(
+        mailbox: ShiftTaskInvalidationMailbox,
+        epoch: UInt64,
+        service: any ShiftTaskServiceProtocol,
+        shiftPlanEnabled: Bool
+    ) async {
+        while mailbox.takePending() {
+            guard matchesAuthority(
+                epoch: epoch,
+                taskIdentity: ObjectIdentifier(service as AnyObject),
+                signalRIdentity: signalRServiceIdentity
+            ) else {
+                mailbox.reset()
+                return
+            }
+            await ingestSupportedInvalidation(
+                epoch: epoch,
+                service: service,
+                shiftPlanEnabled: shiftPlanEnabled
+            )
+        }
     }
 
     /// Reserves the generation of the first canonical pass that will begin AFTER
@@ -354,25 +475,78 @@ final class ShiftTasksViewModel {
         return (pendingGeneration ?? allocateGeneration(), false)
     }
 
-    /// Hands out the next totally-ordered generation. When the sequence saturates,
-    /// the epoch is incremented (a checked add that traps rather than wrapping) and
-    /// the sequence restarts at 1, so the new generation still compares strictly
-    /// greater than every prior one. No wrapping arithmetic, no zero sentinel.
+    /// Hands out the next totally-ordered generation. Normally increments
+    /// `sequence`; on `sequence` saturation it rolls into the next `epoch`; and if
+    /// BOTH `epoch` and `sequence` are saturated it renormalizes the bounded set of
+    /// live generations onto a compact low range first. The result is a strict total
+    /// order that never wraps and never traps (issue #814, blocker 3).
     private func allocateGeneration() -> RefreshGeneration {
         if generationCursor.sequence == UInt64.max {
-            generationCursor = RefreshGeneration(
-                epoch: generationCursor.epoch + 1,
-                sequence: 1
-            )
-        } else {
-            generationCursor.sequence += 1
+            if generationCursor.epoch == UInt64.max {
+                // Both fields saturated — renormalize the (tiny) live set down to
+                // `(0, 1...k)`, resetting the cursor low so allocation can resume.
+                renormalizeGenerations()
+            } else {
+                generationCursor = RefreshGeneration(
+                    epoch: generationCursor.epoch + 1,
+                    sequence: 1
+                )
+                return generationCursor
+            }
         }
+        generationCursor.sequence += 1
         return generationCursor
     }
 
-    /// Parks a continuation for `generation`, resolving it exactly once when a
-    /// covering pass completes (or immediately if that generation has already
-    /// completed, or `false` on cancellation / stale authority).
+    /// Actor-isolated (MainActor) renormalization invoked only when the generation
+    /// cursor fully saturates. Because at most a handful of generations are ever
+    /// live (running, pending, last-completed, coalesced demand, and each parked
+    /// shared completion), it remaps that bounded set onto a compact `(0, 1...k)`
+    /// range that PRESERVES their exact relative order, and rewrites every
+    /// reference — including the shared-completion dictionary keys — consistently.
+    /// Parked callers are cancelled by waiter id (not by generation value), so key
+    /// remapping never severs a waiter from its completion. Allocation then resumes
+    /// from a low cursor without wrapping or trapping.
+    private func renormalizeGenerations() {
+        var live = Set<RefreshGeneration>()
+        if let runningGeneration { live.insert(runningGeneration) }
+        if let pendingGeneration { live.insert(pendingGeneration) }
+        if let lastCompletedGeneration { live.insert(lastCompletedGeneration) }
+        live.formUnion(coalescedDemand)
+        live.formUnion(generationCompletions.keys)
+
+        let ordered = live.sorted()
+        var mapping: [RefreshGeneration: RefreshGeneration] = [:]
+        for (index, generation) in ordered.enumerated() {
+            mapping[generation] = RefreshGeneration(epoch: 0, sequence: UInt64(index + 1))
+        }
+
+        func remap(_ generation: RefreshGeneration?) -> RefreshGeneration? {
+            guard let generation else { return nil }
+            return mapping[generation] ?? generation
+        }
+
+        runningGeneration = remap(runningGeneration)
+        pendingGeneration = remap(pendingGeneration)
+        lastCompletedGeneration = remap(lastCompletedGeneration)
+        coalescedDemand = Set(coalescedDemand.map { mapping[$0] ?? $0 })
+
+        var remappedCompletions: [RefreshGeneration: GenerationCompletion] = [:]
+        for (generation, completion) in generationCompletions {
+            remappedCompletions[mapping[generation] ?? generation] = completion
+        }
+        generationCompletions = remappedCompletions
+
+        generationCursor = ordered.isEmpty
+            ? RefreshGeneration(epoch: 0, sequence: 0)
+            : RefreshGeneration(epoch: 0, sequence: UInt64(ordered.count))
+    }
+
+    /// Awaits the SHARED completion for `generation`, resolving exactly once when a
+    /// covering pass completes (or immediately if that generation already completed,
+    /// or `false` on cancellation / stale authority). All callers of the same
+    /// generation share one completion object; cancellation is per caller by id and
+    /// resolves only that caller to `false`.
     private func awaitGeneration(
         _ generation: RefreshGeneration,
         epoch: UInt64
@@ -390,18 +564,19 @@ final class ShiftTasksViewModel {
                     continuation.resume(returning: lastCompletedResult)
                     return
                 }
-                refreshWaiters[generation, default: [:]][waiterID] = continuation
+                let completion = generationCompletions[generation] ?? {
+                    let created = GenerationCompletion()
+                    generationCompletions[generation] = created
+                    return created
+                }()
+                completion.addAwaiter(waiterID, continuation)
                 #if DEBUG
                 refreshWaiterRegistrationObserver?()
                 #endif
             }
         } onCancel: {
             Task { @MainActor [weak self] in
-                self?.cancelRefreshWaiter(
-                    generation: generation,
-                    id: waiterID,
-                    epoch: epoch
-                )
+                self?.cancelRefreshWaiter(id: waiterID, epoch: epoch)
             }
         }
     }
@@ -439,7 +614,21 @@ final class ShiftTasksViewModel {
             token: token,
             service: service
         ) {
-            guard let generation = runningGeneration else { return }
+            guard runningGeneration != nil else { return }
+            #if DEBUG
+            // Reserved-but-not-begun window: real callers can register against THIS
+            // pass right up until it begins. Production leaves the hook nil.
+            if let hook = ownerPassWillBeginHook {
+                await hook()
+                guard matchesRefreshOwner(
+                    epoch: epoch,
+                    token: token,
+                    service: service
+                ) else {
+                    return
+                }
+            }
+            #endif
             // The load is about to read server state: from this point a newly
             // arriving caller can no longer be guaranteed coverage by THIS pass and
             // must be routed to the next (pending) generation.
@@ -503,7 +692,6 @@ final class ShiftTasksViewModel {
 
             completePass(
                 token: token,
-                generation: generation,
                 succeeded: passSucceeded
             )
         }
@@ -515,12 +703,16 @@ final class ShiftTasksViewModel {
     /// `pendingGeneration` into the next running pass or retires the owner. This
     /// releases explicit mutation/load callers after the FIRST pass covering their
     /// generation instead of holding them until global quiescence.
+    ///
+    /// `runningGeneration` is read FRESH rather than captured, so if a concurrent
+    /// allocation renormalized the generation set while `loadSnapshot` was awaiting,
+    /// this still resolves the correct (remapped) generation (issue #814, blocker 3).
     private func completePass(
         token: UUID,
-        generation: RefreshGeneration,
         succeeded: Bool
     ) {
         guard refreshOwnerToken == token else { return }
+        guard let generation = runningGeneration else { return }
 
         if lastCompletedGeneration == nil || generation > lastCompletedGeneration! {
             lastCompletedGeneration = generation
@@ -543,27 +735,33 @@ final class ShiftTasksViewModel {
         isRefreshing = false
     }
 
+    /// Cancels a single caller by waiter id, searching across all live generation
+    /// completions (the id, not the generation value, is the stable key — so a
+    /// mid-flight renormalization that remapped generation values cannot sever the
+    /// caller from its completion). Resolves only THIS caller to `false`; peers
+    /// awaiting the same shared generation are untouched (issue #814, blocker 2).
     private func cancelRefreshWaiter(
-        generation: RefreshGeneration,
         id: UUID,
         epoch: UInt64
     ) {
-        guard lifecycleEpoch == epoch,
-              var bucket = refreshWaiters[generation],
-              let continuation = bucket.removeValue(forKey: id) else {
-            return
+        guard lifecycleEpoch == epoch else { return }
+
+        var didCancel = false
+        for (generation, completion) in generationCompletions {
+            if completion.cancelAwaiter(id) {
+                didCancel = true
+                if completion.awaiterCount == 0, !completion.isResolved {
+                    generationCompletions.removeValue(forKey: generation)
+                }
+                break
+            }
         }
-        if bucket.isEmpty {
-            refreshWaiters.removeValue(forKey: generation)
-        } else {
-            refreshWaiters[generation] = bucket
-        }
-        continuation.resume(returning: false)
+        guard didCancel else { return }
 
         // Only abandon the owner once there is genuinely no outstanding demand:
         // no parked continuation and no coalesced invalidation still awaiting a
         // covering pass.
-        if refreshWaiters.isEmpty, coalescedDemand.isEmpty {
+        if generationCompletions.isEmpty, coalescedDemand.isEmpty {
             abandonRefreshOwner()
         }
     }
@@ -734,6 +932,8 @@ final class ShiftTasksViewModel {
 
         taskInvalidationSubscription?.cancel()
         taskInvalidationSubscription = nil
+        invalidationMailbox?.reset()
+        invalidationMailbox = nil
 
         refreshOwnerTask?.cancel()
         refreshOwnerTask = nil
@@ -774,52 +974,77 @@ final class ShiftTasksViewModel {
         }
     }
 
-    /// Resolves every parked continuation whose target generation is covered by the
-    /// just-completed `generation`, removing each from its bucket BEFORE resuming so
-    /// no continuation can be resumed twice even under re-entrant registration.
+    /// Resolves every shared completion whose target generation is covered by the
+    /// just-completed `generation`, removing each from the map BEFORE resuming so no
+    /// completion can be resolved twice even under re-entrant registration. Each
+    /// completion fans its single shared result out to all its callers at once.
     private func resumeRefreshWaiters(
         coveringThrough generation: RefreshGeneration,
         returning value: Bool
     ) {
-        let coveredKeys = refreshWaiters.keys.filter { $0 <= generation }
+        let coveredKeys = generationCompletions.keys.filter { $0 <= generation }
         guard !coveredKeys.isEmpty else { return }
-        var continuations: [CheckedContinuation<Bool, Never>] = []
+        var completions: [GenerationCompletion] = []
         for key in coveredKeys {
-            if let bucket = refreshWaiters.removeValue(forKey: key) {
-                continuations.append(contentsOf: bucket.values)
+            if let completion = generationCompletions.removeValue(forKey: key) {
+                completions.append(completion)
             }
         }
-        for continuation in continuations {
-            continuation.resume(returning: value)
+        for completion in completions {
+            completion.resolve(value)
         }
     }
 
-    /// Resolves ALL parked continuations exactly once (teardown / server
-    /// replacement). Buckets are drained before any resume so re-entrancy cannot
-    /// observe a resumed continuation still registered.
+    /// Resolves ALL shared completions exactly once WITHOUT publishing success
+    /// (teardown / server replacement). The map is drained before any resume so
+    /// re-entrancy cannot observe a resumed completion still registered, and no
+    /// stale success is ever published.
     private func resumeAllRefreshWaiters(returning value: Bool) {
-        let buckets = refreshWaiters
-        refreshWaiters.removeAll()
-        for bucket in buckets.values {
-            for continuation in bucket.values {
-                continuation.resume(returning: value)
+        let completions = generationCompletions
+        generationCompletions.removeAll()
+        for completion in completions.values {
+            if value {
+                completion.resolve(true)
+            } else {
+                completion.resumeAllForTeardown()
             }
         }
     }
 
     #if DEBUG
-    /// Number of parked continuations across all generations. Bounded by concurrent
-    /// explicit callers plus at most one pass-initiating invalidation — independent
-    /// of invalidation volume.
+    /// Number of parked continuations across all live generation completions.
+    /// Bounded by concurrent explicit callers plus at most one pass-initiating
+    /// invalidation — independent of invalidation volume.
     var pendingRefreshWaiterCountForTesting: Int {
-        refreshWaiters.values.reduce(0) { $0 + $1.count }
+        generationCompletions.values.reduce(0) { $0 + $1.awaiterCount }
     }
 
+    /// Number of live shared-completion objects (one per live generation). This is
+    /// the coalescer's per-generation state size: it stays O(live generations) and
+    /// NEVER grows with the number of callers N targeting a generation (issue #814,
+    /// blocker 2).
+    var liveGenerationCompletionCountForTesting: Int { generationCompletions.count }
+
     var refreshWaiterTargetGenerationsForTesting: [UInt64] {
-        refreshWaiters.flatMap { generation, bucket in
-            Array(repeating: generation.sequence, count: bucket.count)
+        generationCompletions.flatMap { generation, completion in
+            Array(repeating: generation.sequence, count: completion.awaiterCount)
         }
         .sorted()
+    }
+
+    /// Number of MainActor drain tasks the invalidation mailbox has scheduled since
+    /// the current lifecycle began. A burst of N supported invalidations delivered
+    /// while the MainActor is occupied schedules AT MOST ONE additional drain, so
+    /// this count is N-independent (issue #814, blocker 1).
+    var invalidationMailboxScheduleCountForTesting: Int {
+        invalidationMailbox?.scheduleCountForTesting ?? 0
+    }
+
+    /// Number of supported invalidations deposited into the mailbox this lifecycle.
+    /// Grows with event count (proving events are observed) while the schedule count
+    /// stays constant (proving drains are coalesced).
+    var invalidationMailboxDepositCountForTesting: Int {
+        invalidationMailbox?.depositCountForTesting ?? 0
     }
 
     var isRefreshOwnerActiveForTesting: Bool { refreshOwnerToken != nil }
@@ -839,23 +1064,22 @@ final class ShiftTasksViewModel {
 
     var pendingGenerationSequenceForTesting: UInt64? { pendingGeneration?.sequence }
 
-    /// Drives the REAL reservation path once (using the VM's current authority)
-    /// and returns the reserved generation's `(epoch, sequence)` plus whether it
-    /// started the owner, so a test can prove first-pass-after-registration
-    /// semantics without reaching into internals.
-    func debugReserveCoveringGeneration()
-        -> (epoch: UInt64, sequence: UInt64, didStartOwner: Bool)? {
-        guard isActive, let service = taskService else { return nil }
-        let reservation = reserveCoveringGeneration(
-            epoch: lifecycleEpoch,
-            service: service,
-            shiftPlanEnabled: shiftPlanEnabled
-        )
-        return (
-            reservation.generation.epoch,
-            reservation.generation.sequence,
-            reservation.didStartOwner
-        )
+    /// Full `(epoch, sequence)` tokens for the running / pending / last-completed
+    /// generations, so a renormalization proof can assert the entire live set was
+    /// remapped onto a compact low range while preserving relative order (issue
+    /// #814, blocker 3).
+    var runningGenerationTokenForTesting: (epoch: UInt64, sequence: UInt64)? {
+        runningGeneration.map { ($0.epoch, $0.sequence) }
+    }
+
+    var pendingGenerationTokenForTesting: (epoch: UInt64, sequence: UInt64)? {
+        pendingGeneration.map { ($0.epoch, $0.sequence) }
+    }
+
+    var liveGenerationCompletionTokensForTesting: [(epoch: UInt64, sequence: UInt64)] {
+        generationCompletions.keys
+            .map { ($0.epoch, $0.sequence) }
+            .sorted { ($0.epoch, $0.sequence) < ($1.epoch, $1.sequence) }
     }
 
     /// Positions the generation cursor for a deterministic rollover proof without
@@ -884,4 +1108,79 @@ final class ShiftTasksViewModel {
             < RefreshGeneration(epoch: rhsEpoch, sequence: rhsSequence)
     }
     #endif
+}
+
+/// Bounded, thread-safe coalescing mailbox that decouples the number of supported
+/// SignalR invalidation events from the number of MainActor drain tasks scheduled.
+///
+/// The SignalR hub delivers events synchronously on its serial coordinator queue
+/// (off the MainActor). Without coalescing, a burst of N events while the MainActor
+/// is occupied would enqueue N hop tasks and, transitively, risk N parked waiters.
+/// This mailbox guarantees that AT MOST ONE drain task is in flight at a time,
+/// independent of event count, while never losing a deposit raised during a
+/// drain/reschedule race:
+///
+/// - `deposit()` sets pending demand and returns `true` ONLY on the idle → draining
+///   transition, so exactly one caller is told to schedule the single drain.
+/// - `takePending()` clears-and-checks demand under the SAME lock; when it finds no
+///   demand it atomically ends the draining state. Because deposit's set and
+///   takePending's clear share one lock, a deposit that races the end-of-drain
+///   either keeps the current drain alive (demand still set) or wins the next
+///   idle → draining transition (schedules a fresh drain) — never both, never
+///   neither.
+///
+/// `@unchecked Sendable` is sound: all mutable state is guarded by `lock`.
+private final class ShiftTaskInvalidationMailbox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pendingDemand = false
+    private var draining = false
+
+    #if DEBUG
+    private var depositCount = 0
+    private var scheduleCount = 0
+    var depositCountForTesting: Int { lock.withLock { depositCount } }
+    var scheduleCountForTesting: Int { lock.withLock { scheduleCount } }
+    #endif
+
+    /// Records one unit of demand. Returns `true` exactly once per idle → draining
+    /// transition; the sole `true` recipient must schedule exactly one drain.
+    func deposit() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        #if DEBUG
+        depositCount += 1
+        #endif
+        pendingDemand = true
+        if draining {
+            return false
+        }
+        draining = true
+        #if DEBUG
+        scheduleCount += 1
+        #endif
+        return true
+    }
+
+    /// Consumes pending demand for one drain iteration. Returns `true` if there was
+    /// demand to service; otherwise atomically clears the draining state and returns
+    /// `false`, ending the drain loop.
+    func takePending() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if pendingDemand {
+            pendingDemand = false
+            return true
+        }
+        draining = false
+        return false
+    }
+
+    /// Clears all state (authority change / teardown), so an outstanding drain
+    /// observes no demand and exits without touching fresh lifecycle state.
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        pendingDemand = false
+        draining = false
+    }
 }
