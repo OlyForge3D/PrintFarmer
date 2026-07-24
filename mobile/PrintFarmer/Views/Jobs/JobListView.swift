@@ -173,7 +173,16 @@ struct JobListView: View {
             }
 
             if !viewModel.recentJobs.isEmpty {
-                Section(isExpanded: $viewModel.showRecentJobs) {
+                // Recent must render like the sibling In Queue / Printing
+                // sections. A collapsible `Section(isExpanded:)` under the
+                // `.plain` list style renders no disclosure control on iPad,
+                // so the section stayed permanently collapsed and completed
+                // jobs (and their harvest entry point) were unreachable in
+                // the regular size class (#794). A plain always-visible
+                // section keeps completed jobs reachable on iPad; the iPhone
+                // layout uses the separate paged `RecentPage()` and is
+                // unaffected.
+                Section {
                     ForEach(viewModel.recentJobs.prefix(10)) { item in
                         recentJobRow(item)
                     }
