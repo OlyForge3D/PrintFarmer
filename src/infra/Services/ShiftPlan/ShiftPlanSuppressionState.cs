@@ -57,6 +57,20 @@ public readonly record struct ReplayTombstone(long Version, DateTime ObservedAtU
 public sealed class ShiftPlanSuppressionState
 {
     /// <summary>
+    /// Version assigned to a suppressed key that carries no explicit mutation version — i.e. a key
+    /// present in <see cref="SuppressedKeys"/> without a matching <see cref="SuppressedVersions"/>
+    /// entry. Production always records <see cref="UserTask.LastMutationSequence"/> alongside a
+    /// suppression, so this only covers versionless/direct-seeded legacy rows. It is treated as the
+    /// lowest legitimate durable version (<c>0</c>) rather than <see cref="long.MinValue"/> so that
+    /// when such a key is cleared, its replay tombstone floors at <c>0</c>: an equal legacy-<c>0</c>
+    /// durable/delta replay is then idempotent (<c>0 &lt;= 0</c>), while a strictly newer dismissal
+    /// (version &gt;= 1) still re-suppresses. Using <see cref="long.MinValue"/> here would let a
+    /// legacy-<c>0</c> replay read as newer than the tombstone and wrongly re-suppress a genuine
+    /// recurrence — the exact #823 failure on the versionless-seed path.
+    /// </summary>
+    public const long LegacySuppressionVersion = 0L;
+
+    /// <summary>
     /// UTC start-of-pass timestamp from the previous compile, or <c>null</c> before
     /// the first pass. Used to bootstrap newly-suppressed keys precisely from
     /// "since the last pass" instead of a fixed rolling window.
@@ -247,7 +261,7 @@ public sealed class ShiftPlanSuppressionState
     {
         long version = SuppressedVersions.TryGetValue(key, out long suppressedVersion)
             ? suppressedVersion
-            : long.MinValue;
+            : LegacySuppressionVersion;
         MarkCleared(key, version, clearedAtUtc);
     }
 

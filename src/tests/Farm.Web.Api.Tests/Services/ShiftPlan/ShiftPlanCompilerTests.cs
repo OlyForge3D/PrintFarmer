@@ -1250,6 +1250,55 @@ public class ShiftPlanCompilerTests
         Assert.Equal(5L, afterClear.Version);
     }
 
+    /// <summary>
+    /// Issue #823 (legacy versionless-seed edge — direct state): a key present in
+    /// <see cref="ShiftPlanSuppressionState.SuppressedKeys"/> with NO matching
+    /// <see cref="ShiftPlanSuppressionState.SuppressedVersions"/> entry (a versionless/direct-seeded
+    /// legacy row) must clear to a replay tombstone floored at the legacy version <c>0</c> — NOT
+    /// <see cref="long.MinValue"/>. Otherwise an equal legacy-<c>0</c> durable/delta replay reads as
+    /// strictly newer than the tombstone and wrongly re-suppresses a genuine recurrence after the
+    /// kind bootstraps, reproducing #823 on the versionless-seed path. Proves the exact
+    /// direct-seed → clear → bootstrap → equal-v0 replay sequence stays idempotent while a strictly
+    /// newer (v1) dismissal still re-suppresses.
+    /// </summary>
+    [Fact]
+    public void SuppressionState_VersionlessSeedClearedThenEqualZeroReplay_IsIdempotent_NewerReSuppresses()
+    {
+        ShiftPlanSuppressionState state = new();
+        (UserTaskSourceKind, string) keyA = (UserTaskSourceKind.FailureIncident, "failure:A");
+        DateTime t = new(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+
+        // Direct/legacy seed: suppressed with NO recorded mutation version or replay memory.
+        _ = state.SuppressedKeys.Add(keyA);
+        Assert.False(state.TryGetReplayTombstone(keyA, out _));
+
+        // Clear the versionless key: the tombstone must floor at legacy 0, not long.MinValue.
+        state.MarkCleared(keyA, t);
+        Assert.DoesNotContain(keyA, state.SuppressedKeys);
+        Assert.True(state.IsExcludedFromBootstrap(keyA));
+        Assert.True(state.TryGetReplayTombstone(keyA, out ReplayTombstone afterClear));
+        Assert.Equal(ShiftPlanSuppressionState.LegacySuppressionVersion, afterClear.Version);
+        Assert.Equal(0L, afterClear.Version);
+
+        // Kind bootstraps: exclusion evidence may drop, but the legacy-0 tombstone survives.
+        state.MarkBootstrapped(UserTaskSourceKind.FailureIncident);
+        Assert.False(state.IsExcludedFromBootstrap(keyA));
+        Assert.True(state.TryGetReplayTombstone(keyA, out ReplayTombstone afterBootstrap));
+        Assert.Equal(0L, afterBootstrap.Version);
+
+        // Equal legacy-0 replay (durable row / overlapped delta) is idempotent: A is NOT re-suppressed.
+        Assert.False(state.ObserveDismissal(keyA, version: 0, observedAtUtc: t));
+        Assert.DoesNotContain(keyA, state.SuppressedKeys);
+        Assert.True(state.TryGetReplayTombstone(keyA, out ReplayTombstone afterReplay));
+        Assert.Equal(0L, afterReplay.Version);
+
+        // A strictly newer (v1) dismissal is a genuine new episode: it re-suppresses and advances.
+        Assert.True(state.ObserveDismissal(keyA, version: 1, observedAtUtc: t));
+        Assert.Contains(keyA, state.SuppressedKeys);
+        Assert.True(state.TryGetReplayTombstone(keyA, out ReplayTombstone afterNewer));
+        Assert.Equal(1L, afterNewer.Version);
+    }
+
     [Fact]
     public async Task CompileAsync_SpecWithoutSourceKindOrSourceId_IsIgnored()
     {
