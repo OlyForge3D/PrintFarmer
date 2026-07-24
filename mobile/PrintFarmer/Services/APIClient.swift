@@ -925,6 +925,21 @@ actor APIClient {
         return try await execute(request, session: requestSession)
     }
 
+    func put<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String]
+    ) async throws -> T {
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        return try await execute(request, session: requestSession)
+    }
+
     func patch<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
         let requestSession = captureRequestSession()
         var request = try buildRequest(session: requestSession, path: path, method: "PATCH")

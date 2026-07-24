@@ -188,6 +188,8 @@ struct OfflineQueueStatusView: View {
         switch item.operation {
         case .partAdjustment(let sku, _): return "Adjust \(sku)"
         case .harvest: return "Harvest job"
+        case .taskComplete: return "Complete task"
+        case .toolheadBind(_, let toolheadIndex, _, _, _): return "Bind toolhead \(toolheadIndex)"
         }
     }
 

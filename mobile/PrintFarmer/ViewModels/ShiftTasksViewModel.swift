@@ -42,6 +42,7 @@ final class ShiftTasksViewModel {
 
     @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
     @ObservationIgnored private var taskService: (any ShiftTaskServiceProtocol)?
+    @ObservationIgnored private var offlineQueue: (any OfflineWriteEnqueuing)?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var taskServiceIdentity: ObjectIdentifier?
     @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
@@ -73,7 +74,8 @@ final class ShiftTasksViewModel {
     func configure(
         taskService: any ShiftTaskServiceProtocol,
         signalRService: any SignalRServiceProtocol,
-        shiftPlanEnabled: Bool
+        shiftPlanEnabled: Bool,
+        offlineQueue: (any OfflineWriteEnqueuing)? = nil
     ) {
         let newTaskIdentity = ObjectIdentifier(taskService as AnyObject)
         let newSignalRIdentity = ObjectIdentifier(signalRService as AnyObject)
@@ -88,6 +90,7 @@ final class ShiftTasksViewModel {
         invalidateLifecycle(resetState: true)
         self.taskService = taskService
         self.signalRService = signalRService
+        self.offlineQueue = offlineQueue
         self.taskServiceIdentity = newTaskIdentity
         self.signalRServiceIdentity = newSignalRIdentity
         self.shiftPlanEnabled = shiftPlanEnabled
@@ -425,6 +428,37 @@ final class ShiftTasksViewModel {
             ) else {
                 return
             }
+
+            // Offline-class failure of a task completion: durably enqueue the
+            // frozen intent (same idempotency key) so it replays exactly once
+            // when connectivity returns (F10-Q2, #790). Skip/dismiss are NEVER
+            // queued. Terminal conflicts / validation / identity failures are
+            // surfaced immediately as before (never queued). Only the
+            // completion op with an enqueuer wired takes this path; otherwise
+            // the pre-existing surfaced-failure behavior is unchanged.
+            if intent.operation == .complete,
+               let offlineQueue,
+               let idempotencyKey = intent.idempotencyKey,
+               OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(error) {
+                let result = await offlineQueue.enqueue(
+                    .taskComplete(taskID: intent.taskID, idempotencyKey: idempotencyKey)
+                )
+                guard matchesMutation(
+                    taskID: intent.taskID,
+                    token: token,
+                    epoch: epoch,
+                    taskIdentity: taskIdentity
+                ) else {
+                    return
+                }
+                if case .enqueued = result {
+                    // Safely queued — clear the in-flight state without an error
+                    // banner. The offline status surface tracks the pending item.
+                    mutationActivities.removeValue(forKey: intent.taskID)
+                    return
+                }
+            }
+
             mutationActivities[intent.taskID] = ShiftTaskMutationActivity(
                 token: token,
                 intent: intent,

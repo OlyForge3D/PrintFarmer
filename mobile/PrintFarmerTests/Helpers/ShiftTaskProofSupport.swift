@@ -278,7 +278,8 @@ func makeShiftTask(
     anchorAtUtc: Date? = nil,
     windowStartUtc: Date? = nil,
     windowEndUtc: Date? = nil,
-    sourceKind: ShiftTaskSourceKind = .harvest
+    sourceKind: ShiftTaskSourceKind = .harvest,
+    status: ShiftTaskStatus = .pending
 ) -> ShiftTask {
     ShiftTask(
         id: id,
@@ -287,7 +288,7 @@ func makeShiftTask(
         entityId: "30000000-0003-0000-0000-000000000001",
         title: title,
         description: "Proof detail",
-        status: .pending,
+        status: status,
         priority: priority,
         createdAt: Date(timeIntervalSince1970: 1_773_000_000),
         dueAt: nil,
