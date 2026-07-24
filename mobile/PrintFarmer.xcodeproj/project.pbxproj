@@ -184,6 +184,7 @@
 		F7778AC5000000000000B005 /* ControlledFilamentCoverageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7778BD5000000000000B005 /* ControlledFilamentCoverageService.swift */; };
 		A70A710000000000A0000101 /* AttentionModelDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */; };
 		A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000102 /* AttentionServiceTests.swift */; };
+		D8180000000000000000A001 /* PushDegradationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8180000000000000000B001 /* PushDegradationTests.swift */; };
 		A70A710000000000A0000201 /* PrinterBackendCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */; };
 		A78210000000000000000001 /* ShiftTaskModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78200000000000000000001 /* ShiftTaskModels.swift */; };
 		A78210000000000000000002 /* ShiftTaskService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78200000000000000000002 /* ShiftTaskService.swift */; };
@@ -672,6 +673,7 @@
 		F7778BD5000000000000B005 /* ControlledFilamentCoverageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlledFilamentCoverageService.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000101 /* AttentionModelDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionModelDecodingTests.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000102 /* AttentionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttentionServiceTests.swift; sourceTree = "<group>"; };
+		D8180000000000000000B001 /* PushDegradationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushDegradationTests.swift; sourceTree = "<group>"; };
 		A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilitiesTests.swift; sourceTree = "<group>"; };
 		A78200000000000000000001 /* ShiftTaskModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskModels.swift; sourceTree = "<group>"; };
 		A78200000000000000000002 /* ShiftTaskService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskService.swift; sourceTree = "<group>"; };
@@ -1413,6 +1415,7 @@
 				FA5A00000000000000000014 /* FarmSnapshotContainerAuthorityTests.swift */,
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
 				A70A710000000000B0000102 /* AttentionServiceTests.swift */,
+				D8180000000000000000B001 /* PushDegradationTests.swift */,
 				BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */,
 				BC20000000000000000000FA /* SpoolServiceTests.swift */,
 				D61000000000000000000005 /* ServerRegistryTests.swift */,
@@ -1753,6 +1756,7 @@
 				BC10000000000000000000FA /* SpoolServiceTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				A70A710000000000A0000102 /* AttentionServiceTests.swift in Sources */,
+				D8180000000000000000A001 /* PushDegradationTests.swift in Sources */,
 				A78230000000000000000002 /* ShiftTaskModelsServiceTests.swift in Sources */,
 				A78230000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift in Sources */,
 				A79910000000000000000003 /* AttentionFeedViewModelTests.swift in Sources */,

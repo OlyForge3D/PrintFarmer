@@ -954,6 +954,19 @@ actor APIClient {
         try await executeVoid(request, session: requestSession)
     }
 
+    /// DELETE with a JSON request body. Some gated endpoints (e.g. native-push
+    /// `DELETE /api/notifications/device-tokens`, issue #818) identify the
+    /// resource by a body field rather than a path segment. Routes through the
+    /// same `validateResponse` path as every other verb, so a gated 404 with
+    /// `code == "featureDisabled"` still surfaces as `NetworkError.featureDisabled`.
+    func deleteVoid<B: Encodable & Sendable>(_ path: String, body: B) async throws {
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "DELETE")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        try await executeVoid(request, session: requestSession)
+    }
+
     // MARK: - Internal
 
     private func buildRequest(session requestSession: RequestSession, path: String, method: String) throws -> URLRequest {
