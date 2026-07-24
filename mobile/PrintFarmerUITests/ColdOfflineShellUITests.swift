@@ -51,6 +51,19 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
             .firstMatch
     }
 
+    /// Matches the first descendant with the exact accessibility identifier,
+    /// regardless of its XCUI element type. SwiftUI attaches an identifier placed
+    /// on a transparent container to whatever concrete view it collapses onto
+    /// (e.g. `cold-offline-shell` lands on the cards `ScrollView`, so it surfaces
+    /// under `scrollViews`, not `otherElements`). Querying by identifier across
+    /// any type keeps these state anchors robust without asserting a brittle,
+    /// layout-dependent element class.
+    private func element(id: String) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@", id))
+            .firstMatch
+    }
+
     // MARK: - Tests
 
     /// Offline launch renders the cached read-only shell with populated cards.
@@ -58,7 +71,7 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
         openColdOfflineShell()
 
         XCTAssertTrue(
-            app.otherElements["cold-offline-shell"].waitForExistence(timeout: 10),
+            element(id: "cold-offline-shell").waitForExistence(timeout: 10),
             "The cold-offline shell content container must be present"
         )
 
@@ -72,11 +85,11 @@ final class ColdOfflineShellUITests: PrintFarmerUITestCase {
         // The distinct "no cached data" and present-empty dead-ends must NOT be
         // shown when a populated snapshot exists.
         XCTAssertFalse(
-            app.otherElements["farm-absent-state"].exists,
+            element(id: "farm-absent-state").exists,
             "A populated cached snapshot must not render the absent-fleet state"
         )
         XCTAssertFalse(
-            app.otherElements["farm-cached-empty-state"].exists,
+            element(id: "farm-cached-empty-state").exists,
             "A populated cached snapshot must not render the cached-empty state"
         )
     }
