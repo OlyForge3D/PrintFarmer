@@ -10,7 +10,10 @@ struct PrinterDetailView: View {
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
 
+    private let printerId: UUID
+
     init(printerId: UUID) {
+        self.printerId = printerId
         _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
         _coverageViewModel = State(initialValue: PrinterFilamentCoverageViewModel(printerId: printerId))
     }
@@ -35,6 +38,10 @@ struct PrinterDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        // Stable, printer-scoped destination identifier so task-action routing
+        // (#788) can assert it reached the exact printer and place a11y focus
+        // there. Additive only — no behavior change.
+        .accessibilityIdentifier("printer.detail.root.\(printerId.uuidString)")
         .navigationTitle("Printer")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)

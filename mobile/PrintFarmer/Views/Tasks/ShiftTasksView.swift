@@ -2,7 +2,10 @@ import SwiftUI
 
 struct ShiftTasksView: View {
     @Environment(ServiceContainer.self) private var services
+    @Environment(AppRouter.self) private var router
     @State private var viewModel = ShiftTasksViewModel()
+    @State private var actionRouter = TaskActionRouter()
+    @State private var actionCapabilities = TaskActionCapabilities()
 
     var body: some View {
         NavigationStack {
@@ -23,13 +26,42 @@ struct ShiftTasksView: View {
                 .refreshable {
                     await reloadCapabilitiesAndTasks()
                 }
+                .sheet(item: harvestPresentationBinding) { presentation in
+                    HarvestSheetView(job: presentation.job) {
+                        Task { await actionRouter.harvestDidComplete(taskID: presentation.taskID) }
+                    }
+                    .accessibilityIdentifier("shiftTasks.destination.harvest.\(presentation.taskID)")
+                }
+                .sheet(item: maintenancePresentationBinding) { presentation in
+                    MaintenanceView()
+                        .accessibilityIdentifier("shiftTasks.destination.maintenance.\(presentation.taskID)")
+                }
         }
         .task(id: services.activeServerGeneration) {
             await reloadCapabilitiesAndTasks()
         }
+        .onChange(of: services.activeServerGeneration) { _, _ in
+            // Server switch / teardown: invalidate any in-flight handoff so a
+            // stale destination cannot be applied against the new server (#726).
+            actionRouter.invalidate()
+        }
         .onDisappear {
             viewModel.deactivate()
         }
+    }
+
+    private var harvestPresentationBinding: Binding<TaskActionRouter.HarvestPresentation?> {
+        Binding(
+            get: { actionRouter.harvestPresentation },
+            set: { if $0 == nil { actionRouter.harvestSheetDismissed() } }
+        )
+    }
+
+    private var maintenancePresentationBinding: Binding<TaskActionRouter.MaintenancePresentation?> {
+        Binding(
+            get: { actionRouter.maintenancePresentation },
+            set: { if $0 == nil { actionRouter.maintenanceSheetDismissed() } }
+        )
     }
 
     @ViewBuilder
@@ -116,7 +148,12 @@ struct ShiftTasksView: View {
                 ForEach(snapshot.groups) { group in
                     Section {
                         ForEach(group.tasks) { task in
-                            ShiftTaskRow(task: task, viewModel: viewModel)
+                            ShiftTaskRow(
+                                task: task,
+                                viewModel: viewModel,
+                                actionRouter: actionRouter,
+                                capabilities: actionCapabilities
+                            )
                         }
                     } header: {
                         Text(group.anchorKind.groupTitle)
@@ -200,19 +237,66 @@ struct ShiftTasksView: View {
         await services.capabilitiesService.refresh()
         guard !Task.isCancelled else { return }
 
+        let resolved = services.capabilitiesService.resolved
+        actionCapabilities = TaskActionCapabilities(resolved: resolved)
+        configureActionRouter()
+
         viewModel.configure(
             taskService: services.shiftTaskService,
             signalRService: services.signalRService,
-            shiftPlanEnabled: services.capabilitiesService.resolved.shiftPlanEnabled,
+            shiftPlanEnabled: resolved.shiftPlanEnabled,
             offlineQueue: services.offlineWriteQueue
         )
         _ = await viewModel.refresh()
+    }
+
+    /// Wires the task-action router to the shared `AppRouter`, the job service,
+    /// and the checklist view model. The authority snapshot is the active
+    /// server generation so a mid-handoff server switch aborts destination
+    /// application. `refreshTasks` performs the single canonical refresh after
+    /// a successful harvest; the router never issues a domain mutation.
+    private func configureActionRouter() {
+        let services = services
+        let router = router
+        let viewModel = viewModel
+        actionRouter.configure(
+            environment: TaskActionRoutingEnvironment(
+                dismissActiveSheets: {
+                    // Dismiss any active operator/legacy sheet and yield one
+                    // runloop turn so SwiftUI applies the dismissal before the
+                    // destination mutates (#726 dismiss-before-destination).
+                    router.requestTransientSheetDismissal()
+                    await Task { @MainActor in }.value
+                },
+                navigateToSwap: { printerID, toolheadID in
+                    router.routeToFilamentSwap(printerID: printerID, toolheadID: toolheadID)
+                },
+                authoritySnapshot: {
+                    services.activeServerGeneration
+                },
+                loadHarvestJob: { jobID in
+                    do {
+                        let job = try await services.jobService.get(id: jobID)
+                        return .success(job)
+                    } catch NetworkError.unauthorized, NetworkError.forbidden {
+                        return .failure(.unauthorized)
+                    } catch {
+                        return .failure(.dependencyUnavailable)
+                    }
+                },
+                refreshTasks: {
+                    _ = await viewModel.refresh()
+                }
+            )
+        )
     }
 }
 
 private struct ShiftTaskRow: View {
     let task: ShiftTask
     let viewModel: ShiftTasksViewModel
+    let actionRouter: TaskActionRouter
+    let capabilities: TaskActionCapabilities
 
     private var presentation: ShiftTaskRowPresentation {
         ShiftTaskRowPresentation(task: task)
@@ -222,9 +306,21 @@ private struct ShiftTaskRow: View {
         viewModel.mutationActivity(for: task.id)
     }
 
+    private var actionKind: TaskActionKind? {
+        TaskActionKind(taskType: task.taskType)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             taskSummary
+
+            if let actionKind {
+                primaryAction(actionKind)
+            }
+
+            if let routeError = actionRouter.rowError(for: task.id) {
+                routeErrorView(routeError)
+            }
 
             if let failure = activity?.failure {
                 mutationError(failure, isRetrying: activity?.isInFlight == true)
@@ -292,6 +388,68 @@ private struct ShiftTaskRow: View {
                 operationButton(.dismiss)
             }
         }
+    }
+
+    private func primaryAction(_ kind: TaskActionKind) -> some View {
+        Button {
+            Task { await actionRouter.activate(task: task, capabilities: capabilities) }
+        } label: {
+            HStack(spacing: 8) {
+                if actionRouter.isRouting(taskID: task.id) {
+                    ProgressView()
+                }
+                Text(primaryActionLabel(kind))
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .frame(maxWidth: .infinity)
+        .disabled(actionRouter.isRouting(taskID: task.id))
+        .accessibilityLabel(primaryActionLabel(kind))
+        .accessibilityHint("Opens the \(primaryActionLabel(kind).lowercased()) flow for \(task.title).")
+        .accessibilityIdentifier("shiftTasks.action.open.\(task.id)")
+    }
+
+    private func primaryActionLabel(_ kind: TaskActionKind) -> String {
+        switch kind {
+        case .harvest: "Harvest plate"
+        case .filamentSwap: "Swap filament"
+        case .maintenance: "Review maintenance"
+        }
+    }
+
+    private func routeErrorView(_ error: TaskActionRouter.RowError) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label {
+                Text("Can't open this task")
+                    .font(.subheadline.weight(.semibold))
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+            }
+            .foregroundStyle(.orange)
+
+            Text(error.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button("Dismiss") {
+                actionRouter.dismissRowError(taskID: task.id)
+            }
+            .buttonStyle(.bordered)
+            .frame(minHeight: 44)
+            .accessibilityLabel("Dismiss error")
+            .accessibilityHint("Dismisses the routing error for \(task.title).")
+            .accessibilityIdentifier("shiftTasks.action.error.dismiss.\(task.id)")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(Color.orange.opacity(0.45), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("shiftTasks.action.error.\(task.id)")
     }
 
     private func operationButton(_ operation: ShiftTaskMutationOperation) -> some View {

@@ -5,6 +5,7 @@ enum DemoShiftTaskScenario: Equatable {
     #if DEBUG
     case mutationFailureThenSuccess
     case initialLoadFailureThenSuccess
+    case taskActionRouting
     #endif
 }
 
@@ -43,6 +44,8 @@ actor DemoShiftTaskService: ShiftTaskServiceProtocol {
             self.tasks = Self.standardTasks
         case .mutationFailureThenSuccess:
             self.tasks = [Self.mutationTask]
+        case .taskActionRouting:
+            self.tasks = Self.routingTasks
         }
         #else
         self.tasks = Self.standardTasks
@@ -186,4 +189,85 @@ actor DemoShiftTaskService: ShiftTaskServiceProtocol {
             sourceId: "spool:demo"
         ),
     ]
+
+    #if DEBUG
+    /// Deterministic, dedicated seed for #788 task-action routing XCUI. Each
+    /// actionable row targets a REAL demo entity so the shipped destination
+    /// flow can load its context: harvest → an existing completed job, swap →
+    /// an existing printer, maintenance → an existing printer with a structured
+    /// `maintenancealert:` source id. Duplicate display names across rows prove
+    /// routing keys off stable IDs, never titles.
+    static let routingHarvestTaskID = "78810000-0000-0000-0000-000000000001"
+    static let routingSwapTaskID = "78810000-0000-0000-0000-000000000002"
+    static let routingMaintenanceTaskID = "78810000-0000-0000-0000-000000000003"
+    static let routingHarvestJobID = "30000000-0003-0000-0000-000000000007"
+    static let routingSwapPrinterID = "10000000-0001-0000-0000-000000000003"
+    static let routingMaintenancePrinterID = "10000000-0001-0000-0000-000000000001"
+
+    private static let routingTasks = [
+        ShiftTask(
+            id: routingHarvestTaskID,
+            taskType: .harvestReady,
+            entityType: "Job",
+            entityId: routingHarvestJobID,
+            title: "Handle the plate",
+            description: "Completed print is ready to clear.",
+            status: .pending,
+            priority: .high,
+            createdAt: Date(timeIntervalSince1970: 1_784_510_400),
+            dueAt: nil,
+            completedAt: nil,
+            relatedEntityCount: 1,
+            metadataJson: nil,
+            anchorKind: .now,
+            anchorAtUtc: nil,
+            windowStartUtc: nil,
+            windowEndUtc: nil,
+            sourceKind: .harvest,
+            sourceId: "harvest:routing"
+        ),
+        ShiftTask(
+            id: routingSwapTaskID,
+            taskType: .filamentRunout,
+            entityType: "Printer",
+            entityId: routingSwapPrinterID,
+            title: "Handle the plate",
+            description: "Filament is about to run out.",
+            status: .pending,
+            priority: .high,
+            createdAt: Date(timeIntervalSince1970: 1_784_510_460),
+            dueAt: nil,
+            completedAt: nil,
+            relatedEntityCount: 1,
+            metadataJson: nil,
+            anchorKind: .now,
+            anchorAtUtc: nil,
+            windowStartUtc: nil,
+            windowEndUtc: nil,
+            sourceKind: .filamentCoverage,
+            sourceId: "coverage:routing"
+        ),
+        ShiftTask(
+            id: routingMaintenanceTaskID,
+            taskType: .maintenanceInIdleWindow,
+            entityType: "Printer",
+            entityId: routingMaintenancePrinterID,
+            title: "Handle the plate",
+            description: "Scheduled maintenance is due in the idle window.",
+            status: .pending,
+            priority: .normal,
+            createdAt: Date(timeIntervalSince1970: 1_784_510_520),
+            dueAt: nil,
+            completedAt: nil,
+            relatedEntityCount: 1,
+            metadataJson: nil,
+            anchorKind: .now,
+            anchorAtUtc: nil,
+            windowStartUtc: nil,
+            windowEndUtc: nil,
+            sourceKind: .maintenance,
+            sourceId: "maintenancealert:22220000-0000-0000-0000-000000000001"
+        ),
+    ]
+    #endif
 }

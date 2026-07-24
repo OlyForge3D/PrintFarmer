@@ -44,6 +44,14 @@ final class AppRouter {
     var pendingNFCReadyPrinterId: UUID?
     var pendingSpoolHighlightId: Int?
 
+    /// Monotonic token observed by legacy/operator sheet presenters to close
+    /// any active sheet before a task-action destination is applied (#726).
+    /// Bumped by `requestTransientSheetDismissal()`. Presenters react via
+    /// `.onChange(of:)` and close their local `@State` sheet bindings, which in
+    /// turn resets the corresponding legacy sheet stack through the existing
+    /// dismissal wiring.
+    var sheetDismissalNonce: Int = 0
+
     func navigate(to destination: DeepLinkDestination) {
         switch destination {
         case .printerDetail(let id):
@@ -66,6 +74,25 @@ final class AppRouter {
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
         }
+    }
+
+    /// Requests that any active legacy/operator sheet be dismissed. Task-action
+    /// routing calls this (and awaits the acknowledgement seam) BEFORE applying
+    /// a destination so an action never opens behind a sheet (#726).
+    func requestTransientSheetDismissal() {
+        sheetDismissalNonce &+= 1
+    }
+
+    /// Applies the guided-swap (#710) destination for a task-action handoff:
+    /// selects the Farm tab and deterministically drives the Farm stack to the
+    /// target printer's detail (where the guided filament swap lives). Unlike
+    /// `navigate(to:)`, this appends synchronously because the sheet has already
+    /// been dismissed and the stack is mounted — no timing delay is needed, so
+    /// the destination is testable without waiting on elapsed time.
+    func routeToFilamentSwap(printerID: UUID, toolheadID: String?) {
+        selectedTab = .farm
+        printersPath = NavigationPath()
+        printersPath.append(AppDestination.printerDetail(id: printerID))
     }
 
     func resetToRoot(tab: AppTab) {
