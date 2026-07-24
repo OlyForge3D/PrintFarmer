@@ -53,19 +53,45 @@ final class ShiftTasksViewModel {
 
     @ObservationIgnored private var refreshOwnerToken: UUID?
     @ObservationIgnored private var refreshOwnerTask: Task<Void, Never>?
-    @ObservationIgnored private var refreshWaiters: [UUID: RefreshWaiter] = [:]
 
-    /// Monotonic generation counter. Each canonical refresh pass is tagged with
-    /// a generation, and each waiter records the generation of the first pass
-    /// that will begin after it registers. Waiters resolve as soon as their
-    /// generation (or any later one) completes rather than at global refresh
-    /// quiescence, which bounds coalescing under sustained invalidations: parked
-    /// waiters are released every pass instead of accumulating until a quiet
-    /// pass occurs (issue #814).
-    @ObservationIgnored private var passGenerationCounter: UInt64 = 0
-    @ObservationIgnored private var runningGeneration: UInt64 = 0
-    @ObservationIgnored private var pendingGeneration: UInt64 = 0
-    @ObservationIgnored private var completedGeneration: UInt64 = 0
+    /// Parked continuations awaiting a canonical pass, bucketed by the generation
+    /// they target. Only explicit callers (refresh / retry / post-mutation load)
+    /// and the single pass-initiating invalidation ever park here. Sustained storm
+    /// invalidations coalesce WITHOUT parking a continuation, so the parked count
+    /// is bounded by the number of concurrent explicit callers and is independent
+    /// of invalidation volume (issue #814).
+    @ObservationIgnored private var refreshWaiters:
+        [RefreshGeneration: [UUID: CheckedContinuation<Bool, Never>]] = [:]
+
+    /// Generations that have coalesced fire-and-forget demand from supported
+    /// invalidations that did not park a continuation. Keyed by generation so the
+    /// footprint is bounded by the number of live generations (at most two), never
+    /// by invalidation volume. A generation stays here until a covering pass
+    /// completes; it keeps the owner from being abandoned while demand is pending.
+    @ObservationIgnored private var coalescedDemand: Set<RefreshGeneration> = []
+
+    /// Total-ordered, overflow-safe generation token. `generationCursor` is the
+    /// last value handed out; ordering is lexicographic on `(epoch, sequence)` so
+    /// comparisons never depend on wrapping arithmetic or a zero sentinel.
+    @ObservationIgnored private var generationCursor = RefreshGeneration(epoch: 0, sequence: 0)
+
+    /// Generation of the pass the owner is currently servicing, plus whether that
+    /// pass's `loadSnapshot` has begun. A caller registers against the running
+    /// generation only while its load has NOT yet begun (it will still observe the
+    /// caller's effect); once the load is in flight the caller must be covered by
+    /// the next, pending pass.
+    @ObservationIgnored private var runningGeneration: RefreshGeneration?
+    @ObservationIgnored private var runningPassStarted = false
+
+    /// At most one pass may be queued ahead of the running one. Every storm
+    /// invalidation that arrives while a load is in flight collapses onto this
+    /// single reserved generation, bounding scheduled passes to two.
+    @ObservationIgnored private var pendingGeneration: RefreshGeneration?
+
+    /// Last fully-completed generation and its published result, used to resolve a
+    /// late registrant for an already-covered generation exactly once.
+    @ObservationIgnored private var lastCompletedGeneration: RefreshGeneration?
+    @ObservationIgnored private var lastCompletedResult = false
 
     #if DEBUG
     /// Deterministic test seam fired on the MainActor immediately after a
@@ -76,9 +102,17 @@ final class ShiftTasksViewModel {
     var refreshWaiterRegistrationObserver: (@MainActor @Sendable () -> Void)?
     #endif
 
-    private struct RefreshWaiter {
-        let continuation: CheckedContinuation<Bool, Never>
-        let targetGeneration: UInt64
+    /// Overflow-safe, totally-ordered refresh generation. Ordering is lexicographic
+    /// on `(epoch, sequence)`; when `sequence` saturates, the epoch increments and
+    /// the sequence restarts, so a later generation always compares strictly
+    /// greater than an earlier one without any wrapping arithmetic (issue #814).
+    private struct RefreshGeneration: Comparable, Hashable {
+        var epoch: UInt64
+        var sequence: UInt64
+
+        static func < (lhs: RefreshGeneration, rhs: RefreshGeneration) -> Bool {
+            (lhs.epoch, lhs.sequence) < (rhs.epoch, rhs.sequence)
+        }
     }
 
     /// Production callers use the default enqueuer, which hops each
@@ -133,7 +167,7 @@ final class ShiftTasksViewModel {
                       ShiftTaskInvalidation.supportedTargets.contains(invalidation.target) else {
                     return
                 }
-                _ = await self.requestCanonicalRefresh(
+                await self.ingestSupportedInvalidation(
                     epoch: epoch,
                     service: taskService,
                     shiftPlanEnabled: shiftPlanEnabled
@@ -217,71 +251,159 @@ final class ShiftTasksViewModel {
         mutationActivities[taskID]
     }
 
+    /// Explicit callers (pull-to-refresh, retry, post-mutation load) always need
+    /// the pass result, so they park a continuation for the first generation that
+    /// covers them and resolve as soon as THAT generation completes — never at
+    /// global refresh quiescence.
     private func requestCanonicalRefresh(
         epoch: UInt64,
         service: any ShiftTaskServiceProtocol,
         shiftPlanEnabled: Bool
     ) async -> Bool {
+        guard matchesAuthority(
+            epoch: epoch,
+            taskIdentity: ObjectIdentifier(service as AnyObject),
+            signalRIdentity: signalRServiceIdentity
+        ) else {
+            return false
+        }
+
+        let reservation = reserveCoveringGeneration(
+            epoch: epoch,
+            service: service,
+            shiftPlanEnabled: shiftPlanEnabled
+        )
+        return await awaitGeneration(reservation.generation, epoch: epoch)
+    }
+
+    /// Supported invalidations are pure signals: they only need to guarantee a
+    /// canonical pass covers them, not the result. The pass-initiating invalidation
+    /// (the one that finds the owner idle) awaits its generation so a single
+    /// callback still drives one full load synchronously — the shipped #782
+    /// behavior. Every subsequent storm invalidation coalesces onto the already
+    /// scheduled work as fire-and-forget: it parks NO continuation and spawns NO
+    /// suspended task, so N invalidations cannot grow waiters, tasks, or passes.
+    private func ingestSupportedInvalidation(
+        epoch: UInt64,
+        service: any ShiftTaskServiceProtocol,
+        shiftPlanEnabled: Bool
+    ) async {
+        guard matchesAuthority(
+            epoch: epoch,
+            taskIdentity: ObjectIdentifier(service as AnyObject),
+            signalRIdentity: signalRServiceIdentity
+        ) else {
+            return
+        }
+
+        let reservation = reserveCoveringGeneration(
+            epoch: epoch,
+            service: service,
+            shiftPlanEnabled: shiftPlanEnabled
+        )
+
+        guard reservation.didStartOwner else {
+            // Coalesced onto an in-flight or already-scheduled pass. Record the
+            // demand so the owner is not abandoned before it covers this event,
+            // then return without parking a continuation.
+            coalescedDemand.insert(reservation.generation)
+            return
+        }
+
+        _ = await awaitGeneration(reservation.generation, epoch: epoch)
+    }
+
+    /// Reserves the generation of the first canonical pass that will begin AFTER
+    /// the caller registers, starting the refresh owner if none is running.
+    ///
+    /// - If the owner is idle, a new generation is allocated and its pass is
+    ///   started; the caller is covered by it (`didStartOwner == true`).
+    /// - If the running pass has been reserved but its `loadSnapshot` has NOT begun
+    ///   yet, the caller joins that running generation (it will still observe the
+    ///   caller's effect).
+    /// - If a load is already in flight, the caller is covered by the single queued
+    ///   pending generation (allocated once, then shared by all later arrivals).
+    ///
+    /// This makes "first pass whose load begins after registration" the exact
+    /// coverage contract, and bounds scheduled passes to two (issue #814).
+    private func reserveCoveringGeneration(
+        epoch: UInt64,
+        service: any ShiftTaskServiceProtocol,
+        shiftPlanEnabled: Bool
+    ) -> (generation: RefreshGeneration, didStartOwner: Bool) {
+        if refreshOwnerToken == nil {
+            let generation = allocateGeneration()
+            runningGeneration = generation
+            runningPassStarted = false
+            startRefreshOwner(
+                epoch: epoch,
+                service: service,
+                shiftPlanEnabled: shiftPlanEnabled
+            )
+            return (generation, true)
+        }
+
+        if !runningPassStarted, let running = runningGeneration {
+            return (running, false)
+        }
+
+        if pendingGeneration == nil {
+            pendingGeneration = allocateGeneration()
+        }
+        // `pendingGeneration` is non-nil here by construction.
+        return (pendingGeneration ?? allocateGeneration(), false)
+    }
+
+    /// Hands out the next totally-ordered generation. When the sequence saturates,
+    /// the epoch is incremented (a checked add that traps rather than wrapping) and
+    /// the sequence restarts at 1, so the new generation still compares strictly
+    /// greater than every prior one. No wrapping arithmetic, no zero sentinel.
+    private func allocateGeneration() -> RefreshGeneration {
+        if generationCursor.sequence == UInt64.max {
+            generationCursor = RefreshGeneration(
+                epoch: generationCursor.epoch + 1,
+                sequence: 1
+            )
+        } else {
+            generationCursor.sequence += 1
+        }
+        return generationCursor
+    }
+
+    /// Parks a continuation for `generation`, resolving it exactly once when a
+    /// covering pass completes (or immediately if that generation has already
+    /// completed, or `false` on cancellation / stale authority).
+    private func awaitGeneration(
+        _ generation: RefreshGeneration,
+        epoch: UInt64
+    ) async -> Bool {
         let waiterID = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled,
-                      matchesAuthority(
-                        epoch: epoch,
-                        taskIdentity: ObjectIdentifier(service as AnyObject),
-                        signalRIdentity: signalRServiceIdentity
-                      ) else {
+                      isActive,
+                      lifecycleEpoch == epoch else {
                     continuation.resume(returning: false)
                     return
                 }
-
-                let targetGeneration = ensureCoveringGeneration(
-                    epoch: epoch,
-                    service: service,
-                    shiftPlanEnabled: shiftPlanEnabled
-                )
-                refreshWaiters[waiterID] = RefreshWaiter(
-                    continuation: continuation,
-                    targetGeneration: targetGeneration
-                )
+                if let completed = lastCompletedGeneration, generation <= completed {
+                    continuation.resume(returning: lastCompletedResult)
+                    return
+                }
+                refreshWaiters[generation, default: [:]][waiterID] = continuation
                 #if DEBUG
                 refreshWaiterRegistrationObserver?()
                 #endif
             }
         } onCancel: {
             Task { @MainActor [weak self] in
-                self?.cancelRefreshWaiter(id: waiterID, epoch: epoch)
+                self?.cancelRefreshWaiter(
+                    generation: generation,
+                    id: waiterID,
+                    epoch: epoch
+                )
             }
         }
-    }
-
-    /// Reserves the generation of the first canonical pass that will begin after
-    /// the caller registers, starting the refresh owner if one is not already
-    /// running. Coalescing is bounded: callers that arrive while a pass is in
-    /// flight all share a single reserved `pendingGeneration` (at most one pass
-    /// is ever queued ahead), so a sustained invalidation storm cannot grow the
-    /// number of scheduled passes.
-    private func ensureCoveringGeneration(
-        epoch: UInt64,
-        service: any ShiftTaskServiceProtocol,
-        shiftPlanEnabled: Bool
-    ) -> UInt64 {
-        if runningGeneration == 0 {
-            passGenerationCounter &+= 1
-            runningGeneration = passGenerationCounter
-            startRefreshOwner(
-                epoch: epoch,
-                service: service,
-                shiftPlanEnabled: shiftPlanEnabled
-            )
-            return runningGeneration
-        }
-
-        if pendingGeneration == 0 {
-            passGenerationCounter &+= 1
-            pendingGeneration = passGenerationCounter
-        }
-        return pendingGeneration
     }
 
     private func startRefreshOwner(
@@ -317,7 +439,11 @@ final class ShiftTasksViewModel {
             token: token,
             service: service
         ) {
-            let generation = runningGeneration
+            guard let generation = runningGeneration else { return }
+            // The load is about to read server state: from this point a newly
+            // arriving caller can no longer be guaranteed coverage by THIS pass and
+            // must be routed to the next (pending) generation.
+            runningPassStarted = true
             var passSucceeded = false
 
             do {
@@ -384,41 +510,60 @@ final class ShiftTasksViewModel {
     }
 
     /// Publishes the outcome of a single canonical pass: resolves every waiter
-    /// whose target generation is now covered, then either promotes the queued
+    /// whose target generation is now covered and clears that generation's
+    /// coalesced fire-and-forget demand, then either promotes the queued
     /// `pendingGeneration` into the next running pass or retires the owner. This
-    /// releases explicit mutation/load callers after the FIRST pass covering
-    /// their generation instead of holding them until global quiescence.
+    /// releases explicit mutation/load callers after the FIRST pass covering their
+    /// generation instead of holding them until global quiescence.
     private func completePass(
         token: UUID,
-        generation: UInt64,
+        generation: RefreshGeneration,
         succeeded: Bool
     ) {
         guard refreshOwnerToken == token else { return }
 
-        if generation > completedGeneration {
-            completedGeneration = generation
+        if lastCompletedGeneration == nil || generation > lastCompletedGeneration! {
+            lastCompletedGeneration = generation
+            lastCompletedResult = succeeded
         }
         resumeRefreshWaiters(coveringThrough: generation, returning: succeeded)
+        coalescedDemand = coalescedDemand.filter { $0 > generation }
 
-        if pendingGeneration != 0 {
-            runningGeneration = pendingGeneration
-            pendingGeneration = 0
+        if let pending = pendingGeneration {
+            runningGeneration = pending
+            pendingGeneration = nil
+            runningPassStarted = false
             return
         }
 
         refreshOwnerTask = nil
         refreshOwnerToken = nil
-        runningGeneration = 0
+        runningGeneration = nil
+        runningPassStarted = false
         isRefreshing = false
     }
 
-    private func cancelRefreshWaiter(id: UUID, epoch: UInt64) {
+    private func cancelRefreshWaiter(
+        generation: RefreshGeneration,
+        id: UUID,
+        epoch: UInt64
+    ) {
         guard lifecycleEpoch == epoch,
-              let waiter = refreshWaiters.removeValue(forKey: id) else {
+              var bucket = refreshWaiters[generation],
+              let continuation = bucket.removeValue(forKey: id) else {
             return
         }
-        waiter.continuation.resume(returning: false)
-        if refreshWaiters.isEmpty {
+        if bucket.isEmpty {
+            refreshWaiters.removeValue(forKey: generation)
+        } else {
+            refreshWaiters[generation] = bucket
+        }
+        continuation.resume(returning: false)
+
+        // Only abandon the owner once there is genuinely no outstanding demand:
+        // no parked continuation and no coalesced invalidation still awaiting a
+        // covering pass.
+        if refreshWaiters.isEmpty, coalescedDemand.isEmpty {
             abandonRefreshOwner()
         }
     }
@@ -593,10 +738,13 @@ final class ShiftTasksViewModel {
         refreshOwnerTask?.cancel()
         refreshOwnerTask = nil
         refreshOwnerToken = nil
-        passGenerationCounter = 0
-        runningGeneration = 0
-        pendingGeneration = 0
-        completedGeneration = 0
+        generationCursor = RefreshGeneration(epoch: 0, sequence: 0)
+        runningGeneration = nil
+        runningPassStarted = false
+        pendingGeneration = nil
+        lastCompletedGeneration = nil
+        lastCompletedResult = false
+        coalescedDemand.removeAll()
         isRefreshing = false
         resumeAllRefreshWaiters(returning: false)
 
@@ -616,45 +764,124 @@ final class ShiftTasksViewModel {
         refreshOwnerTask?.cancel()
         refreshOwnerTask = nil
         refreshOwnerToken = nil
-        runningGeneration = 0
-        pendingGeneration = 0
+        runningGeneration = nil
+        runningPassStarted = false
+        pendingGeneration = nil
+        coalescedDemand.removeAll()
         isRefreshing = false
         if snapshot == nil, phase == .loading {
             phase = .idle
         }
     }
 
+    /// Resolves every parked continuation whose target generation is covered by the
+    /// just-completed `generation`, removing each from its bucket BEFORE resuming so
+    /// no continuation can be resumed twice even under re-entrant registration.
     private func resumeRefreshWaiters(
-        coveringThrough generation: UInt64,
+        coveringThrough generation: RefreshGeneration,
         returning value: Bool
     ) {
-        let matured = refreshWaiters.filter {
-            $0.value.targetGeneration <= generation
+        let coveredKeys = refreshWaiters.keys.filter { $0 <= generation }
+        guard !coveredKeys.isEmpty else { return }
+        var continuations: [CheckedContinuation<Bool, Never>] = []
+        for key in coveredKeys {
+            if let bucket = refreshWaiters.removeValue(forKey: key) {
+                continuations.append(contentsOf: bucket.values)
+            }
         }
-        guard !matured.isEmpty else { return }
-        for id in matured.keys {
-            refreshWaiters.removeValue(forKey: id)
-        }
-        for waiter in matured.values {
-            waiter.continuation.resume(returning: value)
+        for continuation in continuations {
+            continuation.resume(returning: value)
         }
     }
 
+    /// Resolves ALL parked continuations exactly once (teardown / server
+    /// replacement). Buckets are drained before any resume so re-entrancy cannot
+    /// observe a resumed continuation still registered.
     private func resumeAllRefreshWaiters(returning value: Bool) {
-        let waiters = refreshWaiters
+        let buckets = refreshWaiters
         refreshWaiters.removeAll()
-        for waiter in waiters.values {
-            waiter.continuation.resume(returning: value)
+        for bucket in buckets.values {
+            for continuation in bucket.values {
+                continuation.resume(returning: value)
+            }
         }
     }
 
     #if DEBUG
-    var pendingRefreshWaiterCountForTesting: Int { refreshWaiters.count }
+    /// Number of parked continuations across all generations. Bounded by concurrent
+    /// explicit callers plus at most one pass-initiating invalidation — independent
+    /// of invalidation volume.
+    var pendingRefreshWaiterCountForTesting: Int {
+        refreshWaiters.values.reduce(0) { $0 + $1.count }
+    }
 
     var refreshWaiterTargetGenerationsForTesting: [UInt64] {
-        refreshWaiters.values.map(\.targetGeneration).sorted()
+        refreshWaiters.flatMap { generation, bucket in
+            Array(repeating: generation.sequence, count: bucket.count)
+        }
+        .sorted()
     }
 
     var isRefreshOwnerActiveForTesting: Bool { refreshOwnerToken != nil }
+
+    /// Count of canonical passes currently scheduled: the running pass (if any)
+    /// plus the single queued pending pass (if any). Bounded to two regardless of
+    /// invalidation volume.
+    var scheduledPassCountForTesting: Int {
+        (runningGeneration != nil ? 1 : 0) + (pendingGeneration != nil ? 1 : 0)
+    }
+
+    /// Number of coalesced fire-and-forget invalidation generations awaiting a
+    /// covering pass. Bounded by live generations (≤ 2), never by storm size.
+    var coalescedDemandCountForTesting: Int { coalescedDemand.count }
+
+    var runningGenerationSequenceForTesting: UInt64? { runningGeneration?.sequence }
+
+    var pendingGenerationSequenceForTesting: UInt64? { pendingGeneration?.sequence }
+
+    /// Drives the REAL reservation path once (using the VM's current authority)
+    /// and returns the reserved generation's `(epoch, sequence)` plus whether it
+    /// started the owner, so a test can prove first-pass-after-registration
+    /// semantics without reaching into internals.
+    func debugReserveCoveringGeneration()
+        -> (epoch: UInt64, sequence: UInt64, didStartOwner: Bool)? {
+        guard isActive, let service = taskService else { return nil }
+        let reservation = reserveCoveringGeneration(
+            epoch: lifecycleEpoch,
+            service: service,
+            shiftPlanEnabled: shiftPlanEnabled
+        )
+        return (
+            reservation.generation.epoch,
+            reservation.generation.sequence,
+            reservation.didStartOwner
+        )
+    }
+
+    /// Positions the generation cursor for a deterministic rollover proof without
+    /// brute-forcing 2^64 allocations.
+    func debugSetGenerationCursor(epoch: UInt64, sequence: UInt64) {
+        generationCursor = RefreshGeneration(epoch: epoch, sequence: sequence)
+    }
+
+    /// Allocates the next generation through the REAL overflow-safe path and
+    /// returns its `(epoch, sequence)` so a test can assert total ordering across
+    /// the sequence-saturation boundary.
+    func debugAllocateGeneration() -> (epoch: UInt64, sequence: UInt64) {
+        let generation = allocateGeneration()
+        return (generation.epoch, generation.sequence)
+    }
+
+    /// Total-ordering comparison over the REAL generation type, used to prove that
+    /// a post-rollover generation compares strictly greater than a pre-rollover one.
+    func debugGenerationLess(
+        lhsEpoch: UInt64,
+        lhsSequence: UInt64,
+        rhsEpoch: UInt64,
+        rhsSequence: UInt64
+    ) -> Bool {
+        RefreshGeneration(epoch: lhsEpoch, sequence: lhsSequence)
+            < RefreshGeneration(epoch: rhsEpoch, sequence: rhsSequence)
+    }
     #endif
 }
