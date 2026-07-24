@@ -101,7 +101,10 @@ final class PartAdjustmentViewModel {
     /// live values only if `submit()` is ever invoked directly without
     /// `beginSubmit()` (some unit tests exercise it that way).
     @discardableResult
-    func submit(partsInventoryService: any PartsInventoryServiceProtocol) async -> PartAdjustmentResponse? {
+    func submit(
+        partsInventoryService: any PartsInventoryServiceProtocol,
+        offlineQueue: OfflineWriteEnqueuing? = nil
+    ) async -> PartAdjustmentResponse? {
         // If the caller's own Task was already cancelled before this
         // method got its first turn on the executor (e.g. the presenting
         // sheet was dismissed in the same runloop tick as the submit
@@ -179,6 +182,28 @@ final class PartAdjustmentViewModel {
             }
             isSubmitting = false
             logger.warning("Adjustment failed: \(error.localizedDescription)")
+
+            // Offline-class failure + durable outbox available: hand the frozen
+            // intent (identical operationKey + body) to the queue for later
+            // idempotent replay, rather than dropping it. Not a second
+            // idempotency owner — the queue re-sends this exact key/body. A
+            // terminal failure (conflict/validation/auth) is NOT queued; it
+            // surfaces immediately below.
+            if let offlineQueue, OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(error) {
+                let operation = OfflineWriteOperation.partAdjustment(sku: part.sku, request: request)
+                let outcome = await offlineQueue.enqueue(operation)
+                if case .enqueued = outcome {
+                    // The intent is now durably owned by the queue; release this
+                    // view model's key/snapshot and reset the form as on success.
+                    operationKey = nil
+                    pendingSnapshot = nil
+                    delta = -1
+                    notes = ""
+                    successMessage = "Saved offline — will sync when reconnected."
+                    return nil
+                }
+            }
+
             errorMessage = error.localizedDescription
             return nil
         }

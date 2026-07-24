@@ -56,6 +56,10 @@ final class HarvestViewModel {
     private(set) var isSubmitting = false
     var errorMessage: String?
     var result: HarvestJobResponse?
+    /// Set when an offline-class submit failure was durably enqueued to the
+    /// outbox (#787) for later replay, so the sheet can confirm "saved offline"
+    /// instead of showing a transport error.
+    private(set) var offlineEnqueued = false
 
     /// Invoked exactly once, immediately upon the first successful (or
     /// idempotently replayed `alreadyHarvested`) response — the single
@@ -303,7 +307,11 @@ final class HarvestViewModel {
         isLoadingContext = false
     }
 
-    func submit(partsInventoryService: any PartsInventoryServiceProtocol, allowWrongBin: Bool = false) async {
+    func submit(
+        partsInventoryService: any PartsInventoryServiceProtocol,
+        allowWrongBin: Bool = false,
+        offlineQueue: OfflineWriteEnqueuing? = nil
+    ) async {
         // Once-per-sheet contract: a `result` already means a prior attempt
         // succeeded — no further attempt may ever reach the server again
         // for this presented sheet, even if `submit()` is called directly
@@ -413,6 +421,25 @@ final class HarvestViewModel {
         } catch {
             isSubmitting = false
             logger.warning("Harvest failed: \(error.localizedDescription)")
+
+            // Offline-class failure + durable outbox available: durably enqueue
+            // the frozen harvest intent (identical operationKey + body) for later
+            // idempotent replay. A `wrongBin` / `partMappingRequired` / other
+            // terminal conflict is handled above and never reaches here, so this
+            // only queues genuine transport/offline/5xx failures. An
+            // operator-present override retry (`allowWrongBin`) is never queued.
+            if !allowWrongBin,
+               let offlineQueue,
+               OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(error) {
+                let operation = OfflineWriteOperation.harvest(jobId: job.id, request: request)
+                let outcome = await offlineQueue.enqueue(operation)
+                if case .enqueued = outcome {
+                    errorMessage = nil
+                    offlineEnqueued = true
+                    return
+                }
+            }
+
             errorMessage = error.localizedDescription
         }
     }
