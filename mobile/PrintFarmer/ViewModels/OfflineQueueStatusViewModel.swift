@@ -96,6 +96,10 @@ final class OfflineQueueStatusViewModel {
             return [sku]
         case .harvest(_, let request):
             return request.outputs?.map { $0.sku } ?? []
+        case .taskComplete, .toolheadBind:
+            // Task-complete and toolhead-bind have no affected parts SKUs; their
+            // review refetches canonical task/toolhead state instead.
+            return []
         }
     }
 }
@@ -126,6 +130,18 @@ struct OfflineWriteReview: Equatable, Identifiable {
             var renewed = request
             renewed.operationKey = newKey
             return .harvest(jobId: jobId, request: renewed)
+        case .taskComplete(let taskID, _):
+            // Idempotency key is a top-level field (header-based); mint a fresh
+            // one so the review re-enters as a distinct intent.
+            return .taskComplete(taskID: taskID, idempotencyKey: newKey)
+        case .toolheadBind(let printerID, let toolheadIndex, _, let request, let expectedPriorSpoolId):
+            return .toolheadBind(
+                printerID: printerID,
+                toolheadIndex: toolheadIndex,
+                idempotencyKey: newKey,
+                request: request,
+                expectedPriorSpoolId: expectedPriorSpoolId
+            )
         }
     }
 }

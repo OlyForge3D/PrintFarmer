@@ -31,6 +31,7 @@ protocol PrinterServiceProtocol: Sendable {
 
     // Filament / Spool
     func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool]
     func loadFilament(printerId: UUID) async throws -> CommandResult
     func unloadFilament(printerId: UUID) async throws -> CommandResult

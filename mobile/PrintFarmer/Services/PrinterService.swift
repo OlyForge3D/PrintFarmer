@@ -104,6 +104,25 @@ actor PrinterService: PrinterServiceProtocol {
         return try await apiClient.post("/api/printers/\(printerId)/active-spool", body: body)
     }
 
+    /// Final server bookkeeping bind of a spool to a specific toolhead index
+    /// (#711/#710 contract). This is the ONLY toolhead command that the offline
+    /// queue may replay (F10-Q2, #790): it carries an idempotency key in the
+    /// `Idempotency-Key` header so a replay after a transport-ambiguous first
+    /// attempt applies exactly once inside the server's retention window. No
+    /// physical filament/motion/temperature command is involved.
+    func bindToolheadSpool(
+        printerId: UUID,
+        toolheadIndex: Int,
+        request: ToolheadSpoolBindRequest,
+        idempotencyKey: String
+    ) async throws -> CommandResult {
+        try await apiClient.put(
+            "/api/printers/\(printerId)/toolheads/\(toolheadIndex)/spool",
+            body: request,
+            headers: ["Idempotency-Key": idempotencyKey]
+        )
+    }
+
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] {
         try await apiClient.get("/api/printers/\(printerId)/spoolman/spools")
     }

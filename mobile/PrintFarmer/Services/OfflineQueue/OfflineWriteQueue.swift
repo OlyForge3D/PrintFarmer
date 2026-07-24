@@ -141,6 +141,18 @@ actor OfflineWriteQueue {
     /// when there is no identity, when the outbox is full, or when the intent
     /// carries no idempotency key.
     func enqueue(_ operation: OfflineWriteOperation) async -> OfflineWriteEnqueueResult {
+        await enqueue(operation, prerequisiteItemID: nil)
+    }
+
+    /// Durably enqueues an intent that MUST NOT replay until a prerequisite
+    /// domain-write item has succeeded and left the queue (F10-Q2, #790). Used
+    /// when a single logical action queues both a domain write and a linked
+    /// task completion: the completion carries the domain write's queue id so
+    /// the drain never applies the completion before its required mutation.
+    func enqueue(
+        _ operation: OfflineWriteOperation,
+        prerequisiteItemID: UUID?
+    ) async -> OfflineWriteEnqueueResult {
         await loadIfNeeded()
         guard replayEnabled else { return .replayDisabled }
         guard let server = activeServerID, let user = activeUserID else { return .noIdentity }
@@ -155,7 +167,8 @@ actor OfflineWriteQueue {
             createdAt: clock.now(),
             idempotencyKey: key,
             operation: operation,
-            status: .pending
+            status: .pending,
+            prerequisiteItemID: prerequisiteItemID
         )
         items.append(item)
         await persist()
@@ -231,15 +244,29 @@ actor OfflineWriteQueue {
         }
     }
 
-    /// Oldest (FIFO) pending, non-blocked item in the namespace.
+    /// Oldest (FIFO) pending, non-blocked item in the namespace. An item whose
+    /// `prerequisiteItemID` still names an item present in the namespace (in any
+    /// status) is held back, so a linked task completion never precedes its
+    /// required domain mutation (F10-Q2, #790).
     private func oldestPending(server: UUID, user: UUID, blocking blockedEntities: Set<String>) -> OfflineWriteItem? {
-        items
+        let namespaceIDs = Set(
+            items.filter { $0.serverID == server && $0.userID == user }.map { $0.id }
+        )
+        return items
             .filter {
                 $0.serverID == server && $0.userID == user
                     && $0.status.isPending
                     && !blockedEntities.contains($0.entityKey)
+                    && !prerequisiteStillPending($0, in: namespaceIDs)
             }
             .min(by: { $0.createdAt < $1.createdAt })
+    }
+
+    /// Whether the item's prerequisite domain-write is still present in the
+    /// namespace (i.e. has not yet succeeded and left the queue).
+    private func prerequisiteStillPending(_ item: OfflineWriteItem, in namespaceIDs: Set<UUID>) -> Bool {
+        guard let prerequisite = item.prerequisiteItemID else { return false }
+        return namespaceIDs.contains(prerequisite)
     }
 
     // MARK: Operator dispositions

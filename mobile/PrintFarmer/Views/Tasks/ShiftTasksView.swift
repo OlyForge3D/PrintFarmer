@@ -203,7 +203,8 @@ struct ShiftTasksView: View {
         viewModel.configure(
             taskService: services.shiftTaskService,
             signalRService: services.signalRService,
-            shiftPlanEnabled: services.capabilitiesService.resolved.shiftPlanEnabled
+            shiftPlanEnabled: services.capabilitiesService.resolved.shiftPlanEnabled,
+            offlineQueue: services.offlineWriteQueue
         )
         _ = await viewModel.refresh()
     }

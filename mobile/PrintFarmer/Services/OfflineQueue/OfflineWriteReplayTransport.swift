@@ -170,40 +170,82 @@ extension OfflineWriteQueue: OfflineWriteEnqueuing {}
 
 // MARK: - Production adapter
 
-/// Replays through the same `PartsInventoryServiceProtocol` the online path
-/// uses. A returned response (including an idempotent `alreadyHarvested` harvest
-/// replay) is `.success`; any thrown error is classified.
-struct PartsInventoryOfflineReplayTransport: OfflineWriteReplayTransport {
-    let service: any PartsInventoryServiceProtocol
+/// The set of canonical services a replay may need, resolved at attempt time on
+/// the main actor. Each is optional: a `nil` (container gone / not yet wired)
+/// yields a transient `.retryable` so nothing is ever falsely marked applied.
+/// Parts replays use `parts`; task-complete uses `tasks`; toolhead-bind uses
+/// `printers`. One bundle keeps the four allowlisted kinds behind a single
+/// replay owner (F10-Q2, #790) — no parallel queue/transport per kind.
+struct OfflineReplayServices {
+    let parts: (any PartsInventoryServiceProtocol)?
+    let tasks: (any ShiftTaskServiceProtocol)?
+    let printers: (any PrinterServiceProtocol)?
 
-    init(service: any PartsInventoryServiceProtocol) {
-        self.service = service
-    }
-
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
-        await OfflineWriteReplayExecutor.execute(operation, using: service)
-    }
-}
-
-/// Production adapter that resolves the CURRENT parts-inventory service at
-/// replay time (on the main actor). A server switch replaces the container's
-/// service instance; resolving lazily means a replay always uses the client for
-/// the currently-bound identity rather than a captured, possibly-stale one. If
-/// the provider yields `nil` (container gone), the attempt is treated as
-/// transient so nothing is falsely marked applied.
-struct DynamicPartsInventoryReplayTransport: OfflineWriteReplayTransport {
-    let provider: @Sendable @MainActor () -> (any PartsInventoryServiceProtocol)?
-
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
-        guard let service = await provider() else { return .retryable }
-        return await OfflineWriteReplayExecutor.execute(operation, using: service)
+    init(
+        parts: (any PartsInventoryServiceProtocol)? = nil,
+        tasks: (any ShiftTaskServiceProtocol)? = nil,
+        printers: (any PrinterServiceProtocol)? = nil
+    ) {
+        self.parts = parts
+        self.tasks = tasks
+        self.printers = printers
     }
 }
 
-/// Shared execution + classification so both production adapters behave
-/// identically.
+/// Production adapter that resolves the CURRENT services at replay time (on the
+/// main actor). A server switch replaces the container's service instances;
+/// resolving lazily means a replay always uses the clients for the
+/// currently-bound identity rather than captured, possibly-stale ones.
+struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
+    let provider: @Sendable @MainActor () -> OfflineReplayServices
+
+    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
+        let services = await provider()
+        return await OfflineWriteReplayExecutor.execute(operation, using: services)
+    }
+}
+
+/// Shared execution + classification. Each allowlisted kind re-sends the frozen
+/// key+body against its canonical route. Task-complete and toolhead-bind first
+/// obtain canonical state (#711/#710) so a replay after a gap applies exactly
+/// once and NEVER overwrites a newer binding or completes an incompatible
+/// terminal task — a changed state is surfaced for review with zero mutation.
 enum OfflineWriteReplayExecutor {
     static func execute(
+        _ operation: OfflineWriteOperation,
+        using services: OfflineReplayServices
+    ) async -> OfflineWriteReplayOutcome {
+        switch operation {
+        case .partAdjustment, .harvest:
+            guard let parts = services.parts else { return .retryable }
+            return await executeParts(operation, using: parts)
+        case .taskComplete(let taskID, let idempotencyKey):
+            guard let tasks = services.tasks else { return .retryable }
+            return await executeTaskComplete(taskID: taskID, idempotencyKey: idempotencyKey, using: tasks)
+        case .toolheadBind(let printerID, let toolheadIndex, let idempotencyKey, let request, let expectedPriorSpoolId):
+            guard let printers = services.printers else { return .retryable }
+            return await executeToolheadBind(
+                printerID: printerID,
+                toolheadIndex: toolheadIndex,
+                idempotencyKey: idempotencyKey,
+                request: request,
+                expectedPriorSpoolId: expectedPriorSpoolId,
+                using: printers
+            )
+        }
+    }
+
+    /// Parts-inventory replay (part adjustment / harvest, #787). A returned
+    /// response (including an idempotent `alreadyHarvested` replay) is
+    /// `.success`; any thrown error is classified.
+    static func execute(
+        _ operation: OfflineWriteOperation,
+        using service: any PartsInventoryServiceProtocol
+    ) async -> OfflineWriteReplayOutcome {
+        await executeParts(operation, using: service)
+    }
+
+    private static func executeParts(
         _ operation: OfflineWriteOperation,
         using service: any PartsInventoryServiceProtocol
     ) async -> OfflineWriteReplayOutcome {
@@ -213,7 +255,99 @@ enum OfflineWriteReplayExecutor {
                 _ = try await service.adjustPart(sku: sku, request: request)
             case .harvest(let jobId, let request):
                 _ = try await service.harvestJob(jobId: jobId, request: request)
+            case .taskComplete, .toolheadBind:
+                // Not a parts operation — never routed here by the bundle
+                // dispatcher. Treated as transient so it is never falsely
+                // marked applied by the parts-only adapter.
+                return .retryable
             }
+            return .success
+        } catch {
+            return OfflineWriteReplayClassifier.outcome(for: error)
+        }
+    }
+
+    /// Task-complete replay. Canonical task state decides the disposition:
+    /// already-terminal `completed` = one completion (no re-POST); still
+    /// applicable (`pending`/`inProgress`) replays the frozen key; an
+    /// incompatible terminal state (`skipped`/`dismissed`/unrecognized) or a
+    /// missing task is surfaced for review WITHOUT any write. Skip/dismiss are
+    /// never encoded, so this only completes.
+    private static func executeTaskComplete(
+        taskID: String,
+        idempotencyKey: String,
+        using service: any ShiftTaskServiceProtocol
+    ) async -> OfflineWriteReplayOutcome {
+        do {
+            let snapshot = try await service.loadSnapshot(shiftPlanEnabled: true)
+            let tasks = snapshot.groups.flatMap { $0.tasks }
+            guard let task = tasks.first(where: { $0.id == taskID }) else {
+                return .conflict(OfflineWriteConflict(
+                    reason: .unavailable,
+                    message: "This task no longer exists on the server."
+                ))
+            }
+            switch task.status {
+            case .completed:
+                // Canonical idempotent success: exactly one completion.
+                return .success
+            case .pending, .inProgress:
+                try await service.complete(taskID: taskID, idempotencyKey: idempotencyKey)
+                return .success
+            case .skipped, .dismissed:
+                return .conflict(OfflineWriteConflict(
+                    reason: .staleState,
+                    message: "This task was \(task.status.wireValue.lowercased()) since it was queued."
+                ))
+            case .unknown(let raw):
+                return .conflict(OfflineWriteConflict(
+                    reason: .staleState,
+                    message: "This task is in an unrecognized state (\(raw)) and cannot be completed automatically."
+                ))
+            }
+        } catch {
+            return OfflineWriteReplayClassifier.outcome(for: error)
+        }
+    }
+
+    /// Toolhead-bind replay. Canonical toolhead state (#711) decides: already
+    /// bound to the target = idempotent `.success` with ZERO mutation; the
+    /// expected prior binding still present replays the frozen body; a missing
+    /// toolhead or a DIFFERENT (newer) binding is surfaced for review WITHOUT
+    /// overwriting.
+    private static func executeToolheadBind(
+        printerID: UUID,
+        toolheadIndex: Int,
+        idempotencyKey: String,
+        request: ToolheadSpoolBindRequest,
+        expectedPriorSpoolId: Int?,
+        using service: any PrinterServiceProtocol
+    ) async -> OfflineWriteReplayOutcome {
+        do {
+            let details = try await service.getDetails(id: printerID)
+            guard let toolhead = details.toolheads.first(where: { $0.index == toolheadIndex }) else {
+                return .conflict(OfflineWriteConflict(
+                    reason: .unavailable,
+                    message: "This toolhead no longer exists on the printer."
+                ))
+            }
+            if toolhead.currentSpoolId == request.spoolId {
+                // Already bound to the intended spool — idempotent, no write.
+                return .success
+            }
+            guard toolhead.currentSpoolId == expectedPriorSpoolId else {
+                // A newer/different binding is present. Never overwrite.
+                return .conflict(OfflineWriteConflict(
+                    reason: .staleState,
+                    message: "This toolhead's spool changed since the bind was queued."
+                ))
+            }
+            _ = try await service.bindToolheadSpool(
+                printerId: printerID,
+                toolheadIndex: toolheadIndex,
+                request: request,
+                idempotencyKey: idempotencyKey
+            )
             return .success
         } catch {
             return OfflineWriteReplayClassifier.outcome(for: error)
