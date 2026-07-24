@@ -1,0 +1,76 @@
+import XCTest
+@testable import PrintFarmer
+
+/// Regression tests for the SignalR negotiate request builder.
+///
+/// Guards against the redaction-in-transport defect (issue #873): the
+/// negotiate POST must carry the real bearer token on the wire
+/// (`Authorization: Bearer <jwt>`), never a redacted placeholder. These tests
+/// capture the OUTGOING request via `MockURLProtocol` and assert the exact
+/// header value, so a future change that masks the token before transmit fails
+/// here instead of silently 401ing against a real server.
+final class SignalRServiceTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        MockURLProtocol.reset()
+    }
+
+    override func tearDown() {
+        MockURLProtocol.reset()
+        super.tearDown()
+    }
+
+    /// Fails the negotiate response (HTTP 500) so `connect()` throws before the
+    /// WebSocket upgrade — which `MockURLProtocol` cannot service — while still
+    /// capturing the fully built negotiate request for header assertions.
+    private func makeService(token: String?) -> SignalRService {
+        MockURLProtocol.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
+        }
+        return SignalRService(
+            serverURL: TestData.testBaseURL,
+            session: MockURLProtocol.mockSession(),
+            tokenProvider: { token }
+        )
+    }
+
+    func testNegotiateSendsBearerAuthorizationHeader() async {
+        let token = "test-jwt-token-123"
+        let service = makeService(token: token)
+
+        // connect() is expected to throw once negotiate returns 500.
+        do {
+            try await service.connect()
+            XCTFail("connect() should have thrown on a 500 negotiate response")
+        } catch {
+            // expected
+        }
+        await service.disconnect()
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertNotNil(captured, "negotiate request should have been sent")
+        XCTAssertEqual(captured?.url?.path.hasSuffix("/hubs/printers/negotiate"), true)
+        XCTAssertEqual(
+            captured?.value(forHTTPHeaderField: "Authorization"),
+            "Bearer \(token)",
+            "negotiate must transmit the real bearer token, not a redacted placeholder"
+        )
+    }
+
+    func testNegotiateOmitsAuthorizationWhenNoToken() async {
+        let service = makeService(token: nil)
+
+        do {
+            try await service.connect()
+            XCTFail("connect() should have thrown on a 500 negotiate response")
+        } catch {
+            // expected
+        }
+        await service.disconnect()
+
+        let captured = MockURLProtocol.capturedRequests.first
+        XCTAssertNotNil(captured, "negotiate request should have been sent")
+        XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
+    }
+}
