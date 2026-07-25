@@ -157,6 +157,10 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
+
+        // Admin Control Center overview aggregation (issue #933). Composes the existing
+        // health-check pipeline; does not run its own probes.
+        services.AddScoped<Farm.Web.Api.Services.Admin.IAdminOverviewService, Farm.Web.Api.Services.Admin.AdminOverviewService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);
