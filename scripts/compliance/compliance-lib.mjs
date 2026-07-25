@@ -1813,9 +1813,49 @@ export function validateSbomDocument(sbom, sbomPath, dependencyPolicy) {
   return errors;
 }
 
-export async function scanPublicationFiles(repoRoot, relativePaths, secretPatterns) {
+function isVariableCredentialTemplate(value) {
+  return /\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*/.test(value);
+}
+
+function scanPathMatchesException(scanPath, exceptionPath) {
+  const normalizedExceptionPath = normalizeRelativePath(exceptionPath);
+  return scanPath === normalizedExceptionPath
+    || scanPath.endsWith(`/${normalizedExceptionPath}`);
+}
+
+export async function scanPublicationFiles(
+  repoRoot,
+  relativePaths,
+  secretPatterns,
+  secretPatternExceptions = [],
+) {
   const errors = [];
-  const patterns = secretPatterns.map((pattern) => new RegExp(pattern, 'i'));
+  const patterns = secretPatterns.map((source) => ({
+    expression: new RegExp(source, 'gi'),
+    source,
+  }));
+  const validExceptions = [];
+  const usedExceptions = new Set();
+
+  for (const [index, exception] of secretPatternExceptions.entries()) {
+    const exceptionPath = normalizeRelativePath(exception.path ?? '');
+    const isValid = isSafeRepositoryPath(exceptionPath)
+      && secretPatterns.includes(exception.pattern)
+      && /^[a-f0-9]{64}$/.test(exception.matchSha256 ?? '')
+      && typeof exception.reason === 'string'
+      && exception.reason.trim().length > 0;
+    if (!isValid) {
+      errors.push(createError(
+        'PUBLICATION_SECRET_EXCEPTION_INVALID',
+        `secretPatternExceptions[${index}]`,
+        'exception requires a safe path, known pattern, SHA-256 match hash, and rationale',
+      ));
+      continue;
+    }
+    validExceptions.push({ ...exception, index, path: exceptionPath });
+  }
+
+  const scannedPaths = [];
 
   for (const relativePath of relativePaths) {
     const absolutePath = path.resolve(repoRoot, relativePath);
@@ -1831,10 +1871,45 @@ export async function scanPublicationFiles(repoRoot, relativePaths, secretPatter
     }
 
     const content = await readFile(absolutePath, 'utf8');
+    scannedPaths.push(relativeToRoot);
     for (const pattern of patterns) {
-      if (pattern.test(content)) {
-        errors.push(createError('PUBLICATION_SECRET', relativePath, `content matches prohibited secret pattern ${pattern.source}`));
+      pattern.expression.lastIndex = 0;
+      for (const match of content.matchAll(pattern.expression)) {
+        if (isVariableCredentialTemplate(match[0])) {
+          continue;
+        }
+
+        const matchSha256 = createHash('sha256').update(match[0]).digest('hex');
+        const exception = validExceptions.find((candidate) =>
+          scanPathMatchesException(relativeToRoot, candidate.path)
+          && candidate.pattern === pattern.source
+          && candidate.matchSha256 === matchSha256);
+        if (exception) {
+          usedExceptions.add(exception.index);
+          continue;
+        }
+
+        errors.push(createError(
+          'PUBLICATION_SECRET',
+          relativePath,
+          `content matches prohibited secret pattern ${pattern.source}`,
+        ));
+        break;
       }
+    }
+  }
+
+  for (const exception of validExceptions) {
+    if (!usedExceptions.has(exception.index)) {
+      const pathWasScanned = scannedPaths.some((scanPath) =>
+        scanPathMatchesException(scanPath, exception.path));
+      errors.push(createError(
+        'PUBLICATION_SECRET_EXCEPTION_STALE',
+        exception.path,
+        pathWasScanned
+          ? 'hash-bound exception no longer matches the reviewed content'
+          : 'hash-bound exception path was not scanned',
+      ));
     }
   }
 

@@ -520,8 +520,48 @@ test('scanPublicationFiles rejects embedded credentials', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-'));
   try {
     await writeFile(path.join(root, 'source.json'), '{"token":"ghp_abcdefghijklmnopqrstuvwxyz"}\n');
-    const errors = await scanPublicationFiles(root, ['source.json'], ['gh[pousr]_[A-Za-z0-9]{20,}']);
+    const pattern = 'gh[pousr]_[A-Za-z0-9]{20,}';
+    const errors = await scanPublicationFiles(root, ['source.json'], [pattern]);
     assert.ok(hasCode(errors, 'PUBLICATION_SECRET'));
+
+    assert.deepEqual(
+      await scanPublicationFiles(root, ['source.json'], [pattern], [{
+        matchSha256: 'd66f4cc7d7c08ec57ca73717f8625478602fd28781494d2876f871b01f4f35b9',
+        path: 'source.json',
+        pattern,
+        reason: 'Synthetic negative-test fixture.',
+      }]),
+      [],
+    );
+
+    const staleErrors = await scanPublicationFiles(root, ['source.json'], [pattern], [{
+      matchSha256: '0000000000000000000000000000000000000000000000000000000000000000',
+      path: 'source.json',
+      pattern,
+      reason: 'Deliberately stale fixture.',
+    }]);
+    assert.ok(hasCode(staleErrors, 'PUBLICATION_SECRET'));
+    assert.ok(hasCode(staleErrors, 'PUBLICATION_SECRET_EXCEPTION_STALE'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('scanPublicationFiles permits variable credential templates', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-template-'));
+  try {
+    await writeFile(
+      path.join(root, 'source.txt'),
+      'upstream=https://x-access-token:${PUBLIC_REPO_PAT}@example.test/source\n',
+    );
+    assert.deepEqual(
+      await scanPublicationFiles(
+        root,
+        ['source.txt'],
+        ['https?://[^\\s/:]+:[^\\s/@]+@'],
+      ),
+      [],
+    );
   } finally {
     await rm(root, { force: true, recursive: true });
   }

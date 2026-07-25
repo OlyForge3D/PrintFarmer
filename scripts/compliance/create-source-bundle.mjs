@@ -81,7 +81,11 @@ async function collectArchiveFiles(root, currentDirectory, files, symbolicLinks)
   }
 }
 
-export async function scanSourceArchive(archivePath, secretPatterns) {
+export async function scanSourceArchive(
+  archivePath,
+  secretPatterns,
+  secretPatternExceptions = [],
+) {
   const extractionRoot = await mkdtemp(path.join(tmpdir(), 'printfarmer-source-'));
   try {
     await execFileAsync('tar', ['-xzf', archivePath, '-C', extractionRoot]);
@@ -89,7 +93,12 @@ export async function scanSourceArchive(archivePath, secretPatterns) {
     const symbolicLinks = [];
     await collectArchiveFiles(extractionRoot, extractionRoot, files, symbolicLinks);
 
-    const scanErrors = await scanPublicationFiles(extractionRoot, files, secretPatterns);
+    const scanErrors = await scanPublicationFiles(
+      extractionRoot,
+      files,
+      secretPatterns,
+      secretPatternExceptions,
+    );
     const patterns = secretPatterns.map((pattern) => new RegExp(pattern, 'i'));
     for (const symbolicLink of symbolicLinks) {
       for (const pattern of patterns) {
@@ -158,7 +167,11 @@ async function main() {
   ], {
     cwd: options.repoRoot,
   });
-  await scanSourceArchive(archivePath, policy.publication.secretPatterns);
+  await scanSourceArchive(
+    archivePath,
+    policy.publication.secretPatterns,
+    policy.publication.secretPatternExceptions ?? [],
+  );
 
   const commitTimestamp = await git(options.repoRoot, ['show', '-s', '--format=%cI', revision]);
   const releaseBaseUrl = `${policy.repositoryUrl}/releases/download/${version}`;

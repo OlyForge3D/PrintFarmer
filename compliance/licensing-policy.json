@@ -193,6 +193,38 @@
       "gh[pousr]_[A-Za-z0-9]{20,}",
       "AKIA[0-9A-Z]{16}",
       "https?://[^\\s/:]+:[^\\s/@]+@"
+    ],
+    "secretPatternExceptions": [
+      {
+        "path": ".copilot/skills/gh-auth-isolation/SKILL.md",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "da6ca128983ebff1c3bdbb015338f67aa62730ef903f496eccca176d2f8c2f3f",
+        "reason": "Documented fictional hard-coded credential used as a security anti-pattern example."
+      },
+      {
+        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+        "reason": "Private-key marker documented without key material in secret-handling guidance."
+      },
+      {
+        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
+        "reason": "RSA private-key marker documented without key material in secret-handling guidance."
+      },
+      {
+        "path": "scripts/compliance/compliance.test.mjs",
+        "pattern": "gh[pousr]_[A-Za-z0-9]{20,}",
+        "matchSha256": "d66f4cc7d7c08ec57ca73717f8625478602fd28781494d2876f871b01f4f35b9",
+        "reason": "Synthetic GitHub token used by the negative publication-scanner test."
+      },
+      {
+        "path": "scripts/compliance/compliance.test.mjs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "44de90237471c73eee56499f5e43c97119b04c0fd489502881d035cae8c3423c",
+        "reason": "Synthetic credentialed URL used by the negative source-archive test."
+      }
     ]
   },
   "exceptions": []

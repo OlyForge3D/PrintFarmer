@@ -172,7 +172,11 @@ Source archives must not contain secret-bearing environment files, credentials,
 private keys, database files, or other prohibited tracked paths. Reviewed
 non-secret templates named `.env.example`, `.env.development`, or
 `.env.template` may be included because they are required build/deployment
-source. Release files are scanned for credential patterns before publication.
+source. Repository-owned application, test, deployment, release, and
+development metadata remains included. Release files are scanned for credential
+patterns before publication. Synthetic scanner fixtures and security
+documentation examples require an exact path, pattern, matched-value SHA-256,
+and rationale in policy; changed or additional matches fail publication.
 
 ## Deployment and verification procedure
 
