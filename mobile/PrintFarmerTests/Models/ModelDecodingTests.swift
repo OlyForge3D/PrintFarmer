@@ -32,7 +32,10 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(printer.isEnabled)
         XCTAssertTrue(printer.isOnline)
         XCTAssertEqual(printer.state, "printing")
-        XCTAssertEqual(printer.progress, 45.5)
+        // Backend delivers progress on a 0–100 scale; Printer.init(from:) clamps and
+        // rescales it to the 0–1.0 UI-internal scale. See Models/Models.swift and
+        // PrinterProgressContractTests (issue #277).
+        XCTAssertEqual(printer.progress, 0.455)
         XCTAssertEqual(printer.jobName, "benchy.gcode")
     }
 
