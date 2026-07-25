@@ -169,6 +169,14 @@ describe('buildSettingCommandItems', () => {
     expect(motd?.label).toBe('MotdMessage');
   });
 
+  it('maps every settings group that a backend section declares', () => {
+    // `HistorySeedingBackgroundService` declares Group = "Job Queue". A group with
+    // no entry here is silently skipped by the palette (`if (!location) continue`),
+    // which is how that section ended up unreachable by any route.
+    expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']).toBeDefined();
+    expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']?.subPageId).toBe('automation');
+  });
+
   it('disambiguates a property name shared by two sections on the same page', () => {
     // `Enabled` exists on 13 backend settings classes, several of which render
     // on a single page. A bare `field=Enabled` link would resolve to whichever
