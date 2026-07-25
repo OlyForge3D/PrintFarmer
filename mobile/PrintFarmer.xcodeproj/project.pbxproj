@@ -200,6 +200,7 @@
 		A78230000000000000000001 /* ShiftTaskProofSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000001 /* ShiftTaskProofSupport.swift */; };
 		A78230000000000000000002 /* ShiftTaskModelsServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */; };
 		A78230000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */; };
+		A78230000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift */; };
 		A78230000000000000000004 /* ShiftTaskSignalRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000004 /* ShiftTaskSignalRTests.swift */; };
 		A78230000000000000000005 /* ShiftTaskViewPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000005 /* ShiftTaskViewPresentationTests.swift */; };
 		A78230000000000000000006 /* ShiftTasksUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A78220000000000000000006 /* ShiftTasksUITests.swift */; };
@@ -690,6 +691,7 @@
 		A78220000000000000000001 /* ShiftTaskProofSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskProofSupport.swift; sourceTree = "<group>"; };
 		A78220000000000000000002 /* ShiftTaskModelsServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskModelsServiceTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksViewModelAuthorityTests.swift; sourceTree = "<group>"; };
+		A78220000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksCoalescerHardeningTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000004 /* ShiftTaskSignalRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskSignalRTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000005 /* ShiftTaskViewPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTaskViewPresentationTests.swift; sourceTree = "<group>"; };
 		A78220000000000000000006 /* ShiftTasksUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftTasksUITests.swift; sourceTree = "<group>"; };
@@ -1142,6 +1144,7 @@
 				976554965D98BFA6F917FA14 /* PartAdjustmentViewModelTests.swift */,
 				1BB420C7D1448757457238B5 /* BinPartLoggingViewModelTests.swift */,
 				A78220000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift */,
+				A78220000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift */,
 				F7778BD3000000000000B003 /* FarmFilamentCoverageViewModelTests.swift */,
 				F7778BD4000000000000B004 /* PrinterFilamentCoverageViewModelTests.swift */,
 				A79900000000000000000003 /* AttentionFeedViewModelTests.swift */,
@@ -1762,6 +1765,7 @@
 				D8180000000000000000A001 /* PushDegradationTests.swift in Sources */,
 				A78230000000000000000002 /* ShiftTaskModelsServiceTests.swift in Sources */,
 				A78230000000000000000003 /* ShiftTasksViewModelAuthorityTests.swift in Sources */,
+				A78230000000000000000814 /* ShiftTasksCoalescerHardeningTests.swift in Sources */,
 				A79910000000000000000003 /* AttentionFeedViewModelTests.swift in Sources */,
 				A79910000000000000000004 /* AttentionReconnectGapTests.swift in Sources */,
 				F78010000000000000000001 /* AttentionInteractionTests.swift in Sources */,
