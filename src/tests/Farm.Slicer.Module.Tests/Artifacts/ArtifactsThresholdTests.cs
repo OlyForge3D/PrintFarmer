@@ -10,7 +10,6 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Artifacts;
 
-[Collection(IntegrationTestCollection.Name)]
 public class ArtifactsThresholdTests
 {
     [Fact(DisplayName = "Warning threshold event fires when exceeded")]

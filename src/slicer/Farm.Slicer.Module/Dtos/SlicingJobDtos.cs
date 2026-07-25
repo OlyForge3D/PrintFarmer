@@ -31,8 +31,6 @@ public class SlicingJobDto
 {
     public string JobId { get; set; } = string.Empty;
 
-    public Guid UserId { get; set; }
-
     public SlicingJobStatus Status { get; set; } = SlicingJobStatus.Queued;
 
     public int Progress { get; set; }

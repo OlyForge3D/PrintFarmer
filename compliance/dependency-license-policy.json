@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "reviewedOn": "2026-07-25",
+  "reviewedOn": "2026-07-24",
   "allowedExpressions": [
     "(MIT AND Zlib)",
     "(MPL-2.0 OR Apache-2.0)",
@@ -23,8 +23,7 @@
     "MPL-2.0",
     "PostgreSQL",
     "Unlicense",
-    "Zlib",
-    "blessing"
+    "Zlib"
   ],
   "deniedValues": [
     "",
@@ -268,16 +267,6 @@
       "reviewDate": "2026-07-24",
       "reviewAfter": "2027-07-24",
       "rationale": "The analyzer is a private build-time tool and is not included in distributed application artifacts. The custom expression prevents treating its source-available terms as an OSI license."
-    },
-    {
-      "ecosystem": "nuget",
-      "observedLicense": "FILE-SHA256:99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95",
-      "approvedExpression": "blessing",
-      "evidence": "SQLitePCLRaw.lib.e_sqlite3 3.53.3 LICENSE.txt; SHA-256 99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95; the package identifies its native SQLite builds, states that SQLite is public domain, and links https://sqlite.org/copyright.html",
-      "reviewer": "Copilot App",
-      "reviewDate": "2026-07-25",
-      "reviewAfter": "2027-07-25",
-      "rationale": "SQLite's deliverable code is dedicated to the public domain; SPDX identifies the SQLite Blessing as blessing. The exact package license text and official SQLite dedication support this mapping."
     },
     {
       "ecosystem": "nuget",

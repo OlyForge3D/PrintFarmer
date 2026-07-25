@@ -1,5 +1,4 @@
 ﻿using System.ComponentModel.DataAnnotations;
-using System.Text.Json.Serialization;
 
 namespace Farm.Slicer.Module.Domain;
 
@@ -17,14 +16,11 @@ public class SlicerService
 
     public string? Version { get; set; }
 
-    [JsonIgnore]
     public string? Host { get; set; } // service base URL or identifier
 
-    [JsonIgnore]
     public string? UiManifestUrl { get; set; }
 
     // JSON blob describing capabilities (array or object)
-    [JsonIgnore]
     public string? CapabilitiesJson { get; set; }
 
     public int MaxConcurrentJobs { get; set; } = 1;
@@ -33,7 +29,6 @@ public class SlicerService
 
     public DateTime LastSeen { get; set; } = DateTime.UtcNow;
 
-    [JsonIgnore]
     public string? ApiKey { get; set; }
 
     public DateTime? ApiKeyRotatedAt { get; set; }
@@ -48,6 +43,5 @@ public class SlicerService
     /// Stable instance identifier assigned by the deployment environment.
     /// Survives container restarts to enable re-registration without duplicates.
     /// </summary>
-    [JsonIgnore]
     public string? InstanceId { get; set; }
 }

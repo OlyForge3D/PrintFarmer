@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -583,8 +582,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
         }
 
         // Broadcast failure event to all connected clients
-        await _hub.Clients.Group(AuthorizedHubGroups.Farm)
-            .SendAsync("FailureDetected", failureEvent, cancellationToken);
+        await _hub.Clients.All.SendAsync("FailureDetected", failureEvent, cancellationToken);
 
         _logger.LogInformation(
             "[PrintFailureMonitor] Failure event broadcast for printer {PrinterId}, job {JobId}",

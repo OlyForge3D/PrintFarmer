@@ -6,7 +6,7 @@ using Farm.Infrastructure.Domain;
 namespace PrinterDiscovery.Services;
 
 /// <summary>
-/// Service for streaming discovery with real-time progress updates.
+/// Service for streaming discovery with real-time progress updates via SignalR.
 /// Extends the base discovery functionality with progress broadcasting.
 /// </summary>
 public interface IStreamingDiscoveryService
@@ -194,22 +194,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
 
                             // Broadcast printer found event immediately
                             await _broadcaster.BroadcastPrinterFoundAsync(
-                                new InternalDiscoveryPrinterFoundDto(
-                                    sessionId,
-                                    result.Name,
-                                    result.ServerUrl,
-                                    result.OriginalServerUrl,
-                                    result.IpAddress,
-                                    result.Backend,
-                                    result.BackendPort,
-                                    result.FrontendPort,
-                                    result.CameraStreamUrl,
-                                    result.CameraSnapshotUrl,
-                                    result.Manufacturer,
-                                    result.Model,
-                                    result.Notes,
-                                    result.DiscoveredAt,
-                                    result.IsReachable),
+                                new DiscoveryPrinterFoundDto(sessionId, result),
                                 cts.Token);
                         }
                     }

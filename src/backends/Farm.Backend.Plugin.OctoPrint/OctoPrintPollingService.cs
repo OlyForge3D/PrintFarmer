@@ -444,8 +444,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: spoolInfo,
                             FileName: PrinterStatusDto.ExtractFileName(statusData.JobName));
 
-                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-                            .SendAsync("printerupdated", signalRUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
                     }
                 }
                 catch (Exception ex)
@@ -506,8 +505,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

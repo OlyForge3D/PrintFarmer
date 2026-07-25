@@ -3,7 +3,7 @@ if (!window.PrintFarmerDebug) {
 }
 import React, { useState, useEffect } from 'react';
 import './printerDiscovery.css';
-import { useStartDiscoveryStream, useCancelDiscoveryStream, useRegisterDiscoveredPrinter, useManufacturers, useModels } from '@/common/hooks/useApi';
+import { useStartDiscoveryStream, useCancelDiscoveryStream, useCreatePrinter, useManufacturers, useModels } from '@/common/hooks/useApi';
 import { useDiscoveryStream, useSignalRConnection } from '@/common/hooks/useSignalR';
 import { PrinterBackend } from '@/types/api';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -49,7 +49,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
   const startDiscoveryMutation = useStartDiscoveryStream();
   const cancelDiscoveryMutation = useCancelDiscoveryStream();
-  const registerPrinterMutation = useRegisterDiscoveredPrinter();
+  const createPrinterMutation = useCreatePrinter();
   const { isConnected: isSignalRConnected } = useSignalRConnection('printer');
   const [startError, setStartError] = useState<string | null>(null);
   
@@ -95,7 +95,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
       }
       resetDiscovery(); // Clear previous results
       const backends = selectedBackends.size > 0 ? Array.from(selectedBackends) : undefined;
-      const result = await startDiscoveryMutation.mutateAsync({ backends });
+      const result = await startDiscoveryMutation.mutateAsync({ backends, autoRegister: false });
       if (!result || !('sessionId' in result) || !result.sessionId) {
         console.error('[PrintFarmer] startDiscovery returned no sessionId', result);
         setSessionId(null);
@@ -127,16 +127,16 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
     if (selectedPrinters.size === foundPrinters.length) {
       setSelectedPrinters(new Set());
     } else {
-      setSelectedPrinters(new Set(foundPrinters.map(p => p.discoveryId)));
+      setSelectedPrinters(new Set(foundPrinters.map(p => p.serverUrl)));
     }
   };
 
-  const handleToggleSelection = (discoveryId: string) => {
+  const handleToggleSelection = (serverUrl: string) => {
     const newSelected = new Set(selectedPrinters);
-    if (newSelected.has(discoveryId)) {
-      newSelected.delete(discoveryId);
+    if (newSelected.has(serverUrl)) {
+      newSelected.delete(serverUrl);
     } else {
-      newSelected.add(discoveryId);
+      newSelected.add(serverUrl);
     }
     setSelectedPrinters(newSelected);
   };
@@ -147,21 +147,24 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
   };
 
   const handleAddSelected = async () => {
-    if (!sessionId) return;
-    const printersToAdd = foundPrinters.filter(p => selectedPrinters.has(p.discoveryId));
+    const printersToAdd = foundPrinters.filter(p => selectedPrinters.has(p.serverUrl));
     
     try {
       for (const printer of printersToAdd) {
-        const config = printerConfigs[printer.discoveryId] || {};
-        await registerPrinterMutation.mutateAsync({
-          sessionId,
-          request: {
-            discoveryId: printer.discoveryId,
-            manufacturerId: config.manufacturerId,
-            modelId: config.modelId,
-            newManufacturerName: config.newManufacturerName,
-            newModelName: config.newModelName,
-          },
+        const config = printerConfigs[printer.serverUrl] || {};
+        await createPrinterMutation.mutateAsync({
+          name: printer.name || `${printer.manufacturer || 'Unknown'} Printer`,
+          serverUrl: printer.serverUrl,
+          backend: printer.backend,
+          notes: `Auto-discovered at ${printer.ipAddress}:${printer.backendPort ?? 'unknown'}`,
+          manufacturerId: config.manufacturerId,
+          modelId: config.modelId,
+          newManufacturerName: config.newManufacturerName,
+          newModelName: config.newModelName,
+          backendPort: printer.backendPort ?? undefined,
+          frontendPort: printer.frontendPort ?? undefined,
+          cameraStreamUrl: printer.cameraStreamUrl ?? undefined,
+          cameraSnapshotUrl: printer.cameraSnapshotUrl ?? undefined,
         });
       }
       
@@ -236,9 +239,9 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
             <Button
               variant="primary"
               onClick={handleAddSelected}
-              disabled={selectedPrinters.size === 0 || registerPrinterMutation.isPending}
+              disabled={selectedPrinters.size === 0 || createPrinterMutation.isPending}
             >
-              {registerPrinterMutation.isPending
+              {createPrinterMutation.isPending
                 ? 'Adding...'
                 : `Add ${selectedPrinters.size} Selected Printer${selectedPrinters.size !== 1 ? 's' : ''}`}
             </Button>
@@ -314,8 +317,13 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
             />
 
             <p className="text-xs text-pf-text-tertiary mb-2">Session: {progress.sessionId}</p>
+            {progress.networkRanges && progress.networkRanges.length > 0 && (
+              <p className="text-xs text-pf-text-tertiary mb-2">
+                Networks: {progress.networkRanges.join(', ')} {progress.autoDetectedNetworks && '(auto-detected)'}
+              </p>
+            )}
             <p className="text-sm text-pf-text-secondary mb-2">
-              {progress.message || 'Scanning for compatible printers...'}
+              Scanning {progress.currentNetwork} - {progress.currentIp}
             </p>
             <p className="text-xs text-pf-text-tertiary">
               {progress.scannedIps} of {progress.totalIps} IPs scanned • {progress.printersFound} printers found
@@ -350,15 +358,15 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
 
             <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-md p-2 bg-pf-bg-2">
               {foundPrinters.map((printer) => {
-                const config = printerConfigs[printer.discoveryId];
+                const config = printerConfigs[printer.serverUrl];
                 const hasConfig = !!(config?.manufacturerId || config?.newManufacturerName);
                 const hasModelConfig = !!(config?.modelId || config?.newModelName);
 
                 return (
                   <div
-                      key={printer.discoveryId}
+                      key={printer.serverUrl}
                       className={`p-4 rounded-lg transition-colors border ${
-                        selectedPrinters.has(printer.discoveryId)
+                        selectedPrinters.has(printer.serverUrl)
                           ? 'bg-pf-bg-2 border-pf-border'
                           : 'border-pf-border hover:bg-pf-bg-secondary'
                       }`}
@@ -383,7 +391,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                         </div>
 
                         <p className="text-sm text-pf-text-secondary mb-2">
-                          Network connection details are retained securely by PrintFarmer.
+                          {printer.ipAddress}:{printer.backendPort ?? 'unknown'} • {printer.serverUrl}
                         </p>
 
                         {/* Inline Manufacturer and Model Selection */}
@@ -400,10 +408,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                     modelId: undefined,
                                     newManufacturerName: undefined
                                   };
-                                  setPrinterConfigs(prev => ({ ...prev, [printer.discoveryId]: newConfig }));
+                                  setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
 
                                   if (e.target.value && (config?.modelId || config?.newModelName)) {
-                                    setSelectedPrinters(prev => new Set([...prev, printer.discoveryId]));
+                                    setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                   }
                                 }}
                                 className="w-full text-xs"
@@ -426,10 +434,10 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                                     modelId: e.target.value || undefined,
                                     newModelName: undefined
                                   };
-                                  setPrinterConfigs(prev => ({ ...prev, [printer.discoveryId]: newConfig }));
+                                  setPrinterConfigs(prev => ({ ...prev, [printer.serverUrl]: newConfig }));
 
                                   if ((config?.manufacturerId || config?.newManufacturerName) && e.target.value) {
-                                    setSelectedPrinters(prev => new Set([...prev, printer.discoveryId]));
+                                    setSelectedPrinters(prev => new Set([...prev, printer.serverUrl]));
                                   }
                                 }}
                                 className="w-full text-xs"
@@ -492,21 +500,22 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                         )}
 
                         {/* Auto-detected info */}
-                        {(printer.manufacturer || printer.model) && (
+                        {(printer.manufacturer || printer.model || printer.firmware) && (
                           <div className="text-xs text-pf-text-tertiary space-y-0.5">
                             {printer.manufacturer && <p>Auto-detected: {printer.manufacturer}</p>}
                             {printer.model && <p>Model: {printer.model}</p>}
+                            {printer.firmware && <p>Firmware: {printer.firmware} {printer.version}</p>}
                           </div>
                         )}
                       </div>
 
                       <div className="flex items-center">
                         <Checkbox
-                          aria-label={`Select printer ${printer.name || printer.discoveryId}`}
-                          checked={selectedPrinters.has(printer.discoveryId)}
+                          aria-label={`Select printer ${printer.name || printer.serverUrl}`}
+                          checked={selectedPrinters.has(printer.serverUrl)}
                           onChange={(e) => {
                             e.stopPropagation();
-                            handleToggleSelection(printer.discoveryId);
+                            handleToggleSelection(printer.serverUrl);
                           }}
                         />
                       </div>

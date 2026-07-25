@@ -33,7 +33,6 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
-✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, SQL Server, MySQL (all tested)  
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
@@ -141,7 +140,6 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 
 **Operations:**
 - **[Deployment Guide](./docs/DEPLOYMENT.md)** - Docker, environments, configuration
-- **[Worker Authentication](./docs/WORKER_AUTHENTICATION.md)** - Slicer registry, service, and job-route credentials
 - **[Development Guide](./docs/DEVELOPMENT.md)** - Code style, testing, contribution workflow
 - **[Troubleshooting Guide](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
@@ -316,7 +314,7 @@ For complete Pi hardware recommendations, setup checklist, and troubleshooting, 
 ## 🔒 Security
 
 - **Authentication**: JWT tokens with secure HttpOnly cookies
-- **Authorization**: Role, `resource:action` permission, owner, farm, and worker-resource checks
+- **Authorization**: Role-based access control (Admin, Operator, Viewer)
 - **Encryption**: API keys encrypted at rest
 - **HTTPS**: Enforced in production
 - **Validation**: Input validation and CORS protection

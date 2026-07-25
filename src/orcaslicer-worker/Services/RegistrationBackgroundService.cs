@@ -132,12 +132,11 @@ public class RegistrationBackgroundService : BackgroundService
         {
             _logger.LogInformation("Attempting to register with slicer registry...");
 
-            (Guid serviceId, string apiKey) = await _registrationClient.RegisterAsync(cancellationToken);
+            (Guid serviceId, string? apiKey) = await _registrationClient.RegisterAsync(cancellationToken);
 
             _serviceId = serviceId;
             _apiKey = apiKey;
             _isRegistered = true;
-            _workerState.SetRegisteredService(serviceId, apiKey);
 
             _logger.LogInformation(
                 "Successfully registered with slicer registry. ServiceId: {ServiceId}, HeartbeatInterval: {Interval}s",
@@ -150,7 +149,6 @@ public class RegistrationBackgroundService : BackgroundService
         {
             _logger.LogError(ex, "Failed to register with slicer registry");
             _isRegistered = false;
-            _workerState.ClearRegisteredService();
             return false;
         }
     }
@@ -176,7 +174,6 @@ public class RegistrationBackgroundService : BackgroundService
 
             if (deregisterTask.Result)
             {
-                _workerState.ClearRegisteredService();
                 _logger.LogInformation("Successfully deregistered from slicer registry.");
             }
             else

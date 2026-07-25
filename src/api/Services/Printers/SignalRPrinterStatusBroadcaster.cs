@@ -22,8 +22,7 @@ public class SignalRPrinterStatusBroadcaster(
     /// <inheritdoc />
     public async Task BroadcastPrinterImportProgressAsync(object result, CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-            .SendAsync("printerimportprogress", result, cancellationToken);
+        await _hubContext.Clients.All.SendAsync("printerimportprogress", result, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -33,7 +32,6 @@ public class SignalRPrinterStatusBroadcaster(
         PrinterStatusDto updated = _statusCacheWriter.UpdateSpoolInfo(printerId, spoolInfo);
 
         // Push the updated status to all connected clients
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-            .SendAsync("printerupdated", updated, cancellationToken);
+        await _hubContext.Clients.All.SendAsync("printerupdated", updated, cancellationToken);
     }
 }

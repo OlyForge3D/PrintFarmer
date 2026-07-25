@@ -1,7 +1,6 @@
 ﻿using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
@@ -522,7 +521,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 Jobs = jobs
             };
 
-            await _hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("jobqueueupdate", update, ct);
+            await _hub.Clients.All.SendAsync("jobqueueupdate", update, ct);
 
             _logger.LogDebug(
                 "[PrintJobCompletionService] Broadcasted jobqueueupdate for printer {PrinterId} with {JobCount} jobs",

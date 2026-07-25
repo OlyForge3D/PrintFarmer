@@ -52,7 +52,6 @@ import {
   ResolveHostnameRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
-  RegisterDiscoveredPrinterRequest,
   SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -653,17 +652,6 @@ export class ApiClient {
     const response = await this.client.post<{ message: string }>(
       `/printers/discover/${sessionId}/cancel`,
       {}
-    );
-    return response.data;
-  }
-
-  async registerDiscoveredPrinter(
-    sessionId: string,
-    request: RegisterDiscoveredPrinterRequest
-  ): Promise<Printer> {
-    const response = await this.client.post<Printer>(
-      `/printers/discover/${encodeURIComponent(sessionId)}/register`,
-      request
     );
     return response.data;
   }

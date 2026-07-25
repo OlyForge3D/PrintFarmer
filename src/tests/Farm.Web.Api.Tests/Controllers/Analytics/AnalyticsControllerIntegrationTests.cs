@@ -2,26 +2,23 @@
 using System.Net.Http.Json;
 using Farm.Infrastructure.Dtos;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers.Analytics;
 
-public class AnalyticsControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
+public class AnalyticsControllerIntegrationTests : IClassFixture<CustomWebApplicationFactory>
 {
-    private HttpClient _client = null!;
+    private readonly HttpClient _client;
     private readonly CustomWebApplicationFactory _factory;
 
     public AnalyticsControllerIntegrationTests(CustomWebApplicationFactory factory)
     {
         _factory = factory;
-    }
-
-    public async Task InitializeAsync() => _client = await _factory.CreateAdminClientAsync();
-
-    public Task DisposeAsync()
-    {
-        _client.Dispose();
-        return Task.CompletedTask;
+        _client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
     }
 
     [Fact]

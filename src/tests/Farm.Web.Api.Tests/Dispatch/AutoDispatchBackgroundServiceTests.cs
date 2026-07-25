@@ -69,7 +69,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         _clientProxyMock = new Mock<IClientProxy>();
         _hubClientsMock = new Mock<IHubClients>();
-        _hubClientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_clientProxyMock.Object);
+        _hubClientsMock.Setup(c => c.All).Returns(_clientProxyMock.Object);
         _hubMock = new Mock<IHubContext<PrinterHub>>();
         _hubMock.Setup(h => h.Clients).Returns(_hubClientsMock.Object);
 

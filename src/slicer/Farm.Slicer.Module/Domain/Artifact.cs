@@ -1,6 +1,4 @@
-﻿using System.Text.Json.Serialization;
-
-namespace Farm.Slicer.Module.Domain;
+﻿namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Represents a persisted slicing output (G-code, preview image, log, etc.) stored locally on disk.
@@ -24,7 +22,6 @@ public class Artifact
     public string FileName { get; set; } = string.Empty;
 
     /// <summary>Relative path from the configured artifact root to the stored file (no leading slash).</summary>
-    [JsonIgnore]
     public string RelativePath { get; set; } = string.Empty;
 
     /// <summary>Content type for downstream consumers (UI, downloads).</summary>
@@ -34,7 +31,6 @@ public class Artifact
     public long SizeBytes { get; set; }
 
     /// <summary>SHA-256 hash (hex) of the artifact for integrity and future dedup.</summary>
-    [JsonIgnore]
     public string Sha256 { get; set; } = string.Empty;
 
     /// <summary>UTC timestamp when the artifact was created/persisted.</summary>

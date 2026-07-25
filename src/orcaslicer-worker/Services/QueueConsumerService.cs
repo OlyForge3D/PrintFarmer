@@ -25,5 +25,5 @@ public class QueueConsumerService(
         => _pipeline.ProcessJobAsync(job, ct);
 
     protected override string[] GetWorkerCapabilities()
-        => WorkerConstants.Capabilities;
+        => ["orcaslicer", "stl-processing", "gcode-generation"];
 }

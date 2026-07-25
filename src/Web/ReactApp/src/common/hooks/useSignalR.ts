@@ -376,7 +376,7 @@ export function useDiscoveryPrinterFound(
   onPrinterFound?: (found: import('@/types/api').DiscoveryPrinterFoundDto) => void
 ) {
   // State is reset by parent remounting with key prop when sessionId changes
-  const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterSummaryDto[]>([]);
+  const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterDto[]>([]);
 
   useEffect(() => {
     if (!sessionId) return;

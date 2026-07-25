@@ -38,7 +38,6 @@ public class SignalRHarvestEventBroadcaster(IHubContext<HarvestHub> hubContext) 
     /// <returns>A task representing the asynchronous broadcast operation.</returns>
     public async Task BroadcastToAllAsync(string eventName, object? data, CancellationToken cancellationToken = default)
     {
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-            .SendAsync(eventName, data, cancellationToken);
+        await _hubContext.Clients.All.SendAsync(eventName, data, cancellationToken);
     }
 }

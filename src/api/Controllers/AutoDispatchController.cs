@@ -1,6 +1,4 @@
-﻿using Farm.Infrastructure.Security;
-using Farm.Infrastructure.Services.AutoDispatch;
-using Farm.Web.Api.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Services.AutoDispatch;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,7 +20,6 @@ public class AutoDispatchController(
     /// Get the auto-dispatch status for a printer.
     /// </summary>
     [HttpGet("{printerId:guid}/status")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> GetStatusAsync(Guid printerId, CancellationToken ct)
@@ -45,7 +42,6 @@ public class AutoDispatchController(
     /// is idempotent so a redundant client call is harmless.
     /// </summary>
     [HttpPost("{printerId:guid}/ready")]
-    [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
     [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -68,7 +64,6 @@ public class AutoDispatchController(
     /// the printer stays in PendingReady; otherwise transitions to None.
     /// </summary>
     [HttpPost("{printerId:guid}/skip")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> SkipNextAsync(Guid printerId, CancellationToken ct)
@@ -89,7 +84,6 @@ public class AutoDispatchController(
     /// without affecting queued jobs.
     /// </summary>
     [HttpPost("{printerId:guid}/cancel")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> CancelAutoAsync(Guid printerId, CancellationToken ct)
@@ -110,7 +104,6 @@ public class AutoDispatchController(
     /// immediately without waiting for PendingReady confirmation.
     /// </summary>
     [HttpPost("{printerId:guid}/pre-clear")]
-    [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -132,7 +125,6 @@ public class AutoDispatchController(
     /// Enable or disable auto-dispatch for a printer.
     /// </summary>
     [HttpPut("{printerId:guid}/enabled")]
-    [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> SetEnabledAsync(
@@ -155,7 +147,6 @@ public class AutoDispatchController(
     /// Get auto-dispatch status for all printers.
     /// </summary>
     [HttpGet("status")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(AutoDispatchGlobalStatusDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<AutoDispatchGlobalStatusDto>> GetAllStatusAsync(CancellationToken ct)
     {
@@ -168,7 +159,6 @@ public class AutoDispatchController(
     /// </summary>
     [HttpPut("enabled")]
     [Authorize(Roles = "farm_admin")]
-    [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     [ProducesResponseType(typeof(List<AutoDispatchStatusDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<AutoDispatchStatusDto>>> SetAllEnabledAsync(
         [FromBody] SetAutoDispatchEnabledRequest request,

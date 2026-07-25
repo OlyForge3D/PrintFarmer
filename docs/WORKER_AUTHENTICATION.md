@@ -1,165 +1,339 @@
-## Slicer worker authentication
+# Worker Authentication
 
-PrintFarmer uses three credentials for separate slicer trust boundaries. These
-credentials are API secrets and must only be sent over TLS outside a trusted
-container network.
+## Overview
 
-| Credential | Header | Scope |
-|---|---|---|
-| Shared registry key | `X-Slicer-Api-Key` | Registry list and registration |
-| Registry-issued service key | `X-Slicer-Service-Api-Key` | One registered service's lifecycle routes |
-| Registry-issued worker service key | `X-Worker-Key` and `X-Worker-Id` | Worker-only job, model, and artifact routes |
+PrintFarmer's distributed slicing system uses a shared API key mechanism to authenticate worker processes. This prevents unauthorized access to critical job management endpoints while allowing legitimate workers to claim, process, and complete slicing jobs.
 
-Header names are exact contract names. HTTP header matching is
-case-insensitive, but the hyphen placement must match.
+## Architecture
 
-### Configuration
+### Protected Endpoints
 
-The API or standalone slicer host reads the shared secret from
-`WorkerAuth:SharedKey`, normally supplied as `WorkerAuth__SharedKey`. It also
-supports the process environment variable `WORKER_SHARED_API_KEY`.
+The following endpoints require worker authentication:
 
-The OrcaSlicer worker reads the shared registration secret in this order:
+- `POST /api/slice/claim` - Claim the next available job from the queue
+- `POST /api/slice/{id}/progress` - Report progress updates for a job
+- `POST /api/slice/{id}/complete` - Mark a job as complete and upload artifacts
 
-1. `SlicerRegistry:ApiKey` for registration.
-2. `Worker:SharedKey`.
-3. `Worker:SharedApiKey` for compatibility.
-4. `WORKER_SHARED_API_KEY`.
+### Authentication Mechanism
 
-The Docker deployment templates set `WorkerAuth__SharedKey` on the API/slicer
-host and `Worker__SharedKey` on the worker from the same
-`WORKER_SHARED_API_KEY` value. This shared value only bootstraps registration.
-After registration, the worker keeps the returned per-service key in memory and
-uses it for lifecycle and worker-only requests.
-
-Production must configure a non-empty shared registration key. A missing
-registration key only bypasses registry validation in the `Testing`
-environment. Worker-only routes never bypass registry-issued key validation.
-
-### Registration and service identity
-
-Register a worker with the shared registry key:
+Workers authenticate by including a shared API key in the `X-Worker-Key` HTTP header:
 
 ```http
-POST /api/slicers/register
-X-Slicer-Api-Key: <shared-key>
+POST /api/slice/claim HTTP/1.1
+Host: api.printfarmer.example
 Content-Type: application/json
+X-Worker-Key: your-secret-worker-key
+
+{
+  "workerName": "orcaslicer-worker-01",
+  "capabilities": ["orcaslicer"]
+}
 ```
 
-Successful registration returns a service GUID and a generated per-service
-key:
+### Authorization Flow
+
+1. Worker sends request with `X-Worker-Key` header
+2. `WorkerAuthService` validates the header using constant-time comparison
+3. If valid: request proceeds to controller logic
+4. If invalid or missing: returns `401 Unauthorized`
+
+### Testing Environment Behavior
+
+In the `Testing` environment (integration tests), if no shared key is configured, authentication checks are bypassed. This allows tests to run without explicit key configuration while ensuring production deployments enforce security.
+
+## Configuration
+
+### Environment Variables
+
+Set the worker shared API key via environment variable:
+
+```bash
+export WORKER_SHARED_API_KEY="your-secure-random-key-here"
+```
+
+**Development Example:**
+```bash
+export WORKER_SHARED_API_KEY="dev-worker-key-not-for-production"
+```
+
+**Production Example:**
+```bash
+export WORKER_SHARED_API_KEY="$(openssl rand -base64 32)"
+```
+
+### appsettings.json (Alternative)
+
+You can also configure the key in `appsettings.json`:
 
 ```json
 {
-  "id": "46df3648-8d62-4f70-b455-bb721db0c360",
-  "apiKey": "<registry-issued-service-key>"
+  "WorkerAuth": {
+    "SharedKey": "your-secure-random-key-here"
+  }
 }
 ```
 
-Registration creates the `SlicerService` and its internal `Worker` record
-atomically. A synchronization failure leaves neither record persisted.
+**Priority:** Environment variables take precedence over `appsettings.json` values.
 
-The worker keeps the returned GUID and key as its registered service identity.
-They are sent as `X-Worker-Id` and `X-Worker-Key` on every worker-only request.
-PrintFarmer resolves that GUID to the internal enabled worker record and
-validates the key bound to that record. A key issued to one service cannot be
-paired with another service's GUID.
+### Docker Deployment
 
-### Registry routes
+In Docker Compose or Kubernetes environments, inject the key as an environment variable:
 
-The shared registry key protects:
+**docker-compose.yml:**
+```yaml
+services:
+  api:
+    image: printfarmer/api:latest
+    environment:
+      - WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
+  
+  orcaslicer-worker:
+    image: printfarmer/orcaslicer-worker:latest
+    environment:
+      - WORKER_API_KEY=${WORKER_SHARED_API_KEY}  # Worker reads from WORKER_API_KEY
+      - Worker__ApiBaseUrl=http://api:5245
+```
 
-- `GET /api/slicers`
-- `POST /api/slicers/register`
+**Kubernetes Secret:**
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: worker-api-key
+type: Opaque
+stringData:
+  key: "your-secure-random-key-here"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+spec:
+  template:
+    spec:
+      containers:
+      - name: api
+        env:
+        - name: WORKER_SHARED_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: worker-api-key
+              key: key
+```
 
-The registry-issued service key protects the service identified by `{id}`:
+## Worker Implementation
 
-- `GET /api/slicers/{id}`
-- `POST /api/slicers/{id}/heartbeat`
-- `POST /api/slicers/{id}/deregister`
-- `POST /api/slicers/{id}/rotate-key`
+Workers must include the `X-Worker-Key` header in all protected requests:
 
-For example:
+**Example (C# HttpClient):**
+```csharp
+var client = new HttpClient();
+client.DefaultRequestHeaders.Add("X-Worker-Key", workerApiKey);
 
-```http
-POST /api/slicers/46df3648-8d62-4f70-b455-bb721db0c360/heartbeat
-X-Slicer-Service-Api-Key: <registry-issued-service-key>
-Content-Type: application/json
-
+var claimRequest = new ClaimJobRequest
 {
-  "status": "Online",
-  "freeSlots": 1
+    WorkerName = "orcaslicer-worker-01",
+    Capabilities = new[] { "orcaslicer" }
+};
+
+var response = await client.PostAsJsonAsync(
+    $"{apiBaseUrl}/api/slice/claim",
+    claimRequest
+);
+
+if (response.StatusCode == HttpStatusCode.Unauthorized)
+{
+    _logger.LogError("Worker authentication failed - check API key");
+    return;
 }
 ```
 
-The service key is matched to the route GUID. A key issued to one service
-cannot operate on another service.
-
-### Worker-only routes
-
-Every worker-only request requires both headers:
-
-```http
-X-Worker-Key: <registry-issued-service-key>
-X-Worker-Id: 46df3648-8d62-4f70-b455-bb721db0c360
+**Example (curl):**
+```bash
+curl -X POST https://api.printfarmer.example/api/slice/claim \
+  -H "Content-Type: application/json" \
+  -H "X-Worker-Key: your-secret-worker-key" \
+  -d '{
+    "workerName": "orcaslicer-worker-01",
+    "capabilities": ["orcaslicer"]
+  }'
 ```
 
-The protected routes are:
+## Security Considerations
 
-- `POST /api/slice/claim`
-- `POST /api/slice/{jobId}/progress`
-- `POST /api/slice/{jobId}/renew-lease`
-- `GET /api/slice/{jobId}/model`
-- `POST /api/slice/{jobId}/artifacts`
-- `POST /api/slice/{jobId}/complete`
-- `POST /api/slice/{jobId}/fail`
+### Current Implementation: Shared Key
 
-Claim requests also carry the registered service GUID in `workerId`. The
-header GUID, body GUID, and credential-bound service must agree. After a claim,
-PrintFarmer stores the internal worker ID on the job. Model downloads, artifact
-uploads, progress, lease renewal, completion, and failure are allowed only
-while that job is processing and assigned to the resolved worker.
+The current implementation uses a **single shared key** for all workers. This has security implications:
 
-Workers receive a same-origin model route rather than the model storage path.
-They upload artifacts through the job-scoped multipart route. Completion only
-accepts artifact IDs created by the same worker for the same job.
+**Advantages:**
+- Simple to deploy and configure
+- No database or key management infrastructure required
+- Suitable for trusted internal networks
 
-### User routes and artifacts
+**Limitations:**
+- All workers share the same credential
+- Compromised key requires updating all workers simultaneously
+- No per-worker audit trail or revocation capability
+- Key rotation requires coordinated restart of all services
 
-User-facing slice submission, status, cancellation, and artifact downloads do
-not accept worker keys. They require the normal authenticated user principal,
-the applicable `resource:action` permission, and owner/farm access. Farm
-administrator bypasses are audited.
+### Best Practices
 
-### Failure contract
+1. **Generate Strong Keys:**
+   ```bash
+   # Generate a cryptographically secure random key
+   openssl rand -base64 32
+   ```
 
-Authentication failures use `application/problem+json`.
+2. **Keep Keys Secret:**
+   - Never commit keys to source control
+   - Use environment variables or secret management systems
+   - Rotate keys regularly (quarterly minimum)
 
-| Status | Code | Meaning |
-|---|---|---|
-| `401` | `authentication_required` | A required key or service identity is missing, malformed, disabled, or invalid |
-| `503` | `authentication_unavailable` | A registry route cannot resolve its configured validator |
-| `403` | `resource_forbidden` | Valid identity does not own the addressed resource |
-| `404` | `resource_not_found` | Protected user-facing resource does not exist |
+3. **Network Isolation:**
+   - Deploy workers in isolated networks
+   - Use firewall rules to restrict API access to worker IPs
+   - Consider mutual TLS for additional transport security
 
-Responses do not echo presented credentials, worker process output, internal
-storage paths, or raw slicer failure details.
+4. **Monitoring:**
+   - Monitor for 401 responses (potential auth issues or attacks)
+   - Alert on unexpected worker names or capabilities
+   - Track worker activity for anomaly detection
 
-### Rotation and operations
+### Future: Per-Worker Keys (Planned)
 
-- Rotate the deployment shared key by updating `WORKER_SHARED_API_KEY` for the
-  API/slicer host and every worker, then restart the affected services
-  together. This controls future registration; already registered workers use
-  their per-service keys.
-- Rotate a service key with
-  `POST /api/slicers/{id}/rotate-key` and the current service key. Store the
-  returned replacement before the next heartbeat or worker-only request.
-- Never put credentials in source control, command output, URLs, or support
-  bundles.
-- Restrict direct access to worker and slicer-host ports. Expose them through
-  the authenticated PrintFarmer deployment path only.
-- Treat repeated `authentication_required` responses as a configuration or
-  compromise signal; do not retry indefinitely with the same rejected key.
+A more robust authentication model is planned for production deployments:
 
-OpenAPI publishes separate `apiKey` schemes for registry, service, and worker
-authentication so generated clients can distinguish the trust boundaries.
+- **Database-backed keys:** Each worker has a unique API key stored in the database
+- **Key rotation:** Workers can refresh keys without service interruption
+- **Revocation:** Individual workers can be disabled without affecting others
+- **Audit trail:** Track which worker performed which actions
+- **Expiration:** Keys automatically expire after a configured lifetime
+
+**Migration Path:**
+The shared key mechanism will remain supported for backward compatibility. New deployments can opt into per-worker keys by setting `WorkerAuth:UsePerWorkerKeys=true`.
+
+## Troubleshooting
+
+### 401 Unauthorized Errors
+
+**Symptom:** Worker requests return `401 Unauthorized`
+
+**Diagnostic Steps:**
+
+1. **Verify key is set:**
+   ```bash
+   # On API server
+   echo $WORKER_SHARED_API_KEY
+   
+   # Should output non-empty value
+   ```
+
+2. **Check worker configuration:**
+   ```bash
+   # On worker machine
+   echo $WORKER_API_KEY
+   
+   # Should match API server's WORKER_SHARED_API_KEY
+   ```
+
+3. **Inspect request headers:**
+   ```bash
+   # Enable verbose logging on worker
+   export WORKER_LOGGING_LEVEL=Debug
+   
+   # Look for log entries showing header inclusion
+   ```
+
+4. **Test with curl:**
+   ```bash
+   curl -v -X POST http://api:5245/api/slice/claim \
+     -H "Content-Type: application/json" \
+     -H "X-Worker-Key: test-key" \
+     -d '{"workerName":"test","capabilities":["orcaslicer"]}'
+   
+   # Check response status and headers
+   ```
+
+### Key Mismatch
+
+**Symptom:** Worker key doesn't match API server key
+
+**Solution:**
+```bash
+# Regenerate and synchronize key across all services
+NEW_KEY=$(openssl rand -base64 32)
+
+# Update API server
+export WORKER_SHARED_API_KEY="$NEW_KEY"
+
+# Update all workers
+export WORKER_API_KEY="$NEW_KEY"
+
+# Restart services
+docker-compose restart api orcaslicer-worker prusaslicer-worker
+```
+
+### Testing Environment Bypass
+
+**Symptom:** Tests pass without key but production fails
+
+**Explanation:** The `Testing` environment bypasses auth when no key is configured. Always set `WORKER_SHARED_API_KEY` in `TestWebApplicationFactory` for accurate testing:
+
+```csharp
+// In test setup
+Environment.SetEnvironmentVariable("WORKER_SHARED_API_KEY", "test-worker-key");
+```
+
+## Related Documentation
+
+- [Distributed Slicing Architecture](./DISTRIBUTED_SLICING.md)
+- [Worker Development Guide](./WORKER_DEVELOPMENT.md)
+- [Security Best Practices](../SECURITY.md)
+- [Deployment Configuration](./DEPLOYMENT_CONFIG_PERSISTENCE.md)
+
+## API Reference
+
+### WorkerAuthService
+
+**Namespace:** `Farm.Web.Api.Services.Workers`
+
+**Interface:**
+```csharp
+public interface IWorkerAuthService
+{
+    bool IsAuthorized(HttpContext context);
+}
+```
+
+**Implementation:**
+```csharp
+public sealed class WorkerAuthService : IWorkerAuthService
+{
+    public bool IsAuthorized(HttpContext context)
+    {
+        // Extracts X-Worker-Key header and validates against configured key
+        // Uses constant-time comparison to prevent timing attacks
+        // Returns true if authorized, false otherwise
+    }
+}
+```
+
+### WorkerAuthSettings
+
+**Namespace:** `Farm.Web.Api.Services.Workers`
+
+**Configuration POCO:**
+```csharp
+public sealed class WorkerAuthSettings
+{
+    public string SharedKey { get; set; } = string.Empty;
+}
+```
+
+**Binding:** Reads from `WorkerAuth:SharedKey` in configuration or `WORKER_SHARED_API_KEY` environment variable.
+
+## Changelog
+
+- **2025-10-21:** Initial shared key authentication implementation
+- **2025-10-21:** Added negative auth tests and documentation
+- **Future:** Per-worker key model design and implementation (planned)

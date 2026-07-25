@@ -1,134 +1,188 @@
-﻿using System;
-using System.Net.Http;
-using System.Net.Http.Json;
-using System.Threading;
-using System.Threading.Tasks;
-using Farm.Infrastructure;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
+﻿using Farm.Infrastructure;
+using Microsoft.AspNetCore.SignalR.Client;
 
 namespace PrinterDiscovery.Services;
 
 /// <summary>
-/// Sends discovery events to the API over the authenticated internal ingestion boundary.
+/// Broadcasts discovery progress to the API's SignalR hub.
+/// Used for manual discovery with real-time progress updates.
 /// </summary>
 public interface IDiscoveryProgressBroadcaster
 {
     /// <summary>
-    /// Broadcasts discovery progress to the API.
+    /// Broadcast discovery progress to the API's SignalR hub.
     /// </summary>
+    /// <param name="progress">The discovery progress data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     Task BroadcastProgressAsync(DiscoveryProgressDto progress, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Broadcasts a discovered printer to the API.
+    /// Broadcast when a printer is found during discovery.
     /// </summary>
-    Task BroadcastPrinterFoundAsync(
-        InternalDiscoveryPrinterFoundDto printerFound,
-        CancellationToken cancellationToken = default);
+    /// <param name="found">The discovered printer data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
+    Task BroadcastPrinterFoundAsync(DiscoveryPrinterFoundDto found, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Broadcasts discovery completion to the API.
+    /// Broadcast discovery completion to the API's SignalR hub.
     /// </summary>
+    /// <param name="completed">The discovery completion data to broadcast.</param>
+    /// <param name="cancellationToken">Cancellation token for the operation.</param>
     Task BroadcastCompletedAsync(DiscoveryCompletedDto completed, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Ensure the SignalR connection is established.
+    /// </summary>
+    Task EnsureConnectedAsync(CancellationToken cancellationToken = default);
 }
 
-/// <inheritdoc />
-public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
+public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster, IAsyncDisposable
 {
-    private const string ServiceKeyHeaderName = "X-Discovery-Service-Key";
-
-    private readonly HttpClient _httpClient;
     private readonly ILogger<DiscoveryProgressBroadcaster> _logger;
-    private readonly string? _sharedKey;
+    private readonly string _hubUrl;
+    private HubConnection? _hubConnection;
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
-    /// <summary>
-    /// Initializes the authenticated discovery event broadcaster.
-    /// </summary>
-    public DiscoveryProgressBroadcaster(
-        HttpClient httpClient,
-        IConfiguration configuration,
-        ILogger<DiscoveryProgressBroadcaster> logger)
+    public DiscoveryProgressBroadcaster(IConfiguration config, ILogger<DiscoveryProgressBroadcaster> logger)
     {
-        ArgumentNullException.ThrowIfNull(httpClient);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        _httpClient = httpClient;
-        _logger = logger;
-        _sharedKey = configuration["Discovery:SharedKey"];
-
-        string serviceUrl = configuration["Discovery:ApiBaseUrl"] ?? "http://api:5245";
-        _httpClient.BaseAddress = new Uri(serviceUrl.TrimEnd('/') + "/", UriKind.Absolute);
+        string apiBaseUrl = config["Discovery:ApiBaseUrl"] ?? "http://api:5245";
+        _hubUrl = $"{apiBaseUrl.TrimEnd('/')}/hubs/printers";
     }
 
-    /// <inheritdoc />
-    public Task BroadcastProgressAsync(
-        DiscoveryProgressDto progress,
-        CancellationToken cancellationToken = default) =>
-        SendAsync(
-            "api/internal/discovery/events/progress",
-            new InternalDiscoveryProgressDto(
-                progress.SessionId,
-                progress.TotalIps,
-                progress.ScannedIps,
-                progress.PrintersFound,
-                progress.PrintersExcluded,
-                progress.ProgressPercentage,
-                progress.Status,
-                progress.Message,
-                progress.AutoDetectedNetworks),
-            cancellationToken);
-
-    /// <inheritdoc />
-    public Task BroadcastPrinterFoundAsync(
-        InternalDiscoveryPrinterFoundDto printerFound,
-        CancellationToken cancellationToken = default) =>
-        SendAsync("api/internal/discovery/events/printer-found", printerFound, cancellationToken);
-
-    /// <inheritdoc />
-    public Task BroadcastCompletedAsync(
-        DiscoveryCompletedDto completed,
-        CancellationToken cancellationToken = default) =>
-        SendAsync(
-            "api/internal/discovery/events/completed",
-            new InternalDiscoveryCompletedDto(
-                completed.SessionId,
-                completed.TotalPrintersFound,
-                completed.TotalPrintersExcluded,
-                completed.Duration,
-                completed.WasCancelled,
-                completed.AutoDetectedNetworks),
-            cancellationToken);
-
-    private async Task SendAsync<T>(
-        string requestUri,
-        T payload,
-        CancellationToken cancellationToken)
+    public async Task EnsureConnectedAsync(CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(_sharedKey))
+        if (_hubConnection?.State == HubConnectionState.Connected)
         {
-            throw new InvalidOperationException(
-                "Discovery event authentication is unavailable because Discovery:SharedKey is not configured.");
+            return;
         }
 
-        using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
-        {
-            Content = JsonContent.Create(payload),
-        };
-        _ = request.Headers.TryAddWithoutValidation(ServiceKeyHeaderName, _sharedKey);
-
+        await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                return;
+            }
+
+            // Dispose old connection if exists
+            if (_hubConnection != null)
+            {
+                await _hubConnection.DisposeAsync();
+            }
+
+            _hubConnection = new HubConnectionBuilder()
+                .WithUrl(_hubUrl)
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hubConnection.Closed += async (error) =>
+            {
+                _logger.LogWarning(error, "[DISCOVERY-BROADCASTER] SignalR connection closed");
+                await Task.CompletedTask;
+            };
+
+            _hubConnection.Reconnected += async (connectionId) =>
+            {
+                _logger.LogInformation("[DISCOVERY-BROADCASTER] SignalR reconnected with connectionId: {ConnectionId}", connectionId);
+                await Task.CompletedTask;
+            };
+
+            await _hubConnection.StartAsync(cancellationToken);
+            _logger.LogInformation("[DISCOVERY-BROADCASTER] Connected to SignalR hub at {Url}", _hubUrl);
         }
-        catch (HttpRequestException ex)
+        catch (Exception ex)
         {
-            _logger.LogError(
-                ex,
-                "Failed to publish discovery event to {RequestUri}",
-                requestUri);
+            _logger.LogError(ex, "[DISCOVERY-BROADCASTER] Failed to connect to SignalR hub at {Url}", _hubUrl);
             throw;
         }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    public async Task BroadcastProgressAsync(DiscoveryProgressDto progress, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureConnectedAsync(cancellationToken);
+
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                // Invoke the hub method to broadcast to the discovery group
+                await _hubConnection.InvokeAsync("BroadcastDiscoveryProgressAsync", progress, cancellationToken);
+                _logger.LogDebug(
+                    "[DISCOVERY-BROADCASTER] Broadcasted progress for session {SessionId}: {Percentage}%",
+                    progress.SessionId, progress.ProgressPercentage);
+            }
+            else
+            {
+                _logger.LogWarning("[DISCOVERY-BROADCASTER] Cannot broadcast - not connected");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DISCOVERY-BROADCASTER] Failed to broadcast progress");
+        }
+    }
+
+    public async Task BroadcastPrinterFoundAsync(DiscoveryPrinterFoundDto found, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureConnectedAsync(cancellationToken);
+
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                await _hubConnection.InvokeAsync("BroadcastDiscoveryPrinterFoundAsync", found, cancellationToken);
+                _logger.LogInformation(
+                    "[DISCOVERY-BROADCASTER] Broadcasted printer found for session {SessionId}: {Name} at {Ip}",
+                    found.SessionId, found.Printer.Name, found.Printer.ServerUrl);
+            }
+            else
+            {
+                _logger.LogWarning("[DISCOVERY-BROADCASTER] Cannot broadcast printer found - not connected");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DISCOVERY-BROADCASTER] Failed to broadcast printer found");
+        }
+    }
+
+    public async Task BroadcastCompletedAsync(DiscoveryCompletedDto completed, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureConnectedAsync(cancellationToken);
+
+            if (_hubConnection?.State == HubConnectionState.Connected)
+            {
+                await _hubConnection.InvokeAsync("BroadcastDiscoveryCompletedAsync", completed, cancellationToken);
+                _logger.LogInformation(
+                    "[DISCOVERY-BROADCASTER] Broadcasted completion for session {SessionId}: {Found} printers found",
+                    completed.SessionId, completed.TotalPrintersFound);
+            }
+            else
+            {
+                _logger.LogWarning("[DISCOVERY-BROADCASTER] Cannot broadcast completion - not connected");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[DISCOVERY-BROADCASTER] Failed to broadcast completion");
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_hubConnection != null)
+        {
+            await _hubConnection.DisposeAsync();
+        }
+
+        _connectionLock.Dispose();
     }
 }

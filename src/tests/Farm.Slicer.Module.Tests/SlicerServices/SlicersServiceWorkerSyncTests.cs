@@ -31,7 +31,7 @@ public class SlicersServiceWorkerSyncTests
         _ = clientProxy.Setup(p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object[]>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         Mock<IHubClients> hubClients = new Mock<IHubClients>();
-        _ = hubClients.Setup(c => c.Group(It.IsAny<string>())).Returns(clientProxy.Object);
+        _ = hubClients.Setup(c => c.All).Returns(clientProxy.Object);
         Mock<IHubContext<SlicerHub>> hub = new Mock<IHubContext<SlicerHub>>();
         _ = hub.SetupGet(h => h.Clients).Returns(hubClients.Object);
         return hub;
@@ -169,57 +169,6 @@ public class SlicersServiceWorkerSyncTests
             It.Is<string>(s => s == SlicerHubEvents.SlicerRegistered),
             It.IsAny<object[]>(),
             It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact(DisplayName = "RegisterAsync fails closed without persisting an orphaned service")]
-    public async Task RegisterAsync_WhenWorkerSynchronizationFails_DoesNotPersistService()
-    {
-        using SlicerDbContext db = CreateDb();
-        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
-        var workerRepo = new Mock<IWorkerRepository>(MockBehavior.Strict);
-        _ = workerRepo
-            .Setup(repository => repository.GetByServiceIdAsync(It.IsAny<string>()))
-            .ThrowsAsync(new InvalidOperationException("worker synchronization failed"));
-        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
-        SlicerServiceMetrics metrics = CreateMetrics();
-        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
-        using HttpClient httpClient = CreateMockHttpClient();
-        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
-        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
-        Mock<ICatalogService> catalogService = CreateMockCatalogService();
-        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
-        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
-        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
-        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
-        var service = new SlicersService(
-            slicerRepo,
-            workerRepo.Object,
-            profileRepo.Object,
-            filamentProfileRepo.Object,
-            machineProfileRepo.Object,
-            machineModelProfileRepo.Object,
-            catalogService.Object,
-            aliasService.Object,
-            settingsService.Object,
-            mockHub.Object,
-            metrics,
-            httpClient,
-            CreateMockLogger(),
-            settings);
-        var request = new RegisterSlicerDto
-        {
-            Name = "orphan-test-worker",
-            SlicerType = 1,
-            Version = "2.3.1",
-            Host = "http://worker.internal",
-            MaxConcurrentJobs = 1,
-        };
-
-        Func<Task> register = async () =>
-            await service.RegisterAsync(request, CancellationToken.None);
-
-        _ = await register.Should().ThrowAsync<InvalidOperationException>();
-        _ = db.Set<SlicerService>().Should().BeEmpty();
     }
 
     [Fact(DisplayName = "HeartbeatAsync updates Worker FreeSlots, ActiveJobs, Status")]

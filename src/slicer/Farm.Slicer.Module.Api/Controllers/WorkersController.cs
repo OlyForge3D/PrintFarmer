@@ -1,6 +1,4 @@
 ﻿using System.Text.Json;
-using Farm.Infrastructure.Security;
-using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -16,7 +14,6 @@ namespace Farm.Slicer.Module.Api.Controllers;
 [ApiController]
 [Route("api/workers")]
 [Authorize]
-[RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
 public class WorkersController(
     IWorkerRepository workerRepository,
     ISliceJobRepository jobRepository,
@@ -50,6 +47,7 @@ public class WorkersController(
             Id = w.Id,
             ServiceId = w.ServiceId,
             Name = w.Name,
+            EndpointUrl = w.EndpointUrl,
             Capabilities = ParseCapabilities(w.CapabilitiesJson),
             Status = w.Status,
             FreeSlots = w.FreeSlots,
@@ -89,6 +87,7 @@ public class WorkersController(
             Id = worker.Id,
             ServiceId = worker.ServiceId,
             Name = worker.Name,
+            EndpointUrl = worker.EndpointUrl,
             Capabilities = JsonSerializer.Deserialize<string[]>(worker.CapabilitiesJson) ?? [],
             Status = worker.Status,
             FreeSlots = worker.FreeSlots,

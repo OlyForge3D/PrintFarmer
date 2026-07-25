@@ -47,7 +47,7 @@ public class LoadBalancingTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateAdminClientAsync();
+        _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public async Task DisposeAsync()

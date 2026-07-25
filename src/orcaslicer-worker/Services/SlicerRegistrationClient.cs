@@ -64,7 +64,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                    ?? configuration["Worker:StorageEndpoint"]
                    ?? "http://api:5245";
         _serviceName = configuration["SlicerRegistry:ServiceName"] ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "orcaslicer-worker";
-        _serviceVersion = configuration["SlicerRegistry:Version"] ?? WorkerConstants.SlicerVersion;
+        _serviceVersion = configuration["SlicerRegistry:Version"] ?? "1.0.0";
         _serviceHost = configuration["SlicerRegistry:Host"] ?? "http://orcaslicer-worker:8080";
 
         // Ensure base URL doesn't have trailing slash
@@ -97,13 +97,10 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
             // Add API key header if configured
-            string? apiKey = _configuration["SlicerRegistry:ApiKey"]
-                ?? _configuration["Worker:SharedKey"]
-                ?? _configuration["Worker:SharedApiKey"]
-                ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+            string? apiKey = _configuration["SlicerRegistry:ApiKey"];
             if (!string.IsNullOrEmpty(apiKey))
             {
-                _httpClient.DefaultRequestHeaders.Add("X-Slicer-Api-Key", apiKey);
+                _httpClient.DefaultRequestHeaders.Add("X-Slicer-ApiKey", apiKey);
             }
 
             HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
@@ -161,7 +158,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             {
                 Content = content
             };
-            request.Headers.Add("X-Slicer-Service-Api-Key", apiKey);
+            request.Headers.Add("X-Slicer-ApiKey", apiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -186,7 +183,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         try
         {
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister");
-            request.Headers.Add("X-Slicer-Service-Api-Key", apiKey);
+            request.Headers.Add("X-Slicer-ApiKey", apiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 

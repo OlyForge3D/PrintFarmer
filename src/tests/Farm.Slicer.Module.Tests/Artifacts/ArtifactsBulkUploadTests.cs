@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,7 +35,6 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         jobRepo.Jobs.Add(new SliceJob { Id = jobId, Status = SliceJobStatus.Processing });
 
         ArtifactsController controller = new ArtifactsController(service, jobRepo, settings);
-        controller.ControllerContext = CreateAdministratorControllerContext();
 
         IFormFile file = CreateFormFile(Encoding.UTF8.GetBytes("G1 X10 Y10"), "test.gcode", "application/x-gcode");
 
@@ -92,20 +90,6 @@ public class ArtifactsBulkUploadTests(CustomWebApplicationFactory factory) : ICl
         {
             Headers = new HeaderDictionary(),
             ContentType = contentType
-        };
-    }
-
-    private static ControllerContext CreateAdministratorControllerContext()
-    {
-        ClaimsIdentity identity = new(
-            [new Claim(ClaimTypes.Role, "farm_admin")],
-            authenticationType: "Test");
-        return new ControllerContext
-        {
-            HttpContext = new DefaultHttpContext
-            {
-                User = new ClaimsPrincipal(identity),
-            },
         };
     }
 }

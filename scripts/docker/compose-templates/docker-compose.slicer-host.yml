@@ -42,7 +42,7 @@ services:
       - ConnectionStrings__Default=${ConnectionStrings__Default}
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
-      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
       - Logging__LogLevel__Default=Information
       - Logging__LogLevel__Microsoft.AspNetCore=Warning
     volumes:

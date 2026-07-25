@@ -824,7 +824,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning("[PrusaLink] Pause requires digest authentication credentials");
+            _logger?.LogWarning("[PrusaLink] Pause requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
             return false;
         }
 
@@ -835,7 +835,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning("[PrusaLink] Resume requires digest authentication credentials");
+            _logger?.LogWarning("[PrusaLink] Resume requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
             return false;
         }
 

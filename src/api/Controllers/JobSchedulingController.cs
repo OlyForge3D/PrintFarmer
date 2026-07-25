@@ -2,9 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -30,7 +28,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="request">The scheduling request containing start time and recurrence options.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/schedule")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -70,7 +67,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="request">The reschedule request containing the new scheduled time.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPut("{jobId:guid}/reschedule")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -107,7 +103,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="jobId">The unique identifier of the job to cancel scheduling for.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpDelete("{jobId:guid}/schedule")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> CancelSchedulingAsync(Guid jobId, CancellationToken cancellationToken)
@@ -131,7 +126,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="dateTo">Optional end date to filter scheduled jobs.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("scheduled")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(IEnumerable<ScheduledJobDto>), 200)]
     public async Task<ActionResult<IEnumerable<ScheduledJobDto>>> GetScheduledJobsAsync(
         [FromQuery] DateTime? dateFrom,
@@ -148,7 +142,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="jobId">The unique identifier of the job.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("{jobId:guid}")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(ScheduledJobDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ScheduledJobDto>> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken)
@@ -163,7 +156,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="jobId">The unique identifier of the job.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpGet("{jobId:guid}/executions")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(IEnumerable<JobExecutionDto>), 200)]
     public async Task<ActionResult<IEnumerable<JobExecutionDto>>> GetExecutionHistoryAsync(
         Guid jobId,
@@ -191,7 +183,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="jobId">The unique identifier of the job to pause.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/pause")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> PauseSchedulingAsync(Guid jobId, CancellationToken cancellationToken)
@@ -214,7 +205,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// <param name="jobId">The unique identifier of the job to resume.</param>
     /// <param name="cancellationToken">Cancellation token for the async operation.</param>
     [HttpPost("{jobId:guid}/resume")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> ResumeSchedulingAsync(Guid jobId, CancellationToken cancellationToken)

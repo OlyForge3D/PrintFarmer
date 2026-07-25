@@ -116,9 +116,8 @@ public class ObicoServerController : ControllerBase
         await _dbContext.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "[ObicoServer] Created new Obico server: {ServerId} ({ServerName})",
-            server.Id,
-            server.Name);
+            "[ObicoServer] Created new Obico server: {ServerId} ({ServerName}) at {ServerUrl}",
+            server.Id, server.Name, server.Url);
 
         return CreatedAtAction("GetServer", new { id = server.Id }, ToDto(server));
     }
@@ -267,11 +266,8 @@ public class ObicoServerController : ControllerBase
         ObicoServerHealthDto result = await ValidateServerConnectivityAsync(server, ct);
 
         _logger.LogInformation(
-            "[ObicoServer] Health check for {ServerId} ({ServerName}): healthy={IsHealthy}, latency={Latency}ms",
-            server.Id,
-            server.Name,
-            result.Healthy,
-            result.LatencyMs);
+            "[ObicoServer] Health check for {ServerId} ({ServerName}) at {ServerUrl}: healthy={IsHealthy}, latency={Latency}ms",
+            server.Id, server.Name, server.Url, result.Healthy, result.LatencyMs);
 
         return Ok(result);
     }
@@ -313,19 +309,19 @@ public class ObicoServerController : ControllerBase
         }
         catch (UriFormatException)
         {
-            errors.Add("Configured server URL is invalid");
+            errors.Add($"Invalid server URL: {server.Url}");
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            errors.Add("Connection failed");
+            errors.Add($"Connection failed: {ex.Message}");
         }
         catch (TaskCanceledException)
         {
             errors.Add("Request timeout — server did not respond within 10 seconds");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            errors.Add("Unexpected health-check failure");
+            errors.Add($"Unexpected error: {ex.Message}");
         }
         finally
         {
@@ -369,9 +365,9 @@ public class ObicoServerController : ControllerBase
 
             return (false, null);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
-            return (true, "Cannot reach prediction endpoint /p/");
+            return (true, $"Cannot reach prediction endpoint /p/: {ex.Message}");
         }
     }
 
@@ -444,7 +440,7 @@ public class ObicoServerController : ControllerBase
         {
             Id = server.Id,
             Name = server.Name,
-            HasEndpoint = !string.IsNullOrWhiteSpace(server.Url),
+            Url = server.Url,
             IsEnabled = server.IsEnabled,
             HasApiKey = !string.IsNullOrEmpty(server.ApiKey),
             MaxConcurrentAnalyses = server.MaxConcurrentAnalyses,
@@ -463,7 +459,7 @@ public sealed class ObicoServerDto
 
     public required string Name { get; init; }
 
-    public bool HasEndpoint { get; init; }
+    public required string Url { get; init; }
 
     public bool IsEnabled { get; init; }
 

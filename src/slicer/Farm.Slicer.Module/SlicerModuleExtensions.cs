@@ -112,9 +112,7 @@ public static class SlicerModuleExtensions
         }
         else
         {
-            _ = options.UseSqlite(
-                dbConfig.ConnectionString,
-                x => x.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+            _ = options.UseSqlite(dbConfig.ConnectionString);
         }
     }
 
@@ -184,7 +182,7 @@ public static class SlicerModuleExtensions
     /// </summary>
     private static void AddSlicerHostedServices(IServiceCollection services, IConfiguration configuration)
     {
-        // Database initialization (one-shot, applies provider-specific migrations on startup)
+        // Database initialization (one-shot, runs EnsureCreated on startup)
         _ = services.AddHostedService<SlicerDbInitializationHostedService>();
 
         _ = services.AddHostedService<WorkerHealthMonitorService>();

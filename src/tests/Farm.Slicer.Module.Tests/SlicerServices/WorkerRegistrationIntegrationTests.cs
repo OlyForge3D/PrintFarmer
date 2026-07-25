@@ -18,8 +18,6 @@ namespace Farm.Slicer.Module.Tests.SlicerServices;
 [Collection(IntegrationTestCollection.Name)]
 public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsyncLifetime
 {
-    private const string SharedWorkerKey = "test-worker-key";
-
     private readonly CustomWebApplicationFactory _factory = new CustomWebApplicationFactory();
     private readonly ITestOutputHelper _output = output ?? throw new ArgumentNullException(nameof(output));
 
@@ -33,12 +31,7 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         _factory?.Dispose();
     }
 
-    private HttpClient CreateClient()
-    {
-        HttpClient client = _factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Slicer-Api-Key", SharedWorkerKey);
-        return client;
-    }
+    private HttpClient CreateClient() => _factory.CreateClient();
 
     [Fact]
     public async Task WorkerRegistration_ShouldSucceed_AndAppearInList()
@@ -139,7 +132,7 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
 
         // Add API key header
         client.DefaultRequestHeaders.Clear();
-        client.DefaultRequestHeaders.Add("X-Slicer-Service-Api-Key", registration.ApiKey);
+        client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
 
         HttpResponseMessage heartbeatResponse = await client.PostAsync($"/api/slicers/{registration.Id}/heartbeat", heartbeatContent);
 
@@ -190,7 +183,7 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
 
         // Act - Deregister
         client.DefaultRequestHeaders.Clear();
-        client.DefaultRequestHeaders.Add("X-Slicer-Service-Api-Key", registration.ApiKey);
+        client.DefaultRequestHeaders.Add("X-Slicer-ApiKey", registration.ApiKey);
 
         HttpResponseMessage deregisterResponse = await client.PostAsync($"/api/slicers/{registration.Id}/deregister", null);
 
@@ -199,8 +192,6 @@ public class WorkerRegistrationIntegrationTests(ITestOutputHelper output) : IAsy
         _output.WriteLine("Worker deregistered successfully");
 
         // Verify worker no longer appears in list
-        client.DefaultRequestHeaders.Clear();
-        client.DefaultRequestHeaders.Add("X-Slicer-Api-Key", SharedWorkerKey);
         HttpResponseMessage listResponse = await client.GetAsync("/api/slicers");
         string listJson = await listResponse.Content.ReadAsStringAsync();
         SlicerServiceDto[]? workers = JsonSerializer.Deserialize<SlicerServiceDto[]>(listJson, new JsonSerializerOptions
