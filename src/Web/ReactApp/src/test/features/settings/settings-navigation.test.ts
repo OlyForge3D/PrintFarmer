@@ -271,7 +271,17 @@ describe('SETTINGS_GROUP_TO_LOCATION', () => {
     // wiring, clicking a Job Queue setting could route the user to (say) the
     // Farm sub-page — where the field is nowhere to be seen.
     for (const [subPageKey, groups] of Object.entries(SUB_PAGE_ALLOWED_GROUPS)) {
-      const [, expectedSubPageId] = subPageKey.split('.');
+      // Guard against silently mis-inferring the sub-page id if a nested key
+      // like "general.security.advanced" is ever introduced: `.split('.')` +
+      // destructuring on `[, expectedSubPageId]` would truncate to the middle
+      // segment, so this test would push the developer to map a group to the
+      // wrong sub-page. Force the failure to point at the guard instead.
+      const segments = subPageKey.split('.');
+      expect(
+        segments,
+        `SUB_PAGE_ALLOWED_GROUPS key "${subPageKey}" must be a "category.sub" pair — update this guard before introducing nested keys`,
+      ).toHaveLength(2);
+      const expectedSubPageId = segments[1];
       for (const group of groups) {
         const location = SETTINGS_GROUP_TO_LOCATION[group];
         expect(location, `mapping missing for group "${group}"`).toBeDefined();

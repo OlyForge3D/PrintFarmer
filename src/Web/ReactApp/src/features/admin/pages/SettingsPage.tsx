@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';
-import { Button, Card, EmptyState, Input } from '@/common/components/ui';
+import { Button, Card, Input } from '@/common/components/ui';
 import { CloseIcon, SearchIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { settingsTour } from '@/features/admin/tours/settings.tour';
@@ -20,6 +20,7 @@ import {
   AdminLoading,
   AdminError,
   AdminSaveBar,
+  AdminEmpty,
   useDirtyState,
   adminToast,
 } from '@/common/components/admin';
@@ -114,13 +115,28 @@ function validateSection(
  * almost never the one the user was editing (`Enabled` alone is declared on 13
  * settings classes). Structured `section.field` keys from the backend still
  * override the default.
+ *
+ * A bare key that *equals* `defaultSectionKey` is treated as a section-level
+ * error (returned in `sectionErrors`), not a field error — that shape is what
+ * a memberless backend `ValidationException` produces, and no rendered
+ * property is ever named the same as its section key, so attaching it to
+ * `fieldErrors[defaultSectionKey][defaultSectionKey]` would render nowhere.
  */
 function extractFieldErrors(
   err: unknown,
   defaultSectionKey: string,
-): { fieldErrors: Record<string, Record<string, string>>; message?: string } {
-  const result: { fieldErrors: Record<string, Record<string, string>>; message?: string } = {
+): {
+  fieldErrors: Record<string, Record<string, string>>;
+  sectionErrors: Record<string, string>;
+  message?: string;
+} {
+  const result: {
+    fieldErrors: Record<string, Record<string, string>>;
+    sectionErrors: Record<string, string>;
+    message?: string;
+  } = {
     fieldErrors: {},
+    sectionErrors: {},
   };
   if (typeof err !== 'object' || err === null) return result;
   const maybeObj = err as Record<string, unknown>;
@@ -134,10 +150,25 @@ function extractFieldErrors(
     for (const [key, msg] of Object.entries(errorsObj)) {
       const parts = key.split('.');
       const hasSection = parts.length > 1;
-      const section = hasSection ? parts[0] : defaultSectionKey;
-      const fieldName = hasSection ? parts.slice(1).join('.') : parts[0];
-      result.fieldErrors[section] = result.fieldErrors[section] ?? {};
-      result.fieldErrors[section][fieldName] = String(msg ?? 'Invalid value');
+      const msgString = String(msg ?? 'Invalid value');
+      if (hasSection) {
+        const section = parts[0];
+        const fieldName = parts.slice(1).join('.');
+        result.fieldErrors[section] = result.fieldErrors[section] ?? {};
+        result.fieldErrors[section][fieldName] = msgString;
+      } else if (key === defaultSectionKey) {
+        // Bare key equal to the section we posted → section-level error, i.e.
+        // a memberless backend ValidationException (`throw new ValidationException("...")`
+        // with no MemberNames). Attach to the section card instead of dropping
+        // it under a bogus field name.
+        result.sectionErrors[defaultSectionKey] = msgString;
+      } else {
+        // Bare property name → field error on the posted section (member-names
+        // path). Wrong-section attribution here is fixed by the `defaultSectionKey`
+        // heuristic; see `SettingsPageBareErrorAttribution.test.tsx`.
+        result.fieldErrors[defaultSectionKey] = result.fieldErrors[defaultSectionKey] ?? {};
+        result.fieldErrors[defaultSectionKey][key] = msgString;
+      }
     }
   }
   if (typeof dataObj['message'] === 'string') {
@@ -198,6 +229,10 @@ function GroupSaveBlock({
   // block's `key` so React remounts it — do NOT reintroduce a syncing effect,
   // which trips `react-hooks/set-state-in-effect` and needs a suppression.
   const [fieldErrors, setFieldErrors] = useState<Record<string, Record<string, string>>>({});
+  // Section-level errors — currently sourced only from a memberless backend
+  // `ValidationException` where `errors[sectionKey]` carries the reason. Rendered
+  // inline on the section card via `SettingsPagelet.error`.
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -216,6 +251,7 @@ function GroupSaveBlock({
   const handleDiscard = useCallback(() => {
     state.reset();
     setFieldErrors({});
+    setSectionErrors({});
     setSaveError(null);
   }, [state]);
 
@@ -240,6 +276,7 @@ function GroupSaveBlock({
     const changedSectionKeys = state.changedKeys.map((k) => String(k));
     const failed: string[] = [];
     const perSectionErrors: Record<string, Record<string, string>> = {};
+    const perSectionMessages: Record<string, string> = {};
     let firstMessage: string | undefined;
 
     for (const sectionKey of changedSectionKeys) {
@@ -251,6 +288,7 @@ function GroupSaveBlock({
         failed.push(meta.displayName || meta.className);
         const extracted = extractFieldErrors(err, sectionKey);
         Object.assign(perSectionErrors, extracted.fieldErrors);
+        Object.assign(perSectionMessages, extracted.sectionErrors);
         if (!firstMessage && extracted.message) firstMessage = extracted.message;
       }
     }
@@ -258,6 +296,7 @@ function GroupSaveBlock({
     setIsSaving(false);
     if (failed.length > 0) {
       setFieldErrors((prev) => ({ ...prev, ...perSectionErrors }));
+      setSectionErrors((prev) => ({ ...prev, ...perSectionMessages }));
       const summary = failed.length === 1
         ? `Failed to save ${failed[0]}.`
         : `Failed to save ${failed.length} sections: ${failed.join(', ')}.`;
@@ -270,6 +309,7 @@ function GroupSaveBlock({
     // All sections saved — accept current values as the new baseline.
     state.markPristine(state.values);
     setFieldErrors({});
+    setSectionErrors({});
     adminToast.success(`${groupDisplayName} settings saved`);
   }, [groupDisplayName, metadataItems, state]);
 
@@ -337,6 +377,7 @@ function GroupSaveBlock({
                   values={sectionValues}
                   onChange={(field, value) => handleFieldChange(meta.key, field, value)}
                   fieldErrors={fieldErrors[meta.key]}
+                  error={sectionErrors[meta.key]}
                   compact
                   searchQuery={query}
                 />
@@ -673,7 +714,7 @@ export function SettingsPage({
       )}
 
       {noMatchingResults && (
-        <EmptyState
+        <AdminEmpty
           icon={<SettingsIcon className="w-10 h-10" />}
           title="No fields match your filter"
           description={`Nothing on this page matches “${trimmedQuery}”. Try a different term, clear the filter, or use the search box above to look across other settings pages.`}
