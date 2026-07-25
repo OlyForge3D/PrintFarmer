@@ -199,4 +199,65 @@ describe('SettingsPage — wrong-section error attribution', () => {
     // Belt-and-braces: obicoRow is a distinct element from telegramRow.
     expect(obicoRow).not.toBe(telegramRow);
   });
+
+  it('surfaces a memberless section-level error inline on the section card, not silently under a bogus field name', async () => {
+    // Backend regression path: 21 of the 23 `throw new ValidationException(...)` sites in the
+    // settings classes throw without MemberNames (e.g. NetworkDiscoverySettings' bad-CIDR check).
+    // The controller sends those as `{ message: "<reason>", errors: { [sectionKey]: "<reason>" } }`.
+    // Before the #941 regate fix `extractFieldErrors` treated the bare `TelegramSettings` key as a
+    // field name in the posted section, produced `fieldErrors.TelegramSettings.TelegramSettings`,
+    // and `SettingsPagelet` rendered nothing (no property named `TelegramSettings`). The reason
+    // reached the user only via the save banner — and only if the top-level `message` carried it,
+    // which it didn't. This test locks in that the reason lands on the section itself.
+    const reason = 'Bot token is required when Telegram is enabled.';
+    saveSettingsMock.mockRejectedValueOnce({
+      response: {
+        data: {
+          message: reason,
+          errors: { TelegramSettings: reason },
+        },
+      },
+    });
+
+    const { container } = await renderPage();
+
+    fireEvent.click(screen.getByLabelText('Telegram Enabled'));
+
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: /save integrations/i }));
+    });
+
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
+    expect(saveSettingsMock).toHaveBeenCalledWith('TelegramSettings', expect.any(Object));
+
+    // Anchor to the Telegram section card via one of its properties, then walk up to the
+    // Card's outer container (`.bg-pf-panel` — the class the shared Card component paints on
+    // its root div). Any alerts inside belong to Telegram only.
+    const telegramFieldRow = container.querySelector<HTMLElement>(
+      '[data-setting-property="TelegramSettings.enabled"]',
+    );
+    expect(telegramFieldRow).not.toBeNull();
+    const telegramCard = telegramFieldRow!.closest('.bg-pf-panel');
+    expect(telegramCard, 'could not locate the Telegram Card container').not.toBeNull();
+
+    await waitFor(() => {
+      const cardAlerts = Array.from(telegramCard!.querySelectorAll('[role="alert"]'));
+      const matching = cardAlerts.filter((el) => el.textContent?.includes(reason));
+      expect(
+        matching,
+        'the memberless section-level error must render as an inline alert inside the Telegram card, not be dropped by extractFieldErrors',
+      ).toHaveLength(1);
+    });
+
+    // Should not attach to the Obico section — the posted section was Telegram, and Obico
+    // does not declare a property named `TelegramSettings`.
+    const obicoFieldRow = container.querySelector<HTMLElement>(
+      '[data-setting-property="ObicoSettings.enabled"]',
+    );
+    expect(obicoFieldRow).not.toBeNull();
+    const obicoCard = obicoFieldRow!.closest('.bg-pf-panel');
+    expect(obicoCard).not.toBeNull();
+    const obicoAlerts = Array.from(obicoCard!.querySelectorAll('[role="alert"]'));
+    expect(obicoAlerts.some((el) => el.textContent?.includes(reason))).toBe(false);
+  });
 });

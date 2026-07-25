@@ -183,12 +183,66 @@ public class UnifiedSettingsPerKeyPostTests : IAsyncLifetime
 
         body.TryGetProperty("message", out JsonElement messageProp).Should().BeTrue();
         messageProp.ValueKind.Should().Be(JsonValueKind.String);
-        messageProp.GetString().Should().Contain(NetworkDiscoverySettings.SectionName);
+        // The top-level `message` must carry the concrete validation reason so the React
+        // SettingsPage save-error banner tells the user what actually went wrong. Before the
+        // #941 regate fix it was a generic "Validation failed for section 'X'" and the real
+        // reason was buried under `errors[sectionKey]` — which no field renders because no
+        // rendered property is ever named the same as its section key.
+        messageProp.GetString().Should().Contain("Invalid CIDR");
+        messageProp.GetString().Should().Contain("not-a-cidr");
 
         body.TryGetProperty("errors", out JsonElement errorsProp).Should().BeTrue();
         errorsProp.ValueKind.Should().Be(JsonValueKind.Object);
         errorsProp.EnumerateObject().Should().NotBeEmpty(
             "the errors dictionary must contain at least one entry so the UI can render a per-field message");
+    }
+
+    /// <summary>
+    /// Regression guard for the #941 regate finding: a memberless
+    /// <see cref="ValidationException"/> — the shape used by 21 of the 23 <c>Validate()</c>
+    /// implementations across the settings classes — must surface its <see cref="Exception.Message"/>
+    /// in the top-level <c>message</c> field of the response. The React SettingsPage save-error
+    /// banner renders that field verbatim (<c>firstMessage ?? summary</c>). If the message is a
+    /// generic "Validation failed for section 'X'" and the concrete reason lives only under
+    /// <c>errors[sectionKey]</c>, the user is never told what to fix — <c>errors[sectionKey]</c>
+    /// is looked up against <c>prop.name</c>, and no rendered property is ever named the same
+    /// as its section key.
+    /// </summary>
+    [Fact]
+    public async Task Post_MemberlessValidationException_SurfacesRealReasonInTopLevelMessage()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+
+        // NetworkDiscoverySettings.Validate() throws `new ValidationException($"Invalid CIDR subnet: {subnet}")`
+        // for a bad CIDR. That throw has no MemberNames — it is exactly the memberless shape
+        // the frontend was dropping on the floor.
+        NetworkDiscoverySettings payload = new()
+        {
+            EnableDiscovery = true,
+            DiscoverySubnets = new List<string> { "10.0.0.0/foo" },
+        };
+
+        HttpResponseMessage resp = await admin.PostAsJsonAsync(
+            $"/api/settings/{NetworkDiscoverySettings.SectionName}",
+            payload);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+        JsonElement body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+
+        body.TryGetProperty("message", out JsonElement messageProp).Should().BeTrue();
+        messageProp.ValueKind.Should().Be(JsonValueKind.String);
+        string? message = messageProp.GetString();
+        message.Should().NotBeNull();
+        message.Should().NotStartWith(
+            "Validation failed for section",
+            "the top-level message must be the concrete reason, not a generic section-scoped placeholder — the placeholder is what the frontend was rendering when the real reason was invisible");
+        message.Should().Contain(
+            "Invalid CIDR subnet",
+            "the concrete reason from the settings class's validator must reach the user via the top-level message");
+        message.Should().Contain(
+            "10.0.0.0/foo",
+            "the offending value should appear in the surfaced message so the user can identify which entry to correct");
     }
 
     // ─── Regression guard: existing blocklist behaviour must be preserved ────
