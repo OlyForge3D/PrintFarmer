@@ -113,10 +113,12 @@ caller-specific permissions:
     "calibrationCandidates": "/api/printers/calibration-candidates",
     "calibrationContext": "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
     "calibrationProjects": "/api/calibration-projects",
+    "calibrationGenerateJob": "/api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job",
+    "calibrationOrchestration": "/api/calibration-orchestrations/{id}",
     "calibrationSync": "/api/calibration-sync/changes",
     "calibrationImports": "/api/calibration-imports/legacy-v4",
-    "sliceJobs": "/api/slice-jobs",
-    "sliceJob": "/api/slice-jobs/{id}",
+    "sliceJobs": "/api/slice",
+    "sliceJob": "/api/slice/{id}",
     "jobArtifact": "/api/artifacts/job/{jobId}",
     "printerHub": "/hubs/printers",
     "slicerRegistryHub": "/hubs/slicer-registry",
@@ -139,7 +141,8 @@ caller-specific permissions:
 }
 ```
 
-`slicingConfigured` means slicing is enabled in configuration.
+`slicingConfigured` means slicing is enabled in configuration and the worker
+registry holds at least one enabled worker with a registry-issued credential.
 `slicingOperational` additionally requires reachable slicer persistence,
 artifact storage, and a fresh enabled upstream OrcaSlicer `2.3.1` worker with
 available capacity. Calibration context is operational when the caller can
@@ -148,9 +151,91 @@ and serves that context; a split API without a caller-reachable resolver
 advertises it as non-operational and returns
 `503 profile_service_unavailable`. Persistence, synchronization, private
 photos, and immutable generated-profile history are implemented independently.
-Generation, slicing, promotion, queue, and event-streaming feature flags remain
-false. Routes are canonical same-origin paths and never disclose internal
-service addresses.
+`calibrationSlicingEnabled` is computed, never constant: it additionally
+requires a healthy worker that attests its pinned OrcaSlicer binary digest and
+container digest, plus a resolvable stored-model path. Generation, promotion,
+queue, and event-streaming feature flags remain false. Routes are canonical
+same-origin paths and never disclose internal service addresses.
+
+### Canonical slice contract
+
+`POST /api/slice` is the single production slice submission contract, with
+`/api/slice/{id}`, `/api/slice/claim`, `/api/slice/{id}/progress`,
+`/api/slice/{id}/renew-lease`, `/api/slice/{id}/model`,
+`/api/slice/{id}/artifacts`, `/api/slice/{id}/complete` and
+`/api/slice/{id}/fail` completing the lifecycle.
+
+- `slicerEngine` is a validated string name; the only engine used for
+  calibration work is `OrcaSlicer`. An unrecognized value returns `400`
+  `invalid_slicer_engine` and is never coerced to a default engine.
+- Model bytes are referenced by stored `model3DId` and streamed through
+  `GET /api/slice/{id}/model`. A caller-supplied model URL is never
+  dereferenced for a job that carries a stored model identity.
+- `correlationId` and `checksum` are unique per owner and project. A duplicate
+  returns `409 slice_job_duplicate`; jobs without either value are unaffected.
+- Worker mutations require `X-Worker-Key`, `X-Worker-Id`, `X-Worker-Lease` and
+  `X-Worker-Fence`. A wrong worker or job returns `403`; an expired lease,
+  replaced lease token or stale fencing token returns `409` with
+  `lease_expired`, `lease_conflict` or `stale_fencing_token`.
+- Artifact uploads declare `kind`, `sha256` and `sizeBytes`. A mismatch returns
+  `400` `artifact_hash_mismatch` or `artifact_size_mismatch` and no artifact
+  row is created.
+- Completion returns the canonical authenticated download route
+  `/api/artifacts/{artifactId}` and verifies the profile digests the worker
+  reports against the profiles delivered with the claim.
+
+The `/api/slicer/slice`, `/api/slicer/slice-model/{modelId}` and
+`/api/slicer/jobs` routes are superseded. They keep working for existing
+non-calibration callers and return `Deprecation`, `Sunset` and successor `Link`
+headers, but they carry no model identity, resolved profile snapshot or lease
+fencing and must not be used for calibration work.
+
+### Artifact promotion contract
+
+`POST /api/gcode-promotions` promotes one completed slicer artifact into the
+G-code library. It requires `slicing:promote` and an `Idempotency-Key` header
+that becomes the durable operation key.
+
+- The request references the artifact by identity only: `sourceArtifactId`,
+  `sourceSliceJobId`, `expectedSha256`, `expectedSizeBytes` and optional
+  `sourceWorkerId`, `calibrationProjectId`, `calibrationAttemptId` and
+  `calibrationOrchestrationId`. Content is never uploaded by the caller.
+- The server verifies job ownership, artifact/job/worker lineage, terminal job
+  status, artifact kind, media type, size and SHA-256 before copying anything.
+  Failures return `403 resource_forbidden`, `409 artifact_job_mismatch`,
+  `409 artifact_worker_mismatch`, `409 calibration_lineage_mismatch`,
+  `409 slice_job_not_completed`, `409 artifact_hash_mismatch`,
+  `409 artifact_size_mismatch`, `422 unsupported_artifact_kind` or
+  `422 unsupported_artifact_media_type`.
+- Bytes are streamed server side into the library and re-verified while copying.
+  The promoted file keeps immutable lineage: source artifact/job/worker,
+  project/attempt/orchestration, operation and correlation identifiers,
+  specification/model/profile/content digests, engine/distribution/pinned
+  version/container digest, firmware family, G-code dialect, generator identity
+  and a calibration manifest. No storage path, private URL or credential is
+  stored or returned.
+- A new promotion returns `201`; an exact replay returns `200` with
+  `X-Calibration-Replayed: true` and the same `gcodeFileId`. The same operation
+  key with a different payload returns `409 idempotency_payload_mismatch`.
+  Promotion is also deduplicated by source artifact and content digest, so a
+  second operation key for the same bytes replays the original result.
+- The `Idempotency-Key` header is owner-scoped: two owners may use the same key
+  without conflicting, because the persisted promotion identity is derived from
+  the owner scope and the key. The internal scope is never returned. A promotion
+  that loses a durable write race against a concurrent promoter of the same
+  identity returns `409 promotion_conflict` rather than a server error.
+- `GET /api/gcode-promotions/{operationId}` returns the durable result, or
+  `503 promotion_operation_incomplete` while the outcome is not committed yet.
+  A farm administrator resolving a key that several owners reused receives
+  `409 promotion_operation_ambiguous` instead of an arbitrary owner's promotion.
+- When artifact routing, library storage, the promotion checkpoint store or the
+  reconciler is unavailable — for example in a split deployment where the slicer
+  module does not run in the API process — promotion returns
+  `503 promotion_dependency_unavailable` and
+  `calibrationArtifactPromotionEnabled` stays `false`.
+- Source artifact cleanup skips artifacts whose promotion outcome is not durable
+  yet. Promoted G-code is an independent copy and survives artifact cleanup with
+  its lineage intact.
 
 ### Effective calibration capabilities
 
@@ -182,6 +267,168 @@ and `403 permission_denied` when the action is missing. Ownership and farm
 scope are checked after permission checks; identifier-based direct and binary
 reads cannot bypass them. The `farm_admin` bypass is explicit and audited.
 Ordinary users receive no calibration-foundation permissions implicitly.
+
+### Calibration generation core
+
+The deterministic generation services live in
+`Farm.Web.Api.Services.Calibration.Generation` and are registered by
+`AddCalibrationGeneration()`. They are pure application/domain services; the
+durable orchestration that drives them is documented under
+[Calibration generation orchestration](#calibration-generation-orchestration).
+
+| Contract | Responsibility |
+|---|---|
+| `ICalibrationSpecificationCompiler` | Compiles typed method options plus an authoritative context into a canonical specification and its SHA-256, and re-verifies an existing specification against the current context. |
+| `ICalibrationModelValidator` | Validates trusted generated geometry and linked `Model3D` assets by identity, digest and provenance; parses canonical STL/3MF safely and checks the build volume, printable polygon and excluded regions. |
+| `IOrcaCalibrationPlanCompiler` | Verifies the exact native upstream-Orca machine/process/filament documents and emits allowlisted overrides, the pinned version plus both digests, and a complete plan manifest. |
+| `IKlipperCalibrationGcodeGenerator` | Emits deterministic invariant-culture Klipper G-code from an allowlisted command set, with explicit initialization, segment transitions and a safe final reset. `TUNING_TOWER` is never emitted. |
+| `ICalibrationGcodeAnnotator` | Prepends `;PF_META` provenance markers and produces the segment manifest with method/value/unit/layer/Z, line and byte offsets, transition and reset commands, and the final G-code SHA-256. |
+| `ICalibrationGcodeSafetyValidator` | Reject-only static validation. Interprets the emitted program statefully and checks thermal, geometric, motion, extrusion, retraction, pressure advance and volumetric limits plus tuple, version, profile, specification and freshness identity. It is reusable before artifact completion, promotion, queueing and start. |
+| `ICalibrationProfilePatchExporter` | Converts a selected observation into a typed normalized patch and an exact upstream-Orca JSON artifact, and persists it through the authoritative `GeneratedProfileRevision` history. It never mutates a baseline or published profile. |
+
+Generation is fail closed on one conjunctive compatibility tuple: firmware
+family `Klipper` **and** G-code dialect `Klipper` **and** slicer engine
+`OrcaSlicer` **and** distribution `upstream` **and** pinned version `2.3.1`
+**and** a non-empty authoritative container digest **and** binary digest.
+Nothing is inferred from manufacturer, printer model, backend kind, aliases or a
+Moonraker response, and a missing digest is returned as an explicit dependency
+error rather than synthesized.
+
+Supported methods: `temperature`, `flow_ratio_coarse`, `flow_ratio_fine`,
+`flow_ratio_high_range`, `pressure_advance_tower`, `pressure_advance_line`,
+`pressure_advance_pattern`, `flow_verification`, `retraction`,
+`max_volumetric_speed`, `shrinkage`, and `final_verification`. Pressure advance
+line and pattern geometry is produced entirely by the trusted server generator
+with bounded coordinate and extrusion arithmetic; no renderer is invoked and no
+caller-supplied G-code is accepted. `final_verification` emits the deterministic
+envelope and a machine-readable declaration of the linked asset; its printable
+body comes from the pinned upstream slicer.
+
+### Calibration generation orchestration
+
+Generation is a durable, resumable saga over one immutable calibration attempt.
+It spans the core context, the slicer context and one worker process, so it never
+claims a distributed transaction: every step writes its checkpoint before the
+side effect it names, and a step whose outcome is unknown is reconciled from
+durable evidence instead of being repeated.
+
+#### `POST /api/calibration-projects/{projectId}/attempts/{attemptId}/generate-job`
+
+Starts, resumes or replays the generation run of one attempt.
+
+Requires **both** `calibration:generate` and `slicing:submit`, plus ownership of
+the project (a farm administrator bypass is audited). The caller must supply an
+`Idempotency-Key` header; it is the operation identifier the run is recorded
+under in the `calibration.generate-job` idempotency scope.
+
+```json
+{
+  "method": "temperature",
+  "definitionVersion": "1.0",
+  "options": { "startCelsius": 200, "endCelsius": 240, "stepCelsius": 5 },
+  "baseRevision": 3
+}
+```
+
+The body accepts **only** versioned typed method options. There is no field for a
+command line, a G-code fragment, a slicer setting, a file system path, a URL, a
+renderer, an archive or a mesh, and an option that the selected method does not
+define is rejected rather than ignored. The server recompiles the canonical
+specification from the immutable printer configuration snapshot and the attested
+pinned slicer identity and requires it to match the attempt's stored
+`specificationJson` and SHA-256 exactly; a mismatch is refused and never
+rewritten.
+
+| Status | Meaning |
+|---|---|
+| `202 Accepted` | A new or resumed asynchronous run. `Location` carries the durable status route. |
+| `200 OK` | Exact replay of an in-progress or completed run for the same operation key and payload. `X-Calibration-Replayed: true`. |
+| `409 Conflict` | `idempotency_payload_mismatch`, `incompatible_existing_operation`, `orchestration_not_initialized`, or an immutable context, profile or specification that changed. |
+| `412 Precondition Failed` | `revision_conflict`: the supplied `baseRevision` is not the current orchestration revision. |
+| `422 Unprocessable Entity` | `unsupported_or_unsafe_calibration_specification`, with a `problems` array of `{ code, field, message }`. |
+| `503 Service Unavailable` | `generation_dependency_unavailable`: a required production hop is not currently provable. |
+| `400 Bad Request` | `idempotency_key_required`: the `Idempotency-Key` header is missing or too long. |
+
+#### `GET /api/calibration-orchestrations/{id}`
+
+Returns the durable status of one run. Requires `calibration:read` and ownership;
+a caller from another farm receives `404` rather than a discoverable `403`.
+
+```json
+{
+  "id": "1f4b...",
+  "projectId": "9a1c...",
+  "attemptId": "77e2...",
+  "operationId": "attempt-operation-0001",
+  "status": "Running",
+  "currentStep": "awaiting-worker",
+  "revision": 7,
+  "retryCount": 0,
+  "sliceJobId": "3c2a...",
+  "workerId": "5b90...",
+  "specificationSha256": "…",
+  "planManifestSha256": "…",
+  "gcodeSha256": "…",
+  "manifestSha256": "…",
+  "generatorVersion": "1.0.0",
+  "slicerContainerDigest": "sha256:…",
+  "slicerBinarySha256": "…",
+  "statusRoute": "/api/calibration-orchestrations/1f4b..."
+}
+```
+
+The document carries identifiers, digests, counters and timestamps only. It never
+contains a storage path, a worker endpoint, an API key, a private URL or raw
+slicer log text; a worker failure crosses the boundary as the stable code
+`slice_job_failed`, not as the worker's message. REST is the authoritative status
+source; SignalR progress, where present, is an optional hint only.
+
+#### Durable steps
+
+`created` → `validating-context` → `resolving-model` → `compiling-plan` →
+`submitting-slice-job` → `awaiting-worker` → `verifying-artifact` →
+`composing-gcode` → `promoting` → `completed` (or `failed` / `cancelled`).
+
+The submitted job is the canonical `/api/slice` contract row: it carries the
+project, attempt, orchestration and operation lineage, the exact native
+upstream-Orca profile documents with their digests, the pinned distribution,
+version and container digest, the stored model identity with its content digest,
+a deterministic correlation identifier and the specification digest as its
+checksum. The worker resolves model bytes through the authenticated model route;
+no local absolute path and no worker URL is ever persisted.
+
+The promoted program is the annotated, statically validated trusted program. The
+pinned upstream slicer output is verified against its recorded digest and size and
+preserved as immutable lineage on the run rather than spliced into the promoted
+bytes, because splicing would invalidate the manifest byte offsets the safety
+validator depends on. Static safety validation runs before artifact completion and
+again, over the stored bytes, before promotion.
+
+A safe, known failure is retried with bounded exponential backoff and a persisted
+retry count, next-retry instant, stable error code and structured JSON reason. A
+terminal failure stays durable and inspectable. `CalibrationGenerationRecoveryService`
+resumes due runs after a restart and uses the orchestration's optimistic
+concurrency token as an advisory lease, so two hosts never process the same run at
+once. Cancellation is accepted only while the run does not yet own work in another
+bounded context; afterwards it is `409 cancellation_not_permitted`, because this
+scope deliberately does not invent slicer queue semantics.
+
+#### `calibrationGenerationEnabled`
+
+The flag is true only when **every** production hop was resolved and answered a
+real probe in this process: the deterministic generation core, authorized stored
+model resolution, the canonical slice submission path, readable and writable
+artifacts, a registered online worker that attests upstream OrcaSlicer `2.3.1`
+with both a container digest and a binary digest, an operational promotion hop, a
+responsive durable orchestration store and a healthy recovery loop. A registered
+type, a configuration switch or a test double is never accepted as evidence. When
+the flag is false, `unavailableReasons` carries a `calibrationGeneration` entry
+with the stable code of the first missing hop. A split deployment stays false with
+`split_routing_unavailable` until real HTTP routing adapters for the model,
+artifact and promotion hops are present and probe healthy.
+
+`effectiveCapabilities.canGenerate` additionally requires the caller to hold both
+`calibration:generate` and `slicing:submit`.
 
 ## Printers API
 

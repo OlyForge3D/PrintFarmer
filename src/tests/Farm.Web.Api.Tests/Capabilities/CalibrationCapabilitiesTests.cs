@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
@@ -87,7 +88,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                  {
                      "calibrationGenerationEnabled",
                      "calibrationSlicingEnabled",
-                     "calibrationArtifactPromotionEnabled",
                      "calibrationQueueEnabled",
                      "calibrationJobBoundBedClearEnabled",
                      "calibrationEventsEnabled",
@@ -96,8 +96,17 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             _ = root.GetProperty(flag).GetBoolean().Should().BeFalse();
         }
 
+        // Promotion runs entirely inside this monolith host: artifacts are routable in process, the
+        // library storage is writable, the durable checkpoint store answers and the reconciler is wired.
+        _ = root.GetProperty("calibrationArtifactPromotionEnabled").GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("unavailableReasons").EnumerateArray()
+            .Select(reason => reason.GetProperty("feature").GetString())
+            .Should().NotContain("calibrationArtifactPromotion");
+
         _ = root.GetProperty("routes").GetProperty("sliceJobs").GetString()
-            .Should().Be("/api/slice-jobs");
+            .Should().Be("/api/slice");
+        _ = root.GetProperty("routes").GetProperty("sliceJob").GetString()
+            .Should().Be("/api/slice/{id}");
         _ = root.GetProperty("routes").GetProperty("calibrationProjects").GetString()
             .Should().Be("/api/calibration-projects");
         _ = root.GetProperty("routes").GetProperty("calibrationSync").GetString()
@@ -328,6 +337,115 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .Should().Contain("profile_service_unavailable");
     }
 
+    [Fact]
+    public async Task GetCapabilitiesAsync_WithoutRegisteredPromoter_KeepsArtifactPromotionFalse()
+    {
+        // A split host does not load the slicer module in process, so nothing registers a promoter and
+        // artifacts are not routable from here.
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DEPLOYMENT_MODE"] = "split",
+            })
+            .Build();
+        ServiceCollection services = new();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationCapabilityService service = new(
+            configuration,
+            provider,
+            NullLogger<CalibrationCapabilityService>.Instance);
+
+        PlatformCapabilitiesDto capabilities =
+            await service.GetCapabilitiesAsync(null, CancellationToken.None);
+
+        _ = capabilities.DeploymentMode.Should().Be("split");
+        _ = capabilities.CalibrationArtifactPromotionEnabled.Should().BeFalse();
+        _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
+            .Should().Contain("promotion_dependency_unavailable");
+    }
+
+    [Fact]
+    public async Task GetSystemCapabilitiesAsync_WithHealthyWorkerLackingPinnedIdentity_KeepsCalibrationSlicingFalse()
+    {
+        await AddHealthyOrcaServiceAsync(_anonymousFactory);
+        using HttpClient client = _anonymousFactory.CreateClient();
+
+        JsonDocument document = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/system/capabilities") ?? throw new InvalidOperationException("Missing capability response.");
+
+        using (document)
+        {
+            _ = document.RootElement.GetProperty("slicingOperational").GetBoolean().Should().BeTrue();
+            _ = document.RootElement.GetProperty("calibrationSlicingEnabled").GetBoolean()
+                .Should().BeFalse("a worker that does not attest a pinned binary and container digest is unverifiable");
+        }
+    }
+
+    [Fact]
+    public async Task GetSystemCapabilitiesAsync_WithoutCredentialedWorker_ReportsAuthenticationNotConfigured()
+    {
+        await AddOrcaWorkerAsync(
+            _anonymousFactory,
+            version: "2.3.1",
+            lastHeartbeat: DateTime.UtcNow,
+            apiKey: null);
+        using HttpClient client = _anonymousFactory.CreateClient();
+
+        JsonDocument document = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/system/capabilities") ?? throw new InvalidOperationException("Missing capability response.");
+
+        using (document)
+        {
+            _ = document.RootElement.GetProperty("slicingConfigured").GetBoolean().Should().BeFalse();
+            _ = document.RootElement.GetProperty("slicingOperational").GetBoolean().Should().BeFalse();
+            _ = document.RootElement.GetProperty("calibrationSlicingEnabled").GetBoolean().Should().BeFalse();
+            _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
+                .Select(reason => reason.GetProperty("code").GetString())
+                .Should().Contain("worker_authentication_not_configured");
+        }
+    }
+
+    [Fact]
+    public async Task GetSystemCapabilitiesAsync_AdvertisedSliceRoutes_ResolveInTheApiRouteTable()
+    {
+        using HttpClient client = _anonymousFactory.CreateClient();
+
+        JsonDocument document = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/system/capabilities") ?? throw new InvalidOperationException("Missing capability response.");
+
+        using (document)
+        {
+            string sliceJobsRoute = document.RootElement.GetProperty("routes")
+                .GetProperty("sliceJobs").GetString()!;
+
+            // An advertised route must actually exist: an unknown path returns 404, whereas the
+            // real protected route rejects the anonymous caller with 401.
+            HttpResponseMessage response = await client.GetAsync(sliceJobsRoute);
+            _ = response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        }
+    }
+
+    [Fact]
+    public async Task GetSystemCapabilitiesAsync_AdvertisedPromotionRoute_RejectsAnonymousCallerInsteadOf404()
+    {
+        using HttpClient client = _anonymousFactory.CreateClient();
+
+        JsonDocument document = await client.GetFromJsonAsync<JsonDocument>(
+            "/api/system/capabilities") ?? throw new InvalidOperationException("Missing capability response.");
+
+        using (document)
+        {
+            string promotionRoute = document.RootElement.GetProperty("routes")
+                .GetProperty("gcodePromotions").GetString()!;
+
+            // An advertised route must exist and be protected: an unknown path returns 404, whereas
+            // the real promotion route rejects the anonymous caller.
+            HttpResponseMessage response = await client.PostAsync(promotionRoute, content: null);
+            _ = response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+            _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        }
+    }
+
     private static Task AddHealthyOrcaServiceAsync(CustomWebApplicationFactory factory) =>
         AddOrcaWorkerAsync(factory, "2.3.1", DateTime.UtcNow);
 
@@ -342,7 +460,8 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         DateTime lastHeartbeat,
         string capabilitiesJson =
             """{"capabilities":["orcaslicer","orcaslicer-upstream"]}""",
-        string? workerCapabilitiesJson = null)
+        string? workerCapabilitiesJson = null,
+        string? apiKey = "registry-issued-worker-key")
     {
         using IServiceScope scope = factory.Services.CreateScope();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
@@ -369,6 +488,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             EndpointUrl = "http://private-worker.internal",
             CapabilitiesJson = workerCapabilitiesJson ?? capabilitiesJson,
             Version = version,
+            ApiKey = apiKey,
             Status = WorkerStatus.Online,
             TotalSlots = 2,
             ActiveJobs = 0,

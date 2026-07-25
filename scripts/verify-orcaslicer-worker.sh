@@ -34,6 +34,8 @@ set -euo pipefail
 #   10 orca_binary not healthy
 #   11 readiness is relaxed while require-real requested
 #   12 jq required for strict JSON parsing but not available (reserved)
+#   13 require-real requested but the image attests no verified binary identity
+#   14 a stub binary is installed while the image attests a pinned binary identity
 #
 # Notes:
 #   - In allow-stub mode we tolerate stub & skip readiness.
@@ -76,6 +78,8 @@ BINARY_PATH="/usr/local/bin/orcaslicer"
 HEALTH_KEY="orca_binary"
 LOG_PREFIX="orca"
 SIZE_THRESHOLD=2048
+# Identity the image attests for the binary it installed; empty means "stub / unverified".
+ATTESTATION_PATH="/etc/printfarmer/orcaslicer.sha256"
 
 source "$(dirname "$0")/lib_verify_worker.sh"
 
@@ -84,6 +88,7 @@ vw_parse_args "$@"
 vw_start_container
 vw_wait_liveness
 vw_assess_binary
+vw_check_binary_attestation
 vw_invoke_help
 if [ "$MODE" = "require-real" ]; then
   vw_check_readiness

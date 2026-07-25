@@ -1,8 +1,10 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
@@ -75,11 +77,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
             SlicingResult result = new SlicingResult
             {
-                ResultFileUrl = new UriBuilder
-                {
-                    Scheme = Uri.UriSchemeFile,
-                    Path = Path.GetFullPath(gcodeFilePath),
-                }.Uri,
+                // A bare UriBuilder defaults its host to "localhost", which yields a UNC-style
+                // local path on Windows and breaks artifact upload and cleanup. Build the file URI
+                // from the absolute path so the local path round-trips on every platform.
+                ResultFileUrl = new Uri(Path.GetFullPath(gcodeFilePath)),
                 EstimatedPrintTimeSeconds = metadata.PrintTimeSeconds,
                 EstimatedFilamentUsageGrams = metadata.FilamentUsageGrams,
                 OutputFileSizeBytes = new FileInfo(gcodeFilePath).Length,
@@ -125,15 +126,45 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         using HttpRequestMessage request = new(HttpMethod.Get, job.ModelFileUrl);
-        request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-        request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+        request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
+        request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
+        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken.ToString());
+        request.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
         HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         _ = response.EnsureSuccessStatusCode();
         string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
-        await using FileStream fileStream = File.Create(stlFilePath);
-        await response.Content.CopyToAsync(fileStream, cancellationToken);
+        await using (FileStream fileStream = File.Create(stlFilePath))
+        {
+            await response.Content.CopyToAsync(fileStream, cancellationToken);
+        }
+
+        // The model digest published with the claim is authoritative: refuse anything else.
+        if (!string.IsNullOrWhiteSpace(job.ModelSha256))
+        {
+            string actual = await ComputeFileSha256Async(stlFilePath, cancellationToken);
+            if (!string.Equals(actual, job.ModelSha256.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("The downloaded model does not match the digest published with the claim.");
+            }
+        }
+
         job.InputFileSizeBytes = new FileInfo(stlFilePath).Length;
         return stlFilePath;
+    }
+
+    /// <summary>
+    /// Computes the uppercase hexadecimal SHA-256 of a file.
+    /// </summary>
+    /// <param name="path">Path to the file.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The uppercase hexadecimal digest.</returns>
+    private static async Task<string> ComputeFileSha256Async(string path, CancellationToken cancellationToken)
+    {
+        await using FileStream stream = File.OpenRead(path);
+        byte[] hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash);
     }
 
     private static string SanitizeModelFileName(string fileName)
@@ -202,6 +233,68 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return downloadedPaths;
     }
 
+    /// <summary>
+    /// Writes the exact native slicer profile documents delivered with the claim, verifying each
+    /// digest before the bytes are handed to OrcaSlicer.
+    /// </summary>
+    /// <param name="profiles">The native documents plus expected digests.</param>
+    /// <param name="workDir">The per-job working directory.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Absolute paths of the written machine, process and filament files.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when no profiles were delivered or when a document fails its digest check.
+    /// </exception>
+    private static async Task<Dictionary<string, string>> WriteNativeProfilesAsync(
+        NativeSlicerProfiles? profiles,
+        string workDir,
+        CancellationToken cancellationToken)
+    {
+        if (profiles is null)
+        {
+            throw new InvalidOperationException(
+                "The claimed job did not carry native machine/process/filament profiles.");
+        }
+
+        VerifyDigest("machine", profiles.MachineJson, profiles.MachineSha256);
+        VerifyDigest("process", profiles.ProcessJson, profiles.ProcessSha256);
+        VerifyDigest("filament", profiles.FilamentJson, profiles.FilamentSha256);
+
+        string machineJsonPath = Path.Combine(workDir, "machine.json");
+        string processJsonPath = Path.Combine(workDir, "process.json");
+        string filamentJsonPath = Path.Combine(workDir, "filament.json");
+
+        // Written verbatim: OrcaSlicer consumes its own profile schema, so re-serializing a CLR DTO
+        // shape here would produce files the slicer cannot load.
+        await File.WriteAllTextAsync(machineJsonPath, profiles.MachineJson, cancellationToken);
+        await File.WriteAllTextAsync(processJsonPath, profiles.ProcessJson, cancellationToken);
+        await File.WriteAllTextAsync(filamentJsonPath, profiles.FilamentJson, cancellationToken);
+
+        return new Dictionary<string, string>
+        {
+            { "machine", machineJsonPath },
+            { "process", processJsonPath },
+            { "filament", filamentJsonPath }
+        };
+    }
+
+    private static void VerifyDigest(string kind, string content, string expectedSha256)
+    {
+        string actual = NativeSlicerProfiles.ComputeSha256(content);
+        if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"The delivered {kind} profile does not match its published digest.");
+        }
+    }
+
+    /// <summary>
+    /// Materializes profile files for a job that resolved its profiles from the worker's local
+    /// profile cache instead of carrying native documents with the claim.
+    /// </summary>
+    /// <param name="profile">The resolved profile set, including any per-extruder filaments.</param>
+    /// <param name="workDir">The per-job working directory.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Absolute paths of the written machine, process and filament files.</returns>
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
     {
         if (profile == null)
@@ -264,8 +357,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new InvalidOperationException($"OrcaSlicer binary not found at {_orcaSlicerBinaryPath}");
         }
 
-        // Generate the three JSON profile files
-        Dictionary<string, string> profilePaths = await GenerateProfileJsonFilesAsync(job.Profile, workDir, cancellationToken);
+        // Canonical jobs carry native profile documents with published digests; those are written
+        // verbatim after verification. Jobs that resolved profiles from the worker's local cache
+        // fall back to materializing them (including per-extruder filaments).
+        Dictionary<string, string> profilePaths = job.NativeProfiles is not null
+            ? await WriteNativeProfilesAsync(job.NativeProfiles, workDir, cancellationToken)
+            : await GenerateProfileJsonFilesAsync(job.Profile, workDir, cancellationToken);
 
         string machineJson = profilePaths["machine"];
         string processJson = profilePaths["process"];

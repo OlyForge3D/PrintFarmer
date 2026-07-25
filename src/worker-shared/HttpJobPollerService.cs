@@ -1,5 +1,7 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
@@ -51,6 +53,11 @@ public abstract class HttpJobPollerService(
 
     private const string DefaultApiBaseUrl = "http://localhost:5245"; // fallback dev URL
 
+    /// <summary>
+    /// Marker file that claims ownership of a job's local work after an ambiguous outcome.
+    /// </summary>
+    private const string RecoveryMarkerFileName = ".printfarmer-recovery.json";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Resolve API base URL — prefer unified SlicerApi:BaseUrl, then legacy keys.
@@ -79,9 +86,15 @@ public abstract class HttpJobPollerService(
 
                 using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
-                httpClient.Timeout = TimeSpan.FromSeconds(30);
-                httpClient.DefaultRequestHeaders.Add("X-Worker-Key", currentWorkerState.RegisteredServiceApiKey);
-                httpClient.DefaultRequestHeaders.Add("X-Worker-Id", registeredServiceId.Value.ToString());
+
+                // A real slice routinely exceeds 30s; the request timeout must exceed the slice
+                // duration or the worker abandons work the API still considers leased.
+                httpClient.Timeout = TimeSpan.FromSeconds(
+                    int.TryParse(_configuration["Worker:HttpTimeoutSeconds"], out int timeoutSeconds) && timeoutSeconds > 0
+                        ? timeoutSeconds
+                        : 600);
+                httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerKey, currentWorkerState.RegisteredServiceApiKey);
+                httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerId, registeredServiceId.Value.ToString());
 
                 // Attempt to claim a job
                 ClaimJobRequest claimRequest = new ClaimJobRequest
@@ -117,25 +130,43 @@ public abstract class HttpJobPollerService(
                 }
 
                 // Convert the worker-only claim contract to the pipeline model.
-                // Map claimed job to DistributedSlicingJob (feed actual metadata to pipeline)
-                SlicerEngineType engineEnum = (SlicerEngineType)jobStatus.SlicerEngine;
+                // The engine arrives as a validated canonical value; nothing is cast or guessed here.
                 DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
                     WorkerId = registeredServiceId.Value.ToString(),
                     ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
                     ModelFileName = jobStatus.ModelFileName,
-                    EngineType = engineEnum,
-                    SlicerEngine = engineEnum.ToString(),
+                    ModelSha256 = jobStatus.ModelSha256,
+                    EngineType = jobStatus.SlicerEngine,
+                    SlicerEngine = jobStatus.SlicerEngine.ToString(),
                     Status = SlicingJobStatus.Slicing, // in-progress mapping
                     StartedAt = DateTime.UtcNow,
                     ModelTransformJson = jobStatus.ModelTransformJson,
                     ModelFileUrls = jobStatus.ModelFileUrls,
                     ModelFileTransforms = jobStatus.ModelFileTransforms,
+                    LeaseToken = jobStatus.LeaseToken,
+                    LeaseFence = jobStatus.LeaseFence,
+                    NativeProfiles = NativeSlicerProfiles.FromJob(
+                        jobStatus.MachineProfileJson,
+                        jobStatus.ProcessProfileJson,
+                        jobStatus.FilamentProfileJson,
+                        jobStatus.MachineProfileSha256,
+                        jobStatus.ProcessProfileSha256,
+                        jobStatus.FilamentProfileSha256),
                 };
 
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
                 job.Profile = await ResolveProfileFromJsonAsync(jobStatus.SlicerProfileJson, stoppingToken);
+
+                // Every subsequent mutation for this job must carry the lease it was claimed under.
+                _workerState.SetJobLease(job.Id, new WorkerJobLease(job.LeaseToken, job.LeaseFence));
+                httpClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseToken);
+                httpClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseFence);
+                httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken.ToString());
+                httpClient.DefaultRequestHeaders.Add(
+                    WorkerLeaseHeaders.LeaseFence,
+                    job.LeaseFence.ToString(CultureInfo.InvariantCulture));
 
                 _workerState.IncrementActiveJobs();
                 _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
@@ -165,6 +196,7 @@ public abstract class HttpJobPollerService(
         DateTime start = DateTime.UtcNow;
         CancellationTokenSource? localLinkedCts = null;
         SlicingResult? result = null;
+        bool terminalAcknowledgement = false;
         try
         {
             using IServiceScope scope = _serviceProvider.CreateScope();
@@ -223,17 +255,20 @@ public abstract class HttpJobPollerService(
 
             _logger.LogInformation("Job {JobId} slicing completed in {TotalSeconds:F1}s", job.Id, (DateTime.UtcNow - start).TotalSeconds);
 
-            // Upload artifacts (G-code file and any metadata)
+            // Upload artifacts (G-code file and any metadata) with declared digests
             List<Guid> artifactIds = await UploadArtifactsAsync(job, result, httpClient, ct);
 
-            // Complete the job with artifact references
+            // Complete the job with artifact references and the profile digests actually written
             CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
             {
                 PrimaryArtifactId = artifactIds[0],
                 AdditionalArtifactIds = artifactIds.Skip(1).ToArray(),
                 EstimatedPrintTimeSeconds = (int?)Math.Round(result.EstimatedPrintTimeSeconds),
                 FilamentUsedGrams = (decimal?)Math.Round(result.EstimatedFilamentUsageGrams, 2),
-                LogText = result.Metadata.TryGetValue("SlicerLog", out string? logObj) ? logObj?.ToString() : null
+                LogText = result.Metadata.TryGetValue("SlicerLog", out string? logObj) ? logObj?.ToString() : null,
+                MachineProfileSha256 = job.NativeProfiles?.MachineSha256,
+                ProcessProfileSha256 = job.NativeProfiles?.ProcessSha256,
+                FilamentProfileSha256 = job.NativeProfiles?.FilamentSha256,
             };
 
             HttpResponseMessage completeResponse = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest, ct);
@@ -244,13 +279,17 @@ public abstract class HttpJobPollerService(
                 throw new InvalidOperationException($"Failed to complete job: {completeResponse.StatusCode} - {errorContent}");
             }
 
+            // Terminal API acknowledgement received: the local work is now safe to discard.
+            terminalAcknowledgement = true;
             _logger.LogInformation("Job {JobId} completed successfully with {ArtifactIdsCount} artifacts", job.Id, artifactIds.Count);
         }
         catch (OperationCanceledException)
         {
             _logger.LogWarning("Job {JobId} cancelled", job.Id);
 
-            // Job will timeout and be reassigned by the API's error recovery system
+            // Job will timeout and be reassigned by the API's error recovery system. The local work
+            // is kept and marked so a later run cannot mistake it for reclaimable scratch space.
+            TryWriteRecoveryMarker(job.Id, result, "cancelled");
         }
         catch (Exception ex)
         {
@@ -258,6 +297,10 @@ public abstract class HttpJobPollerService(
 
             // Report failure to the API so the job doesn't sit in Processing until lease expires
             await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
+
+            // The outcome is ambiguous from the worker's point of view, so the local work is kept
+            // and marked for recovery instead of being deleted.
+            TryWriteRecoveryMarker(job.Id, result, ex.GetType().Name);
         }
         finally
         {
@@ -270,11 +313,17 @@ public abstract class HttpJobPollerService(
                     localLinkedCts.Dispose();
                 }
             }
-            catch
+            catch (ObjectDisposedException exception)
             {
+                _logger.LogDebug(exception, "Lease renewal token source for job {JobId} was already disposed", job.Id);
             }
 
-            TryCleanupLocalResult(job.Id, result);
+            if (terminalAcknowledgement)
+            {
+                TryCleanupLocalResult(job.Id, result);
+            }
+
+            _workerState.ClearJobLease(job.Id);
             _workerState.DecrementActiveJobs();
         }
     }
@@ -328,9 +377,9 @@ public abstract class HttpJobPollerService(
         if (result.ResultFileUrl != null)
         {
             // ResultFileUrl might be a file:// URI or just a local path
-            if (result.ResultFileUrl.IsAbsoluteUri && result.ResultFileUrl.Scheme == "file")
+            if (result.ResultFileUrl.IsAbsoluteUri && result.ResultFileUrl.IsFile)
             {
-                gcodeFilePath = result.ResultFileUrl.LocalPath;
+                gcodeFilePath = NormalizeLocalPath(result.ResultFileUrl);
             }
             else if (result.ResultFileUrl.IsAbsoluteUri)
             {
@@ -348,14 +397,24 @@ public abstract class HttpJobPollerService(
             throw new InvalidOperationException($"G-code file not found at expected path: {gcodeFilePath}");
         }
 
-        _logger.LogInformation("Uploading G-code artifact from {GcodeFilePath}", gcodeFilePath);
+        _logger.LogInformation("Uploading G-code artifact for job {JobId}", job.Id);
 
-        // Upload the primary G-code file without buffering the full artifact in memory.
+        // Upload the primary G-code file without buffering the full artifact in memory, with a
+        // declared digest so the API can refuse bytes that differ from what this worker produced.
         await using FileStream gcodeStream = OpenArtifactFileStream(gcodeFilePath);
+        string declaredSha256 = Convert.ToHexString(await SHA256.HashDataAsync(gcodeStream, ct));
+        gcodeStream.Position = 0;
+
         using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
         StreamContent gcodeFileContent = new StreamContent(gcodeStream);
         gcodeFileContent.Headers.ContentLength = gcodeStream.Length;
+        gcodeFileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/x.gcode");
         gcodeContent.Add(gcodeFileContent, "file", Path.GetFileName(gcodeFilePath));
+        gcodeContent.Add(new StringContent("gcode"), "kind");
+        gcodeContent.Add(new StringContent(declaredSha256), "sha256");
+        gcodeContent.Add(
+            new StringContent(gcodeStream.Length.ToString(CultureInfo.InvariantCulture)),
+            "sizeBytes");
 
         using HttpResponseMessage uploadResponse =
             await httpClient.PostAsync($"/api/slice/{job.Id}/artifacts", gcodeContent, ct);
@@ -375,9 +434,6 @@ public abstract class HttpJobPollerService(
         artifactIds.Add(artifactResponse.Id);
         _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeStream.Length);
 
-        // Phase 3E: Upload additional artifacts (thumbnails, metadata) from result.Metadata
-        // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
-        // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
     }
 
@@ -629,30 +685,134 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private void TryCleanupLocalResult(Guid jobId, SlicingResult? result)
+    /// <summary>
+    /// Records a durable recovery marker beside a job's output so an ambiguous outcome keeps its
+    /// local work instead of destroying it.
+    /// </summary>
+    /// <param name="jobId">The job whose outcome is unknown.</param>
+    /// <param name="result">The pipeline result, when the pipeline produced one.</param>
+    /// <param name="reason">Non-sensitive failure category.</param>
+    private void TryWriteRecoveryMarker(Guid jobId, SlicingResult? result, string reason)
     {
-        if (result?.ResultFileUrl is not { IsAbsoluteUri: true, IsFile: true } resultUri)
+        if (!TryResolveJobDirectory(jobId, result, out string directory))
         {
             return;
         }
 
         try
         {
-            string filePath = resultUri.LocalPath;
-            string? directory = Path.GetDirectoryName(filePath);
-            if (directory is not null &&
-                string.Equals(Path.GetFileName(directory), jobId.ToString(), StringComparison.Ordinal))
+            string marker = Path.Combine(directory, RecoveryMarkerFileName);
+            string payload = JsonSerializer.Serialize(new
             {
-                Directory.Delete(directory, recursive: true);
-            }
-            else if (File.Exists(filePath))
+                jobId,
+                reason,
+                recordedAtUtc = DateTime.UtcNow,
+                state = "upload_or_completion_unconfirmed",
+            });
+            File.WriteAllText(marker, payload);
+            _logger.LogWarning(
+                "Preserved recoverable local work for job {JobId} ({Reason})",
+                jobId,
+                reason);
+        }
+        catch (IOException exception)
+        {
+            _logger.LogWarning(exception, "Failed to write recovery marker for job {JobId}", jobId);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            _logger.LogWarning(exception, "Failed to write recovery marker for job {JobId}", jobId);
+        }
+    }
+
+    private void TryCleanupLocalResult(Guid jobId, SlicingResult? result)
+    {
+        if (!TryResolveJobDirectory(jobId, result, out string directory))
+        {
+            if (result?.ResultFileUrl is { IsAbsoluteUri: true, IsFile: true } fileUri &&
+                File.Exists(NormalizeLocalPath(fileUri)))
             {
-                File.Delete(filePath);
+                TryDeleteFile(jobId, NormalizeLocalPath(fileUri));
             }
+
+            return;
+        }
+
+        // A recovery marker means another owner is responsible for these bytes; never delete them.
+        if (File.Exists(Path.Combine(directory, RecoveryMarkerFileName)))
+        {
+            _logger.LogInformation(
+                "Retained work directory for job {JobId} because a recovery marker is present",
+                jobId);
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(directory, recursive: true);
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
         }
+    }
+
+    private void TryDeleteFile(Guid jobId, string filePath)
+    {
+        try
+        {
+            File.Delete(filePath);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
+        }
+    }
+
+    /// <summary>
+    /// Resolves the per-job working directory that owns a pipeline result.
+    /// </summary>
+    /// <param name="jobId">The job identifier, which names its working directory.</param>
+    /// <param name="result">The pipeline result, when the pipeline produced one.</param>
+    /// <param name="directory">The resolved directory when the method returns true.</param>
+    /// <returns><see langword="true"/> when a job-owned directory was resolved.</returns>
+    private static bool TryResolveJobDirectory(Guid jobId, SlicingResult? result, out string directory)
+    {
+        directory = string.Empty;
+        if (result?.ResultFileUrl is not { IsAbsoluteUri: true, IsFile: true } resultUri)
+        {
+            return false;
+        }
+
+        string? candidate = Path.GetDirectoryName(NormalizeLocalPath(resultUri));
+        while (!string.IsNullOrEmpty(candidate))
+        {
+            if (string.Equals(Path.GetFileName(candidate), jobId.ToString(), StringComparison.Ordinal))
+            {
+                directory = candidate;
+                return Directory.Exists(directory);
+            }
+
+            candidate = Path.GetDirectoryName(candidate);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Converts a <c>file:</c> URI to a usable local path.
+    /// </summary>
+    /// <param name="uri">The absolute file URI produced by a pipeline.</param>
+    /// <returns>
+    /// The local path. A <c>localhost</c> authority is stripped because it makes
+    /// <see cref="Uri.LocalPath"/> return a UNC-style path that no local API can open on Windows.
+    /// </returns>
+    private static string NormalizeLocalPath(Uri uri)
+    {
+        string localPath = uri.LocalPath;
+        const string LocalHostPrefix = @"\\localhost\";
+        return localPath.StartsWith(LocalHostPrefix, StringComparison.OrdinalIgnoreCase)
+            ? localPath[LocalHostPrefix.Length..]
+            : localPath;
     }
 }

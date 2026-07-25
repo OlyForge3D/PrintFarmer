@@ -132,6 +132,22 @@ public interface IGcodeFilesService
     Task<GcodeFile?> FinalizeChunkedUploadAsync(string filePath, string? originalFileName, string? thumbnailPath, string? virtualDirectory, IChunkedUploadService chunkedUploadService, CancellationToken ct);
 
     /// <summary>
+    /// Streams already-verified G-code bytes into the library and stamps immutable promotion lineage.
+    /// </summary>
+    /// <param name="request">The ingest request, including the source stream and expected digest.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The stored file and whether identical content was already present.</returns>
+    /// <exception cref="GcodeStreamIngestException">
+    /// Thrown when the copied bytes do not match the declared SHA-256 or size. Nothing is persisted.
+    /// </exception>
+    /// <remarks>
+    /// This is the server-side ingest path used by artifact promotion: bytes are copied and hashed in
+    /// one pass, so no caller ever downloads and re-uploads content, and no API-local file path is
+    /// handed across a service boundary.
+    /// </remarks>
+    Task<GcodeStreamIngestResult> IngestStreamAsync(GcodeStreamIngestRequest request, CancellationToken ct);
+
+    /// <summary>
     /// Creates a new virtual directory at the specified path.
     /// </summary>
     /// <param name="path">Parent virtual path where directory will be created (e.g., '/prints'). Null defaults to root.</param>

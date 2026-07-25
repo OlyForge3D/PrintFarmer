@@ -781,6 +781,43 @@ public abstract class CalibrationControllerBase : ControllerBase
     protected IActionResult ImportResult(CalibrationApiResult<LegacyCalibrationImportResultDto> result) =>
         Result(result);
 
+    /// <summary>
+    /// Maps a durable calibration orchestration result, emitting the status route on acceptance and
+    /// the structured, redacted reasons on rejection.
+    /// </summary>
+    /// <param name="result">The saga result.</param>
+    /// <returns>The rendered action result.</returns>
+    protected IActionResult OrchestrationResult(
+        CalibrationApiResult<Farm.Web.Api.Contracts.CalibrationOrchestrationStatusDto> result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        if (!result.IsSuccess || result.Value is null)
+        {
+            ProblemDetails details = new()
+            {
+                Status = result.StatusCode,
+                Title = (result.Code ?? "calibration_generation_failed").Replace('_', ' '),
+                Type = $"https://printfarmer.dev/problems/{result.Code ?? "calibration_generation_failed"}",
+                Instance = HttpContext.Request.Path,
+            };
+            details.Extensions["code"] = result.Code ?? "calibration_generation_failed";
+            if (result.Value?.Problems is { Count: > 0 } problems)
+            {
+                details.Extensions["problems"] = problems;
+            }
+
+            return StatusCode(result.StatusCode, details);
+        }
+
+        SetReplayHeader(result);
+        if (result.StatusCode == StatusCodes.Status202Accepted)
+        {
+            Response.Headers.Location = result.Value.StatusRoute;
+        }
+
+        return StatusCode(result.StatusCode, result.Value);
+    }
+
     private IActionResult Result<T>(CalibrationApiResult<T> result)
     {
         if (!result.IsSuccess || result.Value is null)

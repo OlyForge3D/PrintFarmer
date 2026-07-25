@@ -64,6 +64,84 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     }
 
     /// <inheritdoc/>
+    public async Task<bool> TryPinForPromotionAsync(
+        Guid artifactId,
+        Guid? checkpointId,
+        PromotionOperationIdentity operation,
+        DateTime startedAtUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.Key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.OperationId);
+
+        using SlicerDbContext db = _dbFactory.CreateDbContext();
+        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
+        if (artifact is null)
+        {
+            return false;
+        }
+
+        if (artifact.PromotionOperationKey is not null &&
+            !string.Equals(artifact.PromotionOperationKey, operation.Key, StringComparison.Ordinal))
+        {
+            // Another operation already owns this artifact; promotion stays single-writer.
+            return false;
+        }
+
+        artifact.PromotionOperationKey = operation.Key;
+        artifact.PromotionOperationId = operation.OperationId;
+        artifact.PromotionCheckpointId = checkpointId ?? artifact.PromotionCheckpointId;
+        artifact.PromotionStartedAtUtc ??= startedAtUtc;
+        _ = await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> MarkPromotedAsync(
+        Guid artifactId,
+        Guid gcodeFileId,
+        DateTime promotedAtUtc,
+        CancellationToken ct = default)
+    {
+        using SlicerDbContext db = _dbFactory.CreateDbContext();
+        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
+        if (artifact is null)
+        {
+            return false;
+        }
+
+        artifact.PromotedGcodeFileId = gcodeFileId;
+        artifact.PromotedAtUtc ??= promotedAtUtc;
+        _ = await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> ReleasePromotionPinAsync(
+        Guid artifactId,
+        PromotionOperationIdentity operation,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.Key);
+
+        using SlicerDbContext db = _dbFactory.CreateDbContext();
+        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
+        if (artifact is null ||
+            !string.Equals(artifact.PromotionOperationKey, operation.Key, StringComparison.Ordinal) ||
+            artifact.PromotedAtUtc is not null)
+        {
+            return false;
+        }
+
+        artifact.PromotionOperationKey = null;
+        artifact.PromotionOperationId = null;
+        artifact.PromotionCheckpointId = null;
+        artifact.PromotionStartedAtUtc = null;
+        _ = await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
     public async Task UpdateAsync(Artifact artifact, CancellationToken ct = default)
     {
         using SlicerDbContext db = _dbFactory.CreateDbContext();

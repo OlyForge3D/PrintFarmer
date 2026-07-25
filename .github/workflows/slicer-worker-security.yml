@@ -109,16 +109,16 @@ jobs:
 
       - name: Build OrcaSlicer worker with stub binary (via multistage)
         id: build-orca
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Building OrcaSlicer worker (stub mode for CI efficiency)"
+          # Vulnerability scanning does not need the multi-hundred-megabyte upstream AppImage, so
+          # this job explicitly opts into the stub. Production images build with the default
+          # ALLOW_STUB=false and a pinned ORCASLICER_SHA256.
+          echo "Building OrcaSlicer worker (stub mode for CI scan efficiency)"
           TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           SHA='${{ github.sha }}'
           docker build --platform linux/amd64 \
             --build-arg ORCASLICER_VERSION=${{ env.ORCASLICER_VERSION }} \
             --build-arg ALLOW_STUB=true \
-            --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
             --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
             -f scripts/docker/dockerfiles/Dockerfile.multistage --target orcaslicer-worker \
             -t orcaslicer-worker:scan-${{ github.sha }} .

@@ -28,6 +28,8 @@
 #   10 <health_key> not healthy
 #   11 readiness is relaxed while require-real requested
 #   12 jq required for strict JSON parsing but not available (reserved / not currently triggered)
+#   13 require-real requested but the image attests no verified binary identity
+#   14 a stub binary is installed while the image attests a pinned binary identity
 
 vw_log() { printf "[verify-%s] %s\n" "${LOG_PREFIX}" "$*"; }
 vw_err() { vw_log "ERROR: $*" >&2; }
@@ -106,6 +108,30 @@ vw_assess_binary() {
     if [ "${MODE}" = "require-real" ]; then vw_err "Stub binary not permitted in require-real mode"; exit 6; fi
   else
     vw_log "Binary size (${BINSIZE}) looks plausible"
+  fi
+}
+
+# Asserts that the binary identity the image attests matches the binary it actually installed.
+# Requires ATTESTATION_PATH to be set by the calling script; skipped otherwise.
+# Must run after vw_assess_binary, which sets BINSIZE.
+vw_check_binary_attestation() {
+  if [ -z "${ATTESTATION_PATH-}" ]; then
+    return 0
+  fi
+
+  local attested
+  attested=$(docker exec "${CONTAINER_NAME}" sh -c "cat '${ATTESTATION_PATH}' 2>/dev/null || true" | tr -d '[:space:]')
+  local is_digest="false"
+  if printf '%s' "${attested}" | grep -Eq '^[0-9a-fA-F]{64}$'; then is_digest="true"; fi
+  vw_log "Binary attestation at ${ATTESTATION_PATH}: verified=${is_digest}"
+
+  if [ "${MODE}" = "require-real" ] && [ "${is_digest}" != "true" ]; then
+    vw_err "require-real demands an attested binary identity, but the image attests none"; exit 13
+  fi
+
+  # A stub must never carry a pinned identity: registration would advertise a binary that is not there.
+  if [ "${BINSIZE:-0}" -le "${SIZE_THRESHOLD}" ] && [ "${is_digest}" = "true" ]; then
+    vw_err "A stub binary is installed but the image attests a pinned identity"; exit 14
   fi
 }
 

@@ -42,7 +42,7 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
             UserId = Guid.NewGuid(), // explicit to bypass NameIdentifier fallback path
             ModelFileUrl = "http://example.com/model.stl",
             ModelFileName = "model.stl",
-            SlicerEngine = 0,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfileJson = "{}"
         };
 

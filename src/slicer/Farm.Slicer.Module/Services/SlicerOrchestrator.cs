@@ -487,7 +487,11 @@ public class SlicerOrchestrator(
     private static Dictionary<SlicerEngineType, EngineMetadata> BuildStaticCatalog() =>
         new()
         {
-            [SlicerEngineType.OrcaSlicer] = new EngineMetadata(SlicerEngineType.OrcaSlicer, "1.8.x", s_orcaSupportedExtensions),
+            // The advertised OrcaSlicer version must match the pinned upstream build the workers run.
+            [SlicerEngineType.OrcaSlicer] = new EngineMetadata(
+                SlicerEngineType.OrcaSlicer,
+                Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.SlicerVersion,
+                s_orcaSupportedExtensions),
             [SlicerEngineType.PrusaSlicer] = new EngineMetadata(SlicerEngineType.PrusaSlicer, "2.8.0", s_prusaSupportedExtensions)
         };
 

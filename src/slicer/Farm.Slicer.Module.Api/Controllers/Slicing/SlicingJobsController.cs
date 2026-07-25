@@ -13,9 +13,16 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 /// Legacy slicing jobs controller (pre-queue system).
 /// Provides endpoints for direct slicing job management via the orchestrator.
 /// </summary>
+/// <remarks>
+/// Superseded by <c>POST /api/slice</c>. Retained for existing non-calibration callers only; the
+/// in-memory job store behind it is not durable and is never used for calibration work.
+/// </remarks>
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Jobs")]
+[DeprecatedSliceRoute(
+    SlicingSubmissionController.CanonicalSliceRoute,
+    SlicingSubmissionController.CanonicalSliceRouteSunset)]
 public class SlicingJobsController(
     ISlicerTempPathProvider tempPathProvider,
     ISlicerOrchestrator orchestrator,

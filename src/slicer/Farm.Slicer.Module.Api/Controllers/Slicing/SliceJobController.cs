@@ -1,25 +1,35 @@
 ﻿using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Api.Authorization;
 using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
 /// <summary>
-/// API endpoints for slice job lifecycle management (submit, claim, progress, complete).
+/// Canonical API endpoints for slice job lifecycle management (submit, claim, progress, complete).
 /// </summary>
+/// <remarks>
+/// This is the single production slice contract. Every worker mutation must present a matching
+/// worker credential, claimed job, engine capability, unexpired lease and current fencing token;
+/// anything else is rejected rather than tolerated.
+/// </remarks>
 [ApiController]
 [Route("api/slice")]
 [Tags("Slice Jobs")]
@@ -35,7 +45,9 @@ public partial class SliceJobController(
     ISlicerFileStorage? fileStorage = null,
     IWorkerCircuitBreakerService? circuitBreaker = null,
     ISlicerResourceAccessAuthorizer? resourceAccess = null,
-    IPrinterAccessValidator? printerAccess = null) : ControllerBase
+    IPrinterAccessValidator? printerAccess = null,
+    IModelStorageResolver? modelStorage = null,
+    ICalibrationProfileResolver? profileResolver = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
@@ -49,6 +61,8 @@ public partial class SliceJobController(
     private readonly IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
     private readonly ISlicerResourceAccessAuthorizer? _resourceAccess = resourceAccess;
     private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
+    private readonly IModelStorageResolver? _modelStorage = modelStorage;
+    private readonly ICalibrationProfileResolver? _profileResolver = profileResolver;
 
     /// <summary>
     /// Submits a new slice job.
@@ -60,9 +74,29 @@ public partial class SliceJobController(
     [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitAsync([FromBody] SubmitSliceJobRequest request, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
         {
             return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        // Unknown engine values are refused outright; they are never cast into an undefined member
+        // and never silently fall back to a default engine.
+        if (!SlicerEngineNames.IsDefined(request.SlicerEngine))
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "invalid_slicer_engine",
+                "The slicer engine must be one of the supported canonical engine names.");
+        }
+
+        if (request.Priority is < 0 or > 3)
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "invalid_priority",
+                "Priority must be between 0 (Low) and 3 (Critical).");
         }
 
         if (_printerAccess is not null &&
@@ -141,9 +175,20 @@ public partial class SliceJobController(
             PrinterId = request.PrinterId,
             ModelFileUrl = modelFileUrl,
             ModelFileName = request.ModelFileName,
-            SlicerEngine = request.SlicerEngine,
+            SlicerEngine = (int)request.SlicerEngine,
+            SlicerEngineName = request.SlicerEngine.ToString(),
             SlicerProfileJson = EmbedExtruderFilamentNames(request.SlicerProfileJson, request.ExtruderFilamentProfileNames),
             SlicerProfileId = request.SlicerProfileId,
+            MachineProfileId = request.MachineProfileId,
+            ProcessProfileId = request.ProcessProfileId,
+            FilamentProfileId = request.FilamentProfileId,
+            CalibrationProjectId = request.CalibrationProjectId,
+            IdempotencyScopeId = request.CalibrationProjectId ?? Guid.Empty,
+            CalibrationAttemptId = request.CalibrationAttemptId,
+            CalibrationOrchestrationId = request.CalibrationOrchestrationId,
+            OperationId = request.OperationId,
+            CorrelationId = request.CorrelationId,
+            Checksum = request.Checksum,
             RequiredCapabilitiesJson = request.RequiredCapabilitiesJson,
             Priority = request.Priority,
             ModelTransformJson = request.ModelTransformJson,
@@ -161,13 +206,47 @@ public partial class SliceJobController(
             UpdatedAt = DateTime.UtcNow,
         };
 
-        await _jobRepository.AddAsync(job, ct);
+        IActionResult? modelFailure = await BindStoredModelAsync(job, request, userId, ct);
+        if (modelFailure is not null)
+        {
+            return modelFailure;
+        }
+
+        if (string.IsNullOrWhiteSpace(job.ModelFileName))
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "model_file_name_required",
+                "A model file name is required.");
+        }
+
+        IActionResult? profileFailure = await BindResolvedProfilesAsync(job, request, userId, ct);
+        if (profileFailure is not null)
+        {
+            return profileFailure;
+        }
+
+        try
+        {
+            await _jobRepository.AddAsync(job, ct);
+        }
+        catch (DbUpdateException exception)
+        {
+            // The owner/project-scoped unique indexes are the durable idempotency guard.
+            _logger.LogInformation(
+                exception,
+                "Rejected duplicate slice submission for user {UserId}",
+                userId);
+            return Conflict(new { error = "A slice job with the same correlation or checksum already exists.", code = "slice_job_duplicate" });
+        }
+
         await _eventService.NotifyJobQueuedAsync(job, ct);
 
         return Created($"/api/slice/{job.Id}", new SubmitSliceJobResponse
         {
             JobId = job.Id,
             Status = job.Status,
+            QueuedAt = job.QueuedAt,
         });
     }
 
@@ -276,6 +355,8 @@ public partial class SliceJobController(
     [WorkerApiKeySecurity]
     public async Task<IActionResult> ClaimAsync([FromBody] ClaimJobRequest request, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         Worker? worker = await GetAuthorizedWorkerAsync();
         if (worker is null ||
             !string.Equals(worker.ServiceId, request.WorkerId.ToString(), StringComparison.OrdinalIgnoreCase))
@@ -319,23 +400,15 @@ public partial class SliceJobController(
     [WorkerApiKeySecurity]
     public async Task<IActionResult> ReportProgressAsync(Guid id, [FromBody] SliceJobProgressUpdateRequest request, CancellationToken ct)
     {
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        ArgumentNullException.ThrowIfNull(request);
+
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
+        SliceJob job = lease!.Job;
         string progressMessage = GetPublicProgressMessage(request.ProgressPercent);
         await _jobRepository.UpdateProgressAsync(id, request.ProgressPercent, progressMessage, ct);
         job.ProgressPercent = request.ProgressPercent;
@@ -355,21 +428,24 @@ public partial class SliceJobController(
     [WorkerApiKeySecurity]
     public async Task<IActionResult> CompleteAsync(Guid id, [FromBody] CompleteSliceJobRequest request, CancellationToken ct)
     {
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        ArgumentNullException.ThrowIfNull(request);
+
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
+        SliceJob job = lease!.Job;
+        Worker worker = lease.Worker;
 
-        if (!CanWorkerAccess(job, worker))
+        // The worker must prove it wrote the exact profiles that were delivered to it.
+        if (!ProfileHashesMatch(job, request))
         {
-            return SlicerApiProblems.ResourceForbidden(this);
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "profile_hash_mismatch",
+                "The reported profile digests do not match the profiles delivered with the claim.");
         }
 
         var artifactIds = new List<Guid> { request.PrimaryArtifactId };
@@ -395,19 +471,19 @@ public partial class SliceJobController(
             artifacts.Add(artifact);
         }
 
-        string resultFileUrl = $"/api/artifacts/{request.PrimaryArtifactId}";
+        string resultFileUrl = BuildArtifactDownloadRoute(request.PrimaryArtifactId);
 
         await _jobRepository.MarkCompletedWithArtifactsAsync(
             id, resultFileUrl, artifactIds, request.EstimatedPrintTimeSeconds, request.FilamentUsedGrams, ct);
 
         // Re-fetch updated job for event notification
-        job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is not null)
+        SliceJob? completed = await _jobRepository.GetByIdAsync(id, ct);
+        if (completed is not null)
         {
-            await _eventService.NotifyJobCompletedAsync(job, ct);
+            await _eventService.NotifyJobCompletedAsync(completed, ct);
         }
 
-        if (_circuitBreaker is not null && job?.WorkerId is { } successWorkerId)
+        if (_circuitBreaker is not null && completed?.WorkerId is { } successWorkerId)
         {
             await _circuitBreaker.RecordJobSuccessAsync(successWorkerId, _workerRepository, ct);
         }
@@ -418,7 +494,7 @@ public partial class SliceJobController(
         {
             JobId = id,
             Status = SliceJobStatus.Completed,
-            CompletedAt = job?.CompletedAt,
+            CompletedAt = completed?.CompletedAt,
             ResultFileUrl = resultFileUrl,
             ArtifactIds = artifactIds.ToArray(),
             EstimatedPrintTimeSeconds = request.EstimatedPrintTimeSeconds,
@@ -440,34 +516,25 @@ public partial class SliceJobController(
     public async Task<IActionResult> FailAsync(Guid id, [FromBody] FailSliceJobRequest request, CancellationToken ct)
     {
         _ = request;
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
+        // Worker failures must be durable: the terminal state and its generic public reason are
+        // persisted before the response is written so the orchestration can observe them later.
         await _jobRepository.MarkFailedAsync(id, "Slicing worker reported a failure.", ct);
 
-        job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is not null)
+        SliceJob? failed = await _jobRepository.GetByIdAsync(id, ct);
+        if (failed is not null)
         {
-            await _eventService.NotifyJobFailedAsync(job, ct);
+            await _eventService.NotifyJobFailedAsync(failed, ct);
         }
 
-        if (_circuitBreaker is not null && job?.WorkerId is { } failWorkerId)
+        if (_circuitBreaker is not null)
         {
-            await _circuitBreaker.RecordJobFailureAsync(failWorkerId, _workerRepository, ct);
+            await _circuitBreaker.RecordJobFailureAsync(lease!.Worker.Id, _workerRepository, ct);
         }
 
         return Ok(new CompleteSliceJobResponse
@@ -487,29 +554,30 @@ public partial class SliceJobController(
     [WorkerApiKeySecurity]
     public async Task<IActionResult> RenewLeaseAsync(Guid id, [FromBody] RenewLeaseRequest request, CancellationToken ct)
     {
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        ArgumentNullException.ThrowIfNull(request);
+
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
+        bool renewed = await _jobRepository.TryRenewLeaseAsync(
+            id,
+            lease!.Worker.Id,
+            lease.Token,
+            lease.Fence,
+            request.LeaseDurationSeconds,
+            ct);
 
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
-        await _jobRepository.RenewLeaseAsync(id, request.LeaseDurationSeconds, ct);
-
-        return NoContent();
+        return renewed
+            ? NoContent()
+            : SlicerApiProblems.LeaseConflict(this, "lease_conflict");
     }
 
     /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>
+    /// <param name="id">The claimed job ID.</param>
+    /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}/model")]
     [WorkerApiKeySecurity]
     public Task<IActionResult> DownloadWorkerModelAsync(Guid id, CancellationToken ct) =>
@@ -526,23 +594,39 @@ public partial class SliceJobController(
         int? modelIndex,
         CancellationToken ct)
     {
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
+        SliceJob job = lease!.Job;
+
+        // Canonical path: bytes are resolved by stored identity through an ownership-checked
+        // resolver. A caller-supplied URL is never dereferenced.
+        if (job.Model3DId is { } model3DId)
         {
-            return NotFound();
+            if (_modelStorage is null)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+
+            ModelResolutionResult resolution = await _modelStorage.OpenAsync(model3DId, job.UserId, job.ModelSha256, ct);
+            if (!resolution.Succeeded)
+            {
+                return resolution.Failure switch
+                {
+                    ModelResolutionFailure.Forbidden => SlicerApiProblems.ResourceForbidden(this),
+                    ModelResolutionFailure.HashMismatch => Conflict(new { error = "The stored model no longer matches its recorded hash.", code = "model_hash_mismatch" }),
+                    _ => NotFound(),
+                };
+            }
+
+            ResolvedModelContent content = resolution.Content!;
+            return File(content.Content, content.ContentType, content.FileName);
         }
 
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
+        // Legacy path for pre-existing non-calibration jobs that only recorded a storage key.
         if (_fileStorage is null)
         {
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
@@ -579,43 +663,60 @@ public partial class SliceJobController(
         }
     }
 
-    /// <summary>Uploads a G-code artifact for a job owned by the authenticated worker.</summary>
+    /// <summary>Uploads a verified artifact for a job owned by the authenticated worker.</summary>
+    /// <param name="id">The claimed job ID.</param>
+    /// <param name="file">The artifact bytes.</param>
+    /// <param name="kind">Canonical artifact kind; defaults to <c>gcode</c>.</param>
+    /// <param name="sha256">SHA-256 (hex) the worker computed over the bytes it is sending.</param>
+    /// <param name="sizeBytes">Byte count the worker computed over the bytes it is sending.</param>
+    /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/artifacts")]
     [WorkerApiKeySecurity]
     public async Task<IActionResult> UploadWorkerArtifactAsync(
         Guid id,
         IFormFile file,
+        [FromForm] string? kind,
+        [FromForm] string? sha256,
+        [FromForm] long? sizeBytes,
         CancellationToken ct)
     {
-        Worker? worker = await GetAuthorizedWorkerAsync();
-        if (worker is null)
+        (WorkerJobLease? lease, IActionResult? failure) = await AuthorizeWorkerMutationAsync(id, ct);
+        if (failure is not null)
         {
-            return SlicerApiProblems.AuthenticationRequired(this);
+            return failure;
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
+        string artifactKind = string.IsNullOrWhiteSpace(kind) ? SlicerArtifactKinds.Gcode : kind.Trim();
 
         try
         {
-            Artifact artifact = await _artifactsService.UploadAsync(file, id, worker.Id, "gcode", ct);
-            return Created($"/api/artifacts/{artifact.Id}", new
+            Artifact artifact = await _artifactsService.UploadVerifiedAsync(
+                file,
+                id,
+                lease!.Worker.Id,
+                artifactKind,
+                sha256,
+                sizeBytes,
+                ct);
+            return Created(BuildArtifactDownloadRoute(artifact.Id), new
             {
                 id = artifact.Id,
                 jobId = artifact.JobId,
+                kind = artifact.Kind,
                 fileName = artifact.FileName,
                 contentType = artifact.ContentType,
                 sizeBytes = artifact.SizeBytes,
                 createdAt = artifact.CreatedAt,
+                downloadUrl = BuildArtifactDownloadRoute(artifact.Id),
             });
+        }
+        catch (ArtifactValidationException exception)
+        {
+            _logger.LogWarning(
+                "Rejected artifact upload for job {JobId} ({Code})",
+                id,
+                exception.Code);
+            return SlicerApiProblems.InvalidRequest(this, exception.Code, exception.Message);
         }
         catch (InvalidOperationException)
         {
@@ -791,7 +892,7 @@ public partial class SliceJobController(
         FilamentUsedGrams = job.FilamentUsedGrams,
         WorkerId = null,
         ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
-        SlicerEngine = job.SlicerEngine,
+        SlicerEngine = SlicerEngineNames.Resolve(job),
         ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
     };
 
@@ -806,13 +907,26 @@ public partial class SliceJobController(
             Status = job.Status,
             ModelFileUrl = $"/api/slice/{job.Id}/model",
             ModelFileName = SanitizeFileName(job.ModelFileName, "model.stl"),
-            SlicerEngine = job.SlicerEngine,
+            ModelSha256 = job.ModelSha256,
+            SlicerEngine = SlicerEngineNames.Resolve(job),
             SlicerProfileJson = job.SlicerProfileJson,
             ModelTransformJson = job.ModelTransformJson,
             ModelFileUrls = modelUrls?
                 .Select((_, index) => $"/api/slice/{job.Id}/models/{index}")
                 .ToList(),
             ModelFileTransforms = DeserializeJsonList<string?>(job.ModelFileTransformsJson),
+            MachineProfileJson = job.MachineProfileJson,
+            ProcessProfileJson = job.ProcessProfileJson,
+            FilamentProfileJson = job.FilamentProfileJson,
+            MachineProfileSha256 = job.MachineProfileSha256,
+            ProcessProfileSha256 = job.ProcessProfileSha256,
+            FilamentProfileSha256 = job.FilamentProfileSha256,
+            SlicerDistribution = job.SlicerDistribution,
+            SlicerVersion = job.SlicerVersion,
+            SlicerContainerDigest = job.SlicerContainerDigest,
+            LeaseToken = job.LeaseToken ?? Guid.Empty,
+            LeaseFence = job.LeaseFence,
+            LeaseExpiresAtUtc = job.LeaseExpiresAt,
             RequiredCapabilitiesJson = job.RequiredCapabilitiesJson,
             Priority = job.Priority,
         };
@@ -840,9 +954,287 @@ public partial class SliceJobController(
         return await _workerAuth.AuthenticateAsync(HttpContext);
     }
 
-    private static bool CanWorkerAccess(SliceJob job, Worker worker) =>
-        job.WorkerId == worker.Id &&
-        job.Status == SliceJobStatus.Processing;
+    /// <summary>
+    /// Validates that the caller is an authenticated worker holding an unexpired, current-fence lease
+    /// on the requested job and that it is capable of the job's engine.
+    /// </summary>
+    /// <param name="jobId">The job the caller wants to mutate.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// The validated lease, or the problem result to return. Exactly one of the two is non-null.
+    /// </returns>
+    private async Task<(WorkerJobLease? Lease, IActionResult? Failure)> AuthorizeWorkerMutationAsync(
+        Guid jobId,
+        CancellationToken ct)
+    {
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
+        {
+            return (null, SlicerApiProblems.AuthenticationRequired(this));
+        }
+
+        SliceJob? job = await _jobRepository.GetByIdAsync(jobId, ct);
+        if (job is null)
+        {
+            return (null, NotFound());
+        }
+
+        if (job.WorkerId != worker.Id || job.Status != SliceJobStatus.Processing)
+        {
+            return (null, SlicerApiProblems.ResourceForbidden(this));
+        }
+
+        if (!WorkerSupportsEngine(worker, SlicerEngineNames.Resolve(job)))
+        {
+            return (null, SlicerApiProblems.ResourceForbidden(this));
+        }
+
+        if (job.LeaseToken is not { } storedToken)
+        {
+            // A claimed job without a lease token predates fencing; it must be re-claimed rather
+            // than mutated, because its holder cannot be proven.
+            return (null, SlicerApiProblems.LeaseConflict(this, "lease_required"));
+        }
+
+        if (job.LeaseExpiresAt is not { } expiresAt || expiresAt <= DateTime.UtcNow)
+        {
+            return (null, SlicerApiProblems.LeaseConflict(this, "lease_expired"));
+        }
+
+        if (!TryReadLeaseHeaders(out Guid presentedToken, out long presentedFence))
+        {
+            return (null, SlicerApiProblems.LeaseConflict(this, "lease_required"));
+        }
+
+        if (presentedToken != storedToken)
+        {
+            return (null, SlicerApiProblems.LeaseConflict(this, "lease_conflict"));
+        }
+
+        if (presentedFence != job.LeaseFence)
+        {
+            return (null, SlicerApiProblems.LeaseConflict(this, "stale_fencing_token"));
+        }
+
+        return (new WorkerJobLease(worker, job, storedToken, job.LeaseFence), null);
+    }
+
+    private bool TryReadLeaseHeaders(out Guid leaseToken, out long leaseFence)
+    {
+        leaseToken = Guid.Empty;
+        leaseFence = 0;
+
+        // Lease fencing is a transport-level worker concern that applies uniformly to JSON and
+        // multipart routes, so it is read from headers rather than bound per action model.
+#pragma warning disable S6932 // Header-based lease fencing is intentional for the worker contract
+        return Request.Headers.TryGetValue(WorkerLeaseHeaders.LeaseToken, out Microsoft.Extensions.Primitives.StringValues tokenValues) &&
+               Guid.TryParse(tokenValues.FirstOrDefault(), out leaseToken) &&
+               leaseToken != Guid.Empty &&
+               Request.Headers.TryGetValue(WorkerLeaseHeaders.LeaseFence, out Microsoft.Extensions.Primitives.StringValues fenceValues) &&
+               long.TryParse(
+                   fenceValues.FirstOrDefault(),
+                   System.Globalization.NumberStyles.Integer,
+                   System.Globalization.CultureInfo.InvariantCulture,
+                   out leaseFence);
+#pragma warning restore S6932
+    }
+
+    /// <summary>
+    /// Confirms the worker advertises the capability tag required by the job's engine.
+    /// </summary>
+    /// <param name="worker">The authenticated worker.</param>
+    /// <param name="engine">The engine the job requires.</param>
+    /// <returns><see langword="true"/> when the worker advertises the engine capability.</returns>
+    private static bool WorkerSupportsEngine(Worker worker, SlicerEngineType engine)
+    {
+        string tag = SlicerEngineNames.ToCapabilityTag(engine);
+        if (string.IsNullOrWhiteSpace(worker.CapabilitiesJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(worker.CapabilitiesJson);
+            JsonElement capabilities = document.RootElement.ValueKind switch
+            {
+                JsonValueKind.Array => document.RootElement,
+                JsonValueKind.Object when document.RootElement.TryGetProperty("capabilities", out JsonElement value) => value,
+                _ => default,
+            };
+
+            return capabilities.ValueKind == JsonValueKind.Array &&
+                   capabilities.EnumerateArray().Any(value =>
+                       value.ValueKind == JsonValueKind.String &&
+                       string.Equals(value.GetString(), tag, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool ProfileHashesMatch(SliceJob job, CompleteSliceJobRequest request) =>
+        HashMatches(job.MachineProfileSha256, request.MachineProfileSha256) &&
+        HashMatches(job.ProcessProfileSha256, request.ProcessProfileSha256) &&
+        HashMatches(job.FilamentProfileSha256, request.FilamentProfileSha256);
+
+    /// <summary>
+    /// Compares an expected digest with the digest a worker reported.
+    /// </summary>
+    /// <param name="expected">Digest recorded on the job, or <see langword="null"/> when no profile was delivered.</param>
+    /// <param name="reported">Digest the worker echoed back.</param>
+    /// <returns>
+    /// <see langword="true"/> when no profile was delivered, or when the reported digest matches.
+    /// A delivered profile with a missing or different reported digest never matches.
+    /// </returns>
+    private static bool HashMatches(string? expected, string? reported)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(reported) &&
+               string.Equals(expected.Trim(), reported.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Builds the canonical authenticated download route for an artifact.
+    /// </summary>
+    /// <param name="artifactId">The artifact identity.</param>
+    /// <returns>The permission-checked API route callers use to download the bytes.</returns>
+    private static string BuildArtifactDownloadRoute(Guid artifactId) =>
+        $"/api/artifacts/{artifactId}";
+
+    /// <summary>
+    /// Binds the submission to stored model identity, refusing caller-supplied locations for
+    /// canonical jobs.
+    /// </summary>
+    private async Task<IActionResult?> BindStoredModelAsync(
+        SliceJob job,
+        SubmitSliceJobRequest request,
+        Guid userId,
+        CancellationToken ct)
+    {
+        if (request.Model3DId is not { } model3DId)
+        {
+            return string.IsNullOrWhiteSpace(request.ModelFileUrl)
+                ? SlicerApiProblems.InvalidRequest(
+                    this,
+                    "model_reference_required",
+                    "Supply model3DId for stored models, or modelFileUrl for a previously stored key.")
+                : null;
+        }
+
+        if (_modelStorage is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        Model3D? model = await _modelStorage.FindOwnedAsync(model3DId, userId, ct);
+        if (model is null)
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "model_not_found",
+                "The referenced stored model does not exist or is not accessible.");
+        }
+
+        job.Model3DId = model.Id;
+        job.ModelSha256 = string.IsNullOrWhiteSpace(model.FileHash) ? null : model.FileHash;
+
+        // The worker resolves bytes through the authenticated model route, so the free-form caller
+        // location is replaced rather than persisted for dereference.
+        job.ModelFileUrl = $"/api/slice/{job.Id}/model";
+        if (string.IsNullOrWhiteSpace(job.ModelFileName))
+        {
+            job.ModelFileName = string.IsNullOrWhiteSpace(model.Name) ? model.FileName : model.Name;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Snapshots exact native upstream-Orca profile JSON and hashes onto the job before it can be
+    /// claimed, so the worker receives immutable content rather than a live lookup.
+    /// </summary>
+    private async Task<IActionResult?> BindResolvedProfilesAsync(
+        SliceJob job,
+        SubmitSliceJobRequest request,
+        Guid userId,
+        CancellationToken ct)
+    {
+        if (request.MachineProfileId is not { } machineId ||
+            request.ProcessProfileId is not { } processId ||
+            request.FilamentProfileId is not { } filamentId)
+        {
+            bool anySupplied = request.MachineProfileId.HasValue ||
+                               request.ProcessProfileId.HasValue ||
+                               request.FilamentProfileId.HasValue;
+            return anySupplied
+                ? SlicerApiProblems.InvalidRequest(
+                    this,
+                    "incomplete_profile_selection",
+                    "Machine, process and filament profiles must all be supplied together.")
+                : null;
+        }
+
+        if (_profileResolver is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        ResolvedCalibrationProfiles resolved;
+        try
+        {
+            resolved = await _profileResolver.ResolveAsync(
+                machineId,
+                processId,
+                filamentId,
+                new CalibrationProfileAccessScope(userId, PrintFarmerPermissions.IsFarmAdmin(User)),
+                ct);
+        }
+        catch (CalibrationProfileResolverUnavailableException)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        if (resolved.Machine is null || resolved.Process is null || resolved.Filament is null)
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "profile_not_found",
+                "One or more referenced profiles do not exist or are not accessible.");
+        }
+
+        if (string.IsNullOrWhiteSpace(resolved.Machine.RawJson) ||
+            string.IsNullOrWhiteSpace(resolved.Process.RawJson) ||
+            string.IsNullOrWhiteSpace(resolved.Filament.RawJson))
+        {
+            return SlicerApiProblems.InvalidRequest(
+                this,
+                "profile_content_unavailable",
+                "The referenced profiles do not carry native slicer JSON.");
+        }
+
+        job.MachineProfileJson = resolved.Machine.RawJson;
+        job.ProcessProfileJson = resolved.Process.RawJson;
+        job.FilamentProfileJson = resolved.Filament.RawJson;
+        job.MachineProfileSha256 = ComputeSha256(resolved.Machine.RawJson);
+        job.ProcessProfileSha256 = ComputeSha256(resolved.Process.RawJson);
+        job.FilamentProfileSha256 = ComputeSha256(resolved.Filament.RawJson);
+        job.SlicerDistribution = resolved.Machine.SlicerDistribution ?? CalibrationContractConstants.SlicerDistribution;
+        job.SlicerVersion = resolved.Machine.SlicerVersion ?? CalibrationContractConstants.SlicerVersion;
+
+        return null;
+    }
+
+    /// <summary>Computes the uppercase hexadecimal SHA-256 of a UTF-8 payload.</summary>
+    /// <param name="value">The payload to digest.</param>
+    /// <returns>The uppercase hexadecimal digest.</returns>
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private static string GetPublicProgressMessage(int progressPercent) =>
         $"Slicing in progress ({Math.Clamp(progressPercent, 0, 100)}%).";
@@ -856,4 +1248,11 @@ public partial class SliceJobController(
 
     [GeneratedRegex("[^a-zA-Z0-9._-]+")]
     private static partial Regex NonFileNameCharacterRegex();
+
+    /// <summary>A validated worker lease over a claimed job.</summary>
+    /// <param name="Worker">The authenticated worker holding the lease.</param>
+    /// <param name="Job">The claimed job.</param>
+    /// <param name="Token">The lease token both sides agree on.</param>
+    /// <param name="Fence">The fencing counter both sides agree on.</param>
+    private sealed record WorkerJobLease(Worker Worker, SliceJob Job, Guid Token, long Fence);
 }

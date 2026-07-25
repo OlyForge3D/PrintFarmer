@@ -553,6 +553,57 @@ public sealed class CalibrationOrchestration
     public DateTime UpdatedAtUtc { get; set; }
 
     public DateTime? CompletedAtUtc { get; set; }
+
+    /// <summary>SHA-256 of the canonical generation request that owns this orchestration run.</summary>
+    /// <remarks>
+    /// A second call carrying the same operation identifier but a different canonical payload is a
+    /// conflict rather than a resume, so the digest is durable rather than recomputed from memory.
+    /// </remarks>
+    public string? GenerationRequestSha256 { get; set; }
+
+    /// <summary>SHA-256 of the recompiled canonical specification this run is pinned to.</summary>
+    public string? SpecificationSha256 { get; set; }
+
+    /// <summary>SHA-256 of the compiled upstream-Orca plan manifest.</summary>
+    public string? PlanManifestSha256 { get; set; }
+
+    /// <summary>SHA-256 of the final annotated calibration G-code.</summary>
+    public string? GcodeSha256 { get; set; }
+
+    /// <summary>SHA-256 of the canonical calibration manifest describing the final G-code.</summary>
+    public string? ManifestSha256 { get; set; }
+
+    /// <summary>Version of the trusted generator that produced the specification, plan and program.</summary>
+    public string? GeneratorVersion { get; set; }
+
+    /// <summary>Pinned slicer container digest the accepted worker attested.</summary>
+    public string? SlicerContainerDigest { get; set; }
+
+    /// <summary>Pinned slicer binary digest the accepted worker attested.</summary>
+    public string? SlicerBinarySha256 { get; set; }
+
+    /// <summary>Worker that claimed and executed the submitted slice job.</summary>
+    public Guid? WorkerId { get; set; }
+
+    /// <summary>Server-composed final artifact that was safety validated and promoted.</summary>
+    public Guid? FinalArtifactId { get; set; }
+
+    /// <summary>Idempotency operation key used for the artifact promotion hop.</summary>
+    public string? PromotionOperationId { get; set; }
+
+    /// <summary>UTC timestamp at which the current step started, used for stuck-step reconciliation.</summary>
+    public DateTime? StepStartedAtUtc { get; set; }
+
+    /// <summary>Opaque owner of the current in-process lease, or <see langword="null"/> when free.</summary>
+    /// <remarks>
+    /// The lease is advisory and always bounded by <see cref="LeaseExpiresAtUtc"/>. It exists so a
+    /// restarted host and a live request do not process the same orchestration concurrently; the
+    /// durable checkpoints, not the lease, are what make the saga correct.
+    /// </remarks>
+    public string? LeaseOwner { get; set; }
+
+    /// <summary>UTC instant at which the current lease lapses.</summary>
+    public DateTime? LeaseExpiresAtUtc { get; set; }
 }
 
 /// <summary>Append-only, cursor-addressable row in the calibration synchronization journal.</summary>
