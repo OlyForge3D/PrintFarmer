@@ -127,7 +127,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.automation': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Operations', 'Monitoring', 'Maintenance']}
+        allowedGroups={['Operations', 'Monitoring', 'Maintenance', 'Job Queue']}
         introText="Configure cost tracking, Obico print failure detection, and automatic tag rules."
       />
     </SettingsSection>

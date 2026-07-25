@@ -94,11 +94,16 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         const err = fieldErrors?.[prop.name];
         const hasDescription = Boolean(prop.display?.description);
         const invalid = Boolean(err);
+        // Property names are not unique across sections — `Enabled` is declared
+        // on 13 settings classes, several of which render on the same page. A
+        // bare `prop.name` id therefore emits duplicate DOM ids and points every
+        // matching label at whichever control rendered first.
+        const fieldId = `${metadata.key}.${prop.name}`;
 
         const label = (
           <label
             className="flex items-center shrink-0 w-64 text-sm font-medium text-pf-text-primary"
-            htmlFor={prop.name}
+            htmlFor={fieldId}
           >
             <span className="break-words">
               {query ? <HighlightedText text={displayName} query={query} /> : displayName}
@@ -190,7 +195,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           control = (
             <div className="flex-1 min-w-0">
               <Checkbox
-                id={prop.name}
+                id={fieldId}
                 name={prop.name}
                 aria-label={displayName}
                 checked={Boolean(values[prop.name])}
@@ -204,7 +209,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           control = (
             <div className="flex-1 min-w-0">
               <Textarea
-                id={prop.name}
+                id={fieldId}
                 name={prop.name}
                 rows={2}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
@@ -221,7 +226,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           control = (
             <div className="flex-1 min-w-0">
               <Input
-                id={prop.name}
+                id={fieldId}
                 name={prop.name}
                 type="number"
                 value={getInputValue(values[prop.name] as SettingValue)}
@@ -241,7 +246,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           control = (
             <div className="flex-1 min-w-0">
               <Select
-                id={prop.name}
+                id={fieldId}
                 name={prop.name}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
@@ -260,7 +265,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           control = (
             <div className="flex-1 min-w-0">
               <Input
-                id={prop.name}
+                id={fieldId}
                 name={prop.name}
                 type={prop.display?.inputType === SettingInputType.Password ? 'password' : 'text'}
                 value={String(getInputValue(values[prop.name] as SettingValue))}

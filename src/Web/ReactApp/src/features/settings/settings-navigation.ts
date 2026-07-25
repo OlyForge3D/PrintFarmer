@@ -253,6 +253,11 @@ export const SETTINGS_GROUP_TO_LOCATION: Record<
   Operations: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
   Monitoring: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
   Maintenance: { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
+  // `HistorySeedingBackgroundService` declares Group = "Job Queue". Without an
+  // entry here the palette silently skips it (`if (!location) continue`), and
+  // without a matching `allowedGroups` entry in the automation sub-page it
+  // renders nowhere — leaving the section unreachable by any route.
+  'Job Queue': { scopeId: 'system', categoryId: 'general', subPageId: 'automation' },
   Integrations: { scopeId: 'system', categoryId: 'integrations', subPageId: 'connections' },
   Slicing: { scopeId: 'system', categoryId: 'slicing', subPageId: 'defaults' },
 };
