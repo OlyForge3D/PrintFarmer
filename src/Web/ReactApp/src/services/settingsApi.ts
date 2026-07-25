@@ -1,5 +1,5 @@
 import { apiClient } from '@/services/api';
-import type { SettingMetadata } from '@/components/SettingsPagelet';
+import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 
 /**
  * Settings API - delegated to apiClient singleton
