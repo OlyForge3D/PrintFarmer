@@ -83,11 +83,11 @@ final class DashboardViewModel {
     @ObservationIgnored private var canonicalLoadToken: UUID?
     @ObservationIgnored private var canonicalLoadTask: Task<Void, Never>?
     @ObservationIgnored private var canonicalLoadRequested = false
-    @ObservationIgnored private var canonicalLoadWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
-#if DEBUG
-    @ObservationIgnored private var canonicalIdleWaiters: [CheckedContinuation<Void, Never>] = []
-    @ObservationIgnored private var retiredCanonicalLoadTasks: [Task<Void, Never>] = []
-#endif
+    @ObservationIgnored private var canonicalPassHasRecoveryDemand = false
+    @ObservationIgnored private var canonicalPendingRecoveryDemand = false
+    @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
+    @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
+    @ObservationIgnored private var canonicalCommitAuthorization: FarmSnapshotCommitAuthorization?
 
     // Snapshot lifecycle authority (#816), consumed unchanged.
     @ObservationIgnored private var snapshotStore: (any FarmSnapshotStoring)?
@@ -99,6 +99,12 @@ final class DashboardViewModel {
         }
     ) {
         self.callbackEnqueuer = callbackEnqueuer
+    }
+
+    deinit {
+        canonicalCommitAuthorization?.invalidate()
+        canonicalLoadTask?.cancel()
+        canonicalLoadWaiters.completeAll()
     }
 
     func configure(
@@ -176,7 +182,7 @@ final class DashboardViewModel {
                 guard previous == .reconnecting, state == .connected else {
                     return
                 }
-                self.requestCanonicalLoad()
+                self.requestCanonicalLoad(isRecovery: true)
             }
         }
         lastObservedConnectionState = connectionRegistration.initial
@@ -245,102 +251,175 @@ final class DashboardViewModel {
     }
 
     func loadDashboard() async {
-        guard canLoadDashboard else { return }
-        let waiterID = UUID()
-        await withCheckedContinuation { continuation in
-            canonicalLoadWaiters[waiterID] = continuation
-            requestCanonicalLoad()
+        guard let waiter = beginCanonicalLoad() else { return }
+        await waiter.wait()
+    }
+
+    private func beginCanonicalLoad() -> CanonicalLoadWaiter? {
+        guard canLoadDashboard else { return nil }
+        let enqueue = callbackEnqueuer
+        let waiter = canonicalLoadWaiters.registerWaiter { [weak self] in
+            enqueue { [weak self] in
+                self?.canonicalWaiterCancelled()
+            }
         }
+        requestCanonicalLoad()
+        return waiter
     }
 
     private var canLoadDashboard: Bool {
         isViewActive && printerService != nil && jobService != nil
     }
 
-    private func requestCanonicalLoad() {
+    private func requestCanonicalLoad(isRecovery: Bool = false) {
         guard canLoadDashboard else { return }
         canonicalLoadRequested = true
+        if isRecovery {
+            canonicalPendingRecoveryDemand = true
+        }
+        canonicalCommitAuthorization?.invalidate()
         guard canonicalLoadTask == nil else { return }
 
         let token = UUID()
         canonicalLoadToken = token
         canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+        canonicalPendingRecoveryDemand = false
         isLoading = true
         errorMessage = nil
         let authority = makeCanonicalAuthority(token: token)
-        canonicalLoadTask = Task { [weak self] in
-            await self?.runCanonicalLoad(authority: authority)
-        }
+        startCanonicalPass(authority: authority)
     }
 
-    private func runCanonicalLoad(authority: CanonicalAuthority) async {
-        while isCanonicalLoadCurrent(authority) {
-            let result = await loadCanonicalSnapshot(authority: authority)
-            guard isCanonicalLoadCurrent(authority) else { return }
-            if canonicalLoadRequested {
-                canonicalLoadRequested = false
-                continue
-            }
-
-            switch result {
-            case .success(let snapshot):
-                publish(snapshot)
-            case .failure(let error):
-                handleLoadFailure(error)
-            case .superseded:
-                continue
-            }
-            finishCanonicalLoad(authority: authority)
+    private func startCanonicalPass(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority),
+              let printerService,
+              let jobService else {
             return
         }
+        let input = CanonicalLoadInput(
+            printerService: printerService,
+            jobService: jobService,
+            statisticsService: statisticsService,
+            jobAnalyticsService: jobAnalyticsService,
+            autoPrintService: autoPrintService,
+            snapshotStore: snapshotStore,
+            pendingReadyPrinterIDs: pendingReadyPrinterIDs,
+            summary: summary,
+            queueStats: queueStats,
+            modelStats: modelStats,
+            upcomingJobs: upcomingJobs,
+            now: now,
+            logger: logger
+        )
+        let installAuthorization: @MainActor @Sendable (
+            FarmSnapshotCommitAuthorization
+        ) -> Bool = { [weak self] authorization in
+            guard let self, self.isCanonicalPassCurrent(authority) else {
+                authorization.invalidate()
+                return false
+            }
+            self.canonicalCommitAuthorization = authorization
+            return true
+        }
+        let taskTracker = canonicalTaskTracker
+        taskTracker.taskStarted()
+        canonicalLoadTask = Task { [weak self, taskTracker, input] in
+            defer { taskTracker.taskFinished() }
+            let result = await Self.loadCanonicalSnapshot(
+                input: input,
+                installAuthorization: installAuthorization
+            )
+            self?.completeCanonicalPass(result, authority: authority)
+        }
     }
 
-    private func loadCanonicalSnapshot(authority: CanonicalAuthority) async -> CanonicalLoadResult {
-        guard let printerService, let jobService else { return .superseded }
+    private func completeCanonicalPass(
+        _ result: CanonicalLoadResult,
+        authority: CanonicalAuthority
+    ) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        if canonicalLoadRequested {
+            canonicalLoadRequested = false
+            canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+            canonicalPendingRecoveryDemand = false
+            canonicalCommitAuthorization = nil
+            startCanonicalPass(authority: authority)
+            return
+        }
 
-        let capturedSession = await snapshotStore?.currentSession()
-        guard isCanonicalPassCurrent(authority) else { return .superseded }
+        switch result {
+        case .success(let snapshot):
+            publish(snapshot)
+        case .failure(let error):
+            handleLoadFailure(error)
+        case .superseded:
+            break
+        }
+        finishCanonicalLoad(authority: authority)
+    }
+
+    nonisolated private static func loadCanonicalSnapshot(
+        input: CanonicalLoadInput,
+        installAuthorization: @MainActor @Sendable (
+            FarmSnapshotCommitAuthorization
+        ) -> Bool
+    ) async -> CanonicalLoadResult {
+        let capturedSession = await input.snapshotStore?.currentSession()
+        guard !Task.isCancelled else { return .superseded }
+        let commitAuthorization: FarmSnapshotCommitAuthorization?
+        if let store = input.snapshotStore, let capturedSession {
+            commitAuthorization = await store.authorizeCommit(capturedSession: capturedSession)
+            guard !Task.isCancelled,
+                  let commitAuthorization,
+                  await installAuthorization(commitAuthorization) else {
+                commitAuthorization?.invalidate()
+                return .superseded
+            }
+        } else {
+            commitAuthorization = nil
+        }
 
         do {
-            async let printersTask = printerService.list()
-            async let queueTask = jobService.list()
-            async let allJobsTask = jobService.listAllJobs()
+            async let printersTask = input.printerService.list()
+            async let queueTask = input.jobService.list()
+            async let allJobsTask = input.jobService.listAllJobs()
             let (loadedPrinters, loadedQueue, loadedJobs) = try await (
                 printersTask,
                 queueTask,
                 allJobsTask
             )
-            guard isCanonicalPassCurrent(authority) else { return .superseded }
+            guard !Task.isCancelled else { return .superseded }
 
-            var loadedPendingReady = pendingReadyPrinterIDs
-            if let autoPrintService {
+            var loadedPendingReady = input.pendingReadyPrinterIDs
+            if let autoPrintService = input.autoPrintService {
                 do {
                     let statuses = try await autoPrintService.getAllStatus()
-                    guard isCanonicalPassCurrent(authority) else { return .superseded }
+                    guard !Task.isCancelled else { return .superseded }
                     loadedPendingReady = Set(
                         statuses.printers.filter { $0.state == "PendingReady" }.map(\.printerId)
                     )
                 } catch {
-                    guard isCanonicalPassCurrent(authority) else { return .superseded }
-                    logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
                 }
             }
 
-            var loadedSummary = summary
-            if let statisticsService {
+            var loadedSummary = input.summary
+            if let statisticsService = input.statisticsService {
                 do {
                     loadedSummary = try await statisticsService.getSummary()
                 } catch {
-                    guard isCanonicalPassCurrent(authority) else { return .superseded }
-                    logger.warning("Failed to load statistics summary: \(error.localizedDescription)")
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.warning("Failed to load statistics summary: \(error.localizedDescription)")
                 }
-                guard isCanonicalPassCurrent(authority) else { return .superseded }
+                guard !Task.isCancelled else { return .superseded }
             }
 
-            var loadedQueueStats = queueStats
-            var loadedModelStats = modelStats
-            var loadedUpcomingJobs = upcomingJobs
-            if let jobAnalyticsService {
+            var loadedQueueStats = input.queueStats
+            var loadedModelStats = input.modelStats
+            var loadedUpcomingJobs = input.upcomingJobs
+            if let jobAnalyticsService = input.jobAnalyticsService {
                 do {
                     async let statsTask = jobAnalyticsService.getStats()
                     async let modelStatsTask = jobAnalyticsService.getModelStats()
@@ -356,26 +435,35 @@ final class DashboardViewModel {
                         modelStatsTask,
                         upcomingTask
                     )
-                    guard isCanonicalPassCurrent(authority) else { return .superseded }
+                    guard !Task.isCancelled else { return .superseded }
                     loadedQueueStats = stats
                     loadedModelStats = models
                     loadedUpcomingJobs = upcoming
                 } catch {
-                    guard isCanonicalPassCurrent(authority) else { return .superseded }
-                    logger.warning("Failed to load farm status data: \(error.localizedDescription)")
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.warning("Failed to load farm status data: \(error.localizedDescription)")
                 }
             }
 
-            let instant = now()
-            if let store = snapshotStore, let session = capturedSession {
+            let instant = input.now()
+            if let store = input.snapshotStore,
+               let session = capturedSession,
+               let commitAuthorization {
                 let envelope = FarmSnapshotEnvelope(
                     namespace: session.namespace,
                     printers: loadedPrinters,
                     pendingReadyPrinterIDs: loadedPendingReady,
                     lastUpdatedAtMillis: Int64((instant.timeIntervalSince1970 * 1000).rounded())
                 )
-                _ = await store.commit(envelope, capturedSession: session)
-                guard isCanonicalPassCurrent(authority) else { return .superseded }
+                _ = await store.commit(
+                    envelope,
+                    capturedSession: session,
+                    authorization: commitAuthorization
+                )
+                guard !Task.isCancelled,
+                      commitAuthorization.withAuthorization({ true }) == true else {
+                    return .superseded
+                }
             }
 
             return .success(
@@ -395,7 +483,7 @@ final class DashboardViewModel {
                 )
             )
         } catch {
-            guard isCanonicalPassCurrent(authority) else { return .superseded }
+            guard !Task.isCancelled else { return .superseded }
             return .failure(error)
         }
     }
@@ -419,33 +507,34 @@ final class DashboardViewModel {
         canonicalLoadTask = nil
         canonicalLoadToken = nil
         canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
+        canonicalCommitAuthorization = nil
         isLoading = false
-        resumeCanonicalWaiters()
-        resumeCanonicalIdleWaiters()
+        canonicalLoadWaiters.completeAll()
     }
 
     private func invalidateCanonicalLoad() {
         canonicalLifecycleEpoch &+= 1
-#if DEBUG
-        if let canonicalLoadTask {
-            retiredCanonicalLoadTasks.append(canonicalLoadTask)
-        }
-#endif
+        canonicalCommitAuthorization?.invalidate()
+        canonicalCommitAuthorization = nil
         canonicalLoadTask?.cancel()
         canonicalLoadTask = nil
         canonicalLoadToken = nil
         canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
         isLoading = false
-        resumeCanonicalWaiters()
-        resumeCanonicalIdleWaiters()
+        canonicalLoadWaiters.completeAll()
     }
 
-    private func resumeCanonicalWaiters() {
-        let waiters = canonicalLoadWaiters.values
-        canonicalLoadWaiters.removeAll(keepingCapacity: true)
-        for waiter in waiters {
-            waiter.resume()
+    private func canonicalWaiterCancelled() {
+        guard canonicalLoadWaiters.activeCount == 0,
+              !canonicalPassHasRecoveryDemand,
+              !canonicalPendingRecoveryDemand else {
+            return
         }
+        invalidateCanonicalLoad()
     }
 
     private func makeCanonicalAuthority(token: UUID) -> CanonicalAuthority {
@@ -486,29 +575,25 @@ final class DashboardViewModel {
     }
 
 #if DEBUG
+    func beginCanonicalLoadForTesting() -> CanonicalLoadWaiter? {
+        beginCanonicalLoad()
+    }
+
+    var canonicalWaiterCountForTesting: Int {
+        canonicalLoadWaiters.activeCount
+    }
+
+    func waitForCanonicalWaiterCount(_ count: Int) async {
+        await canonicalLoadWaiters.waitForActiveCount(count)
+    }
+
     func waitForCanonicalLoadToBecomeIdle() async {
-        guard canonicalLoadTask != nil else { return }
-        await withCheckedContinuation { continuation in
-            canonicalIdleWaiters.append(continuation)
-        }
+        await canonicalTaskTracker.waitForIdle()
     }
 
     func waitForSupersededCanonicalLoads() async {
-        for task in retiredCanonicalLoadTasks {
-            await task.value
-        }
-        retiredCanonicalLoadTasks.removeAll(keepingCapacity: true)
+        await canonicalTaskTracker.waitForIdle()
     }
-
-    private func resumeCanonicalIdleWaiters() {
-        let waiters = canonicalIdleWaiters
-        canonicalIdleWaiters.removeAll(keepingCapacity: true)
-        for waiter in waiters {
-            waiter.resume()
-        }
-    }
-#else
-    private func resumeCanonicalIdleWaiters() {}
 #endif
 
     private struct CanonicalAuthority {
@@ -532,6 +617,22 @@ final class DashboardViewModel {
         let upcomingJobs: [QueuedJobWithMeta]
         let pendingReadyPrinterIDs: Set<UUID>
         let lastUpdatedAt: Date
+    }
+
+    private struct CanonicalLoadInput: Sendable {
+        let printerService: any PrinterServiceProtocol
+        let jobService: any JobServiceProtocol
+        let statisticsService: (any StatisticsServiceProtocol)?
+        let jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
+        let autoPrintService: (any AutoDispatchServiceProtocol)?
+        let snapshotStore: (any FarmSnapshotStoring)?
+        let pendingReadyPrinterIDs: Set<UUID>
+        let summary: StatisticsSummary?
+        let queueStats: QueueStats?
+        let modelStats: [QueuePrinterModelStats]
+        let upcomingJobs: [QueuedJobWithMeta]
+        let now: @Sendable () -> Date
+        let logger: Logger
     }
 
     private enum CanonicalLoadResult {

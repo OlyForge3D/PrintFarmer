@@ -71,9 +71,12 @@ struct PrinterListView: View {
             }
         }
         .task {
-            viewModel.activate()
-            viewModel.configure(printerService: services.printerService, autoPrintService: services.autoPrintService)
-            viewModel.configureSignalR(services.signalRService)
+            PrinterListViewLifecycle.taskActivate(
+                viewModel: viewModel,
+                printerService: services.printerService,
+                autoPrintService: services.autoPrintService,
+                signalRService: services.signalRService
+            )
             coverageViewModel.configure(coverageService: services.filamentCoverageService)
             coverageViewModel.configureSignalR(services.signalRService)
             // #789: wire + hydrate the fleet read-cache BEFORE the canonical load
@@ -84,12 +87,18 @@ struct PrinterListView: View {
             await coverageViewModel.load()
         }
         .onDisappear {
-            retryTask?.cancel()
-            viewModel.deactivate()
+            PrinterListViewLifecycle.onDisappear(
+                viewModel: viewModel,
+                retryTask: retryTask
+            )
             coverageViewModel.tearDownSignalR()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            Task { await viewModel.loadAutoDispatchStatuses() }
+            Task {
+                await PrinterListViewLifecycle.willEnterForeground(
+                    viewModel: viewModel
+                )
+            }
         }
         .onChange(of: router.printersPath) { _, newPath in
             if newPath.isEmpty {
@@ -196,6 +205,37 @@ struct PrinterListView: View {
                 }
             }
         }
+    }
+}
+
+@MainActor
+enum PrinterListViewLifecycle {
+    static func taskActivate(
+        viewModel: PrinterListViewModel,
+        printerService: any PrinterServiceProtocol,
+        autoPrintService: any AutoDispatchServiceProtocol,
+        signalRService: any SignalRServiceProtocol
+    ) {
+        viewModel.activate()
+        viewModel.configure(
+            printerService: printerService,
+            autoPrintService: autoPrintService
+        )
+        viewModel.configureSignalR(signalRService)
+    }
+
+    static func onDisappear(
+        viewModel: PrinterListViewModel,
+        retryTask: Task<Void, Never>?
+    ) {
+        retryTask?.cancel()
+        viewModel.deactivate()
+    }
+
+    static func willEnterForeground(
+        viewModel: PrinterListViewModel
+    ) async {
+        await viewModel.loadAutoDispatchStatuses()
     }
 }
 

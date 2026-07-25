@@ -257,6 +257,139 @@ final class PrinterListViewModelTests: XCTestCase {
         XCTAssertEqual(vm.printers.first?.name, "Ender 3")
     }
 
+    func testProductionViewLifecycleFencesRetainedListAndRestoresExactlyOneOwner() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let printer = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let script = ScriptedCanonicalResult<[Printer]>([
+            .value([printer]),
+            .value([printer]),
+            .value([printer])
+        ])
+        mockService.listHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let retainedViewModel = PrinterListViewModel(
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+
+        PrinterListViewLifecycle.taskActivate(
+            viewModel: retainedViewModel,
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService,
+            signalRService: signalR
+        )
+        await retainedViewModel.loadPrinters()
+        XAssertEqual(await script.callCount, 1)
+
+        PrinterListViewLifecycle.onDisappear(
+            viewModel: retainedViewModel,
+            retryTask: nil
+        )
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        await PrinterListViewLifecycle.willEnterForeground(
+            viewModel: retainedViewModel
+        )
+        XAssertEqual(await script.callCount, 1)
+
+        PrinterListViewLifecycle.taskActivate(
+            viewModel: retainedViewModel,
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService,
+            signalRService: signalR
+        )
+        await retainedViewModel.loadPrinters()
+        XAssertEqual(await script.callCount, 2)
+
+        signalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        signalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        await retainedViewModel.waitForCanonicalLoadToBecomeIdle()
+        XAssertEqual(await script.callCount, 3)
+
+        signalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XAssertEqual(await script.callCount, 3)
+    }
+
+    func testCancellingOneListCallerCompletesPromptlyAndPreservesPeerDemand() async throws {
+        let firstGate = ShiftTaskResultGate<[Printer]>()
+        let current = [try TestData.decodePrinter(from: TestJSON.printerMinimal)]
+        let script = ScriptedCanonicalResult<[Printer]>([
+            .gated(firstGate),
+            .value(current)
+        ])
+        mockService.listHandler = { _ in try await script.next() }
+
+        let cancelledCaller = Task { await viewModel.loadPrinters() }
+        await script.waitForCallCount(1)
+        let peerCaller = Task { await viewModel.loadPrinters() }
+        await viewModel.waitForCanonicalWaiterCount(2)
+
+        cancelledCaller.cancel()
+        await cancelledCaller.value
+        XCTAssertEqual(viewModel.canonicalWaiterCountForTesting, 1)
+        XAssertEqual(await script.callCount, 1)
+
+        await firstGate.succeed([try TestData.decodePrinter()])
+        await peerCaller.value
+
+        XAssertEqual(await script.callCount, 2)
+        XCTAssertEqual(viewModel.printers.map(\.id), current.map(\.id))
+        XCTAssertEqual(viewModel.canonicalWaiterCountForTesting, 0)
+    }
+
+    func testCancellingSoleListCallerUnwindsDemandWithoutWaitingForService() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let gate = ShiftTaskResultGate<[Printer]>()
+        let script = ScriptedCanonicalResult<[Printer]>([.gated(gate)])
+        mockService.listHandler = { _ in try await script.next() }
+        let vm = PrinterListViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        vm.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+
+        let caller = Task { await vm.loadPrinters() }
+        await script.waitForCallCount(1)
+        caller.cancel()
+        await caller.value
+        XCTAssertEqual(callbackQueue.count, 1)
+        await callbackQueue.runNext()
+
+        XCTAssertEqual(vm.canonicalWaiterCountForTesting, 0)
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertTrue(vm.printers.isEmpty)
+        XAssertEqual(await script.callCount, 1)
+
+        await gate.succeed([try TestData.decodePrinter()])
+        await vm.waitForSupersededCanonicalLoads()
+        XCTAssertTrue(vm.printers.isEmpty)
+    }
+
+    func testParkedListServiceDoesNotRetainViewModelOrCaller() async {
+        let gate = ShiftTaskResultGate<[Printer]>()
+        let script = ScriptedCanonicalResult<[Printer]>([.gated(gate)])
+        mockService.listHandler = { _ in try await script.next() }
+        var vm: PrinterListViewModel? = PrinterListViewModel()
+        vm?.configure(
+            printerService: mockService,
+            autoPrintService: mockAutoDispatchService
+        )
+        let weakVM = CanonicalOwnerWeakReference(vm)
+        let waiter = vm?.beginCanonicalLoadForTesting()
+        let caller = Task { await waiter?.wait() }
+        await script.waitForCallCount(1)
+
+        vm = nil
+        XCTAssertNil(weakVM.value)
+        await caller.value
+
+        await gate.succeed([])
+    }
+
     // MARK: - Load Printers
 
     func testLoadPrintersSuccessPopulatesList() async throws {

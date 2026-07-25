@@ -245,6 +245,7 @@
 		CB2FF0F351CB05372F628076 /* DemoJobAnalyticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B702C279B165D2E4C7F09452 /* DemoJobAnalyticsService.swift */; };
 		CCE5C88ED5A47C0CDE718088 /* DispatchService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D7AFE879AABAE41D24CBF24 /* DispatchService.swift */; };
 		CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */; };
+		815CA1100000000000000001 /* CanonicalLoadCoordination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CA1100000000000000002 /* CanonicalLoadCoordination.swift */; };
 		CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0002 /* ConnectionMonitor.swift */; };
 		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
 		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
@@ -696,6 +697,7 @@
 		A9C4C4D554DEEE8404DCF48B /* MockNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockNotificationService.swift; sourceTree = "<group>"; };
 		AA1BB2CC3DD4EE5FF6A7B8C9 /* LocalNetworkAuthorization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalNetworkAuthorization.swift; sourceTree = "<group>"; };
 		AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModel.swift; sourceTree = "<group>"; };
+		815CA1100000000000000002 /* CanonicalLoadCoordination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanonicalLoadCoordination.swift; sourceTree = "<group>"; };
 		AC9740564FFEA02088E0E2C8 /* AuthViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthViewModel.swift; sourceTree = "<group>"; };
 		AD5B287E56228618B9E1A0C4 /* PrintFarmer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrintFarmer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF81383E489642A1A80EE943 /* DeepLinkHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkHandler.swift; sourceTree = "<group>"; };
@@ -1463,6 +1465,7 @@
 				BC2000000000000000000006 /* BarcodeIntakeViewModel.swift */,
 				AC9740564FFEA02088E0E2C8 /* AuthViewModel.swift */,
 				AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */,
+				815CA1100000000000000002 /* CanonicalLoadCoordination.swift */,
 				F9121CFE5C6DFAB79CD12B21 /* JobDetailViewModel.swift */,
 				1A0CD24EBD01E5889869039C /* JobListViewModel.swift */,
 				DAFDAD6E115B4CFF2CCC862D /* LoginViewModel.swift */,
@@ -1900,6 +1903,7 @@
 				762008F3419AB9A3D8FD178E /* AppConfig.swift in Sources */,
 				71A9C2DF9F18FDC75CE11E43 /* AuthViewModel.swift in Sources */,
 				CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */,
+				815CA1100000000000000001 /* CanonicalLoadCoordination.swift in Sources */,
 				FB7019EE21E8A15811BE2787 /* JobDetailViewModel.swift in Sources */,
 				6FB5573AA419B929334A449D /* JobListViewModel.swift in Sources */,
 				8A0E52A04D22061CB28D06BE /* LoginViewModel.swift in Sources */,
