@@ -246,6 +246,16 @@ function GroupSaveBlock({
       const errs = validateSection(metaForSection, nextSection);
       setFieldErrors((prev) => ({ ...prev, [sectionKey]: errs }));
     }
+
+    // Section-level errors come from the server and can't be re-derived on the
+    // client, so unlike field errors we clear (not recompute) them as the user
+    // edits — otherwise a stale server alert lingers while they fix the value.
+    setSectionErrors((prev) => {
+      if (!(sectionKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[sectionKey];
+      return next;
+    });
   }, [metadataItems, state]);
 
   const handleDiscard = useCallback(() => {
@@ -295,8 +305,21 @@ function GroupSaveBlock({
 
     setIsSaving(false);
     if (failed.length > 0) {
-      setFieldErrors((prev) => ({ ...prev, ...perSectionErrors }));
-      setSectionErrors((prev) => ({ ...prev, ...perSectionMessages }));
+      // Only errors produced by *this* attempt may remain for the sections we
+      // just tried. Dropping the attempted keys first (rather than spreading
+      // over `prev`) means a section that succeeded this round clears its stale
+      // alert instead of carrying an error for a save that just went through.
+      // Sections not part of this save are left untouched.
+      setFieldErrors((prev) => {
+        const next = { ...prev };
+        for (const key of changedSectionKeys) delete next[key];
+        return { ...next, ...perSectionErrors };
+      });
+      setSectionErrors((prev) => {
+        const next = { ...prev };
+        for (const key of changedSectionKeys) delete next[key];
+        return { ...next, ...perSectionMessages };
+      });
       const summary = failed.length === 1
         ? `Failed to save ${failed[0]}.`
         : `Failed to save ${failed.length} sections: ${failed.join(', ')}.`;

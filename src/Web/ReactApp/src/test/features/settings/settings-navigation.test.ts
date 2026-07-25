@@ -170,10 +170,14 @@ describe('buildSettingCommandItems', () => {
     expect(motd?.label).toBe('MotdMessage');
   });
 
-  it('maps every settings group that a backend section declares', () => {
+  it('routes the Job Queue group to the automation sub-page', () => {
     // `HistorySeedingBackgroundService` declares Group = "Job Queue". A group with
     // no entry here is silently skipped by the palette (`if (!location) continue`),
     // which is how that section ended up unreachable by any route.
+    //
+    // NOTE: this only asserts the single Job Queue mapping — it does NOT enumerate
+    // backend section metadata. The real guard that every backend-declared group
+    // has a location entry is tracked as issue #951.
     expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']).toBeDefined();
     expect(SETTINGS_GROUP_TO_LOCATION['Job Queue']?.subPageId).toBe('automation');
   });
