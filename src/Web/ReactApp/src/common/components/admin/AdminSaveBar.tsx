@@ -49,9 +49,6 @@ function formatSummary(changeCount: number | undefined, changedLabels: string[] 
     if (remaining > 0) {
       return `${list} and ${remaining} more changed`;
     }
-    if (shown.length === 1) {
-      return `${list} changed`;
-    }
     return `${list} changed`;
   }
   const count = changeCount ?? 0;
@@ -146,7 +143,7 @@ export function AdminSaveBar({
             loading={isSaving}
             iconLeft={!isSaving ? <SaveIcon className="w-3.5 h-3.5" /> : undefined}
           >
-            {isSaving ? saveLabel : saveLabel}
+            {saveLabel}
           </Button>
         </div>
       </div>
