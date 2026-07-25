@@ -16,7 +16,7 @@ namespace Farm.Slicer.Module.Tests;
 public class SlicerApiKeyFilterTests
 {
     [Fact]
-    public async Task RequireSlicerApiKey_NoValidatorInProduction_ReturnsUnauthorized()
+    public async Task RequireSlicerApiKey_NoValidatorInProduction_ReturnsServiceUnavailableProblem()
     {
         bool executed = false;
         ActionExecutingContext context = CreateContext("Production");
@@ -29,11 +29,14 @@ public class SlicerApiKeyFilterTests
         });
 
         _ = executed.Should().BeFalse();
-        _ = context.Result.Should().BeOfType<UnauthorizedObjectResult>();
+        ObjectResult result = context.Result.Should().BeOfType<ObjectResult>().Subject;
+        _ = result.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ProblemDetails problem = result.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("authentication_unavailable");
     }
 
     [Fact]
-    public async Task RequireSlicerServiceApiKey_NoValidatorInProduction_ReturnsUnauthorized()
+    public async Task RequireSlicerServiceApiKey_NoValidatorInProduction_ReturnsServiceUnavailableProblem()
     {
         bool executed = false;
         ActionExecutingContext context = CreateContext("Production");
@@ -46,7 +49,10 @@ public class SlicerApiKeyFilterTests
         });
 
         _ = executed.Should().BeFalse();
-        _ = context.Result.Should().BeOfType<UnauthorizedObjectResult>();
+        ObjectResult result = context.Result.Should().BeOfType<ObjectResult>().Subject;
+        _ = result.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        ProblemDetails problem = result.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("authentication_unavailable");
     }
 
     private static ActionExecutingContext CreateContext(string environmentName)

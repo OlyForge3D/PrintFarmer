@@ -164,7 +164,9 @@ final class JobHistoryViewModelTests: XCTestCase {
     }
     
     func testLoadMoreDoesNothingWhenNoMoreData() async {
-        let page = QueueHistoryPage(entries: [], totalCount: 5, currentPage: 1, pageSize: 30, stats: nil)
+        // canLoadMore checks `entries.count < totalCount`; with both zero the guard
+        // in loadMore() short-circuits without calling the service.
+        let page = QueueHistoryPage(entries: [], totalCount: 0, currentPage: 1, pageSize: 30, stats: nil)
         mockJobAnalyticsService.historyPageToReturn = page
         await viewModel.loadHistory()
         
@@ -173,20 +175,52 @@ final class JobHistoryViewModelTests: XCTestCase {
         
         await viewModel.loadMore()
         
-        // Should not call service since totalCount (5) <= currentOffset (0) + items.count (0)
+        // Should not call service since entries.count (0) >= totalCount (0).
         XCTAssertNil(mockJobAnalyticsService.getHistoryCalledWith)
     }
     
     func testLoadMoreHandlesError() async {
-        let page = QueueHistoryPage(entries: [], totalCount: 100, currentPage: 1, pageSize: 30, stats: nil)
-        mockJobAnalyticsService.historyPageToReturn = page
-        await viewModel.loadHistory()
-        
+        let previousEntry = QueueHistoryEntry(
+            id: "previous",
+            jobName: "previous.gcode",
+            printerName: "Previous Printer",
+            status: "completed",
+            completedAt: Date(),
+            durationSeconds: 600
+        )
+        viewModel.historyPage = QueueHistoryPage(
+            entries: [previousEntry],
+            totalCount: 100,
+            currentPage: 1,
+            pageSize: 30,
+            stats: nil
+        )
+        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
+        viewModel.dateFrom = dateFrom
+        viewModel.dateTo = dateTo
+        viewModel.error = "prior-job-history-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
         await viewModel.loadMore()
         
-        XCTAssertNotNil(viewModel.error)
+        // loadMore() is a secondary paginator: on failure it logs via `logger.warning`
+        // and leaves `viewModel.error` untouched so the already-loaded page keeps rendering.
+        // Issue #810 tracks recovery of the mutable offset after a failed request.
+        // Seeding a nonnil sentinel proves the error channel is neither cleared
+        // nor overwritten by the secondary path.
+        let called = mockJobAnalyticsService.getHistoryCalledWith
+        XCTAssertEqual(called?.limit, 30)
+        XCTAssertEqual(called?.offset, 30)
+        XCTAssertNil(called?.sortBy)
+        XCTAssertNil(called?.statuses)
+        XCTAssertEqual(called?.dateStart, dateFrom)
+        XCTAssertEqual(called?.dateEnd, dateTo)
+        XCTAssertEqual(viewModel.historyPage?.entries.count, 1)
+        XCTAssertEqual(viewModel.historyPage?.entries.first?.id, "previous")
+        XCTAssertEqual(viewModel.historyPage?.totalCount, 100)
+        XCTAssertEqual(viewModel.historyPage?.currentPage, 1)
+        XCTAssertEqual(viewModel.error, "prior-job-history-error-sentinel")
         XCTAssertFalse(viewModel.isLoadingMore)
     }
     
@@ -222,12 +256,41 @@ final class JobHistoryViewModelTests: XCTestCase {
     }
     
     func testLoadTimelineHandlesError() async {
+        let previousEvent = TimelineEvent(
+            jobId: "previous",
+            jobName: "previous.gcode",
+            printerName: "Previous Printer",
+            state: "completed",
+            enteredAtUtc: Date(timeIntervalSince1970: 1_699_999_000),
+            exitedAtUtc: Date(timeIntervalSince1970: 1_700_000_000),
+            durationSeconds: 1_000,
+            estimatedDurationSeconds: 900,
+            variancePercent: 11.1
+        )
+        viewModel.timeline = [previousEvent]
+        let dateFrom = Date(timeIntervalSince1970: 1_700_000_000)
+        let dateTo = Date(timeIntervalSince1970: 1_700_086_400)
+        viewModel.error = "prior-timeline-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
         
-        await viewModel.loadTimeline(dateFrom: Date(), dateTo: Date())
+        await viewModel.loadTimeline(dateFrom: dateFrom, dateTo: dateTo)
         
-        XCTAssertTrue(viewModel.timeline.isEmpty)
-        XCTAssertNotNil(viewModel.error)
+        // loadTimeline() is a secondary load: it logs via `logger.warning`
+        // and does not surface `viewModel.error` — the primary history page still owns
+        // any error state that gets rendered and the previous timeline is preserved.
+        // Seeding a nonnil sentinel proves the secondary path never clobbers
+        // the primary error channel.
+        let called = mockJobAnalyticsService.getTimelineCalledWith
+        XCTAssertEqual(called?.dateFrom, dateFrom)
+        XCTAssertEqual(called?.dateTo, dateTo)
+        XCTAssertNil(called?.printerId)
+        XCTAssertNil(called?.filterStatus)
+        XCTAssertEqual(called?.limit, 100)
+        XCTAssertEqual(viewModel.timeline.count, 1)
+        XCTAssertEqual(viewModel.timeline.first?.jobId, "previous")
+        XCTAssertEqual(viewModel.timeline.first?.state, "completed")
+        XCTAssertEqual(viewModel.error, "prior-timeline-error-sentinel")
+        XCTAssertFalse(viewModel.isLoading)
     }
     
     // MARK: - Load Job State History
@@ -325,9 +388,12 @@ final class JobHistoryViewModelTests: XCTestCase {
     }
     
     func testCanLoadMoreReturnsFalseWhenNoMoreData() {
+        // canLoadMore returns `entries.count < totalCount`. When the loaded page
+        // has drained the total, both sides equal zero (or n == n) and the flag
+        // is false.
         viewModel.historyPage = QueueHistoryPage(
             entries: [],
-            totalCount: 5,
+            totalCount: 0,
             currentPage: 1,
             pageSize: 30,
             stats: nil
