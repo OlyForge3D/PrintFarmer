@@ -110,6 +110,9 @@ const LazyProfileImportWizardPage = lazy(() =>
 const LazyNewSliceJobPage = lazy(() =>
   import('@/features/slicer/pages/NewSliceJobPage').then(mod => ({ default: mod.NewSliceJobPage }))
 );
+const LazyAdminControlCenterPage = lazy(() =>
+  import('@/features/admin/pages/AdminControlCenterPage').then(mod => ({ default: mod.AdminControlCenterPage }))
+);
 
 function RouteLoader() {
   return (
@@ -305,7 +308,7 @@ function AuthenticatedAppRoutes() {
         <Route path="profile/notifications" element={lazyRoute(<LazyNotificationPreferencesPage />)} />
         <Route path="profile/passkeys" element={lazyRoute(<LazyPasskeysPage />)} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
-          <Route index element={<Navigate to="/admin/settings" replace />} />
+          <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={<SystemSettingsRoute />} />
           <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
           <Route path="printers" element={<Navigate to="/printers" replace />} />
