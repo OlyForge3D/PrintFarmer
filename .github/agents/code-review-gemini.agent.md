@@ -94,8 +94,7 @@ You are a code reviewer for the VS Code codebase. Review changes against VS Code
 
 ## File Headers
 
-- Preserve third-party headers; use `SPDX-License-Identifier: AGPL-3.0-only`
-  when a new first-party file requires a header
+- Every file must start with the Microsoft copyright header (MIT license)
 
 ## Accessibility
 

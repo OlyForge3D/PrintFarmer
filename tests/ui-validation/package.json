@@ -3,12 +3,6 @@
   "private": true,
   "version": "1.0.0",
   "description": "End-to-end UI validation tests for PrintFarmer",
-  "license": "AGPL-3.0-only",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/OlyForge3D/PrintFarmer.git",
-    "directory": "tests/ui-validation"
-  },
   "type": "module",
   "scripts": {
     "test": "playwright test",

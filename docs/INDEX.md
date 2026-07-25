@@ -16,13 +16,11 @@ These are the main documentation files you should read first:
 - **[UI.md](./UI.md)** - Frontend components and pages
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Code style, testing, and contribution guide
 - **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
-- **[LICENSING_AND_SOURCE.md](./LICENSING_AND_SOURCE.md)** - License, corresponding source, SBOM, notices, and calibration provenance
 
 ## Project Management
 
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
 - **[SECURITY.md](../SECURITY.md)** - Security policy and reporting
-- **[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)** - Bundled component and asset notices
 
 ## Advanced Topics
 

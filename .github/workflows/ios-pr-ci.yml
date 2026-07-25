@@ -11,9 +11,6 @@ concurrency:
   group: ios-pr-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build (iOS)
@@ -49,7 +46,7 @@ jobs:
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" \
@@ -77,20 +74,6 @@ jobs:
           fi
           sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
 
-      - name: Select available iPhone simulator
-        run: |
-          SIMULATOR_ID="$(
-           xcrun simctl list devices available |
-             awk -F '[()]' '/iPhone/ { simulator_id=$2 } END { print simulator_id }'
-          )"
-          if [ -z "$SIMULATOR_ID" ]; then
-           echo "::error::No available iPhone simulator was found"
-           exit 1
-          fi
-          xcrun simctl boot "$SIMULATOR_ID" 2>/dev/null || true
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
-
       - name: Run unit tests
         timeout-minutes: 15
         run: |
@@ -98,7 +81,7 @@ jobs:
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
             -configuration Debug \
-            -destination "platform=iOS Simulator,id=${SIMULATOR_ID}" \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
             CODE_SIGN_IDENTITY="-" \

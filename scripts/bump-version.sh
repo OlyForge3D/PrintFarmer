@@ -17,12 +17,6 @@ if [ ! -f "$VERSION_FILE" ]; then
   echo "v0.0.0" > "$VERSION_FILE"
 fi
 
-# Require a clean working tree before changing repository-owned version files.
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Working tree is not clean. Please commit or stash changes before running this script." >&2
-  exit 5
-fi
-
 CURRENT_RAW=$(cat "$VERSION_FILE" | tr -d ' \n\r\t')
 # allow leading v
 CURRENT=${CURRENT_RAW#v}
@@ -58,14 +52,19 @@ NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
 echo "Bumping version: ${CURRENT_RAW} -> ${NEW_VERSION}"
 
 printf "%s\n" "$NEW_VERSION" > "$VERSION_FILE"
-"$ROOT/scripts/sync-monorepo-version.sh"
 
 # Ensure we have tags and full history (works even if checkout was shallow)
 git fetch --prune --unshallow --tags || true
 
-# Commit only if synchronized version metadata changed
-git add "$VERSION_FILE" "$ROOT/Directory.Build.props" "$ROOT/mobile/PrintFarmer.xcodeproj/project.pbxproj"
-if git diff --cached --quiet; then
+# Require a clean working tree to avoid accidental commits of unrelated files
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Working tree is not clean. Please commit or stash changes before running this script." >&2
+  exit 5
+fi
+
+# Commit only if VERSION changed
+git add "$VERSION_FILE"
+if git diff --cached --quiet -- "$VERSION_FILE"; then
   echo "No change to $VERSION_FILE; nothing to commit."
 else
   git commit -m "chore(release): bump version to ${NEW_VERSION}"
