@@ -3,6 +3,7 @@ using System;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,14 +12,16 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    partial class SlicerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260725095116_AddCalibrationProfileIdentity")]
+    partial class AddCalibrationProfileIdentity
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.7")
+                .HasAnnotation("ProductVersion", "10.0.3")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -341,13 +344,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("ClientUploadHash")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<Guid?>("ClientUploadId")
-                        .HasColumnType("uuid");
-
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -362,9 +358,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.Property<double?>("DimensionZ")
                         .HasColumnType("double precision");
-
-                    b.Property<string>("ExtractedMetadataJson")
-                        .HasColumnType("text");
 
                     b.Property<int>("FileFormat")
                         .HasColumnType("integer");
@@ -395,9 +388,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
-                    b.Property<DateTime?>("ImportedAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<bool>("IsValid")
                         .HasColumnType("boolean");
 
@@ -416,18 +406,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("bytea");
 
-                    b.Property<string>("SourceCreator")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("SourceLicense")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("SourceUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
                     b.Property<string>("ThumbnailFileName")
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
@@ -436,7 +414,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("UploadedAt")
@@ -466,9 +443,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("UploadedAt");
 
                     b.HasIndex("UploadedByUserId");
-
-                    b.HasIndex("UploadedByUserId", "ClientUploadId")
-                        .IsUnique();
 
                     b.ToTable("Models3D", "slicer");
                 });
@@ -617,9 +591,6 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("EstimatedPrintTimeSeconds")
                         .HasColumnType("integer");
 
-                    b.Property<string>("ExtruderFilamentProfileNamesJson")
-                        .HasColumnType("TEXT");
-
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("numeric");
 
@@ -631,19 +602,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
 
-                    b.Property<string>("ModelFileTransformsJson")
-                        .HasColumnType("text");
-
                     b.Property<string>("ModelFileUrl")
                         .IsRequired()
                         .HasMaxLength(2048)
                         .HasColumnType("character varying(2048)");
-
-                    b.Property<string>("ModelFileUrlsJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ModelTransformJson")
-                        .HasColumnType("text");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");
