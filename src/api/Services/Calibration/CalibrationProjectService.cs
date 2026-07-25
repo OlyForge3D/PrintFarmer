@@ -323,6 +323,11 @@ public sealed class CalibrationProjectService(
             return Validation<CalibrationProjectDto>("printer_not_calibration_eligible");
         }
 
+        if (ValidateSelectedToolhead(request, context) is string toolheadCode)
+        {
+            return Validation<CalibrationProjectDto>(toolheadCode);
+        }
+
         DateTime nowUtc = UtcNow();
         Guid projectId = Guid.NewGuid();
         PrinterConfigurationSnapshot snapshot = CreateSnapshot(
@@ -3146,6 +3151,44 @@ public sealed class CalibrationProjectService(
         string.Equals(context.Firmware.GcodeDialect, nameof(PrinterGcodeDialect.Klipper), StringComparison.Ordinal) &&
         string.Equals(context.Slicer.Engine, CalibrationContractConstants.SlicerEngine, StringComparison.Ordinal) &&
         string.Equals(context.Slicer.Distribution, CalibrationContractConstants.SlicerDistribution, StringComparison.Ordinal);
+
+    // Strict complete-or-missing selection: both absent is allowed by the existing create contract
+    // (SelectedToolheadId/SelectedToolheadIndex are nullable), but any partial, mismatched, or
+    // unknown pair is rejected against the server-captured immutable snapshot toolhead list.
+    private static string? ValidateSelectedToolhead(
+        CalibrationProjectCreateRequest request,
+        CalibrationContextDto context)
+    {
+        bool hasId = request.SelectedToolheadId.HasValue;
+        bool hasIndex = request.SelectedToolheadIndex.HasValue;
+        if (!hasId && !hasIndex)
+        {
+            return null;
+        }
+
+        if (hasId != hasIndex)
+        {
+            return "toolhead_selection_invalid";
+        }
+
+        Guid selectedId = request.SelectedToolheadId!.Value;
+        int selectedIndex = request.SelectedToolheadIndex!.Value;
+        if (selectedId == Guid.Empty)
+        {
+            return "toolhead_selection_invalid";
+        }
+
+        IReadOnlyList<CalibrationToolheadDto> capturedToolheads = context.Snapshot.Toolheads;
+        foreach (CalibrationToolheadDto toolhead in capturedToolheads)
+        {
+            if (toolhead.Id == selectedId && toolhead.Index == selectedIndex)
+            {
+                return null;
+            }
+        }
+
+        return "toolhead_selection_invalid";
+    }
 
     private static CalibrationExperienceMode ParseExperienceMode(string value) =>
         Enum.Parse<CalibrationExperienceMode>(value, ignoreCase: true);
