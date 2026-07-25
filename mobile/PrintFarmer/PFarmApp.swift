@@ -83,10 +83,12 @@ struct PFarmApp: App {
                 .task {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
-                    PushNotificationManager.shared.configure(notificationService: services.notificationService)
-                    await PushNotificationManager.shared.refreshPermissionStatus()
-                    if PushNotificationManager.shared.pushEnabled {
-                        await PushNotificationManager.shared.requestPermissionAndRegister()
+                    if !UITestBootstrap.isEnabled {
+                        PushNotificationManager.shared.configure(notificationService: services.notificationService)
+                        await PushNotificationManager.shared.refreshPermissionStatus()
+                        if PushNotificationManager.shared.pushEnabled {
+                            await PushNotificationManager.shared.requestPermissionAndRegister()
+                        }
                     }
                     #endif
                 }

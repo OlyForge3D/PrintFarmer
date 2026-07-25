@@ -37,6 +37,7 @@ enum UITestBootstrap {
 
     /// Launch argument that flips the app into deterministic UI-test mode.
     static let launchArgument = "--uitesting"
+    private static let launchEnvironmentKey = "PFARM_UI_TESTING"
 
     /// Additional launch argument that selects the *unauthenticated*
     /// login-flow mode. When present alongside `launchArgument`, the
@@ -148,10 +149,12 @@ enum UITestBootstrap {
         let authViewModel: AuthViewModel
     }
 
-    /// True when the current process was launched with `--uitesting`.
-    /// Safe to call from `PFarmApp.init()`.
+    /// True when the current process was launched by the UI-test harness.
+    /// The environment is fixed at process creation, before Xcode injects
+    /// its UI-test runtime and before deferred SwiftUI tasks execute.
     static var isEnabled: Bool {
-        isEnabled(in: CommandLine.arguments)
+        ProcessInfo.processInfo.environment[launchEnvironmentKey] == "1"
+            || isEnabled(in: CommandLine.arguments)
     }
 
     /// Pure test-friendly overload used by unit tests to verify the
