@@ -1009,13 +1009,18 @@ public sealed class CalibrationProjectService(
             return NotFound<CalibrationAttemptDto>();
         }
 
-        string requestHash = ComputeCanonicalHash(request);
+        // Bind the route resource identity (parent project) and operation type into the canonical
+        // request hash so replaying the same operation ID against a different project route target
+        // produces a deterministic idempotency_payload_mismatch instead of returning a stored
+        // response belonging to the first project. Mirrors CreateMutationIdentity for the sync lane.
+        string requestHash = ComputeDirectOperationHash("attempt.create", "project", projectId, request);
         CalibrationApiResult<CalibrationAttemptDto>? replay = await FindReplayAsync<CalibrationAttemptDto>(
             actor,
             request.ClientId,
             request.RequestId,
             requestHash,
-            cancellationToken);
+            cancellationToken,
+            operationType: "attempt.create");
         if (replay is not null)
         {
             return replay;
@@ -1150,7 +1155,8 @@ public sealed class CalibrationProjectService(
                     request.ClientId,
                     request.RequestId,
                     requestHash,
-                    cancellationToken);
+                    cancellationToken,
+                    operationType: "attempt.create");
                 if (replay is not null)
                 {
                     return replay;
@@ -1194,14 +1200,19 @@ public sealed class CalibrationProjectService(
             return NotFound<CalibrationAttemptEventDto>();
         }
 
-        string requestHash = ComputeCanonicalHash(request);
+        // Bind the route resource identity (parent attempt) and operation type into the canonical
+        // request hash so replaying the same operation ID against a different attempt route target
+        // produces a deterministic idempotency_payload_mismatch instead of returning a stored
+        // response belonging to the first attempt.
+        string requestHash = ComputeDirectOperationHash("attempt.event.append", "attempt", attemptId, request);
         CalibrationApiResult<CalibrationAttemptEventDto>? replay =
             await FindReplayAsync<CalibrationAttemptEventDto>(
                 actor,
                 request.ClientId,
                 request.OperationId,
                 requestHash,
-                cancellationToken);
+                cancellationToken,
+                operationType: "attempt.event.append");
         if (replay is not null)
         {
             return replay;
@@ -1271,7 +1282,8 @@ public sealed class CalibrationProjectService(
                     request.ClientId,
                     request.OperationId,
                     requestHash,
-                    cancellationToken);
+                    cancellationToken,
+                    operationType: "attempt.event.append");
                 if (replay is not null)
                 {
                     return replay;
@@ -1334,14 +1346,15 @@ public sealed class CalibrationProjectService(
             return Validation<CalibrationObservationDto>("selection_parent_not_found");
         }
 
-        string requestHash = ComputeCanonicalHash(request);
+        string requestHash = ComputeDirectOperationHash("observation.append", "attempt", attemptId, request);
         CalibrationApiResult<CalibrationObservationDto>? replay =
             await FindReplayAsync<CalibrationObservationDto>(
                 actor,
                 request.ClientId,
                 request.OperationId,
                 requestHash,
-                cancellationToken);
+                cancellationToken,
+                operationType: "observation.append");
         if (replay is not null)
         {
             return replay;
@@ -1409,7 +1422,8 @@ public sealed class CalibrationProjectService(
                     request.ClientId,
                     request.OperationId,
                     requestHash,
-                    cancellationToken);
+                    cancellationToken,
+                    operationType: "observation.append");
                 if (replay is not null)
                 {
                     return replay;
@@ -1849,14 +1863,15 @@ public sealed class CalibrationProjectService(
             return Validation<GeneratedProfileRevisionDto>("generated_profile_parent_not_found");
         }
 
-        string requestHash = ComputeCanonicalHash(request);
+        string requestHash = ComputeDirectOperationHash("generated-profile.record", "project", projectId, request);
         CalibrationApiResult<GeneratedProfileRevisionDto>? replay =
             await FindReplayAsync<GeneratedProfileRevisionDto>(
                 actor,
                 request.ClientId,
                 request.GenerationRequestId,
                 requestHash,
-                cancellationToken);
+                cancellationToken,
+                operationType: "generated-profile.record");
         if (replay is not null)
         {
             return replay;
@@ -1944,7 +1959,8 @@ public sealed class CalibrationProjectService(
                     request.ClientId,
                     request.GenerationRequestId,
                     requestHash,
-                    cancellationToken);
+                    cancellationToken,
+                    operationType: "generated-profile.record");
                 if (replay is not null)
                 {
                     return replay;
@@ -1988,14 +2004,24 @@ public sealed class CalibrationProjectService(
             return NotFound<GeneratedProfileRevisionDto>();
         }
 
-        string requestHash = ComputeCanonicalHash(request);
+        // Bind both route parameters (revisionId + operationType) into the canonical request hash.
+        // The controller exposes /export and /publish as separate routes calling this method with
+        // different operationType values; the same client operation ID must not replay across a
+        // different revision or a different route operation type.
+        string composedOperationType = $"generated-profile.{operationType}";
+        string requestHash = ComputeDirectOperationHash(
+            composedOperationType,
+            "generatedProfile",
+            revision.Id,
+            request);
         CalibrationApiResult<GeneratedProfileRevisionDto>? replay =
             await FindReplayAsync<GeneratedProfileRevisionDto>(
                 actor,
                 request.ClientId,
                 request.OperationId,
                 requestHash,
-                cancellationToken);
+                cancellationToken,
+                operationType: composedOperationType);
         if (replay is not null)
         {
             return replay;
@@ -2030,7 +2056,7 @@ public sealed class CalibrationProjectService(
             revision.ProjectId,
             request.ClientId,
             request.OperationId,
-            $"generated-profile.{operationType}",
+            composedOperationType,
             requestHash,
             "generatedProfileOperation",
             operation.Id,
@@ -2047,7 +2073,8 @@ public sealed class CalibrationProjectService(
                 request.ClientId,
                 request.OperationId,
                 requestHash,
-                cancellationToken);
+                cancellationToken,
+                operationType: composedOperationType);
         }
 
         return CalibrationApiResult<GeneratedProfileRevisionDto>.Success(result, StatusCodes.Status201Created);
@@ -3439,6 +3466,24 @@ public sealed class CalibrationProjectService(
         NormalizeOperationIdentifiers(node);
         return CalibrationSnapshotBuilder.ComputeSha256(node);
     }
+
+    // Direct operations bind their route resource identity (parent aggregate) and operation type
+    // into the canonical hash so replaying the same client operation ID against a different route
+    // target deterministically produces a distinct hash. FindReplayAsync's canonical-hash equality
+    // check then returns 409 idempotency_payload_mismatch instead of a stored response that belongs
+    // to another resource. Mirrors CreateMutationIdentity used by the sync lane.
+    private static string ComputeDirectOperationHash<T>(
+        string operationType,
+        string routeResourceType,
+        Guid routeResourceId,
+        T request) =>
+        ComputeCanonicalHash(new
+        {
+            OperationType = operationType,
+            RouteResourceType = routeResourceType,
+            RouteResourceId = routeResourceId,
+            Payload = request,
+        });
 
     private static void NormalizeOperationIdentifiers(JsonNode node)
     {

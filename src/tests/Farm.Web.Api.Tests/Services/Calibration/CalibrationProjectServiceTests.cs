@@ -520,6 +520,270 @@ public sealed class CalibrationProjectServiceTests
         _ = second.Value!.Changes.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task CreateAttemptAsync_ReusedOperationIdAgainstDifferentProject_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> projectA = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "project-a"),
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationProjectDto> projectB = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "project-b"),
+            actor,
+            CancellationToken.None);
+        CalibrationAttemptCreateRequest sharedRequest = CreateAttemptRequest("shared-attempt");
+
+        CalibrationApiResult<CalibrationAttemptDto> onA = await service.CreateAttemptAsync(
+            projectA.Value!.Id,
+            sharedRequest,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationAttemptDto> crossProjectReplay = await service.CreateAttemptAsync(
+            projectB.Value!.Id,
+            sharedRequest,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationAttemptDto> sameRouteReplay = await service.CreateAttemptAsync(
+            projectA.Value.Id,
+            sharedRequest,
+            actor,
+            CancellationToken.None);
+
+        _ = onA.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossProjectReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossProjectReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = sameRouteReplay.Replayed.Should().BeTrue();
+        _ = sameRouteReplay.Value!.Id.Should().Be(onA.Value!.Id);
+        _ = (await db.CalibrationAttempts.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AppendAttemptEventAsync_ReusedOperationIdAgainstDifferentAttempt_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "event-project"),
+            actor,
+            CancellationToken.None);
+        Guid attemptA = await AddAttemptAsync(db, project.Value!.Id, actor.Subject);
+        Guid attemptB = await AddAttemptAsync(db, project.Value.Id, actor.Subject, sequence: 2);
+        CalibrationAttemptEventCreateRequest sharedRequest = new()
+        {
+            ClientId = "desktop",
+            OperationId = "shared-event",
+            EventType = "started",
+        };
+
+        CalibrationApiResult<CalibrationAttemptEventDto> onA = await service.AppendAttemptEventAsync(
+            attemptA,
+            sharedRequest,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationAttemptEventDto> crossAttemptReplay =
+            await service.AppendAttemptEventAsync(attemptB, sharedRequest, actor, CancellationToken.None);
+        CalibrationApiResult<CalibrationAttemptEventDto> sameRouteReplay =
+            await service.AppendAttemptEventAsync(attemptA, sharedRequest, actor, CancellationToken.None);
+
+        _ = onA.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossAttemptReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossAttemptReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = sameRouteReplay.Replayed.Should().BeTrue();
+        _ = sameRouteReplay.Value!.Id.Should().Be(onA.Value!.Id);
+        _ = (await db.CalibrationAttemptEvents.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AppendObservationAsync_ReusedOperationIdAgainstDifferentAttempt_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "observation-project"),
+            actor,
+            CancellationToken.None);
+        Guid attemptA = await AddAttemptAsync(db, project.Value!.Id, actor.Subject);
+        Guid attemptB = await AddAttemptAsync(db, project.Value.Id, actor.Subject, sequence: 2);
+        CalibrationObservationCreateRequest sharedRequest = new()
+        {
+            ClientId = "desktop",
+            OperationId = "shared-observation",
+            ObservationType = "measurement",
+            Measurements = JsonSerializer.SerializeToElement(new { flow = 0.98 }),
+            Result = JsonSerializer.SerializeToElement(new { verdict = "pass" }),
+            Units = JsonSerializer.SerializeToElement(new { flow = "ratio" }),
+            Confidence = 0.9m,
+        };
+
+        CalibrationApiResult<CalibrationObservationDto> onA = await service.AppendObservationAsync(
+            attemptA,
+            sharedRequest,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationObservationDto> crossAttemptReplay =
+            await service.AppendObservationAsync(attemptB, sharedRequest, actor, CancellationToken.None);
+        CalibrationApiResult<CalibrationObservationDto> sameRouteReplay =
+            await service.AppendObservationAsync(attemptA, sharedRequest, actor, CancellationToken.None);
+
+        _ = onA.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossAttemptReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossAttemptReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = sameRouteReplay.Replayed.Should().BeTrue();
+        _ = sameRouteReplay.Value!.Id.Should().Be(onA.Value!.Id);
+        _ = (await db.CalibrationObservations.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task CreateGeneratedProfileAsync_ReusedOperationIdAgainstDifferentProject_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> projectA = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "gp-project-a"),
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<CalibrationProjectDto> projectB = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "gp-project-b"),
+            actor,
+            CancellationToken.None);
+        Guid attemptA = await AddAttemptAsync(db, projectA.Value!.Id, actor.Subject);
+        Guid attemptB = await AddAttemptAsync(db, projectB.Value!.Id, actor.Subject, sequence: 2);
+        GeneratedProfileRevisionCreateRequest requestA = CreateGeneratedProfileRequest(attemptA, "shared-generation");
+        GeneratedProfileRevisionCreateRequest requestB = CreateGeneratedProfileRequest(attemptB, "shared-generation");
+
+        CalibrationApiResult<GeneratedProfileRevisionDto> onA = await service.CreateGeneratedProfileAsync(
+            projectA.Value.Id,
+            requestA,
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<GeneratedProfileRevisionDto> crossProjectReplay =
+            await service.CreateGeneratedProfileAsync(projectB.Value.Id, requestB, actor, CancellationToken.None);
+
+        _ = onA.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossProjectReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossProjectReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = (await db.GeneratedProfileRevisions.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RecordGeneratedProfileOperationAsync_ReusedOperationIdAgainstDifferentRevision_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "profile-op-project"),
+            actor,
+            CancellationToken.None);
+        Guid attempt = await AddAttemptAsync(db, project.Value!.Id, actor.Subject);
+        CalibrationApiResult<GeneratedProfileRevisionDto> revisionA = await service.CreateGeneratedProfileAsync(
+            project.Value.Id,
+            CreateGeneratedProfileRequest(attempt, "revision-a"),
+            actor,
+            CancellationToken.None);
+        CalibrationApiResult<GeneratedProfileRevisionDto> revisionB = await service.CreateGeneratedProfileAsync(
+            project.Value.Id,
+            CreateGeneratedProfileRequest(attempt, "revision-b"),
+            actor,
+            CancellationToken.None);
+        GeneratedProfileRevisionOperationRequest sharedRequest = new()
+        {
+            ClientId = "desktop",
+            OperationId = "shared-export",
+            ExportFormat = "orca-json",
+        };
+
+        CalibrationApiResult<GeneratedProfileRevisionDto> onA =
+            await service.RecordGeneratedProfileOperationAsync(
+                revisionA.Value!.Id,
+                sharedRequest,
+                "export",
+                actor,
+                CancellationToken.None);
+        CalibrationApiResult<GeneratedProfileRevisionDto> crossRevisionReplay =
+            await service.RecordGeneratedProfileOperationAsync(
+                revisionB.Value!.Id,
+                sharedRequest,
+                "export",
+                actor,
+                CancellationToken.None);
+        CalibrationApiResult<GeneratedProfileRevisionDto> sameRouteReplay =
+            await service.RecordGeneratedProfileOperationAsync(
+                revisionA.Value.Id,
+                sharedRequest,
+                "export",
+                actor,
+                CancellationToken.None);
+
+        _ = onA.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossRevisionReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossRevisionReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = sameRouteReplay.Replayed.Should().BeTrue();
+        _ = (await db.GeneratedProfileRevisionOperations.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RecordGeneratedProfileOperationAsync_ReusedOperationIdAcrossExportAndPublish_ReturnsIdempotencyMismatch()
+    {
+        await using AppDbContext db = CreateContext();
+        Guid printerId = Guid.NewGuid();
+        CalibrationActor actor = new(Guid.NewGuid(), "owner", false);
+        CalibrationProjectService service = CreateService(db, printerId);
+        CalibrationApiResult<CalibrationProjectDto> project = await service.CreateProjectAsync(
+            CreateProjectRequest(printerId, "publish-project"),
+            actor,
+            CancellationToken.None);
+        Guid attempt = await AddAttemptAsync(db, project.Value!.Id, actor.Subject);
+        CalibrationApiResult<GeneratedProfileRevisionDto> revision = await service.CreateGeneratedProfileAsync(
+            project.Value.Id,
+            CreateGeneratedProfileRequest(attempt, "publish-revision"),
+            actor,
+            CancellationToken.None);
+        GeneratedProfileRevisionOperationRequest exportRequest = new()
+        {
+            ClientId = "desktop",
+            OperationId = "shared-op-across-routes",
+            ExportFormat = "orca-json",
+        };
+        GeneratedProfileRevisionOperationRequest publishRequest = new()
+        {
+            ClientId = "desktop",
+            OperationId = "shared-op-across-routes",
+            PublishedProfileId = Guid.NewGuid(),
+        };
+
+        CalibrationApiResult<GeneratedProfileRevisionDto> exported =
+            await service.RecordGeneratedProfileOperationAsync(
+                revision.Value!.Id,
+                exportRequest,
+                "export",
+                actor,
+                CancellationToken.None);
+        CalibrationApiResult<GeneratedProfileRevisionDto> crossOperationTypeReplay =
+            await service.RecordGeneratedProfileOperationAsync(
+                revision.Value.Id,
+                publishRequest,
+                "publish",
+                actor,
+                CancellationToken.None);
+
+        _ = exported.StatusCode.Should().Be(StatusCodes.Status201Created);
+        _ = crossOperationTypeReplay.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        _ = crossOperationTypeReplay.Code.Should().Be("idempotency_payload_mismatch");
+        _ = (await db.GeneratedProfileRevisionOperations.CountAsync()).Should().Be(1);
+    }
+
     private static AppDbContext CreateContext()
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
@@ -571,21 +835,65 @@ public sealed class CalibrationProjectServiceTests
             Payload = JsonSerializer.SerializeToElement(payload),
         };
 
-    private static async Task<Guid> AddAttemptAsync(AppDbContext db, Guid projectId, string actorSubject)
+    private static CalibrationAttemptCreateRequest CreateAttemptRequest(string requestId) =>
+        new()
+        {
+            ClientId = "desktop",
+            RequestId = requestId,
+            CalibrationKind = "flow",
+            Method = "manual",
+            DefinitionVersion = "1",
+            Input = JsonSerializer.SerializeToElement(new { flow = 0.98 }),
+            Specification = JsonSerializer.SerializeToElement(new { target = 0.98 }),
+            ProfileSnapshotIds = JsonSerializer.SerializeToElement(Array.Empty<Guid>()),
+            PrinterConfigurationRevision = 1,
+        };
+
+    private static GeneratedProfileRevisionCreateRequest CreateGeneratedProfileRequest(
+        Guid attemptId,
+        string generationRequestId) =>
+        new()
+        {
+            ClientId = "desktop",
+            GenerationRequestId = generationRequestId,
+            SourceAttemptId = attemptId,
+            ProfileType = "filament",
+            SchemaVersion = "1.0",
+            SlicerEngine = CalibrationContractConstants.SlicerEngine,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            Name = "Generated",
+            NormalizedSettings = JsonSerializer.SerializeToElement(new { flow_ratio = 1.0 }),
+            ExactProfileJson = """{"flow_ratio":1.0}""",
+            SourceProfileFingerprint = new string('a', 64),
+            GeneratorVersion = "test",
+        };
+
+    private static async Task<Guid> AddAttemptAsync(AppDbContext db, Guid projectId, string actorSubject) =>
+        await AddAttemptAsync(db, projectId, actorSubject, sequence: 1);
+
+    private static async Task<Guid> AddAttemptAsync(
+        AppDbContext db,
+        Guid projectId,
+        string actorSubject,
+        long sequence)
     {
         Guid attemptId = Guid.NewGuid();
+        PrinterConfigurationSnapshot snapshot = await db.PrinterConfigurationSnapshots
+            .Where(candidate => candidate.ProjectId == projectId)
+            .OrderBy(candidate => candidate.CapturedAtUtc)
+            .FirstAsync();
         _ = db.CalibrationAttempts.Add(new CalibrationAttempt
         {
             Id = attemptId,
             ProjectId = projectId,
-            Sequence = 1,
+            Sequence = sequence,
             CalibrationKind = "flow",
             Method = "manual",
             DefinitionVersion = "1",
             InputJson = "{}",
             SpecificationJson = "{}",
             SpecificationSha256 = new string('0', 64),
-            PrinterConfigurationSnapshotId = (await db.PrinterConfigurationSnapshots.SingleAsync()).Id,
+            PrinterConfigurationSnapshotId = snapshot.Id,
             ProfileSnapshotIdsJson = "[]",
             AttemptRequestId = $"attempt-{attemptId:N}",
             CreatedAtUtc = DateTime.UtcNow,
