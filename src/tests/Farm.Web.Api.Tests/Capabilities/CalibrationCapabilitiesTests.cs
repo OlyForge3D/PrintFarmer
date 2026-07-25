@@ -78,6 +78,13 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
                      "calibrationSyncEnabled",
                      "calibrationPhotosEnabled",
                      "calibrationProfileHistoryEnabled",
+                 })
+        {
+            _ = root.GetProperty(flag).GetBoolean().Should().BeTrue();
+        }
+
+        foreach (string flag in new[]
+                 {
                      "calibrationGenerationEnabled",
                      "calibrationSlicingEnabled",
                      "calibrationArtifactPromotionEnabled",
@@ -91,6 +98,15 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
 
         _ = root.GetProperty("routes").GetProperty("sliceJobs").GetString()
             .Should().Be("/api/slice-jobs");
+        _ = root.GetProperty("routes").GetProperty("calibrationProjects").GetString()
+            .Should().Be("/api/calibration-projects");
+        _ = root.GetProperty("routes").GetProperty("calibrationSync").GetString()
+            .Should().Be("/api/calibration-sync/changes");
+        _ = root.GetProperty("limits").GetProperty("photoUploadMaxBytes").GetInt64()
+            .Should().BeGreaterThan(0);
+        _ = root.GetProperty("acceptedMimeTypes").GetProperty("photo").EnumerateArray()
+            .Select(value => value.GetString())
+            .Should().BeEquivalentTo("image/jpeg", "image/png", "image/webp");
         string normalizedBody = body.ToLowerInvariant();
         _ = normalizedBody.Should().NotContain("apikey");
         _ = normalizedBody.Should().NotContain("endpointurl");
@@ -182,6 +198,10 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("effectiveCapabilities").GetProperty("canRead")
             .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("effectiveCapabilities").GetProperty("canCreate")
+            .GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("effectiveCapabilities").GetProperty("canUpdate")
+            .GetBoolean().Should().BeFalse();
     }
 
     [Fact]

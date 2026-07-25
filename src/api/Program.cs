@@ -242,6 +242,26 @@ builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityS
 builder.Services.AddScoped<
     Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
     Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
+builder.Services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
+    .Bind(builder.Configuration.GetSection(
+        Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
+    .Validate(
+        options =>
+            !string.IsNullOrWhiteSpace(options.RootPath) &&
+            options.MaxBytes > 0 &&
+            options.MaxWidth > 0 &&
+            options.MaxHeight > 0 &&
+            options.MaxPixels > 0,
+        "Calibration blob storage requires a private root and positive limits.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    Farm.Web.Api.Services.Calibration.ICalibrationBlobStore,
+    Farm.Web.Api.Services.Calibration.CalibrationBlobStore>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.ICalibrationProjectService,
+    Farm.Web.Api.Services.Calibration.CalibrationProjectService>();
+builder.Services.AddHostedService<
+    Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);

@@ -28,6 +28,45 @@
   "entries": [],
   "referenceRecords": [
     {
+      "id": "calibration-api-contract-filter",
+      "destinationPath": "src/api/Infrastructure/CalibrationApiContractAttribute.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation applying the established API contract negotiation to issue #898 routes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-blob-store",
+      "destinationPath": "src/api/Services/Calibration/CalibrationBlobStore.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 private authenticated photo storage contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-blob-store-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationBlobStoreTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 private photo storage requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-capabilities-controller",
       "destinationPath": "src/api/Controllers/CalibrationCapabilitiesController.cs",
       "referenceUrls": [
@@ -113,6 +152,162 @@
         "https://github.com/OlyForge3D/PrintFarmer/issues/896"
       ],
       "statement": "Independent PrintFarmer test implementation of the issue #896 eligibility, safety, redaction, freshness, and snapshot contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-authorization-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Security/CalibrationPersistenceAuthorizationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 authorization and contract-version requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-configuration",
+      "destinationPath": "src/infra/Data/Configurations/CalibrationConfiguration.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework configuration for the issue #898 aggregate and synchronization model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-contracts",
+      "destinationPath": "src/api/Contracts/CalibrationProjectContracts.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 persistence and synchronization contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-controllers",
+      "destinationPath": "src/api/Controllers/CalibrationProjectsController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 authenticated persistence, history, photo, profile, sync, and import endpoints; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-entities",
+      "destinationPath": "src/infra/Domain/CalibrationEntities.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer domain model implementation of issue #898; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-postgresql",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725203620_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 PostgreSQL persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725203620_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 PostgreSQL persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlite",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725203646_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 SQLite persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725203646_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 SQLite persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlserver",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725203637_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 SQL Server persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725203637_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 SQL Server persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-photo-reconciliation",
+      "destinationPath": "src/api/Services/Calibration/CalibrationPhotoDeleteReconciliationService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 durable photo-delete reconciliation workflow; no external calibration source code was copied or adapted.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
@@ -276,6 +471,32 @@
       }
     },
     {
+      "id": "calibration-project-service",
+      "destinationPath": "src/api/Services/Calibration/CalibrationProjectService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 aggregate persistence, concurrency, idempotency, history, and synchronization rules; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-project-service-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectServiceTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 persistence, ownership, idempotency, conflict, and redaction requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-slicer-profile-identity-postgresql",
       "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725095116_AddCalibrationProfileIdentity.cs",
       "referenceUrls": [
@@ -360,6 +581,19 @@
         "https://github.com/OlyForge3D/PrintFarmer/issues/896"
       ],
       "statement": "Independent PrintFarmer implementation of the issue #896 credential-free canonical snapshot and SHA-256 contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-sqlite-concurrency-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectSqliteConcurrencyTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 provider-backed concurrency, cursor, and tombstone requirements; no external calibration source code was copied or adapted.",
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
