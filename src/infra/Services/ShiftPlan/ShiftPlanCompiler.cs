@@ -61,10 +61,11 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
     /// suppression query ran would be missed this pass AND next pass (its
     /// <c>UpdatedAt</c> is then below the advanced watermark), letting the compiler
     /// recreate the task the user just dismissed. Overlapping the watermark by 15s — the
-    /// compile cadence — absorbs any commit skew up to a full cadence. Re-observed keys
-    /// are idempotently absorbed by the suppression <see cref="HashSet{T}"/>, and cleared
-    /// episodes are still dropped by the end-of-pass RemoveWhere, so the overlap only
-    /// costs a brief, self-healing debounce on flapping conditions.
+    /// compile cadence — absorbs any commit skew up to a full cadence. Because the same
+    /// durable row can therefore reappear across overlapping windows, re-observed keys are
+    /// made idempotent by mutation-version comparison (issue #823): only a strictly-newer
+    /// Skip/Dismiss re-suppresses and evicts cleared evidence, so the overlap only costs a
+    /// brief, self-healing debounce on flapping conditions.
     /// </summary>
     private static readonly TimeSpan SuppressionWatermarkOverlap = TimeSpan.FromSeconds(15);
 
@@ -289,12 +290,19 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         {
             if (suppressionState.LastPassAtUtc is not null)
             {
-                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> changedSinceLastPass =
+                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)> changedSinceLastPass =
                     await _tasks.GetSuppressedSourceKeysAsync(suppressionState.LastPassAtUtc.Value, ct)
                     .ConfigureAwait(false);
-                foreach ((UserTaskSourceKind SourceKind, string SourceId) key in changedSinceLastPass)
+                foreach ((UserTaskSourceKind SourceKind, string SourceId, long Version) key in changedSinceLastPass)
                 {
-                    _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
+                    // Issue #823: the suppression-delta windows intentionally overlap by
+                    // SuppressionWatermarkOverlap, so the same durable Skip/Dismiss row can
+                    // reappear on consecutive passes. Only a mutation strictly newer than the
+                    // key's highest observed version counts as a fresh dismissal — that
+                    // (re-)suppresses, evicts bootstrap-exclusion evidence, and advances the
+                    // replay tombstone. An equal/older replay is idempotent, so a genuine
+                    // recurrence of an already-cleared key is not wrongly re-suppressed.
+                    _ = suppressionState.ObserveDismissal((key.SourceKind, key.SourceId), key.Version, now);
                 }
             }
 
@@ -308,18 +316,32 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
                 .ToList();
             foreach (UserTaskSourceKind sourceKind in unbootstrappedKinds)
             {
-                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
+                // Issue #823: hold back keys with bootstrap-exclusion evidence — authoritatively
+                // cleared earlier this process lifetime. Their stale durable terminal row would
+                // otherwise re-suppress a genuinely new episode while a persistent collision on
+                // another key keeps this kind unbootstrapped. Never-observed and colliding keys
+                // are still recovered — only proven-cleared keys are held back.
+                List<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys = specs.Keys
                     .Where(key => key.Item1 == sourceKind)
                     .Select(key => (key.Item1, key.Item2))
+                    .Where(key => !suppressionState.IsExcludedFromBootstrap(key))
                     .ToList();
-                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> bootstrapped =
+                if (activeKeys.Count == 0)
+                {
+                    continue;
+                }
+
+                IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)> bootstrapped =
                     await _tasks.GetOpenSuppressedByKeysAsync(
                         activeKeys,
                         maxAgeUtc: now - SuppressionBootstrapMaximumAge,
                         ct: ct).ConfigureAwait(false);
-                foreach ((UserTaskSourceKind SourceKind, string SourceId) key in bootstrapped)
+                foreach ((UserTaskSourceKind SourceKind, string SourceId, long Version) key in bootstrapped)
                 {
-                    _ = suppressionState.SuppressedKeys.Add((key.SourceKind, key.SourceId));
+                    // Record the durable row's version in the replay tombstone so a later
+                    // overlapped delta of the same row is a replay, and the clear point is
+                    // captured if the key is cleared.
+                    suppressionState.RecoverSuppression((key.SourceKind, key.SourceId), key.Version, now);
                 }
             }
 
@@ -327,7 +349,7 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
         }
         else
         {
-            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>? suppressedRaw =
+            IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)>? suppressedRaw =
                 await _tasks.GetSuppressedSourceKeysAsync(now - SuppressionBootstrapLookback, ct).ConfigureAwait(false);
             suppressed = suppressedRaw is null
                 ? new()
@@ -439,17 +461,27 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             autoCompleted++;
         }
 
-        // Fix R3-6: drop suppression for any key this pass's sources stopped
-        // producing (for a source that itself succeeded this pass) — the user's
-        // dismissal was honored for that condition's episode; if it recurs later it
-        // is a new occurrence, not a resurrection suppressed by a stale rolling window.
+        // Fix R3-6 / issue #823: reconcile episode-scoped suppression at end of pass.
         if (suppressionState is not null)
         {
-            _ = suppressionState.SuppressedKeys.RemoveWhere(
-                key => !specs.ContainsKey(key)
+            // Issue #713 Fix R3-6: identify keys this pass's (successful) sources stopped
+            // producing so the user's dismissal is treated as episode-scoped, not a stale
+            // rolling timer. Issue #823: capture those authoritatively-cleared keys as
+            // per-key cleared evidence so a later, genuinely new episode of the same key is
+            // not re-suppressed by its stale durable row while the kind stays unbootstrapped
+            // (e.g. because another key of the kind persistently collides).
+            List<(UserTaskSourceKind SourceKind, string SourceId)> clearedThisPass = suppressionState.SuppressedKeys
+                .Where(key => !specs.ContainsKey(key)
                     && !collidingKeys.Contains(key)
                     && authoritativeKinds.TryGetValue(key.SourceKind, out AuthoritativeKindObservation? observation)
-                    && !observation.Authority.PreservedSourceIds.Contains(key.SourceId));
+                    && !observation.Authority.PreservedSourceIds.Contains(key.SourceId))
+                .ToList();
+            foreach ((UserTaskSourceKind SourceKind, string SourceId) key in clearedThisPass)
+            {
+                // MarkCleared removes the key from the suppressed set and records its dismissal
+                // version + clear time, so a stale durable-row replay cannot re-suppress it.
+                suppressionState.MarkCleared(key, now);
+            }
 
             // Only a collision-free authoritative observation proves every active key was
             // considered. Incomplete and colliding kinds remain unbootstrapped so future
@@ -459,6 +491,17 @@ public sealed class ShiftPlanCompiler : IShiftPlanCompiler
             {
                 suppressionState.MarkBootstrapped(successfulKind);
             }
+
+            // Issue #823: bound both per-key collections independently against the durable-
+            // suppression horizon. Bootstrap-exclusion evidence for a kind is already dropped
+            // when it bootstraps; this prunes exclusions for kinds that stay unbootstrapped
+            // (e.g. a persistent collision with many unique IDs) once they age out. Replay
+            // tombstones survive bootstrap — they are pruned only here, and never expire while
+            // the durable row they guard against can still appear in an overlapped delta (both
+            // are bounded by the same horizon, so a pruned tombstone's row is no longer eligible
+            // for exact-key recovery or delta replay either).
+            suppressionState.PruneBootstrapExclusions(now - SuppressionBootstrapMaximumAge);
+            suppressionState.PruneReplayTombstones(now - SuppressionBootstrapMaximumAge);
 
             // Fix R4-3: advance the watermark to now MINUS a safety overlap rather than
             // exactly now, so a user Skip/Dismiss committed just after this pass's
