@@ -20,7 +20,9 @@ class PrintFarmerUITestCase: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
+        MainActor.assumeIsolated {
+            app.launchEnvironment["PFARM_UI_TESTING"] = "1"
+        }
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
