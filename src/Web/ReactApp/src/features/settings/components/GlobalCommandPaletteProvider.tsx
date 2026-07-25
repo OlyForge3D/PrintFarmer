@@ -27,6 +27,7 @@ import { useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { CommandPalette } from '@/features/settings/components/CommandPalette';
+import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import {
   CommandPaletteContext,
   type CommandPaletteContextValue,
@@ -62,6 +63,7 @@ export interface GlobalCommandPaletteProviderProps {
 
 export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteProviderProps): ReactNode {
   const [isOpen, setIsOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<SettingsCommandItem | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { user, hasRole, hasPermission, logout } = useAuth();
@@ -215,11 +217,13 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   const handleSelect = useCallback(
     (item: SettingsCommandItem) => {
       if (item.kind === 'action' && item.onExecute) {
-        if (item.confirmMessage && typeof window !== 'undefined') {
-          const confirmed = window.confirm(item.confirmMessage);
-          if (!confirmed) {
-            return;
-          }
+        if (item.confirmMessage) {
+          // Defer to an in-app confirmation modal rather than `window.confirm`.
+          // A native dialog is unstyled, unannounced to the palette's own live
+          // region, and inconsistent with every other confirmation in the app.
+          setPendingAction(item);
+          close();
+          return;
         }
         void item.onExecute({ close });
         return;
@@ -240,6 +244,18 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   // we can avoid a `useEffect` that reads `location` and calls `setState`
   // (both of which would break React-compiler purity rules for the file).
 
+  const confirmPendingAction = useCallback(() => {
+    const item = pendingAction;
+    setPendingAction(null);
+    if (item?.onExecute) {
+      void item.onExecute({ close });
+    }
+  }, [pendingAction, close]);
+
+  const cancelPendingAction = useCallback(() => {
+    setPendingAction(null);
+  }, []);
+
   const value = useMemo<CommandPaletteContextValue>(
     () => ({ open, close, isOpen }),
     [open, close, isOpen],
@@ -249,6 +265,15 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
     <CommandPaletteContext.Provider value={value}>
       {children}
       <CommandPalette isOpen={isOpen} items={items} onClose={close} onSelect={handleSelect} />
+      <ConfirmationModal
+        isOpen={pendingAction !== null}
+        title={pendingAction?.label ?? 'Confirm action'}
+        message={pendingAction?.confirmMessage ?? ''}
+        confirmButtonText={pendingAction?.label ?? 'Confirm'}
+        isDangerous
+        onConfirm={confirmPendingAction}
+        onCancel={cancelPendingAction}
+      />
     </CommandPaletteContext.Provider>
   );
 }

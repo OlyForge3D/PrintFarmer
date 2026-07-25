@@ -135,7 +135,6 @@ describe('GlobalCommandPaletteProvider', () => {
   });
 
   it('prompts before running a destructive action and cancels on decline', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
     renderProvider();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open palette' }));
@@ -144,13 +143,19 @@ describe('GlobalCommandPaletteProvider', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(confirmSpy).toHaveBeenCalledWith('Sign out of PrintFarmer?');
+    // An in-app modal, not window.confirm.
+    expect(await screen.findByText('Sign out of PrintFarmer?')).toBeInTheDocument();
     expect(authState.logout).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
+
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByText('Sign out of PrintFarmer?')).not.toBeInTheDocument();
+    });
+    expect(authState.logout).not.toHaveBeenCalled();
   });
 
   it('runs the destructive action when the user confirms', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
     renderProvider();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open palette' }));
@@ -158,11 +163,15 @@ describe('GlobalCommandPaletteProvider', () => {
     fireEvent.change(input, { target: { value: 'sign out' } });
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(await screen.findByText('Sign out of PrintFarmer?')).toBeInTheDocument();
+    expect(authState.logout).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
 
     await waitFor(() => {
       expect(authState.logout).toHaveBeenCalled();
     });
-    confirmSpy.mockRestore();
   });
 
   it('throws when useCommandPalette is used outside the provider', () => {

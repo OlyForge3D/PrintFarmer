@@ -156,7 +156,9 @@ describe('buildSettingCommandItems', () => {
     expect(farmName).toBeDefined();
     expect(farmName?.kind).toBe('setting');
     expect(farmName?.label).toBe('Farm Name');
-    expect(farmName?.href).toContain('field=FarmName');
+    // Qualified with the section key — property names are not unique across
+    // sections, and several sections render on the same page.
+    expect(farmName?.href).toContain('field=FarmSettings.FarmName');
     expect(farmName?.href).toContain('scope=system');
     expect(farmName?.href).toContain('tab=general');
   });
@@ -165,6 +167,34 @@ describe('buildSettingCommandItems', () => {
     const items = buildSettingCommandItems(metadata, groups);
     const motd = items.find((item) => item.id === 'setting.FarmSettings.MotdMessage');
     expect(motd?.label).toBe('MotdMessage');
+  });
+
+  it('disambiguates a property name shared by two sections on the same page', () => {
+    // `Enabled` exists on 13 backend settings classes, several of which render
+    // on a single page. A bare `field=Enabled` link would resolve to whichever
+    // section rendered first, so the href must carry the section key.
+    const shared: SettingMetadata[] = [
+      {
+        key: 'ObicoSettings',
+        className: 'ObicoSettings',
+        group: 'General',
+        properties: [{ name: 'Enabled', type: 'bool', attributes: [] }],
+      },
+      {
+        key: 'TelegramSettings',
+        className: 'TelegramSettings',
+        group: 'General',
+        properties: [{ name: 'Enabled', type: 'bool', attributes: [] }],
+      },
+    ];
+
+    const items = buildSettingCommandItems(shared, groups);
+    const obico = items.find((item) => item.id === 'setting.ObicoSettings.Enabled');
+    const telegram = items.find((item) => item.id === 'setting.TelegramSettings.Enabled');
+
+    expect(obico?.href).toContain('field=ObicoSettings.Enabled');
+    expect(telegram?.href).toContain('field=TelegramSettings.Enabled');
+    expect(obico?.href).not.toBe(telegram?.href);
   });
 
   it('skips sections whose group is not mapped to a settings location', () => {

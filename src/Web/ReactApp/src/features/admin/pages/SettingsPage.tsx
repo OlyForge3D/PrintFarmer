@@ -430,10 +430,18 @@ export function SettingsPage({
     }
 
     const raf = window.requestAnimationFrame(() => {
-      const escapedField = typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
-        ? CSS.escape(fieldParam)
-        : fieldParam.replace(/["\\]/g, '\\$&');
-      const selector = `[data-setting-property$=".${escapedField}"]`;
+      // The attribute value is quoted, so only backslashes and quotes need
+      // escaping. CSS.escape is for bare identifiers and would mangle the dot
+      // separator in a qualified `Section.Property` key.
+      const escapedField = fieldParam.replace(/["\\]/g, '\\$&');
+      // Property names are NOT unique across sections — `Enabled` alone appears
+      // in 13 settings classes, several of which render on the same page. A
+      // qualified `Section.Property` link therefore has to match exactly, or the
+      // deep-link scrolls to whichever section happens to render first. Bare
+      // property names keep the old suffix match so older links still resolve.
+      const selector = fieldParam.includes('.')
+        ? `[data-setting-property="${escapedField}"]`
+        : `[data-setting-property$=".${escapedField}"]`;
       const target = document.querySelector<HTMLElement>(selector);
       if (target) {
         const prefersReducedMotion = typeof window.matchMedia === 'function'

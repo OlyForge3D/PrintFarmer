@@ -377,7 +377,7 @@ export function buildSettingCommandItems(
           groupLabel.toLowerCase(),
           'setting',
         ],
-        href: buildSettingsPath({ ...location, field: property.name }),
+        href: buildSettingsPath({ ...location, field: `${section.key}.${property.name}` }),
       });
     }
   }
