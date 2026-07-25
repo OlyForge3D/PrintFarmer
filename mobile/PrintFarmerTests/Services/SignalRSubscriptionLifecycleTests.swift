@@ -4037,6 +4037,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         )
         try result.get()
         await recorder.waitForCount(1)
+        service.drainHubCoordinatorForTesting()
 
         XCTAssertEqual(recorder.snapshot(), [printerID])
         await service.disconnect()
@@ -4072,6 +4073,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         completion.append(SignalRFrameParser.recordSeparator)
         socket.completeReceive(with: .data(completion))
         await recorder.waitForCount(1)
+        service.drainHubCoordinatorForTesting()
 
         XCTAssertEqual(recorder.snapshot(), [printerID])
         await service.disconnect()
@@ -4103,6 +4105,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         )
         try result.get()
         await recorder.waitForCount(printerIDs.count)
+        service.drainHubCoordinatorForTesting()
 
         XCTAssertEqual(recorder.snapshot(), printerIDs)
         await service.disconnect()
@@ -4470,6 +4473,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         await callbackQueue.waitForCount(1)
         await callbackQueue.runNext()
         await attentionService.waitForLoadCount(1)
+        service.drainHubCoordinatorForTesting()
 
         let recoveredLoadCount = await attentionService.loadCallCount
         XCTAssertEqual(trailingRecorder.snapshot(), [trailingPrinterID])

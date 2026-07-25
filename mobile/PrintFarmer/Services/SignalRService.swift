@@ -961,6 +961,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             processIncomingData(data)
         }
     }
+
+    func drainHubCoordinatorForTesting() {
+        coordinator.sync {}
+    }
     #endif
 
     private func processIncomingData(_ data: Data) {
