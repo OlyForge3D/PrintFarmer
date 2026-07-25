@@ -26,5 +26,5 @@ public class QueueConsumerService(
     }
 
     protected override string[] GetWorkerCapabilities()
-        => ["orcaslicer", "stl-processing", "gcode-generation"];
+        => WorkerConstants.Capabilities;
 }

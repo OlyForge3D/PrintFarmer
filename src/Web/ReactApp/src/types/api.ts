@@ -2053,13 +2053,18 @@ export enum DiscoveryStatus {
 
 export interface StartDiscoveryRequest {
   backends?: PrinterBackend[];
-  autoRegister?: boolean;
+}
+
+export interface RegisterDiscoveredPrinterRequest {
+  discoveryId: string;
+  manufacturerId?: string;
+  modelId?: string;
+  newManufacturerName?: string;
+  newModelName?: string;
 }
 
 export interface DiscoveryProgressDto {
   sessionId: string;
-  currentNetwork: string;
-  currentIp: string;
   totalIps: number;
   scannedIps: number;
   printersFound: number;
@@ -2067,22 +2072,30 @@ export interface DiscoveryProgressDto {
   progressPercentage: number;
   status: DiscoveryStatus;
   message?: string;
-  networkRanges?: string[];
   autoDetectedNetworks?: boolean;
+}
+
+export interface DiscoveredPrinterSummaryDto {
+  discoveryId: string;
+  name: string;
+  backend: PrinterBackend;
+  manufacturer?: string;
+  model?: string;
+  discoveredAt: string;
+  isReachable: boolean;
 }
 
 export interface DiscoveryPrinterFoundDto {
   sessionId: string;
-  printer: DiscoveredPrinterDto;
+  printer: DiscoveredPrinterSummaryDto;
 }
 
 export interface DiscoveryCompletedDto {
   sessionId: string;
   totalPrintersFound: number;
   totalPrintersExcluded: number;
-  duration: number; // milliseconds
+  duration: string;
   wasCancelled?: boolean;
-  networkRanges?: string[];
   autoDetectedNetworks?: boolean;
 }
 

@@ -99,8 +99,9 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            // SQLite: Development only - uses EnsureCreated, no migrations
-            _ = options.UseSqlite(dbConfig.ConnectionString);
+            _ = options.UseSqlite(
+                dbConfig.ConnectionString,
+                x => x.MigrationsAssembly("Farm.Migrations.Sqlite"));
         }
     }
 
@@ -269,6 +270,8 @@ public static class ServiceCollectionExtensions
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
+        _ = services.AddSingleton<IDiscoverySessionRegistry, DiscoverySessionRegistry>();
+        _ = services.AddSingleton<DiscoveryServiceAuthenticator>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
         _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, DiscoveryProxyService>();

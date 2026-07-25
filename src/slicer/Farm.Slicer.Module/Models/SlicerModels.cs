@@ -141,8 +141,6 @@ public class DistributedSlicingJob : SlicingJobDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    public Guid UserId { get; set; }
-
     public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
 
     public string ModelFileName { get; set; } = string.Empty;

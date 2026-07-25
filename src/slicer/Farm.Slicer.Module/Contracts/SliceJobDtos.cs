@@ -89,8 +89,6 @@ public class SliceJobStatusResponse
 
     public DateTime? CompletedAt { get; set; }
 
-    public string? ResultFileUrl { get; set; }
-
     public string? ErrorMessage { get; set; }
 
     public int? EstimatedPrintTimeSeconds { get; set; }
@@ -99,7 +97,27 @@ public class SliceJobStatusResponse
 
     public Guid? WorkerId { get; set; }
 
-    // Extended fields needed by workers to perform slicing
+    public string ModelFileName { get; set; } = string.Empty;
+
+    public int SlicerEngine { get; set; }
+
+    public string ArtifactsRoute { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Internal claim response containing the inputs required by an authenticated slicer worker.
+/// This contract is never returned from JWT user routes.
+/// </summary>
+public sealed class WorkerSliceJobResponse
+{
+    public Guid Id { get; set; }
+
+    public Guid UserId { get; set; }
+
+    public Guid? PrinterId { get; set; }
+
+    public string Status { get; set; } = string.Empty;
+
     public string ModelFileUrl { get; set; } = string.Empty;
 
     public string ModelFileName { get; set; } = string.Empty;
@@ -125,6 +143,10 @@ public class SliceJobStatusResponse
     /// Each entry corresponds positionally to a URL in <see cref="ModelFileUrls"/>.
     /// </summary>
     public List<string?>? ModelFileTransforms { get; set; }
+
+    public string? RequiredCapabilitiesJson { get; set; }
+
+    public int Priority { get; set; }
 }
 
 /// <summary>
@@ -155,6 +177,13 @@ public class SliceJobProgressUpdateRequest
     [MaxLength(256)]
     public string? ProgressMessage { get; set; }
 }
+
+/// <summary>
+/// Request from a worker that could not complete its claimed slice job.
+/// The API deliberately replaces the supplied detail with a generic public error.
+/// </summary>
+/// <param name="ErrorMessage">Worker-local failure detail; never returned to API clients.</param>
+public sealed record FailSliceJobRequest([property: MaxLength(1024)] string ErrorMessage);
 
 /// <summary>
 /// Response after successful job completion.

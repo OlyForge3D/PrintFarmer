@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
@@ -46,7 +47,6 @@ public class SliceJobEventService(
             Status = job.Status,
             QueuedAt = job.QueuedAt,
             StartedAt = job.StartedAt,
-            WorkerId = job.WorkerId,
             Timestamp = DateTime.UtcNow
         };
 
@@ -89,10 +89,9 @@ public class SliceJobEventService(
             QueuedAt = job.QueuedAt,
             StartedAt = job.StartedAt,
             CompletedAt = job.CompletedAt,
-            ResultFileUrl = job.ResultFileUrl,
+            ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
             EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId,
             Timestamp = DateTime.UtcNow
         };
 
@@ -111,16 +110,15 @@ public class SliceJobEventService(
             UserId = job.UserId,
             PrinterId = job.PrinterId,
             Status = job.Status,
-            ErrorMessage = job.ErrorMessage,
+            ErrorMessage = string.IsNullOrWhiteSpace(job.ErrorMessage) ? null : "Slicing failed.",
             QueuedAt = job.QueuedAt,
             StartedAt = job.StartedAt,
             CompletedAt = job.CompletedAt,
-            WorkerId = job.WorkerId,
             Timestamp = DateTime.UtcNow
         };
 
         await BroadcastEventAsync(evt, job.UserId, cancellationToken);
-        _logger.LogWarning("Broadcasted JobFailed event for job {JobId}: {JobErrorMessage}", job.Id, job.ErrorMessage);
+        _logger.LogWarning("Broadcasted JobFailed event for job {JobId}", job.Id);
     }
 
     public async Task NotifyJobCancelledAsync(SliceJob job, CancellationToken cancellationToken = default)
@@ -147,12 +145,15 @@ public class SliceJobEventService(
     private async Task BroadcastEventAsync(SliceJobEvent evt, Guid userId, CancellationToken cancellationToken)
     {
         // Send to specific job subscribers
-        await _hubContext.Clients.All.SendAsync($"SliceJob_{evt.JobId}", evt, cancellationToken);
+        await _hubContext.Clients.Group(AuthorizedHubGroups.SliceJob(evt.JobId))
+            .SendAsync("slicejobevent", evt, cancellationToken);
 
         // Send to user group (all clients connected for this user)
-        await _hubContext.Clients.Group($"User-{userId}").SendAsync("slicejobevent", evt, cancellationToken);
+        await _hubContext.Clients.Group(AuthorizedHubGroups.User(userId))
+            .SendAsync("slicejobevent", evt, cancellationToken);
 
         // Send to monitoring group (admin dashboards, etc.)
-        await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicejobevent", evt, cancellationToken);
+        await _hubContext.Clients.Group(AuthorizedHubGroups.SlicingMonitors)
+            .SendAsync("slicejobevent", evt, cancellationToken);
     }
 }

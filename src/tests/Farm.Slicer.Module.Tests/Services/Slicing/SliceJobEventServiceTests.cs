@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -27,8 +28,7 @@ public class SliceJobEventServiceTests
         // Setup hub context clients
         _hubContextMock.Setup(h => h.Clients).Returns(_hubClientsMock.Object);
 
-        // Setup clients to return client proxy for all and group calls
-        _hubClientsMock.Setup(c => c.All).Returns(_clientProxyMock.Object);
+        // Setup clients to return a client proxy for scoped group calls.
         _hubClientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_clientProxyMock.Object);
 
         _service = new SliceJobEventService(_hubContextMock.Object, _loggerMock.Object);
@@ -83,8 +83,7 @@ public class SliceJobEventServiceTests
         // Act
         await _service.NotifyJobQueuedAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
     }
 
     #endregion
@@ -108,8 +107,7 @@ public class SliceJobEventServiceTests
         // Act
         await _service.NotifyJobStartedAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
     }
 
     #endregion
@@ -133,8 +131,7 @@ public class SliceJobEventServiceTests
         // Act
         await _service.NotifyJobProgressAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
     }
 
     #endregion
@@ -158,8 +155,13 @@ public class SliceJobEventServiceTests
         // Act
         await _service.NotifyJobCompletedAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
+        _clientProxyMock.Verify(c => c.SendCoreAsync(
+            "slicejobevent",
+            It.Is<object[]>(args =>
+                args.Length == 1 &&
+                ((SliceJobEvent)args[0]).ArtifactsRoute == $"/api/artifacts/job/{job.Id}"),
+            It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     #endregion
@@ -179,12 +181,18 @@ public class SliceJobEventServiceTests
     {
         // Arrange
         SliceJob job = CreateSliceJob();
+        job.ErrorMessage = @"Worker failed at D:\private\model.stl with token=secret";
 
         // Act
         await _service.NotifyJobFailedAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
+        _clientProxyMock.Verify(c => c.SendCoreAsync(
+            "slicejobevent",
+            It.Is<object[]>(args =>
+                args.Length == 1 &&
+                ((SliceJobEvent)args[0]).ErrorMessage == "Slicing failed."),
+            It.IsAny<CancellationToken>()), Times.Exactly(3));
     }
 
     #endregion
@@ -208,8 +216,7 @@ public class SliceJobEventServiceTests
         // Act
         await _service.NotifyJobCancelledAsync(job, CancellationToken.None);
 
-        // Assert - Verify broadcasts occurred
-        _hubClientsMock.Verify(c => c.All, Times.Once);
+        VerifyScopedBroadcasts(job);
     }
 
     #endregion
@@ -232,6 +239,20 @@ public class SliceJobEventServiceTests
             StartedAt = null,
             WorkerId = null,
         };
+    }
+
+    private void VerifyScopedBroadcasts(SliceJob job)
+    {
+        _hubClientsMock.Verify(
+            c => c.Group(AuthorizedHubGroups.SliceJob(job.Id)),
+            Times.Once);
+        _hubClientsMock.Verify(
+            c => c.Group(AuthorizedHubGroups.User(job.UserId)),
+            Times.Once);
+        _hubClientsMock.Verify(
+            c => c.Group(AuthorizedHubGroups.SlicingMonitors),
+            Times.Once);
+        _hubClientsMock.Verify(c => c.All, Times.Never);
     }
 
     #endregion

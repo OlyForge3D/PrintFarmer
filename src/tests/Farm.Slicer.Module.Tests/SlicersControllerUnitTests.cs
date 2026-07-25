@@ -57,9 +57,9 @@ public class SlicersControllerUnitTests
         IActionResult res = await controller.ListAsync();
         _ = res.Should().BeOfType<OkObjectResult>();
         OkObjectResult? ok = res as OkObjectResult;
-        IReadOnlyList<SlicerServiceResponseDto>? list = ok!.Value as IReadOnlyList<SlicerServiceResponseDto>;
+        IEnumerable<SlicerServiceResponse>? list = ok!.Value as IEnumerable<SlicerServiceResponse>;
         _ = list.Should().NotBeNull();
-        _ = list!.Count.Should().BeGreaterThanOrEqualTo(1);
+        _ = list!.Should().ContainSingle();
     }
 
     [Fact]

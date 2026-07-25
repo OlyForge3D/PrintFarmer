@@ -75,6 +75,7 @@ if (jwtConfigured)
 
     authBuilder.AddJwtBearer("Bearer", options =>
     {
+        options.RequireHttpsMetadata = !builder.Environment.IsEnvironment("Testing");
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
@@ -133,7 +134,11 @@ else
 
 builder.Services.AddAuthorization(opts =>
 {
-    opts.AddPolicy("farm_admin", policy => policy.RequireRole("farm_admin"));
+    opts.AddPolicy("farm_admin", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
+    });
 
     // Desktop API-key exchange scope policies (issue #838). The standalone admin
     // principal carries no token_use claim, so DesktopScopeAuthorizationHandler

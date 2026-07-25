@@ -25,12 +25,14 @@ public class CamerasController(
     ICameraService cameraService,
     IPrinterCameraEndpointDetectionService cameraEndpointDetectionService,
     IStartupStatus startupStatus,
-    ILogger<CamerasController> logger) : ControllerBase
+    ILogger<CamerasController> logger,
+    IHttpClientFactory httpClientFactory) : ControllerBase
 {
     private readonly ICameraService _cameraService = cameraService ?? throw new ArgumentNullException(nameof(cameraService));
     private readonly IPrinterCameraEndpointDetectionService _cameraEndpointDetectionService = cameraEndpointDetectionService ?? throw new ArgumentNullException(nameof(cameraEndpointDetectionService));
     private readonly IStartupStatus _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
     private readonly ILogger<CamerasController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IHttpClientFactory _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
 
     /// <summary>
     /// Gets all standalone cameras.
@@ -39,7 +41,6 @@ public class CamerasController(
     /// <returns>List of all standalone cameras</returns>
     /// <response code="200">Returns the list of cameras</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
     [ProducesResponseType(503)]
@@ -62,7 +63,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetCamerasAsync: {Message}", ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_list_failed", "Cameras could not be read.");
         }
     }
 
@@ -73,7 +74,6 @@ public class CamerasController(
     /// <returns>List of enabled standalone cameras</returns>
     /// <response code="200">Returns the list of enabled cameras</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet("enabled")]
     [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
     [ProducesResponseType(503)]
@@ -96,7 +96,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetEnabledCamerasAsync: {Message}", ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_list_failed", "Cameras could not be read.");
         }
     }
 
@@ -108,7 +108,6 @@ public class CamerasController(
     /// <returns>List of display cameras with printer names</returns>
     /// <response code="200">Returns the list of display cameras</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet("display")]
     [ProducesResponseType(typeof(IEnumerable<DisplayCameraDto>), 200)]
     [ProducesResponseType(503)]
@@ -122,6 +121,12 @@ public class CamerasController(
             }
 
             List<DisplayCameraDto> cameras = await _cameraService.GetDisplayCamerasAsync(ct);
+            foreach (DisplayCameraDto camera in cameras)
+            {
+                camera.StreamProxyUrl = camera.StreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream");
+                camera.SnapshotProxyUrl = camera.SnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot");
+            }
+
             return Ok(cameras);
         }
         catch (InvalidOperationException)
@@ -131,7 +136,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetDisplayCamerasAsync: {Message}", ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_list_failed", "Cameras could not be read.");
         }
     }
 
@@ -144,7 +149,6 @@ public class CamerasController(
     /// <response code="200">Returns the camera</response>
     /// <response code="404">If the camera is not found</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(CameraDto), 200)]
     [ProducesResponseType(404)]
@@ -172,6 +176,8 @@ public class CamerasController(
                 Description = camera.Description,
                 StreamUrl = camera.StreamUrl,
                 SnapshotUrl = camera.SnapshotUrl,
+                StreamConfigured = !string.IsNullOrWhiteSpace(camera.StreamUrl),
+                SnapshotConfigured = !string.IsNullOrWhiteSpace(camera.SnapshotUrl),
                 IsEnabled = camera.IsEnabled,
                 SortOrder = camera.SortOrder,
                 Location = camera.Location,
@@ -194,7 +200,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_read_failed", "The camera could not be read.");
         }
     }
 
@@ -206,7 +212,6 @@ public class CamerasController(
     /// <returns>List of cameras for the specified printer</returns>
     /// <response code="200">Returns the list of cameras for the printer</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet("by-printer/{printerId}")]
     [ProducesResponseType(typeof(IEnumerable<CameraDto>), 200)]
     [ProducesResponseType(503)]
@@ -229,7 +234,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in GetCamerasByPrinterAsync for PrinterId {PrinterId}: {Message}", printerId.ToString(), ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_list_failed", "Cameras could not be read.");
         }
     }
 
@@ -330,7 +335,10 @@ public class CamerasController(
         {
             if (ex.Message.Contains("already exists"))
             {
-                return BadRequest(new { message = ex.Message });
+                return CameraProblem(
+                    "camera_name_conflict",
+                    "A camera with this name already exists.",
+                    StatusCodes.Status400BadRequest);
             }
 
             return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
@@ -338,7 +346,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in CreateCameraAsync: {Message}", ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_create_failed", "The camera could not be created.");
         }
     }
 
@@ -378,7 +386,10 @@ public class CamerasController(
         {
             if (ex.Message.Contains("already exists"))
             {
-                return BadRequest(new { message = ex.Message });
+                return CameraProblem(
+                    "camera_name_conflict",
+                    "A camera with this name already exists.",
+                    StatusCodes.Status400BadRequest);
             }
 
             return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
@@ -386,7 +397,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in UpdateCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_update_failed", "The camera could not be updated.");
         }
     }
 
@@ -423,7 +434,7 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in DeleteCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_delete_failed", "The camera could not be deleted.");
         }
     }
 
@@ -466,7 +477,108 @@ public class CamerasController(
         catch (Exception ex)
         {
             _logger?.LogError(ex, "[CamerasController] Exception in ToggleCameraAsync for ID {CameraId}: {Message}", id.ToString(), ex.Message);
-            return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
+            return CameraProblem("camera_update_failed", "The camera could not be updated.");
         }
     }
+
+    /// <summary>Streams camera content without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/stream")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraStreamAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: false, ct);
+
+    /// <summary>Returns a camera snapshot without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/snapshot")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraSnapshotAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: true, ct);
+
+    private static string GetCameraProxyPath(Guid cameraId, string kind) =>
+        $"/api/cameras/{cameraId:D}/{kind}";
+
+    private async Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)
+    {
+        Camera? camera = await _cameraService.FindByIdAsync(id, ct);
+        if (camera is null || !camera.IsEnabled)
+        {
+            return NotFound();
+        }
+
+        string? target = useSnapshot ? camera.SnapshotUrl : camera.StreamUrl;
+        if (target is null)
+        {
+            return NotFound();
+        }
+
+        if (!Uri.TryCreate(target, UriKind.Absolute, out Uri? targetUri) ||
+            (targetUri.Scheme != Uri.UriSchemeHttp && targetUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _logger.LogWarning("Camera {CameraId} has a non-HTTP(S) target", id);
+            return CameraProblem(
+                "camera_target_invalid",
+                "The configured camera target is invalid.",
+                StatusCodes.Status502BadGateway);
+        }
+
+        try
+        {
+            HttpClient client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
+            HttpResponseMessage response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Camera {CameraId} returned {StatusCode}", id, response.StatusCode);
+                response.Dispose();
+                return CameraProblem(
+                    "camera_upstream_failed",
+                    "The camera did not return a successful response.",
+                    StatusCodes.Status502BadGateway);
+            }
+
+            Stream content = await response.Content.ReadAsStreamAsync(ct);
+            HttpContext.Response.RegisterForDispose(response);
+            string contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            if (response.Content.Headers.ContentLength is long contentLength)
+            {
+                HttpContext.Response.ContentLength = contentLength;
+            }
+
+            return File(content, contentType);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return CameraProblem(
+                "camera_upstream_timeout",
+                "The camera request timed out.",
+                StatusCodes.Status502BadGateway);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Camera proxy request failed for camera {CameraId}", id);
+            return CameraProblem(
+                "camera_upstream_unavailable",
+                "The camera is unavailable.",
+                StatusCodes.Status502BadGateway);
+        }
+    }
+
+    private ObjectResult CameraProblem(
+        string code,
+        string title,
+        int statusCode = StatusCodes.Status500InternalServerError) =>
+        Problem(
+            statusCode: statusCode,
+            title: title,
+            type: $"https://printfarmer.dev/problems/{code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
 }

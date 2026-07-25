@@ -19,9 +19,11 @@ using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Capabilities;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -211,7 +213,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 // .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
+    options.AddOperationTransformer<AuthorizationOperationTransformer>();
+});
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.MaxDepth = 256);
 
 // CORS configuration for API access
 builder.Services.AddPrintFarmerCors();
@@ -230,6 +238,7 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
+builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);

@@ -128,6 +128,14 @@ docker compose --env-file .env.microservices up -d --build
 - Independent health monitoring
 - Better resource isolation
 
+The deployment script generates and preserves `DISCOVERY_SHARED_API_KEY` for
+the printer-discovery service boundary. Compose injects it as
+`DiscoveryAuth__SharedKey` into the API and `Discovery__SharedKey` into the
+discovery service. Treat it as a secret, keep it distinct from worker and user
+credentials, and rotate both services together. It is accepted only as
+`X-Discovery-Service-Key` on internal discovery-event ingestion routes and is
+never a user-facing API credential.
+
 ## Deployment Architectures
 
 ### Architecture Comparison
@@ -167,6 +175,51 @@ Set `DB_PROVIDER` environment variable during deployment:
 ```bash
 export DB_PROVIDER=postgresql  # or sqlserver, mysql, sqlite
 ```
+
+### Migration-safe upgrades
+
+Automatic provider-aware startup migrations are supported for SQLite,
+PostgreSQL, and SQL Server. Core `AppDbContext` and slicer `SlicerDbContext`
+use independent provider-specific migration assemblies. Startup and readiness
+fail if either context cannot apply or validate its migration set; the service
+does not fall back to `EnsureCreated` or continue with a partial schema.
+
+Before upgrading, stop writers and take a provider-native backup:
+
+```bash
+# SQLite: stop PrintFarmer before copying the database and sidecar files.
+cp farm.db "farm.db.$(date +%Y%m%d%H%M%S).bak"
+
+# PostgreSQL
+pg_dump --format=custom --file=printfarmer.backup printfarmer
+
+# SQL Server
+sqlcmd -S "$SQLSERVER_HOST" -Q \
+  "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
+```
+
+Previously supported databases created without migration history are adopted
+only after every expected table and column is validated. The migration history
+baseline is recorded transactionally and does not rewrite application data.
+A partial legacy schema, missing migration assembly, unsupported provider, or
+post-migration validation failure stops startup with one of these stable
+diagnostic codes:
+
+- `legacy_schema_incomplete`
+- `schema_validation_failed`
+- `migration_assembly_missing`
+- `provider_unsupported`
+- `migration_failed`
+
+Do not manually insert migration-history rows or use `EnsureCreated` to recover.
+Preserve the failed database for diagnosis. Correct permissions or deployment
+configuration and restart only when the schema is known to match the release;
+otherwise restore the provider-native backup and the previous application
+version. Rollback is backup restoration, not an automatic down-migration.
+
+The migration-safe contract in this release does not include MySQL. Do not
+upgrade an existing MySQL deployment to this release until a provider-correct
+MySQL migration assembly is available.
 
 ## Network Configuration
 

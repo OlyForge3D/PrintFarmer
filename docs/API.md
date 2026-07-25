@@ -31,6 +31,144 @@ All API responses use camelCase JSON (for TypeScript compatibility):
 }
 ```
 
+Connection credentials and private service addresses are write-only configuration.
+Printer, slicer, worker, queue, artifact, capability, and real-time response
+contracts never return API keys, usernames, passwords, worker keys, internal
+paths, backend endpoints, or private service URLs.
+
+## API Contract and Calibration Capabilities
+
+### Contract negotiation
+
+The minimum supported API contract is `1.0`. Capability requests can negotiate
+the contract with either:
+
+```http
+X-PrintFarmer-Api-Contract-Version: 1.0
+```
+
+or:
+
+```http
+GET /api/system/capabilities?apiContractVersion=1.0
+```
+
+Clients that omit negotiation retain backward-compatible behavior. Capability
+responses include:
+
+```http
+X-PrintFarmer-Api-Contract-Version: 1.0
+X-PrintFarmer-Minimum-Supported-Api-Contract-Version: 1.0
+```
+
+`X-PrintFarmer-Minimum-Api-Contract-Version` is retained as a compatibility
+alias. An invalid or older requested version returns `426` with the stable
+problem code `client_upgrade_required`. `/api/version` remains the
+OctoPrint-compatibility contract and is not used for PrintFarmer negotiation.
+
+### Public platform capabilities
+
+`GET /api/system/capabilities` is anonymous and publicly cacheable for 30
+seconds. It reports deployment-level configuration and health without
+caller-specific permissions:
+
+```json
+{
+  "serverVersion": "1.0.0",
+  "apiContractVersion": "1.0",
+  "minimumSupportedApiContractVersion": "1.0",
+  "calibrationApiVersion": "1.0",
+  "calibrationSchemaVersion": "1.0",
+  "slicingConfigured": true,
+  "slicingOperational": false,
+  "calibrationContextEnabled": false,
+  "calibrationPersistenceEnabled": false,
+  "calibrationSyncEnabled": false,
+  "calibrationPhotosEnabled": false,
+  "calibrationProfileHistoryEnabled": false,
+  "calibrationGenerationEnabled": false,
+  "calibrationSlicingEnabled": false,
+  "calibrationArtifactPromotionEnabled": false,
+  "calibrationQueueEnabled": false,
+  "calibrationJobBoundBedClearEnabled": false,
+  "calibrationEventsEnabled": false,
+  "supportedFirmwareFamilies": ["Klipper"],
+  "supportedGcodeDialects": ["Klipper"],
+  "supportedSlicerEngines": [
+    {
+      "type": "OrcaSlicer",
+      "distribution": "upstream",
+      "version": "2.3.1",
+      "supported": true
+    }
+  ],
+  "routes": {
+    "systemCapabilities": "/api/system/capabilities",
+    "calibrationCapabilities": "/api/calibration/capabilities",
+    "printers": "/api/printers",
+    "sliceJobs": "/api/slice-jobs",
+    "sliceJob": "/api/slice-jobs/{id}",
+    "jobArtifact": "/api/artifacts/job/{jobId}",
+    "printerHub": "/hubs/printers",
+    "slicerRegistryHub": "/hubs/slicer-registry",
+    "slicerProgressHub": "/hubs/slicers"
+  },
+  "healthyCompatibleWorker": {
+    "available": false,
+    "healthyCount": 0,
+    "availableSlots": 0,
+    "engine": "OrcaSlicer",
+    "requiredVersion": "2.3.1"
+  },
+  "unavailableReasons": [
+    {
+      "feature": "calibration",
+      "code": "calibration_domain_not_implemented",
+      "message": "Calibration context, command generation, and dispatch are not implemented by this foundation."
+    }
+  ]
+}
+```
+
+`slicingConfigured` means slicing is enabled in configuration.
+`slicingOperational` additionally requires reachable slicer persistence,
+artifact storage, and a fresh enabled upstream OrcaSlicer `2.3.1` worker with
+available capacity. Calibration feature flags remain false until their public
+routes and all caller-reachable dependencies are implemented and operational.
+Routes are canonical same-origin paths and never disclose internal service
+addresses.
+
+### Effective calibration capabilities
+
+`GET /api/calibration/capabilities` requires a PrintFarmer JWT. Unscoped
+OctoPrint-compatible API keys cannot authenticate this route. The response has
+the platform capability shape plus:
+
+- `effectivePermissions`: only the caller's effective `resource:action`
+  permissions;
+- `effectiveCapabilities`: permission- and dependency-gated operations;
+- model and photo limits, accepted MIME types, and export formats;
+- non-secret compatible-worker counts and structured unavailable reasons.
+
+The response uses `Cache-Control: private, max-age=15` and
+`Vary: Authorization`. Current foundation versions are API `1.0`, calibration
+API `1.0`, and calibration schema `1.0`.
+
+### Calibration foundation permissions
+
+| Resource | Actions |
+|---|---|
+| `calibration` | `create`, `read`, `update`, `delete`, `generate`, `publish` |
+| `queue` | `read`, `write`, `start`, `cancel`, `acknowledge-bed-clear`, `reconcile` |
+| `slicing` | `submit`, `read-artifact`, `promote` |
+| `dispatch-settings` | `manage` |
+
+Protected routes return `401 authentication_required` without authentication
+and `403 permission_denied` when the action is missing. Ownership and farm
+scope are checked after permission checks; identifier-based direct and binary
+reads cannot bypass them. The `farm_admin` bypass is explicit and audited.
+Ordinary users receive no calibration-foundation permissions implicitly.
+
 ## Printers API
 
 ### List All Printers
@@ -45,7 +183,6 @@ GET /api/printers
   {
     "id": "uuid",
     "name": "Printer 1",
-    "url": "http://192.168.1.100:7125",
     "backendType": "Moonraker",
     "isOnline": true,
     "state": "Idle",
@@ -73,7 +210,6 @@ GET /api/printers/{printerId}
 {
   "id": "uuid",
   "name": "Printer 1",
-  "url": "http://192.168.1.100:7125",
   "backendType": "Moonraker",
   "isOnline": true,
   "state": "Idle",
@@ -108,7 +244,6 @@ Content-Type: application/json
 {
   "id": "new-printer-uuid",
   "name": "Printer 2",
-  "url": "http://192.168.1.101:7125",
   "backendType": "Moonraker",
   "isOnline": false,
   "locationId": "location-uuid",
@@ -694,34 +829,64 @@ Authorization: Bearer <token>
 
 ## Discovery API
 
-### Discover Printers on Network
+Discovery routes require a PrintFarmer JWT and the `farm_admin` role. Network
+targets, camera URLs, credentials, and scanned ranges remain server-side.
+
+### Start Discovery
 
 ```http
-POST /api/discovery/scan
+POST /api/printers/discover/stream
+Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "timeout": 30,
-  "backendTypes": ["Moonraker", "PrusaLink"]
+  "backends": ["Moonraker", "PrusaLink"]
 }
 ```
 
-**Response:** 202 Accepted (returns stream of discoveries)
+**Response:** `202 Accepted`
 
-### Get Discovery Status
-
-```http
-GET /api/discovery/status
-```
-
-**Response:**
 ```json
 {
-  "isRunning": true,
-  "progress": 45,
-  "foundCount": 3,
-  "totalCount": 8
+  "sessionId": "discovery-session-id",
+  "message": "Discovery started"
 }
+```
+
+Call `JoinDiscoveryGroupAsync(sessionId)` on the authenticated `/hubs/printers`
+connection. Only the session owner or an audited farm-administrator bypass may
+join. The lowercase events are:
+
+- `discoveryprogress`: counts, percentage, status, and a redacted message;
+- `discoveryprinterfound`: safe metadata plus an opaque `discoveryId`;
+- `discoverycompleted`: totals, duration, and cancellation state.
+
+No discovery event includes an IP address, URL, network range, camera endpoint,
+or credential.
+
+### Register a Discovery Result
+
+```http
+POST /api/printers/discover/{sessionId}/register
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "discoveryId": "opaque-discovery-id",
+  "manufacturerId": "optional-manufacturer-id",
+  "modelId": "optional-model-id"
+}
+```
+
+The server resolves the owner-bound target, creates the printer, and consumes
+the identifier after success. Unknown, expired, cross-session, or replayed
+identifiers return `404 resource_not_found`.
+
+### Cancel Discovery
+
+```http
+POST /api/printers/discover/{sessionId}/cancel
+Authorization: Bearer <token>
 ```
 
 ## Catalog API
@@ -861,53 +1026,51 @@ GET /api/healthz
 
 ### Connection
 
-**URL:** `http://localhost:5245/hubs/printers`
+Protected hub routes:
 
-**Protocol:** WebSocket
+- `/hubs/printers`: authenticated farm and per-user printer events;
+- `/hubs/slicers`: authenticated owner-scoped slice-job progress;
+- `/hubs/slicer-registry`: farm-administrator-only registry events.
+
+SignalR clients must authenticate with the same PrintFarmer JWT used for REST:
 
 ### Listening for Events
 
 ```javascript
 const connection = new HubConnectionBuilder()
   .withUrl('http://localhost:5245/hubs/printers', {
-    withCredentials: true
+    accessTokenFactory: () => printFarmerJwt
   })
   .withAutomaticReconnect()
   .build();
 
 // Listen for printer updates
-connection.on('printerUpdated', (printer) => {
+connection.on('printerupdated', (printer) => {
   console.log('Printer updated:', printer);
   // printer: { id, name, isOnline, state, hotendTemp, bedTemp, progress, ... }
-});
-
-// Listen for connection changes
-connection.on('printerConnected', (printerId) => {
-  console.log('Printer connected:', printerId);
-});
-
-connection.on('printerDisconnected', (printerId) => {
-  console.log('Printer disconnected:', printerId);
-});
-
-// Listen for job progress
-connection.on('jobProgressUpdated', (jobData) => {
-  console.log('Job progress:', jobData);
-  // jobData: { printerId, progress, timeRemaining, ... }
-});
-
-// Listen for location changes
-connection.on('locationUpdated', (location) => {
-  console.log('Location updated:', location);
 });
 
 // Start connection
 connection.start().catch(err => console.error(err));
 ```
 
+The server adds authenticated connections only to authorized farm, user,
+printer, slice-job, administrator, and future project/calibration/queue
+resource groups. Protected publishers do not broadcast through `Clients.All`.
+Job subscriptions on `/hubs/slicers` verify ownership or the audited
+farm-administrator bypass before joining the group.
+Discovery subscriptions on `/hubs/printers` apply the same owner-or-audited-
+administrator rule. Discovery publishers are internal authenticated HTTP
+ingestion routes; untrusted clients cannot invoke hub publisher methods.
+
+SignalR messages are hints and progress notifications, not authoritative
+state. After reconnect, token refresh, a sequence gap, or process restart,
+clients must refetch the relevant REST resources. A successful automatic
+reconnect does not imply that events sent during the gap were replayed.
+
 ### Event Formats
 
-#### printerUpdated
+#### printerupdated
 ```json
 {
   "id": "printer-uuid",
@@ -924,35 +1087,6 @@ connection.start().catch(err => console.error(err));
 }
 ```
 
-#### printerConnected
-```json
-{
-  "id": "printer-uuid",
-  "name": "Printer 1",
-  "timestamp": "2025-12-19T10:30:00Z"
-}
-```
-
-#### printerDisconnected
-```json
-{
-  "id": "printer-uuid",
-  "name": "Printer 1",
-  "timestamp": "2025-12-19T10:30:00Z"
-}
-```
-
-#### jobProgressUpdated
-```json
-{
-  "printerId": "printer-uuid",
-  "jobId": "job-uuid",
-  "progress": 45.5,
-  "timeRemaining": 1800,
-  "timeElapsed": 1200
-}
-```
-
 ## Error Responses
 
 ### 400 Bad Request
@@ -966,8 +1100,18 @@ connection.start().catch(err => console.error(err));
 ### 401 Unauthorized
 ```json
 {
-  "error": "Unauthorized",
-  "details": "Invalid or expired token"
+  "status": 401,
+  "title": "Authentication required",
+  "code": "authentication_required"
+}
+```
+
+### 403 Forbidden
+```json
+{
+  "status": 403,
+  "title": "Permission denied",
+  "code": "permission_denied"
 }
 ```
 
@@ -984,6 +1128,17 @@ connection.start().catch(err => console.error(err));
 {
   "error": "Conflict",
   "details": "Location name already exists"
+}
+```
+
+### 426 Upgrade Required
+```json
+{
+  "status": 426,
+  "title": "Client upgrade required",
+  "code": "client_upgrade_required",
+  "apiContractVersion": "1.0",
+  "minimumSupportedApiContractVersion": "1.0"
 }
 ```
 

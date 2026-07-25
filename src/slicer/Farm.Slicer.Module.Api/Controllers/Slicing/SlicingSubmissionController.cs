@@ -1,7 +1,11 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
@@ -13,9 +17,11 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Route("api/slicer")]
 [Tags("Slicer Submission")]
 public class SlicingSubmissionController(
-    ISlicingSubmissionService submissionService) : ControllerBase
+    ISlicingSubmissionService submissionService,
+    IPrinterAccessValidator? printerAccess = null) : ControllerBase
 {
     private readonly ISlicingSubmissionService _submissionService = submissionService;
+    private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
 
     /// <summary>
     /// Submits a new file for slicing.
@@ -26,6 +32,8 @@ public class SlicingSubmissionController(
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("slice")]
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitFileAsync(
         IFormFile file,
         [FromForm] string? slicerEngine,
@@ -39,6 +47,13 @@ public class SlicingSubmissionController(
         }
 
         Guid userId = GetUserId();
+        if (userId == Guid.Empty ||
+            (_printerAccess is not null &&
+             !await _printerAccess.IsEnabledAsync(printerId, ct)))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
@@ -66,6 +81,8 @@ public class SlicingSubmissionController(
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("slice-model/{modelId}")]
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitModelAsync(
         Guid modelId,
         [FromForm] string? slicerEngine,
@@ -74,6 +91,13 @@ public class SlicingSubmissionController(
         CancellationToken ct)
     {
         Guid userId = GetUserId();
+        if (userId == Guid.Empty ||
+            (_printerAccess is not null &&
+             !await _printerAccess.IsEnabledAsync(printerId, ct)))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobFromModelAsync(

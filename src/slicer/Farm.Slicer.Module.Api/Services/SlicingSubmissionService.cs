@@ -94,6 +94,7 @@ public class SlicingSubmissionService(
                 SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
+                    UserId = userId,
                     Status = SlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,
@@ -191,6 +192,7 @@ public class SlicingSubmissionService(
                 SlicingJobDto storeJob = new()
                 {
                     JobId = jobId,
+                    UserId = userId,
                     Status = SlicingJobStatus.Queued,
                     Progress = 0,
                     SlicerEngine = slicerEngine,

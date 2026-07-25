@@ -51,8 +51,9 @@ public sealed class ObicoServerAssignmentService : IObicoServerAssignmentService
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
-            "[ObicoAssignment] Assigned printer {PrinterName} to Obico server {ServerName} ({ServerUrl})",
-            printer.Name, server.Name, server.Url);
+            "[ObicoAssignment] Assigned printer {PrinterName} to Obico server {ServerName}",
+            printer.Name,
+            server.Name);
 
         return server;
     }

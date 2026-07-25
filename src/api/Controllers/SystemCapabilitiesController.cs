@@ -1,9 +1,10 @@
-﻿using System.Runtime.InteropServices;
-using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.FeatureFlags;
-using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Services.Capabilities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,15 +14,13 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/system")]
-[AllowAnonymous] // Frontend reads capabilities and feature flags before login to decide which UI to render.
+[AllowAnonymous]
 public class SystemCapabilitiesController(
-    IConfiguration configuration,
-    IFeatureFlagService featureFlagService,
-    IOperatorFeatureGate operatorFeatureGate) : ControllerBase
+    ICalibrationCapabilityService capabilityService,
+    IFeatureFlagService featureFlagService) : ControllerBase
 {
-    private readonly IConfiguration _configuration = configuration;
+    private readonly ICalibrationCapabilityService _capabilityService = capabilityService;
     private readonly IFeatureFlagService _featureFlagService = featureFlagService;
-    private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -30,48 +29,26 @@ public class SystemCapabilitiesController(
     /// <returns>Platform capabilities for the running host.</returns>
     [HttpGet("capabilities")]
     [ProducesResponseType(typeof(PlatformCapabilitiesDto), StatusCodes.Status200OK)]
-    public ActionResult<PlatformCapabilitiesDto> GetCapabilities()
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status426UpgradeRequired)]
+    public async Task<ActionResult<PlatformCapabilitiesDto>> GetCapabilitiesAsync(
+        CancellationToken cancellationToken)
     {
-        var arch = RuntimeInformation.ProcessArchitecture;
-        bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
-
-        bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
-        bool slicerEnabled = _configuration.GetValue("Slicer:Enabled", true);
-        bool thumbnailEnabled = _configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
-
-        // In microservices mode the slicer module is NOT loaded in this API process,
-        // but the standalone slicer-host provides the capability. Report slicing as
-        // available so the frontend shows the slicer UI (nginx routes slicer paths
-        // to the slicer-host container).
-        bool isMicroservices = string.Equals(
-            _configuration.GetValue<string>("DEPLOYMENT_MODE"),
-            "microservices",
-            StringComparison.OrdinalIgnoreCase);
-
-        if (isMicroservices && !isArm)
+        ApiContractNegotiation.AddResponseHeaders(Response);
+        ObjectResult? negotiationFailure = ApiContractNegotiation.Negotiate(Request);
+        if (negotiationFailure is not null)
         {
-            slicerEnabled = true;
+            return negotiationFailure;
         }
 
-        string? platformNote = isArm && (!modelFilesEnabled || !slicerEnabled || !thumbnailEnabled)
-            ? "Running on ARM64 — 3D model and slicing features are disabled"
-            : null;
-
-        var dto = new PlatformCapabilitiesDto
+        Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
         {
-            Architecture = arch.ToString(),
-            SlicingEnabled = slicerEnabled,
-            ModelFilesEnabled = modelFilesEnabled,
-            ThumbnailGenerationEnabled = thumbnailEnabled,
-            GcodeUploadEnabled = true,
-            ClientThumbnailUploadEnabled = modelFilesEnabled,
-            IdempotentModelUploadEnabled = modelFilesEnabled,
-            ModelThumbnailReplacementEnabled = modelFilesEnabled,
-            PlatformNote = platformNote,
-            OperatorFeatures = _operatorFeatureGate.GetEffectiveFlags(),
+            Public = true,
+            MaxAge = TimeSpan.FromSeconds(30),
         };
 
-        return Ok(dto);
+        PlatformCapabilitiesDto capabilities =
+            await _capabilityService.GetCapabilitiesAsync(user: null, cancellationToken);
+        return Ok(capabilities);
     }
 
     /// <summary>
