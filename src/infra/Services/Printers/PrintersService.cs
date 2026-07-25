@@ -627,7 +627,7 @@ public class PrintersService(
     public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
-        PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
+        PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Where(p => p.IsEnabled).Select(async p =>
         {
             (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
             return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
@@ -1386,7 +1386,11 @@ public class PrintersService(
 
         if (duplicate != null)
         {
-            _logger.LogWarning("Duplicate printer detected: {DtoName} at {DtoServerUrl} - existing printer: {DuplicateName} ({DuplicateId})", dto.Name, dto.ServerUrl, duplicate.Name, duplicate.Id);
+            _logger.LogWarning(
+                "Duplicate printer detected for {DtoName}; existing printer: {DuplicateName} ({DuplicateId})",
+                dto.Name,
+                duplicate.Name,
+                duplicate.Id);
             throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
         }
 
@@ -1873,7 +1877,7 @@ public class PrintersService(
     public async Task<(string? StreamUrl, string? SnapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
-        if (p == null)
+        if (p == null || !p.IsEnabled)
         {
             return (null, null);
         }
@@ -3126,8 +3130,13 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to upload and start print on printer {Id}", id);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+            _logger.LogWarning(
+                "Failed to upload and start print on printer {Id}; exception type {ExceptionType}",
+                id,
+                ex.GetType().Name);
+            return UploadAndPrintResult.Fail(
+                UploadAndPrintStage.Uploading,
+                "The printer could not start the dispatched job.");
         }
     }
 
@@ -3413,14 +3422,20 @@ public class PrintersService(
                 {
                     if ((duplicateHandling ?? "skip") == "skip")
                     {
-                        _logger.LogInformation("[BulkCreate] Skipping duplicate printer: {PrinterDtoName} (ServerUrl: {ExistingByIpServerUrl})", printerDto.Name, existingByIp.ServerUrl);
+                        _logger.LogInformation(
+                            "[BulkCreate] Skipping duplicate printer: {PrinterDtoName} ({ExistingPrinterId})",
+                            printerDto.Name,
+                            existingByIp.Id);
                         skippedCount++;
                         status = "Skipped";
                         reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                     }
                     else if ((duplicateHandling ?? "skip") == "overwrite")
                     {
-                        _logger.LogInformation("[BulkCreate] Removing duplicate printer: {ExistingByIpName} (ServerUrl: {ExistingByIpServerUrl})", existingByIp.Name, existingByIp.ServerUrl);
+                        _logger.LogInformation(
+                            "[BulkCreate] Removing duplicate printer: {ExistingByIpName} ({ExistingPrinterId})",
+                            existingByIp.Name,
+                            existingByIp.Id);
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
 
@@ -3931,7 +3946,11 @@ public class PrintersService(
             return null;
         }
 
-        _logger.LogInformation("RefreshCameraUrlsAsync: Found printer {PrinterName}, Backend={PrinterBackend}, ServerUrl={PrinterServerUrl}, FrontendPort={PrinterFrontendPort}", printer.Name, printer.Backend, printer.ServerUrl, printer.FrontendPort);
+        _logger.LogInformation(
+            "RefreshCameraUrlsAsync: Found printer {PrinterName} ({PrinterId}), Backend={PrinterBackend}",
+            printer.Name,
+            printer.Id,
+            printer.Backend);
 
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;

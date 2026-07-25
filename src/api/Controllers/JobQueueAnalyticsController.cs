@@ -1,7 +1,9 @@
 ﻿using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Webhooks;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -35,6 +37,7 @@ public class JobQueueAnalyticsController(
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuedPrintJobWithFileMetaDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -78,6 +81,7 @@ public class JobQueueAnalyticsController(
     /// <param name="limit">Maximum number of jobs to return (default 50)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("printer/{printerId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuedPrintJobDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -108,6 +112,7 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("stats")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueueStatsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -130,6 +135,7 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("stats/models")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuePrinterModelStatsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -158,6 +164,7 @@ public class JobQueueAnalyticsController(
     /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("history")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueueHistoryPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -203,6 +210,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The job enqueue request containing G-code file ID and options</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -252,6 +260,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The priority update request containing the new priority value</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}/priority")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -291,6 +300,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to pause</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/pause")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -329,6 +339,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to resume</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/resume")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -367,6 +378,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to cancel</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpDelete("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -405,6 +417,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the completed job to rerun</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/rerun")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -445,6 +458,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The bulk cancel request containing job IDs to cancel</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("bulk/cancel")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(QueueBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -478,6 +492,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The bulk reorder request containing job moves</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("bulk/reorder")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueueBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -511,6 +526,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The ID of the job to retrieve</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -544,6 +560,7 @@ public class JobQueueAnalyticsController(
     /// <param name="updates">The job fields to update</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -595,6 +612,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The notes update request</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}/notes")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -647,6 +665,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">Optional request specifying printer IDs to seed from</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("history/seed")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -682,6 +701,7 @@ public class JobQueueAnalyticsController(
     /// <param name="limit">Maximum number of events to return (default 100, max 1000)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("timeline")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<TimelineEventDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -726,6 +746,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("jobs/{jobId}/state-history")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(JobStateHistoryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -767,6 +788,7 @@ public class JobQueueAnalyticsController(
     /// <param name="dateTo">Optional end date for filtering</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("duration-analytics")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(DurationAnalyticsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -804,6 +826,7 @@ public class JobQueueAnalyticsController(
     /// <param name="id">Job ID</param>
     /// <param name="cancellationToken">Cancellation token</param>
     [HttpGet("jobs/{id}/cost")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -836,6 +859,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">Cost override values</param>
     /// <param name="cancellationToken">Cancellation token</param>
     [HttpPut("jobs/{id}/cost")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -881,6 +905,7 @@ public class JobQueueAnalyticsController(
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The number of jobs that were successfully recalculated.</returns>
     [HttpPost("recalculate-costs")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> RecalculateAllCostsAsync(CancellationToken cancellationToken = default)

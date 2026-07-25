@@ -62,11 +62,9 @@ public class SharedSqliteFixture : IDisposable
         using IServiceScope scope = provider.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Do NOT call EnsureCreated here. The DatabaseInitializer.InitializeAsync
-        // will perform schema provisioning; calling EnsureCreated twice (here and
-        // inside the initializer) has led to duplicate-create errors on shared
-        // in-memory SQLite in concurrent scenarios. Let the initializer be the
-        // single source of truth for schema creation.
+        // Test fixtures provision directly. Production startup uses provider-aware migrations;
+        // the seeding service intentionally no longer creates or alters schema.
+        _ = db.Database.EnsureCreated();
 
         DatabaseInitializer? initializer = scope.ServiceProvider.GetService<DatabaseInitializer>();
         if (initializer != null)

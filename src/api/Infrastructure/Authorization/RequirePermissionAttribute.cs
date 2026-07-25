@@ -1,15 +1,37 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure.Authorization;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
-public sealed class RequirePermissionAttribute(string resource, string action) : Attribute, IAuthorizationRequirement
+public sealed class RequirePermissionAttribute
+    : AuthorizeAttribute, IAuthorizationRequirement, IAuthorizationRequirementData
 {
-    public string Resource { get; } = resource;
+    public RequirePermissionAttribute(string resource, string action)
+    {
+        Resource = resource;
+        Action = action;
+        Permission = $"{resource}:{action}";
+    }
 
-    public string Action { get; } = action;
+    public RequirePermissionAttribute(string permission)
+    {
+        (Resource, Action) = PrintFarmerPermissions.Split(permission);
+        Permission = permission;
+    }
+
+    public string Resource { get; }
+
+    public string Action { get; }
+
+    public string Permission { get; }
+
+    public IEnumerable<IAuthorizationRequirement> GetRequirements()
+    {
+        yield return this;
+    }
 }
 
 public class PermissionAuthorizationHandler(ILogger<RequirePermissionAttribute> logger) : AuthorizationHandler<RequirePermissionAttribute>
@@ -33,16 +55,18 @@ public class PermissionAuthorizationHandler(ILogger<RequirePermissionAttribute> 
         }
 
         // Check if user has admin role (admin has all permissions)
-        if (user.IsInRole("farm_admin"))
+        string permissionClaim = $"{requirement.Resource}:{requirement.Action}";
+        if (PrintFarmerPermissions.IsFarmAdmin(user))
         {
-            _logger.LogDebug("Authorization succeeded: User has admin role");
+            _logger.LogInformation(
+                "Audited farm-admin permission bypass for user {UserId}: {Permission}",
+                user.FindFirstValue(ClaimTypes.NameIdentifier),
+                permissionClaim);
             context.Succeed(requirement);
             return Task.CompletedTask;
         }
 
-        // Check specific permission
-        string permissionClaim = $"{requirement.Resource}:{requirement.Action}";
-        if (user.HasClaim("permission", permissionClaim))
+        if (user.HasClaim(PrintFarmerPermissions.ClaimType, permissionClaim))
         {
             _logger.LogDebug("Authorization succeeded: User has permission {Permission}", permissionClaim);
             context.Succeed(requirement);

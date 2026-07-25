@@ -1,10 +1,13 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Farm.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Hubs;
 
 /// <summary>
 /// SignalR hub for broadcasting maintenance alerts and status updates in real-time.
 /// </summary>
+[Authorize]
 public class MaintenanceHub(ILogger<MaintenanceHub> logger) : Hub
 {
     private readonly ILogger<MaintenanceHub> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -12,6 +15,7 @@ public class MaintenanceHub(ILogger<MaintenanceHub> logger) : Hub
     public override async Task OnConnectedAsync()
     {
         _logger.LogDebug("Client connected to MaintenanceHub: {ConnectionId}", Context.ConnectionId);
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm);
         await base.OnConnectedAsync();
     }
 

@@ -47,7 +47,7 @@ public class JobCostCalculationTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()

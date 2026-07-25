@@ -20,6 +20,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IHubContext<PrinterHub> _hubContext;
     private readonly IDiscoveryProgressCache _progressCache;
+    private readonly IDiscoverySessionRegistry _discoverySessions;
     private readonly ISettingsService _settingsService;
     private readonly ILogger<DiscoveryProxyService> _logger;
     private readonly string _discoveryServiceUrl;
@@ -28,6 +29,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         IHttpClientFactory httpClientFactory,
         IHubContext<PrinterHub> hubContext,
         IDiscoveryProgressCache progressCache,
+        IDiscoverySessionRegistry discoverySessions,
         ISettingsService settingsService,
         ILogger<DiscoveryProxyService> logger,
         IConfiguration config)
@@ -35,6 +37,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _hubContext = hubContext ?? throw new ArgumentNullException(nameof(hubContext));
         _progressCache = progressCache ?? throw new ArgumentNullException(nameof(progressCache));
+        _discoverySessions = discoverySessions ?? throw new ArgumentNullException(nameof(discoverySessions));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         ArgumentNullException.ThrowIfNull(config);
@@ -48,6 +51,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
     public async Task<DiscoveryStreamResponse> StartDiscoveryStreamAsync(
         IReadOnlyList<PrinterBackend>? backends = null,
         bool autoRegister = false,
+        Guid? ownerUserId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("[DISCOVERY] Forwarding discovery request to printer-discovery service at {DiscoveryServiceUrl} (autoRegister={AutoRegister})", _discoveryServiceUrl, autoRegister);
@@ -105,6 +109,10 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                     Status: DiscoveryStatus.Starting,
                     Message: "Discovery starting...");
                 _progressCache.Set(sessionId, initialProgress);
+                if (ownerUserId is { } owner && owner != Guid.Empty)
+                {
+                    _discoverySessions.RegisterSession(sessionId, owner);
+                }
 
                 return new DiscoveryStreamResponse(sessionId, message);
             }

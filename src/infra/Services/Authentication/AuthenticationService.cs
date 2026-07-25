@@ -302,24 +302,13 @@ public class AuthenticationService(
             return false;
         }
 
-        // Diagnostic logging to help tests: print a short preview of the stored hash and verification result
-        try
-        {
-            string? preview = user.PasswordHash != null && user.PasswordHash.Length > 10 ? user.PasswordHash.Substring(0, 10) : user.PasswordHash;
-            Console.WriteLine($"[AuthenticationService] ChangePassword: UserId={userId} StoredHashPreview={preview}");
-        }
-        catch
-        {
-        }
-
         if (string.IsNullOrEmpty(user.PasswordHash))
         {
-            Console.WriteLine($"[AuthenticationService] ChangePassword: Stored hash is null/empty for UserId={userId}");
+            _logger.LogWarning("Password change rejected because user {UserId} has no password hash", userId);
             return false;
         }
 
         bool currentMatches = _passwordHashing.VerifyPassword(currentPassword, user.PasswordHash);
-        Console.WriteLine($"[AuthenticationService] ChangePassword: VerifyPassword result={currentMatches} for UserId={userId}");
         if (!currentMatches)
         {
             return false;

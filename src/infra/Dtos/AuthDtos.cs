@@ -53,8 +53,8 @@ public record UserRoleDto(
     Guid Id,
     Guid UserId,
     Guid RoleId,
+    DateTime AssignedAt,
     string RoleName = "",
-    DateTime AssignedAt = default,
     DateTime? ExpiresAt = null,
     bool IsActive = true);
 

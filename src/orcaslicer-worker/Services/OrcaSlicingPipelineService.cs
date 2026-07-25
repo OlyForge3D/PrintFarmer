@@ -13,20 +13,23 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
     private readonly ILogger<OrcaSlicingPipelineService> _logger;
+    private readonly IWorkerStateService _workerState;
     private readonly string _workingDirectory;
-    private readonly string _storageEndpoint;
     private readonly string _orcaSlicerBinaryPath;
 
-    public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration)
+    public OrcaSlicingPipelineService(
+        HttpClient httpClient,
+        IProgressReporter progressReporter,
+        ILogger<OrcaSlicingPipelineService> logger,
+        IConfiguration configuration,
+        IWorkerStateService workerState)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _progressReporter = progressReporter ?? throw new ArgumentNullException(nameof(progressReporter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
         ArgumentNullException.ThrowIfNull(configuration);
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
-        _storageEndpoint = configuration["SlicerApi:BaseUrl"]
-                          ?? configuration["Worker:StorageEndpoint"]
-                          ?? "http://api:5245";
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/usr/local/bin/orcaslicer";
         if (!Directory.Exists(_workingDirectory))
         {
@@ -39,6 +42,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         ArgumentNullException.ThrowIfNull(job);
         string jobWorkDir = Path.Combine(_workingDirectory, job.Id.ToString());
         _ = Directory.CreateDirectory(jobWorkDir);
+        bool preserveResultForUpload = false;
         try
         {
             _logger.LogInformation("Starting slicing pipeline for job {JobId}", job.Id);
@@ -50,28 +54,35 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             string gcodeFilePath = await RunOrcaSlicerAsync(stlFilePath, configFilePath, jobWorkDir, job, cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 90, "Uploading G-code", cancellationToken);
-            string gcodeUrl = await UploadGcodeAsync(gcodeFilePath, job, cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, 90, "Preparing G-code artifact", cancellationToken);
             await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
             SlicingResult result = new SlicingResult
             {
-                ResultFileUrl = new Uri(gcodeUrl, UriKind.RelativeOrAbsolute),
+                ResultFileUrl = new UriBuilder
+                {
+                    Scheme = Uri.UriSchemeFile,
+                    Path = Path.GetFullPath(gcodeFilePath),
+                }.Uri,
                 EstimatedPrintTimeSeconds = metadata.PrintTimeSeconds,
                 EstimatedFilamentUsageGrams = metadata.FilamentUsageGrams,
                 OutputFileSizeBytes = new FileInfo(gcodeFilePath).Length,
                 LayerCount = metadata.LayerCount,
                 Success = true
             };
-            result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
+            result.Metadata["SlicerVersion"] = $"OrcaSlicer {WorkerConstants.SlicerVersion}";
             result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
             result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
+            preserveResultForUpload = true;
             return result;
         }
         finally
         {
             try
             {
-                Directory.Delete(jobWorkDir, recursive: true);
+                if (!preserveResultForUpload)
+                {
+                    Directory.Delete(jobWorkDir, recursive: true);
+                }
             }
             catch (Exception ex)
             {
@@ -82,13 +93,34 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task<string> FetchStlFileAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
-        HttpResponseMessage response = await _httpClient.GetAsync(job.ModelFileUrl, cancellationToken);
+        WorkerState workerState = _workerState.GetWorkerState();
+        Guid? serviceId = workerState.RegisteredServiceId;
+        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
+        {
+            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
+        }
+
+        using HttpRequestMessage request = new(HttpMethod.Get, job.ModelFileUrl);
+        request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
+        request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+        HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         _ = response.EnsureSuccessStatusCode();
-        string stlFilePath = Path.Combine(workDir, job.ModelFileName);
+        string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
         await using FileStream fileStream = File.Create(stlFilePath);
         await response.Content.CopyToAsync(fileStream, cancellationToken);
         job.InputFileSizeBytes = new FileInfo(stlFilePath).Length;
         return stlFilePath;
+    }
+
+    private static string SanitizeModelFileName(string fileName)
+    {
+        string normalized = (fileName ?? string.Empty).Replace('\\', '/');
+        string baseName = Path.GetFileName(normalized);
+        string sanitized = string.Concat(baseName.Select(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_'
+                ? character
+                : '_'));
+        return string.IsNullOrWhiteSpace(sanitized) ? "model.stl" : sanitized;
     }
 
 #pragma warning disable S1172 // Unused parameters are required by interface
@@ -292,14 +324,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return metadata;
-    }
-
-    private async Task<string> UploadGcodeAsync(string gcodeFilePath, DistributedSlicingJob job, CancellationToken cancellationToken)
-    {
-        string fileName = Path.GetFileName(gcodeFilePath);
-        string mockUrl = $"{_storageEndpoint}/api/files/gcode/{job.Id}/{fileName}";
-        await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-        return mockUrl;
     }
 
     private sealed class GcodeMetadata

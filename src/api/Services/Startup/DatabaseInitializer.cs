@@ -1,5 +1,4 @@
-﻿using System.Data.Common;
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.DataManagement;
@@ -39,71 +38,8 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 _ = await _context.Database.CanConnectAsync();
                 _logger.LogInformation("[DB] Database connection established successfully");
 
-                // For MVP development, use EnsureCreated instead of migrations.
-                // This approach automatically handles schema changes during development.
-                try
-                {
-                    _ = await _context.Database.EnsureCreatedAsync();
-                    _logger.LogInformation("[DB] Database schema ensured successfully (EnsureCreated)");
-
-                    // Lightweight self-healing for SQLite when schema was created before introducing shadow columns
-                    // Ensure case-insensitive shadow columns (NameLowered) & indexes exist for Manufacturers / PrinterModels.
-                    if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            await EnsureCaseInsensitiveColumnsAsync();
-                        }
-                        catch (Exception colEx)
-                        {
-                            _logger.LogWarning(colEx, "[DB] Non-fatal: automatic shadow column/index verification failed: {ColExMessage}", colEx.Message);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "[DB] EnsureCreated failed: {Message}. Attempting manual schema initialization for SQLite.", ex.Message);
-
-                    // Fallback: very early containers (or volume permission issues) sometimes cause EnsureCreated to throw
-                    // For SQLite only, attempt a minimal manual schema verification/creation of the Users table presence heuristic.
-                    try
-                    {
-                        if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Issue a pragma to force open / create file, then check a sentinel table.
-                            _ = await _context.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;");
-
-                            // If no tables exist, this query will fail; wrap & create a tiny bootstrap table then re-run seed later.
-                            // We won't create full schema manually (that belongs to EF model); just let a second EnsureCreated attempt run.
-                            _ = await _context.Database.EnsureCreatedAsync();
-                            _logger.LogInformation("[DB] Fallback EnsureCreated second attempt succeeded");
-
-                            if (string.Equals(dbProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-                            {
-                                try
-                                {
-                                    await EnsureCaseInsensitiveColumnsAsync();
-                                }
-                                catch (Exception colEx)
-                                {
-                                    _logger.LogWarning(colEx, "[DB] Non-fatal (fallback path): automatic shadow column/index verification failed: {ColExMessage}", colEx.Message);
-                                }
-                            }
-                        }
-                        else
-                        {
-                            throw; // Non-SQLite providers should just retry via outer loop
-                        }
-                    }
-                    catch (Exception inner)
-                    {
-                        _logger.LogError(inner, "[DB] Manual fallback schema initialization failed. Will retry (attempt {Value0})", retryCount + 1);
-                        throw; // Bubble to retry loop
-                    }
-                }
-
                 // Seed all data (authentication, catalog, filament types)
-                // Some providers (or test SQLite setups) may require a brief moment after EnsureCreated
+                // Some providers (or test SQLite setups) may require a brief moment after migration
                 // before all connections observe the new schema. Retry a few times for core table existence
                 // before attempting the full seed to avoid "no such table" errors.
                 const int seedMaxAttempts = 3;
@@ -227,7 +163,18 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             new { Name = "update", DisplayName = "Update", Description = "Modify existing resources" },
             new { Name = "delete", DisplayName = "Delete", Description = "Remove resources" },
             new { Name = "execute", DisplayName = "Execute", Description = "Execute operations on resources" },
-            new { Name = "admin", DisplayName = "Administer", Description = "Full administrative control" }
+            new { Name = "admin", DisplayName = "Administer", Description = "Full administrative control" },
+            new { Name = "generate", DisplayName = "Generate", Description = "Generate resource outputs" },
+            new { Name = "publish", DisplayName = "Publish", Description = "Publish resource outputs" },
+            new { Name = "write", DisplayName = "Write", Description = "Create or modify queued resources" },
+            new { Name = "start", DisplayName = "Start", Description = "Start queued work" },
+            new { Name = "cancel", DisplayName = "Cancel", Description = "Cancel queued work" },
+            new { Name = "acknowledge-bed-clear", DisplayName = "Acknowledge Bed Clear", Description = "Acknowledge that a job-specific printer bed is clear" },
+            new { Name = "reconcile", DisplayName = "Reconcile", Description = "Reconcile uncertain queue state" },
+            new { Name = "submit", DisplayName = "Submit", Description = "Submit work for slicing" },
+            new { Name = "read-artifact", DisplayName = "Read Artifact", Description = "Read slicing artifact data" },
+            new { Name = "promote", DisplayName = "Promote", Description = "Promote slicing artifacts into the G-code library" },
+            new { Name = "manage", DisplayName = "Manage", Description = "Manage dispatch configuration" }
         };
         foreach (var action in actions)
         {
@@ -296,7 +243,11 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             new { Name = "roles", DisplayName = "Roles", ResourceType = "system", Description = "Role and permission management" },
             new { Name = "system_settings", DisplayName = "System Settings", ResourceType = "system", Description = "Application configuration and settings" },
             new { Name = "spoolman", DisplayName = "Spoolman Integration", ResourceType = "integration", Description = "Spoolman filament management integration" },
-            new { Name = "network_discovery", DisplayName = "Network Discovery", ResourceType = "system", Description = "Printer network discovery and management" }
+            new { Name = "network_discovery", DisplayName = "Network Discovery", ResourceType = "system", Description = "Printer network discovery and management" },
+            new { Name = "calibration", DisplayName = "Printer Calibration", ResourceType = "calibration", Description = "Printer calibration projects and generation" },
+            new { Name = "queue", DisplayName = "Calibration Queue", ResourceType = "queue", Description = "Authorized queue operations" },
+            new { Name = "slicing", DisplayName = "Slicing", ResourceType = "slicer", Description = "Authorized slicing and artifact operations" },
+            new { Name = "dispatch-settings", DisplayName = "Dispatch Settings", ResourceType = "system", Description = "Dispatch configuration management" }
         };
         foreach (var resource in resources)
         {
@@ -469,152 +420,6 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         {
             _logger.LogWarning(ex, "[DB] Database connection validation failed: {Message}", ex.Message);
             return false;
-        }
-    }
-
-    /// <summary>
-    /// For SQLite + EnsureCreated dev workflow: if the database file predates new shadow columns
-    /// (NameLowered) we add them and their unique indexes safely. This avoids forcing devs to delete
-    /// the whole DB when only these columns were added for case-insensitive uniqueness.
-    /// </summary>
-    private async Task EnsureCaseInsensitiveColumnsAsync()
-    {
-        // Only run for SQLite provider
-        if (!_context.Database.ProviderName?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) ?? true)
-        {
-            return;
-        }
-
-        DbConnection conn = _context.Database.GetDbConnection();
-        await conn.OpenAsync();
-        using DbTransaction tx = await conn.BeginTransactionAsync();
-        try
-        {
-            async Task<bool> ColumnExistsAsync(string table, string column)
-            {
-                using DbCommand cmd = conn.CreateCommand();
-                cmd.Transaction = tx;
-                cmd.CommandText = $"SELECT 1 FROM pragma_table_info('{table}') WHERE lower(name)=lower(@col) LIMIT 1";
-                DbParameter p = cmd.CreateParameter();
-                p.ParameterName = "@col";
-                p.Value = column;
-                _ = cmd.Parameters.Add(p);
-                object? result = await cmd.ExecuteScalarAsync();
-                return result != null;
-            }
-
-            async Task<bool> TableExistsAsync(string table)
-            {
-                using DbCommand cmd = conn.CreateCommand();
-                cmd.Transaction = tx;
-                cmd.CommandText = "SELECT name FROM sqlite_master WHERE type='table' AND name = @tbl LIMIT 1";
-                DbParameter p = cmd.CreateParameter();
-                p.ParameterName = "@tbl";
-                p.Value = table;
-                _ = cmd.Parameters.Add(p);
-                object? r = await cmd.ExecuteScalarAsync();
-                return r != null;
-            }
-
-            async Task EnsureColumnAsync(string table, string column)
-            {
-                if (!await ColumnExistsAsync(table, column))
-                {
-                    using DbCommand alter = conn.CreateCommand();
-                    alter.Transaction = tx;
-                    alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''";
-                    _ = await alter.ExecuteNonQueryAsync();
-                    _logger.LogInformation("[DB] Added missing column {Table}.{Column}", table, column);
-                }
-            }
-
-            async Task<bool> HasDuplicatesAsync(string table)
-            {
-                using DbCommand cmd = conn.CreateCommand();
-                cmd.Transaction = tx;
-                cmd.CommandText = table == "Manufacturers"
-                    ? "SELECT 1 FROM (SELECT lower(Name) AS L, COUNT(*) c FROM Manufacturers GROUP BY lower(Name) HAVING c>1) LIMIT 1"
-                    : "SELECT 1 FROM (SELECT ManufacturerId, lower(Name) AS L, COUNT(*) c FROM PrinterModels GROUP BY ManufacturerId, lower(Name) HAVING c>1) LIMIT 1";
-                object? r = await cmd.ExecuteScalarAsync();
-                return r != null;
-            }
-
-            async Task BackfillAsync(string table)
-            {
-                using DbCommand upd = conn.CreateCommand();
-                upd.Transaction = tx;
-                upd.CommandText = $"UPDATE {table} SET NameLowered = lower(Name) WHERE NameLowered = '' OR NameLowered IS NULL";
-                int rows = await upd.ExecuteNonQueryAsync();
-                if (rows >= 0)
-                {
-                    _logger.LogDebug("[DB] Backfilled {Rows} rows for {Table}.NameLowered", rows, table);
-                }
-            }
-
-            async Task EnsureIndexAsync(string sql, string description)
-            {
-                using DbCommand cmd = conn.CreateCommand();
-                cmd.Transaction = tx;
-                cmd.CommandText = sql;
-                try
-                {
-                    _ = await cmd.ExecuteNonQueryAsync();
-                    _logger.LogInformation("[DB] Ensured index: {Description}", description);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "[DB] Failed to ensure index {Description}: {Message}", description, ex.Message);
-                }
-            }
-
-            // Manufacturers
-            if (await TableExistsAsync("Manufacturers"))
-            {
-                await EnsureColumnAsync("Manufacturers", "NameLowered");
-                await BackfillAsync("Manufacturers");
-                if (await HasDuplicatesAsync("Manufacturers"))
-                {
-                    _logger.LogWarning("[DB] Duplicate manufacturer names (case-insensitive) detected; skipping unique index creation on Manufacturers.NameLowered. Resolve duplicates and restart to enforce uniqueness.");
-                }
-                else
-                {
-                    await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_Manufacturers_NameLowered ON Manufacturers (NameLowered)", "IX_Manufacturers_NameLowered");
-                }
-            }
-            else
-            {
-                _logger.LogInformation("[DB] Skipping Manufacturers shadow column/index creation because Manufacturers table does not exist yet.");
-            }
-
-            // PrinterModels
-            if (await TableExistsAsync("PrinterModels"))
-            {
-                await EnsureColumnAsync("PrinterModels", "NameLowered");
-                await BackfillAsync("PrinterModels");
-                if (await HasDuplicatesAsync("PrinterModels"))
-                {
-                    _logger.LogWarning("[DB] Duplicate printer model names (case-insensitive within manufacturer) detected; skipping unique composite index creation. Resolve duplicates and restart to enforce uniqueness.");
-                }
-                else
-                {
-                    await EnsureIndexAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_PrinterModels_ManufacturerId_NameLowered ON PrinterModels (ManufacturerId, NameLowered)", "IX_PrinterModels_ManufacturerId_NameLowered");
-                }
-            }
-            else
-            {
-                _logger.LogInformation("[DB] Skipping PrinterModels shadow column/index creation because PrinterModels table does not exist yet.");
-            }
-
-            await tx.CommitAsync();
-        }
-        catch (Exception ex)
-        {
-            await tx.RollbackAsync();
-            throw new InvalidOperationException("Failed to ensure shadow columns for case-insensitive uniqueness", ex);
-        }
-        finally
-        {
-            await conn.CloseAsync();
         }
     }
 }

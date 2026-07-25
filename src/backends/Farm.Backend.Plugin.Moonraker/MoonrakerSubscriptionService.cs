@@ -192,7 +192,8 @@ public sealed class MoonrakerSubscriptionService(
                 spoolInfo,
                 FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
 
-            await hub!.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
+            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("printerupdated", statusUpdate, ct);
             _lastHttpPollTimes[printerId] = DateTime.UtcNow;
 
             _logger.LogInformation(
@@ -1156,7 +1157,8 @@ public sealed class MoonrakerSubscriptionService(
         {
             PrinterToolheadUpdate update = new PrinterToolheadUpdate(printerId, x, y, z, homedAxes);
             _logger.LogDebug("Emitting toolhead update for printer {PrinterId}: X={X}, Y={Y}, Z={Z}, HomedAxes={HomedAxes}", printerId, x, y, z, homedAxes);
-            await hub!.Clients.All.SendAsync("toolheadupdate", update, ct);
+            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("toolheadupdate", update, ct);
         }
         catch (Exception ex)
         {
@@ -1214,7 +1216,8 @@ public sealed class MoonrakerSubscriptionService(
         {
             PrinterExtruderUpdate update = new PrinterExtruderUpdate(printerId, temperature, target);
             _logger.LogDebug("Emitting extruder update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
-            await hub!.Clients.All.SendAsync("extruderupdate", update, ct);
+            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("extruderupdate", update, ct);
         }
         catch (Exception extruderEx)
         {
@@ -1272,7 +1275,8 @@ public sealed class MoonrakerSubscriptionService(
         {
             PrinterHeaterBedUpdate update = new PrinterHeaterBedUpdate(printerId, temperature, target);
             _logger.LogDebug("Emitting heater bed update for printer {PrinterId}: Temp={Temperature}, Target={Target}", printerId, temperature, target);
-            await hub!.Clients.All.SendAsync("heaterbedupdate", update, ct);
+            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("heaterbedupdate", update, ct);
         }
         catch (Exception ex)
         {
@@ -1945,8 +1949,7 @@ public sealed class MoonrakerSubscriptionService(
 
             _logger.LogWarning(
                 ex,
-                "Failed to fetch Qidibox filament dictionary from {ServerUrl} (attempt {Attempt}/{Max}). Retrying in {Delay}s.",
-                serverUrl,
+                "Failed to fetch Qidibox filament dictionary (attempt {Attempt}/{Max}). Retrying in {Delay}s.",
                 state.QidiboxDictFetchAttempts,
                 maxAttempts,
                 delaySec);
@@ -2137,7 +2140,8 @@ public sealed class MoonrakerSubscriptionService(
             {
                 PrinterStateUpdate update = new PrinterStateUpdate(printerId, stateValue, progress, jobName, PrinterStatusDto.ExtractFileName(jobName));
                 _logger.LogDebug("Emitting state update for printer {PrinterId}: State={StateValue}, Progress={Progress}, JobName={JobName}", printerId, stateValue, progress, jobName);
-                await hub!.Clients.All.SendAsync("stateupdate", update, ct);
+                await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                    .SendAsync("stateupdate", update, ct);
             }
             catch (Exception ex)
             {
@@ -2212,7 +2216,8 @@ public sealed class MoonrakerSubscriptionService(
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
             _logger.LogDebug("[MoonrakerSubscriptionService] Hub is null: {Value0}", hub == null);
-            await hub!.Clients.All.SendAsync("printerupdated", update, ct);
+            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
         {
@@ -2271,7 +2276,8 @@ public sealed class MoonrakerSubscriptionService(
             _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {PrinterId} via SignalR", printerId);
-            await hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+            await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug("Sent offline status for printer {PrinterId}", printerId);
         }
         catch (OperationCanceledException)
@@ -2311,7 +2317,8 @@ public sealed class MoonrakerSubscriptionService(
                 SpoolInfo: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
-            await hub.Clients.All.SendAsync("printerupdated", shutdownUpdate, ct);
+            await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                .SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug("Sent shutdown status for printer {PrinterId}", printerId);
         }
         catch (OperationCanceledException)
@@ -2478,7 +2485,7 @@ public sealed class MoonrakerSubscriptionService(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to query homed axes for {ServerUrl}", serverUrl);
+            _logger.LogDebug(ex, "Failed to query homed axes");
             return null;
         }
     }
@@ -2561,13 +2568,13 @@ public sealed class MoonrakerSubscriptionService(
             }
             catch (Exception parseEx)
             {
-                _logger.LogWarning(parseEx, "GetSpoolInfoAsync: Failed to parse spool details for {ServerUrl}", serverUrl);
+                _logger.LogWarning(parseEx, "GetSpoolInfoAsync: Failed to parse spool details");
                 return new PrinterSpoolInfoDto(HasActiveSpool: true, ActiveSpoolId: activeSpoolId);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GetSpoolInfoAsync: Exception occurred during spool detection for {ServerUrl}", serverUrl);
+            _logger.LogError(ex, "GetSpoolInfoAsync: Exception occurred during spool detection");
 
             // If any operations fail, Spoolman status is unknown
             return null;
@@ -2637,7 +2644,8 @@ public sealed class MoonrakerSubscriptionService(
                         return;
                     }
 
-                    await hub.Clients.All.SendAsync("printerupdated", statusUpdate, ct);
+                    await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                        .SendAsync("printerupdated", statusUpdate, ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded
                     _lastHttpPollTimes[printer.Id] = DateTime.UtcNow;

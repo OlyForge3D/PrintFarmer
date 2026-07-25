@@ -251,68 +251,57 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             await _repo.AddAsync(svc, ct);
         }
 
-        await _repo.SaveChangesAsync(ct);
-
         // Synchronize to Worker table for dispatcher
-        try
+        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
+            ?? (!string.IsNullOrWhiteSpace(svc.Host)
+                ? await _workerRepo.GetByEndpointUrlAsync(svc.Host)
+                : null);
+
+        if (worker != null)
         {
-            // Find existing worker by service ID or endpoint URL
-            Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
-                ?? (!string.IsNullOrWhiteSpace(svc.Host)
-                    ? await _workerRepo.GetByEndpointUrlAsync(svc.Host)
-                    : null);
-
-            if (worker != null)
-            {
-                // Update existing worker
-                worker.ServiceId = svc.Id.ToString();
-                worker.Name = svc.Name;
-                worker.EndpointUrl = svc.Host ?? string.Empty;
-                worker.CapabilitiesJson = svc.CapabilitiesJson ?? "[]";
-                worker.Status = WorkerStatus.Online;
-                worker.TotalSlots = maxJobs;
-                worker.ActiveJobs = 0;
-                worker.LastHeartbeat = DateTime.UtcNow;
-                worker.OnlineAt = DateTime.UtcNow;
-                worker.ApiKey = svc.ApiKey;
-                worker.Version = svc.Version;
-                worker.UpdatedAt = DateTime.UtcNow;
-                worker.IsDisabled = false;
-            }
-            else
-            {
-                worker = new Worker
-                {
-                    Id = Guid.NewGuid(),
-                    ServiceId = svc.Id.ToString(),
-                    Name = svc.Name,
-                    EndpointUrl = svc.Host ?? string.Empty,
-                    CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
-                    Status = WorkerStatus.Online,
-                    TotalSlots = maxJobs,
-                    ActiveJobs = 0,
-                    CompletedJobs = 0,
-                    FailedJobs = 0,
-                    LastHeartbeat = DateTime.UtcNow,
-                    RegisteredAt = DateTime.UtcNow,
-                    OnlineAt = DateTime.UtcNow,
-                    ApiKey = svc.ApiKey,
-                    Version = svc.Version,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
-                    IsDisabled = false
-                };
-
-                await _workerRepo.AddAsync(worker);
-            }
-
-            await _repo.SaveChangesAsync(ct);
+            worker.ServiceId = svc.Id.ToString();
+            worker.Name = svc.Name;
+            worker.EndpointUrl = svc.Host ?? string.Empty;
+            worker.CapabilitiesJson = svc.CapabilitiesJson ?? "[]";
+            worker.Status = WorkerStatus.Online;
+            worker.TotalSlots = maxJobs;
+            worker.ActiveJobs = 0;
+            worker.LastHeartbeat = DateTime.UtcNow;
+            worker.OnlineAt = DateTime.UtcNow;
+            worker.ApiKey = svc.ApiKey;
+            worker.Version = svc.Version;
+            worker.UpdatedAt = DateTime.UtcNow;
+            worker.IsDisabled = false;
         }
-        catch (Exception ex)
+        else
         {
-            // Log but don't fail registration if Worker sync fails
-            _logger.LogWarning("[RegisterAsync] Failed to sync Worker entity: {ExMessage}", ex.Message);
+            worker = new Worker
+            {
+                Id = Guid.NewGuid(),
+                ServiceId = svc.Id.ToString(),
+                Name = svc.Name,
+                EndpointUrl = svc.Host ?? string.Empty,
+                CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
+                Status = WorkerStatus.Online,
+                TotalSlots = maxJobs,
+                ActiveJobs = 0,
+                CompletedJobs = 0,
+                FailedJobs = 0,
+                LastHeartbeat = DateTime.UtcNow,
+                RegisteredAt = DateTime.UtcNow,
+                OnlineAt = DateTime.UtcNow,
+                ApiKey = svc.ApiKey,
+                Version = svc.Version,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                IsDisabled = false
+            };
+
+            await _workerRepo.AddAsync(worker);
         }
+
+        // SlicerService and Worker share the scoped DbContext, so this single save is atomic.
+        await _repo.SaveChangesAsync(ct);
 
         // Enable the slicer feature on first worker registration.
         // This is the single source of truth: slicer UI is shown only when a worker exists.
@@ -337,7 +326,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         {
             try
             {
-                _logger.LogInformation("OrcaSlicer service registered with push seeding enabled, seeding profiles from {SvcHost}", svc.Host);
+                _logger.LogInformation(
+                    "OrcaSlicer service {SlicerServiceId} registered with push seeding enabled",
+                    svc.Id);
                 await SeedProfilesFromWorkerAsync(svc.Host ?? string.Empty, ct);
                 _logger.LogInformation("Profile seeding completed");
             }
@@ -358,14 +349,12 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         // Broadcast registration event (best-effort)
         try
         {
-            await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerRegistered, new
+            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync(SlicerHubEvents.SlicerRegistered, new
             {
                 id = svc.Id,
                 name = svc.Name,
                 slicerType = svc.SlicerType,
                 version = svc.Version,
-                host = svc.Host,
-                capabilitiesJson = svc.CapabilitiesJson,
                 maxConcurrentJobs = Math.Min(svc.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs)),
                 status = svc.Status,
                 lastSeen = svc.LastSeen
@@ -485,7 +474,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         try
         {
-            await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerHeartbeat, new
+            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync(SlicerHubEvents.SlicerHeartbeat, new
             {
                 id = svc.Id,
                 name = svc.Name,
@@ -571,7 +560,8 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         try
         {
-            await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
+            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators)
+                .SendAsync(SlicerHubEvents.SlicerDeregistered, new { id = svc.Id, name = svc.Name }, ct);
         }
         catch
         {
@@ -642,7 +632,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         // Broadcast rotation event (best-effort)
         try
         {
-            await _hub.Clients.All.SendAsync(SlicerHubEvents.SlicerApiKeyRotated, new
+            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync(SlicerHubEvents.SlicerApiKeyRotated, new
             {
                 id = svc.Id,
                 name = svc.Name,
@@ -685,7 +675,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             return 0;
         }
 
-        _logger.LogInformation("[ImportProfilesForModel] Importing slicer profiles for {ManufacturerName} {PrinterModelName} from worker {OrcaWorkerHost}", manufacturerName, printerModelName, orcaWorker.Host);
+        _logger.LogInformation(
+            "[ImportProfilesForModel] Importing slicer profiles for {ManufacturerName} {PrinterModelName} from worker {WorkerId}",
+            manufacturerName,
+            printerModelName,
+            orcaWorker.Id);
 
         try
         {

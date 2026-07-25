@@ -15,18 +15,21 @@ public class SignalRTaskBroadcaster(IHubContext<PrinterHub> hubContext) : ITaskB
     /// <inheritdoc />
     public async Task BroadcastTaskCreatedAsync(UserTaskDto task, CancellationToken ct = default)
     {
-        await _hubContext.Clients.All.SendAsync("taskcreated", task, ct);
+        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            .SendAsync("taskcreated", task, ct);
     }
 
     /// <inheritdoc />
     public async Task BroadcastTaskUpdatedAsync(UserTaskDto task, CancellationToken ct = default)
     {
-        await _hubContext.Clients.All.SendAsync("taskupdated", task, ct);
+        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            .SendAsync("taskupdated", task, ct);
     }
 
     /// <inheritdoc />
     public async Task BroadcastPendingTaskCountAsync(int count, CancellationToken ct = default)
     {
-        await _hubContext.Clients.All.SendAsync("pendingtaskcount", new { count }, ct);
+        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            .SendAsync("pendingtaskcount", new { count }, ct);
     }
 }

@@ -15,7 +15,7 @@ public class SlicingCompletionNotification
 
     public bool Success { get; set; }
 
-    public Uri? ResultFileUrl { get; set; }
+    public string ArtifactsRoute { get; set; } = string.Empty;
 
     public double ProcessingTimeSeconds { get; set; }
 
@@ -28,8 +28,6 @@ public class SlicingCompletionNotification
     public string? ErrorMessage { get; set; }
 
     public DateTime CompletedAt { get; set; }
-
-    public Dictionary<string, object> Metadata { get; set; } = [];
 }
 
 /// <summary>
@@ -50,6 +48,4 @@ public class SlicingFailureNotification
     public int RetryCount { get; set; }
 
     public bool CanRetry { get; set; }
-
-    public Dictionary<string, object> Metadata { get; set; } = [];
 }

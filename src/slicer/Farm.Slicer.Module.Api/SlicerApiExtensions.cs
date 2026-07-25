@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Api.HostedServices;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Repositories;
@@ -9,10 +11,12 @@ using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api;
@@ -42,6 +46,12 @@ public static class SlicerApiExtensions
         // SignalR notifiers
         _ = services.AddSingleton<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
         _ = services.AddScoped<ISliceJobEventService, SliceJobEventService>();
+        _ = services.AddScoped<IPermissionValidator, ClaimsPermissionValidator>();
+        _ = services.AddScoped<ISlicerResourceAccessAuthorizer, SlicerResourceAccessAuthorizer>();
+        _ = services.AddScoped<IPrinterAccessValidator, PrinterAccessValidator>();
+        services.TryAddSingleton<
+            Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
+            SlicerAuthorizationResultHandler>();
 
         // Profile mapping and export
         _ = services.AddScoped<IOrcaPresetMappingService, OrcaPresetMappingService>();
@@ -55,7 +65,8 @@ public static class SlicerApiExtensions
         // Core slicing services
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
-        _ = services.AddSingleton<IWorkerAuthService, WorkerAuthService>();
+        _ = services.AddScoped<IWorkerAuthService, WorkerAuthService>();
+        _ = services.AddScoped<ISlicerApiKeyValidator, SlicerApiKeyValidator>();
 
         // Artifact services
         _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));

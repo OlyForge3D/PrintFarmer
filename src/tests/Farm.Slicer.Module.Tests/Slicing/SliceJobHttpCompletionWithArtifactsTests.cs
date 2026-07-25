@@ -48,6 +48,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker worker = await db.Workers.SingleAsync();
 
         SliceJob job = new SliceJob
         {
@@ -59,7 +61,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "test-model.stl",
             ModelFileUrl = "http://example/test-model.stl",
-            WorkerId = Guid.NewGuid()
+            WorkerId = worker.Id
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -67,13 +69,13 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload G-code artifact (primary) using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Generated G-code\nG28 ; Home\nG1 X10 Y10 Z0.2 F3000\n; End");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "output.gcode", "application/gcode");
-        Artifact primaryArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, null, "gcode", default);
+        Artifact primaryArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
         _ = primaryArtifact.Should().NotBeNull();
 
         // Upload thumbnail artifact (additional) using service
         byte[] thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }; // PNG header stub
         TestFormFile thumbnailForm = new TestFormFile(thumbnailBytes, "thumbnail.png", "image/png");
-        Artifact thumbnailArtifact = await artifactsService.UploadAsync(thumbnailForm, job.Id, null, "thumbnail", default);
+        Artifact thumbnailArtifact = await artifactsService.UploadAsync(thumbnailForm, job.Id, worker.Id, "thumbnail", default);
         _ = thumbnailArtifact.Should().NotBeNull();
 
         // Complete job with primary, additional artifact, and inline log text
@@ -90,8 +92,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
-        completeRequestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -106,12 +106,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         _ = completeResult.EstimatedPrintTimeSeconds.Should().Be(3600);
         _ = completeResult.FilamentUsedGrams.Should().Be(25.5m);
 
-        // Should have 3 artifacts: primary G-code, thumbnail, and auto-created log
-        _ = completeResult.ArtifactIds.Should().HaveCount(3);
+        // Untrusted inline worker logs are not persisted or returned.
+        _ = completeResult.ArtifactIds.Should().HaveCount(2);
         _ = completeResult.ArtifactIds.Should().Contain(primaryArtifact.Id);
         _ = completeResult.ArtifactIds.Should().Contain(thumbnailArtifact.Id);
-        _ = completeResult.LogArtifactId.Should().NotBeNull();
-        _ = completeResult.ArtifactIds.Should().Contain(completeResult.LogArtifactId!.Value);
+        _ = completeResult.LogArtifactId.Should().BeNull();
 
         // Assert - Job state persisted (query DB directly to bypass any EF caching issues)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
@@ -123,16 +122,16 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         _ = updatedJob.ResultFileUrl.Should().NotBeNullOrEmpty();
         _ = updatedJob.EstimatedPrintTimeSeconds.Should().Be(3600);
         _ = updatedJob.FilamentUsedGrams.Should().Be(25.5m);
-        _ = updatedJob.ArtifactsCount.Should().Be(3);
+        _ = updatedJob.ArtifactsCount.Should().Be(2);
         _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(0);
 
         // Assert - Artifacts retrievable
         IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IReadOnlyList<Artifact> artifacts = await verifyArtifactsService.ListByJobAsync(job.Id, default);
-        _ = artifacts.Should().HaveCount(3);
+        _ = artifacts.Should().HaveCount(2);
         _ = artifacts.Should().Contain(a => a.Id == primaryArtifact.Id && a.Kind == "gcode");
         _ = artifacts.Should().Contain(a => a.Id == thumbnailArtifact.Id && a.Kind == "thumbnail");
-        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.FileName == "slicing.log");
+        _ = artifacts.Should().NotContain(a => a.Kind == "log");
     }
 
     [Fact(DisplayName = "Complete job with only G-code (minimal artifacts)")]
@@ -142,6 +141,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker worker = await db.Workers.SingleAsync();
 
         SliceJob job = new SliceJob
         {
@@ -153,7 +154,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "minimal.stl",
             ModelFileUrl = "http://example/minimal.stl",
-            WorkerId = Guid.NewGuid()
+            WorkerId = worker.Id
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -161,7 +162,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload only G-code using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Minimal G-code\nG28\n");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "minimal.gcode", "application/gcode");
-        Artifact artifact = await artifactsService.UploadAsync(gcodeForm, job.Id, null, "gcode", default);
+        Artifact artifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
 
         // Complete with minimal request (no log, no additional artifacts, no metrics)
         CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
@@ -173,8 +174,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
-        completeRequestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -200,11 +199,13 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
     public async Task Complete_Job_Fails_401_Without_Auth()
     {
         // Arrange - use a client without worker key header
-        HttpClient clientWithoutWorkerKey = await _factory.CreateAuthenticatedClientAsync();
+        HttpClient clientWithoutWorkerKey = await _factory.CreateAdminClientAsync();
 
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker worker = await db.Workers.SingleAsync();
 
         SliceJob job = new SliceJob
         {
@@ -216,7 +217,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "auth-test.stl",
             ModelFileUrl = "http://example/auth-test.stl",
-            WorkerId = Guid.NewGuid()
+            WorkerId = worker.Id
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -253,6 +254,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        Worker worker = await db.Workers.SingleAsync();
 
         SliceJob job = new SliceJob
         {
@@ -264,7 +267,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "complex-model.3mf",
             ModelFileUrl = "http://example/complex-model.3mf",
-            WorkerId = Guid.NewGuid()
+            WorkerId = worker.Id
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -272,17 +275,17 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload G-code using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Complex G-code\nG28\nG1 X100 Y100\n");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "complex.gcode", "application/gcode");
-        Artifact gcodeArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, null, "gcode", default);
+        Artifact gcodeArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
 
         // Upload thumbnail 1 (preview) using service
         byte[] thumb1Bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x01 };
         TestFormFile thumb1Form = new TestFormFile(thumb1Bytes, "preview-small.png", "image/png");
-        Artifact thumb1Artifact = await artifactsService.UploadAsync(thumb1Form, job.Id, null, "thumbnail", default);
+        Artifact thumb1Artifact = await artifactsService.UploadAsync(thumb1Form, job.Id, worker.Id, "thumbnail", default);
 
         // Upload thumbnail 2 (large preview) using service
         byte[] thumb2Bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x02 };
         TestFormFile thumb2Form = new TestFormFile(thumb2Bytes, "preview-large.png", "image/png");
-        Artifact thumb2Artifact = await artifactsService.UploadAsync(thumb2Form, job.Id, null, "thumbnail", default);
+        Artifact thumb2Artifact = await artifactsService.UploadAsync(thumb2Form, job.Id, worker.Id, "thumbnail", default);
 
         // Generate large log text (simulate verbose slicer output)
         StringBuilder logBuilder = new StringBuilder();
@@ -308,8 +311,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
-        completeRequestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -317,23 +318,21 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         _ = completeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         CompleteSliceJobResponse? completeResult = await completeResponse.Content.ReadFromJsonAsync<CompleteSliceJobResponse>();
 
-        // Should have 4 artifacts: gcode + 2 thumbnails + auto-created log
-        _ = completeResult!.ArtifactIds.Should().HaveCount(4);
-        _ = completeResult.LogArtifactId.Should().NotBeNull();
+        // Inline logs are untrusted worker data and are intentionally ignored.
+        _ = completeResult!.ArtifactIds.Should().HaveCount(3);
+        _ = completeResult.LogArtifactId.Should().BeNull();
 
         // Verify all artifacts persisted (use fresh scope to avoid stale tracking)
         using IServiceScope verifyScope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         SlicerDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         IArtifactsService verifyArtifactsService = verifyScope.ServiceProvider.GetRequiredService<IArtifactsService>();
         IReadOnlyList<Artifact> artifacts = await verifyArtifactsService.ListByJobAsync(job.Id, default);
-        _ = artifacts.Should().HaveCount(4);
-
-        Artifact logArtifact = artifacts.Should().ContainSingle(a => a.Kind == "log").Subject;
-        _ = logArtifact.SizeBytes.Should().BeGreaterThan(5000); // Large log should be >5KB
+        _ = artifacts.Should().HaveCount(3);
+        _ = artifacts.Should().NotContain(a => a.Kind == "log");
 
         SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
-        _ = updatedJob!.ArtifactsCount.Should().Be(4);
-        _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(5000);
+        _ = updatedJob!.ArtifactsCount.Should().Be(3);
+        _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(0);
     }
 
     private sealed class TestFormFile(byte[] data, string fileName, string contentType) : IFormFile
