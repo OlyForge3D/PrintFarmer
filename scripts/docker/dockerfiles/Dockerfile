@@ -1,6 +1,12 @@
 # syntax=docker/dockerfile:1
 # Multi-stage build for PrintFarmer React + ASP.NET Core
 
+ARG BUILD_VERSION=development
+ARG VCS_REF=unknown
+ARG SOURCE_REPOSITORY=""
+ARG SOURCE_ARCHIVE_URL=""
+ARG SBOM_URL=""
+
 # Stage 1: Build React application
 FROM node:24-alpine AS react-build
 WORKDIR /app
@@ -41,7 +47,21 @@ RUN dotnet publish ./api/Farm.Web.Api.csproj \
 
 # Stage 3: Final runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="PrintFarmer Monolith" \
+      org.opencontainers.image.description="PrintFarmer API and web client monolith" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 # Install curl for health checks
 RUN apt-get update && \
@@ -53,6 +73,8 @@ COPY --from=dotnet-build /app/publish .
 
 # Copy React build output to wwwroot
 COPY --from=react-build /app/dist ./wwwroot
+COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Create directories for file storage
 RUN mkdir -p /app/uploads /app/gcode /app/slicers /data
@@ -60,6 +82,11 @@ RUN mkdir -p /app/uploads /app/gcode /app/slicers /data
 # Set environment variables
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
+ENV PFARM__SourceInfo__Revision=${VCS_REF}
+ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
+ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
+ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
 
 # Expose ports
 EXPOSE 8080

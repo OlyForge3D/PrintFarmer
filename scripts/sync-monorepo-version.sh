@@ -16,6 +16,7 @@ readonly SCRIPT_NAME
 ROOT="$(git rev-parse --show-toplevel)"
 readonly ROOT
 readonly VERSION_FILE="$ROOT/VERSION"
+readonly DIRECTORY_BUILD_PROPS="$ROOT/Directory.Build.props"
 readonly MOBILE_PBXPROJ="$ROOT/mobile/PrintFarmer.xcodeproj/project.pbxproj"
 
 CHECK_ONLY=false
@@ -63,12 +64,42 @@ sync_xcode_version() {
     echo "✅ Updated mobile MARKETING_VERSION to $version"
 }
 
+sync_dotnet_version() {
+    local version="$1"
+    local current
+
+    if [[ ! -f "$DIRECTORY_BUILD_PROPS" ]]; then
+        echo "Error: Directory.Build.props not found at $DIRECTORY_BUILD_PROPS" >&2
+        return 1
+    fi
+
+    current="$(sed -n 's/.*<VersionPrefix[^>]*>\([^<]*\)<\/VersionPrefix>.*/\1/p' "$DIRECTORY_BUILD_PROPS" | head -n 1)"
+    if [[ -z "$current" ]]; then
+        echo "Error: VersionPrefix not found in $DIRECTORY_BUILD_PROPS" >&2
+        return 1
+    fi
+
+    if "$CHECK_ONLY"; then
+        if [[ "$current" != "$version" ]]; then
+            echo "❌ .NET VersionPrefix mismatch: got '$current', expected '$version'"
+            return 1
+        fi
+        echo "✅ .NET VersionPrefix is in sync: $version"
+        return 0
+    fi
+
+    sed -E -i.bak "s#(<VersionPrefix[^>]*>)[^<]*(</VersionPrefix>)#\1${version}\2#g" "$DIRECTORY_BUILD_PROPS"
+    rm -f "${DIRECTORY_BUILD_PROPS}.bak"
+    echo "✅ Updated .NET VersionPrefix to $version"
+}
+
 main() {
     local version
     version="$(get_version)"
 
     echo "📦 Monorepo version: $version"
 
+    sync_dotnet_version "$version"
     sync_xcode_version "$version"
 
     if ! "$CHECK_ONLY"; then

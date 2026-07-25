@@ -22,6 +22,11 @@ services:
         NODE_TAG: ${NODE_TAG}
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
+        BUILD_VERSION: ${BUILD_VERSION:-development}
+        VCS_REF: ${VCS_REF:-unknown}
+        SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+        SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+        SBOM_URL: ${SBOM_URL:-}
     image: printfarmer-slicer-host
     container_name: printfarmer-slicer-host
     restart: unless-stopped

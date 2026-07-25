@@ -1,3 +1,9 @@
+ARG BUILD_VERSION=development
+ARG VCS_REF=unknown
+ARG SOURCE_REPOSITORY=""
+ARG SOURCE_ARCHIVE_URL=""
+ARG SBOM_URL=""
+
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
 WORKDIR /app
 EXPOSE 5000
@@ -36,8 +42,25 @@ RUN dotnet publish ./api/Farm.Web.Api.csproj \
     --no-restore
 
 FROM base AS final
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="PrintFarmer API" \
+      org.opencontainers.image.description="PrintFarmer API server" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
+
 COPY --from=build /app/publish .
+COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Create necessary directories
 RUN mkdir -p /app/uploads /app/gcode /app/slicers
@@ -45,6 +68,11 @@ RUN mkdir -p /app/uploads /app/gcode /app/slicers
 # Set environment
 ENV ASPNETCORE_URLS=http://+:5000
 ENV ASPNETCORE_ENVIRONMENT=Production
+ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
+ENV PFARM__SourceInfo__Revision=${VCS_REF}
+ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
+ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
+ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=5 \
