@@ -91,10 +91,19 @@ bespoke pages instead of a metadata-driven `<SettingsPage>`.
   the Farm Defaults tab renders only `<FarmSettingsSection />` (its `afterContent`) with
   an empty metadata section list. If you add a class with `[SettingDisplay(Group = "General")]`,
   it will begin appearing on that tab automatically.
-- **`Job Queue`** — one settings class (`HistorySeedingBackgroundService.cs`) declares
-  `Group = "Job Queue"`, but no `SUB_PAGE_CONTENT` entry whitelists that group. Those
-  properties are currently unreachable from the UI. This is a pre-existing gap flagged
-  for follow-up; do not treat it as configurable.
+
+### `Job Queue` — fixed during this epic
+
+`HistorySeedingBackgroundService.cs` declares `Group = "Job Queue"`. Until #939 no tab
+listed that group in `allowedGroups` and `SETTINGS_GROUP_TO_LOCATION` had no entry for
+it, so the section rendered nowhere *and* the command palette skipped it — leaving it
+unreachable by any route. It is now mapped onto the **Automation** sub-page alongside
+`Operations`, `Monitoring` and `Maintenance`, and is a normal configurable section.
+
+> **If you add a new group,** add it in **both** places or it will silently disappear:
+> the owning tab's `allowedGroups` in `SettingsShell.tsx`, and `SETTINGS_GROUP_TO_LOCATION`
+> in `settings-navigation.ts`. The palette skips any group missing from the latter via its
+> `if (!location) continue` guard, and it does so without warning.
 
 ## Backend Settings Classes
 
