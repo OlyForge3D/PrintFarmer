@@ -2833,6 +2833,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("ActiveToolheadIndex")
+                        .HasColumnType("int");
+
                     b.Property<string>("ApiKey")
                         .HasColumnType("nvarchar(max)");
 
@@ -2844,8 +2847,67 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<string>("BackendApiVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<int>("BackendPort")
                         .HasColumnType("int");
+
+                    b.Property<string>("BackendVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<double?>("BedOriginX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("BedOriginY")
+                        .HasColumnType("float");
+
+                    b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CalibrationFilamentProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CalibrationHardwareVerifiedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool?>("CalibrationHasEnclosure")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("CalibrationHasHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("CalibrationMachineProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("CalibrationMotionType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("CalibrationProcessProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CalibrationProfileFormat")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CalibrationSlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CalibrationSlicerEngine")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CalibrationSlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("ConfigurationRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("nvarchar(max)");
@@ -2856,13 +2918,52 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("DateAcquired")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("ExcludedRegionsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("FirmwareDetectedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("FirmwareDetectionConfidence")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("decimal(5,4)");
+
+                    b.Property<int>("FirmwareDetectionSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FirmwareDetectionVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("FirmwareFamily")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("FirmwareIdentityVerified")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<int?>("FrontendPort")
                         .HasColumnType("int");
+
+                    b.Property<int>("GcodeDialect")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
 
                     b.Property<bool>("HasEnclosure")
                         .HasColumnType("bit");
 
                     b.Property<bool>("HasHeatedBed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("bit");
 
                     b.Property<bool>("InMaintenance")
@@ -2883,6 +2984,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("MaxAcceleration")
+                        .HasColumnType("int");
+
                     b.Property<int?>("MaxBedTemp")
                         .HasColumnType("int");
 
@@ -2895,7 +2999,16 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("MaxBuildVolumeZ")
                         .HasColumnType("float");
 
+                    b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("int");
+
                     b.Property<int?>("MaxPrintSpeed")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxTravelAcceleration")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxTravelSpeed")
                         .HasColumnType("int");
 
                     b.Property<Guid>("ModelId")
@@ -2922,6 +3035,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Password")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PrintablePolygonJson")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<Guid?>("PrinterGroupId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2936,6 +3052,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(256)");
 
                     b.Property<bool>("SupportsAutoLeveling")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("SupportsFirmwareRetraction")
+                        .HasColumnType("bit");
+
+                    b.Property<bool?>("SupportsPressureAdvance")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("TemplateMachineProfileId")
@@ -3767,8 +3889,19 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("CurrentSpoolId")
                         .HasColumnType("int");
 
+                    b.Property<string>("DriveType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ExtruderGearRatio")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("ExtruderModelId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("HotendMaxTemperature")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("HotendModelId")
                         .HasColumnType("uniqueidentifier");
@@ -3776,18 +3909,49 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int>("Index")
                         .HasColumnType("int");
 
+                    b.Property<bool?>("IsDirectDrive")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsPrimary")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
+
+                    b.Property<double?>("MaxVolumetricFlow")
+                        .HasColumnType("float");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("float");
+
+                    b.Property<bool?>("NozzleIsHardened")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("NozzleMaterial")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("NozzleMaxTemperature")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("NozzleModelId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("NozzleType")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("OffsetX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("OffsetY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("OffsetZ")
+                        .HasColumnType("float");
 
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");

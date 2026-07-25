@@ -1611,6 +1611,8 @@ public class PrintersController(
             p.MachineHourlyRate = dto.MachineHourlyRate.Value;
         }
 
+        capabilityChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(p, dto);
+
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
         {
@@ -1681,6 +1683,10 @@ public class PrintersController(
                         toolhead.IsPrimary = toolheadDto.IsPrimary.Value;
                         toolheadChanged = true;
                     }
+
+                    toolheadChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(
+                        toolhead,
+                        toolheadDto);
 
                     if (toolheadChanged)
                     {

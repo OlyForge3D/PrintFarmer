@@ -45,6 +45,10 @@ public class FilamentProfile
 
     public string? SlicerVersion { get; set; }
 
+    public string? SlicerDistribution { get; set; }
+
+    public string? ProfileFormat { get; set; }
+
     /// <summary>Soft reference to the user who created this profile (no FK constraint).</summary>
     public Guid? CreatedByUserId { get; set; }
 

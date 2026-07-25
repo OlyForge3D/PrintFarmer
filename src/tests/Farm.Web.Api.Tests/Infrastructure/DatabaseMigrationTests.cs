@@ -8,6 +8,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
@@ -113,7 +114,9 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         result.LegacySchemaBaselined.Should().BeFalse();
-        result.AppliedMigrations.Should().ContainSingle();
+        result.AppliedMigrations.Should().Equal(
+            "20260725032053_InitialV1",
+            "20260725095108_AddCalibrationProfileIdentity");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -191,6 +194,119 @@ public sealed class DatabaseMigrationTests
         _ = coreMigrations.Should().NotBeEmpty();
         _ = slicerMigrations.Should().NotBeEmpty();
         _ = coreMigrations.Should().NotIntersectWith(slicerMigrations);
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Migrations.Sqlite")]
+    [InlineData("postgres", "Farm.Migrations.PostgreSQL")]
+    [InlineData("sqlserver", "Farm.Migrations.SqlServer")]
+    public void CalibrationContextMigration_ForEveryProvider_UsesSafeLegacyDefaults(
+        string provider,
+        string migrationAssembly)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using AppDbContext context = new(options.Options);
+        IMigrationsAssembly migrationsAssembly = context.GetService<IMigrationsAssembly>();
+        KeyValuePair<string, System.Reflection.TypeInfo> migrationDefinition =
+            migrationsAssembly.Migrations.Single(migration =>
+                migration.Key.EndsWith(
+                    "_AddCalibrationPrinterContext",
+                    StringComparison.Ordinal));
+        Migration migration = migrationsAssembly.CreateMigration(
+            migrationDefinition.Value,
+            context.Database.ProviderName!);
+        Dictionary<string, AddColumnOperation> printerColumns = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "Printers")
+            .ToDictionary(operation => operation.Name, StringComparer.Ordinal);
+
+        _ = printerColumns[nameof(Printer.ConfigurationRevision)].DefaultValue
+            .Should().Be(1L);
+        _ = printerColumns[nameof(Printer.FirmwareFamily)].DefaultValue
+            .Should().Be(0);
+        _ = printerColumns[nameof(Printer.GcodeDialect)].DefaultValue
+            .Should().Be(0);
+        _ = printerColumns[nameof(Printer.FirmwareDetectionSource)].DefaultValue
+            .Should().Be(0);
+        _ = printerColumns[nameof(Printer.FirmwareIdentityVerified)].DefaultValue
+            .Should().Be(false);
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite")]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer")]
+    public void CalibrationProfileIdentityMigration_ForEveryProvider_LeavesLegacyIdentityUnknown(
+        string provider,
+        string migrationAssembly)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        IMigrationsAssembly migrationsAssembly = context.GetService<IMigrationsAssembly>();
+        KeyValuePair<string, System.Reflection.TypeInfo> migrationDefinition =
+            migrationsAssembly.Migrations.Single(migration =>
+                migration.Key.EndsWith(
+                    "_AddCalibrationProfileIdentity",
+                    StringComparison.Ordinal));
+        Migration migration = migrationsAssembly.CreateMigration(
+            migrationDefinition.Value,
+            context.Database.ProviderName!);
+        AddColumnOperation[] identityColumns = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Where(operation =>
+                operation.Name is
+                    nameof(MachineProfile.SlicerDistribution) or
+                    nameof(MachineProfile.ProfileFormat))
+            .ToArray();
+
+        _ = identityColumns.Should().HaveCount(6);
+        _ = identityColumns.Select(operation => operation.Table).Should().BeEquivalentTo(
+            "MachineProfiles",
+            "MachineProfiles",
+            "ProcessProfiles",
+            "ProcessProfiles",
+            "FilamentProfiles",
+            "FilamentProfiles");
+        _ = identityColumns.Should().OnlyContain(operation =>
+            operation.IsNullable && operation.DefaultValue == null);
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()

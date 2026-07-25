@@ -222,6 +222,8 @@ public enum BackendCapabilities
     FileDelete = 1 << 11,
     FilamentControl = 1 << 12,
     UploadAndPrint = 1 << 13,
+    Status = 1 << 14,
+    DirectCommand = 1 << 15,
 
     /// <summary>All file operations (download, list, upload, delete)</summary>
     FileOperations = FileDownload | FileList | FileUpload | FileDelete,
@@ -233,5 +235,5 @@ public enum BackendCapabilities
     AllControlOps = ControlOperations | Movement | TemperatureControl,
 
     /// <summary>All capabilities combined</summary>
-    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete | FilamentControl | UploadAndPrint
+    All = FileDownload | FileList | FileUpload | StartPrint | ControlOperations | Camera | FileMetadata | Movement | TemperatureControl | PrinterInformation | History | FileDelete | FilamentControl | UploadAndPrint | Status | DirectCommand
 }

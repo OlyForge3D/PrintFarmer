@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Text.Json;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
@@ -33,18 +34,19 @@ public sealed class CalibrationCapabilityService(
 
     public const string CurrentApiContractVersion = "1.0";
     public const string MinimumSupportedApiContractVersion = "1.0";
-    public const string CalibrationApiVersion = "1.0";
-    public const string CalibrationSchemaVersion = "1.0";
-    public const string UpstreamOrcaSlicerVersion = "2.3.1";
-    public const string UpstreamOrcaSlicerCapability = "orcaslicer-upstream";
+    public const string CalibrationApiVersion = CalibrationContractConstants.ApiVersion;
+    public const string CalibrationSchemaVersion = CalibrationContractConstants.SchemaVersion;
+    public const string UpstreamOrcaSlicerVersion = CalibrationContractConstants.SlicerVersion;
+    public const string UpstreamOrcaSlicerCapability =
+        CalibrationContractConstants.UpstreamSlicerCapability;
 
     private static readonly IReadOnlyList<SlicerEngineCapabilityDto> SlicerEngines =
     [
         new()
         {
-            Type = "OrcaSlicer",
+            Type = CalibrationContractConstants.SlicerEngine,
             Version = UpstreamOrcaSlicerVersion,
-            Distribution = "upstream",
+            Distribution = CalibrationContractConstants.SlicerDistribution,
             Supported = true,
         },
     ];
@@ -55,6 +57,8 @@ public sealed class CalibrationCapabilityService(
             ["systemCapabilities"] = "/api/system/capabilities",
             ["calibrationCapabilities"] = "/api/calibration/capabilities",
             ["printers"] = "/api/printers",
+            ["calibrationCandidates"] = "/api/printers/calibration-candidates",
+            ["calibrationContext"] = "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
             ["sliceJobs"] = "/api/slice-jobs",
             ["sliceJob"] = "/api/slice-jobs/{id}",
             ["jobArtifact"] = "/api/artifacts/job/{jobId}",
@@ -104,13 +108,19 @@ public sealed class CalibrationCapabilityService(
             workerHealth.HealthyCount > 0 &&
             workerHealth.AvailableSlots > 0 &&
             _artifactStorage.MaxFileSizeBytes > 0;
+        ICalibrationProfileResolver? profileResolver =
+            _serviceProvider.GetService<ICalibrationProfileResolver>();
+        bool calibrationContextOperational =
+            profileResolver is not null &&
+            await profileResolver.IsAvailableAsync(cancellationToken);
 
         List<CapabilityUnavailableReasonDto> unavailableReasons =
             BuildUnavailableReasons(
                 slicingEnabled,
                 workerAuthenticationConfigured,
                 slicingOperational,
-                workerHealth);
+                workerHealth,
+                calibrationContextOperational);
 
         IReadOnlyList<string>? effectivePermissions = null;
         EffectiveCalibrationCapabilitiesDto? effectiveCapabilities = null;
@@ -131,7 +141,7 @@ public sealed class CalibrationCapabilityService(
             effectiveCapabilities = BuildEffectiveCapabilities(
                 user,
                 slicingOperational,
-                calibrationOperational: false);
+                calibrationContextOperational);
         }
 
         bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
@@ -149,7 +159,7 @@ public sealed class CalibrationCapabilityService(
             SlicingEnabled = slicingEnabled,
             SlicingConfigured = slicingConfigured,
             SlicingOperational = slicingOperational,
-            CalibrationContextEnabled = false,
+            CalibrationContextEnabled = calibrationContextOperational,
             CalibrationPersistenceEnabled = false,
             CalibrationSyncEnabled = false,
             CalibrationPhotosEnabled = false,
@@ -167,7 +177,11 @@ public sealed class CalibrationCapabilityService(
             GcodeUploadEnabled = true,
             PlatformNote = GetPlatformNote(modelFilesEnabled),
             SupportedSlicerEngines = SlicerEngines,
-            Calibration = new CalibrationFeatureCapabilitiesDto(),
+            Calibration = new CalibrationFeatureCapabilitiesDto
+            {
+                ContextImplemented = true,
+                Operational = calibrationContextOperational,
+            },
             Routes = SafeRoutes,
             Limits = new CapabilityLimitsDto
             {
@@ -225,8 +239,8 @@ public sealed class CalibrationCapabilityService(
 
             string[] compatibleServiceIds = services
                 .Where(service =>
-                    IsCompatibleVersion(service.Version) &&
-                    AttestsUpstreamOrcaSlicer(service.CapabilitiesJson))
+                    CalibrationContractConstants.IsSupportedSlicerVersion(service.Version) &&
+                    CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson))
                 .Select(service => service.Id.ToString())
                 .ToArray();
 
@@ -243,7 +257,9 @@ public sealed class CalibrationCapabilityService(
                 .ToListAsync(cancellationToken);
 
             compatibleWorkers = compatibleWorkers
-                .Where(worker => AttestsUpstreamOrcaSlicer(worker.CapabilitiesJson))
+                .Where(worker =>
+                    CalibrationContractConstants.AttestsUpstreamSlicer(
+                        worker.CapabilitiesJson))
                 .ToList();
 
             return new WorkerHealthSnapshot(
@@ -267,58 +283,23 @@ public sealed class CalibrationCapabilityService(
         }
     }
 
-    private static bool IsCompatibleVersion(string? version) =>
-        string.Equals(version, UpstreamOrcaSlicerVersion, StringComparison.Ordinal) ||
-        (version?.StartsWith($"{UpstreamOrcaSlicerVersion}+", StringComparison.Ordinal) ?? false);
-
-    private static bool AttestsUpstreamOrcaSlicer(string? capabilitiesJson)
-    {
-        if (string.IsNullOrWhiteSpace(capabilitiesJson))
-        {
-            return false;
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(capabilitiesJson);
-            JsonElement capabilities = document.RootElement.ValueKind switch
-            {
-                JsonValueKind.Array => document.RootElement,
-                JsonValueKind.Object when document.RootElement.TryGetProperty(
-                    "capabilities",
-                    out JsonElement value) => value,
-                _ => default,
-            };
-
-            return capabilities.ValueKind == JsonValueKind.Array &&
-                   capabilities.EnumerateArray().Any(value =>
-                       value.ValueKind == JsonValueKind.String &&
-                       string.Equals(
-                           value.GetString(),
-                           UpstreamOrcaSlicerCapability,
-                           StringComparison.Ordinal));
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
     private static List<CapabilityUnavailableReasonDto> BuildUnavailableReasons(
         bool slicingEnabled,
         bool workerAuthenticationConfigured,
         bool slicingOperational,
-        WorkerHealthSnapshot workerHealth)
+        WorkerHealthSnapshot workerHealth,
+        bool calibrationContextOperational)
     {
-        List<CapabilityUnavailableReasonDto> reasons =
-        [
-            new()
+        List<CapabilityUnavailableReasonDto> reasons = [];
+        if (!calibrationContextOperational)
+        {
+            reasons.Add(new()
             {
-                Feature = "calibration",
-                Code = "calibration_domain_not_implemented",
-                Message = "Calibration context, command generation, and dispatch are not implemented by this foundation.",
-            },
-        ];
+                Feature = "calibrationContext",
+                Code = "profile_service_unavailable",
+                Message = "Calibration context requires a caller-reachable upstream OrcaSlicer profile resolver.",
+            });
+        }
 
         if (!slicingEnabled)
         {
@@ -367,40 +348,29 @@ public sealed class CalibrationCapabilityService(
     private static EffectiveCalibrationCapabilitiesDto BuildEffectiveCapabilities(
         ClaimsPrincipal user,
         bool slicingOperational,
-        bool calibrationOperational) =>
+        bool calibrationContextOperational) =>
         new()
         {
-            CanCreate =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Create),
+            CanCreate = false,
             CanRead =
-                calibrationOperational &&
+                calibrationContextOperational &&
                 PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Read),
-            CanUpdate =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Update),
-            CanDelete =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Delete),
-            CanGenerate =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Generate),
-            CanPublish =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Publish),
+            CanUpdate = false,
+            CanDelete = false,
+            CanGenerate = false,
+            CanPublish = false,
             CanSubmitSlicing =
                 slicingOperational &&
                 PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Slicing.Submit),
             CanReadArtifacts =
                 slicingOperational &&
                 PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Slicing.ReadArtifact),
-            CanManageDispatchSettings =
-                calibrationOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.DispatchSettings.Manage),
+            CanManageDispatchSettings = false,
         };
 
     private string GetDeploymentMode() =>
-        _configuration.GetValue<string>("Deployment:Mode")?.ToLowerInvariant() switch
+        (_configuration.GetValue<string>("DEPLOYMENT_MODE") ??
+            _configuration.GetValue<string>("Deployment:Mode"))?.ToLowerInvariant() switch
         {
             "split" or "microservices" => "split",
             _ => "monolith",

@@ -33,6 +33,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
+✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, SQL Server, MySQL (all tested)  

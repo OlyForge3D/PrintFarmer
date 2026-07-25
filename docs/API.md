@@ -81,7 +81,7 @@ caller-specific permissions:
   "calibrationSchemaVersion": "1.0",
   "slicingConfigured": true,
   "slicingOperational": false,
-  "calibrationContextEnabled": false,
+  "calibrationContextEnabled": true,
   "calibrationPersistenceEnabled": false,
   "calibrationSyncEnabled": false,
   "calibrationPhotosEnabled": false,
@@ -102,10 +102,16 @@ caller-specific permissions:
       "supported": true
     }
   ],
+  "calibration": {
+    "contextImplemented": true,
+    "operational": true
+  },
   "routes": {
     "systemCapabilities": "/api/system/capabilities",
     "calibrationCapabilities": "/api/calibration/capabilities",
     "printers": "/api/printers",
+    "calibrationCandidates": "/api/printers/calibration-candidates",
+    "calibrationContext": "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
     "sliceJobs": "/api/slice-jobs",
     "sliceJob": "/api/slice-jobs/{id}",
     "jobArtifact": "/api/artifacts/job/{jobId}",
@@ -122,9 +128,9 @@ caller-specific permissions:
   },
   "unavailableReasons": [
     {
-      "feature": "calibration",
-      "code": "calibration_domain_not_implemented",
-      "message": "Calibration context, command generation, and dispatch are not implemented by this foundation."
+      "feature": "slicing",
+      "code": "compatible_worker_unavailable",
+      "message": "No healthy upstream OrcaSlicer 2.3.1 worker is available."
     }
   ]
 }
@@ -133,10 +139,13 @@ caller-specific permissions:
 `slicingConfigured` means slicing is enabled in configuration.
 `slicingOperational` additionally requires reachable slicer persistence,
 artifact storage, and a fresh enabled upstream OrcaSlicer `2.3.1` worker with
-available capacity. Calibration feature flags remain false until their public
-routes and all caller-reachable dependencies are implemented and operational.
-Routes are canonical same-origin paths and never disclose internal service
-addresses.
+available capacity. Calibration context is operational when the caller can
+reach the local upstream OrcaSlicer profile resolver. The monolith advertises
+and serves that context; a split API without a caller-reachable resolver
+advertises it as non-operational and returns
+`503 profile_service_unavailable`. Later project, generation, slicing,
+promotion, queue, and event feature flags remain false. Routes are canonical
+same-origin paths and never disclose internal service addresses.
 
 ### Effective calibration capabilities
 
@@ -170,6 +179,123 @@ reads cannot bypass them. The `farm_admin` bypass is explicit and audited.
 Ordinary users receive no calibration-foundation permissions implicitly.
 
 ## Printers API
+
+### List Printer Calibration Candidates
+
+```http
+GET /api/printers/calibration-candidates
+```
+
+Requires `calibration:read`. The response includes every enabled printer with
+its configuration revision, observed status freshness, explicit firmware and
+slicer identities, geometry, physical toolheads, declared adapter operations,
+and typed eligibility results.
+
+Printer Calibration eligibility is strictly conjunctive:
+
+- firmware family is explicitly `Klipper`;
+- G-code dialect is explicitly `Klipper`;
+- slicer engine is `OrcaSlicer`, distribution is `upstream`, and the pinned
+  version and profile format are compatible;
+- firmware detection source, detector version, confidence, verification, and
+  observation are present and fresh;
+- bed geometry, physical toolhead/nozzle limits, material, motion, thermal,
+  enclosure, and required operational metadata are complete and fresh;
+- live status is authoritative, fresh, and online;
+- the adapter explicitly supports status, file upload, and print start, or a
+  combined upload-and-print operation;
+- selected machine, process, and filament profiles are compatible, safe, and
+  visible to the caller, with explicit upstream distribution, compatible
+  version, and `orca-json` format identity.
+
+Eligibility never derives from manufacturer, model, aliases, transport
+backend, Moonraker, OctoPrint, or a static printer catalog. Missing, stale,
+unverified, inaccessible, incompatible, or operationally incomplete data
+keeps the printer in the response with `eligible: false`, `missingInputs`, and
+stable `{ code, field, message }` rejection reasons.
+
+```json
+[
+  {
+    "id": "0d7d648e-b7c2-4499-b7a8-612a2627e651",
+    "name": "Voron 2.4",
+    "configurationRevision": 7,
+    "reachability": "online",
+    "observedAtUtc": "2026-07-25T12:00:00Z",
+    "isStale": false,
+    "firmware": {
+      "family": "Klipper",
+      "gcodeDialect": "Klipper",
+      "detectionSource": "printer",
+      "version": "v0.12.0",
+      "detectionVersion": "printer-info-v1",
+      "detectionConfidence": 1.0,
+      "verified": true
+    },
+    "slicer": {
+      "engine": "OrcaSlicer",
+      "distribution": "upstream",
+      "version": "2.3.1",
+      "profileFormat": "orca-json"
+    },
+    "eligible": true,
+    "missingInputs": [],
+    "rejectionReasons": []
+  }
+]
+```
+
+The contract never returns printer credentials, connection URLs, ports,
+cameras, worker credentials, internal paths, or private service addresses.
+
+### Get Printer Calibration Context
+
+```http
+GET /api/printers/{printerId}/calibration-context?slicerType=OrcaSlicer
+```
+
+Requires `calibration:read`. An optional `configurationRevision` query value
+provides optimistic concurrency. If the printer changed, the API returns
+`409 printer_configuration_changed` and the current revision.
+
+The `200` response repeats the candidate state and adds an immutable
+credential-free snapshot:
+
+- canonical `snapshotSha256`, schema version, capture time, and authenticated
+  subject;
+- exact bed geometry, exclusions, motion and acceleration limits;
+- physical toolhead offsets, nozzle/hotend limits, drive details, and material
+  compatibility;
+- verified firmware, backend API version, and upstream OrcaSlicer identity;
+- caller-visible exact machine, process, and filament profile JSON with raw
+  SHA-256 values, explicit distribution and format identity, and canonical
+  effective settings;
+- compatible filament product choices and physical spool choices;
+- supported Printer Calibration methods and generator compatibility.
+
+Exact profile JSON is omitted and a typed rejection reason is returned if a
+profile contains credentials, authorization headers, private service URLs,
+filesystem paths, file URIs, or unsafe commands. Private profiles are visible
+only to their owner; the `farm_admin` bypass remains explicit and audited.
+Transient printer status and capture metadata do not change the canonical
+snapshot hash.
+
+An incomplete context still returns `200` with `eligible: false`, typed
+rejection reasons, and no synthesized defaults. Consumers must not generate or
+dispatch calibration work from an ineligible context.
+
+| Status | Stable code | Meaning |
+|---|---|---|
+| `400` | `unsupported_slicer_type` | `slicerType` is not exactly `OrcaSlicer`. |
+| `401` | `authentication_required` | No authenticated PrintFarmer identity is present. |
+| `403` | `permission_denied` | The caller lacks `calibration:read`. |
+| `404` | `printer_not_found` | The printer is missing or disabled. |
+| `409` | `printer_configuration_changed` | The requested revision is no longer current. |
+| `503` | `profile_service_unavailable` | The profile resolver is not caller-reachable. |
+
+This context supports the public **Printer Calibration** workflow for Klipper
+printers based on upstream OrcaSlicer and its
+[official calibration wiki](https://github.com/SoftFever/OrcaSlicer/wiki/Calibration).
 
 ### List All Printers
 

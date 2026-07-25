@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Slicer.Module.Api.Hubs;
@@ -817,6 +818,8 @@ public class ProfilesService(
             Manufacturer = machineProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer machine profile for {modelDisplayName}",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrinterModelId = printerModelId,
             IsSystem = true,
             IsPublic = true,
@@ -863,6 +866,8 @@ public class ProfilesService(
             Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer filament profile for {modelDisplayName} - {filamentProfile.Material}",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrintSpeed = filamentProfile.PrintSpeed,
             NozzleTemperature = filamentProfile.NozzleTemperature,
             BedTemperature = filamentProfile.BedTemperature,
@@ -909,6 +914,8 @@ public class ProfilesService(
             Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
             Description = $"OrcaSlicer process profile for {modelDisplayName}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrinterModelId = printerModelId,
             Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
             LayerHeight = processProfile.LayerHeight,
@@ -1222,6 +1229,8 @@ public class ProfilesService(
                                 Manufacturer = machineProfile.Manufacturer ?? manufacturerKey ?? string.Empty,
                                 Description = $"OrcaSlicer machine profile for {modelProfiles.Name}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 IsSystem = true,
                                 IsPublic = true,
                                 Hash = profileHash,
@@ -1266,6 +1275,8 @@ public class ProfilesService(
                                 Manufacturer = filamentProfile.Manufacturer,
                                 Description = $"OrcaSlicer filament profile for {modelProfiles.Name} - {filamentProfile.Material}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 PrintSpeed = filamentProfile.PrintSpeed,
                                 NozzleTemperature = filamentProfile.NozzleTemperature,
                                 BedTemperature = filamentProfile.BedTemperature,
@@ -1311,6 +1322,8 @@ public class ProfilesService(
                                 Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                 Description = $"OrcaSlicer process profile for {modelProfiles.Name}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = processProfile.LayerHeight,
                                 InfillPercentage = processProfile.InfillPercentage,
@@ -1457,6 +1470,8 @@ public class ProfilesService(
                                 Manufacturer = machineProfile.Manufacturer ?? string.Empty,
                                 Description = "OrcaSlicer machine profile",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 IsSystem = true,
                                 Hash = profileHash,
                                 RawJson = sanitizedRaw,
@@ -1508,6 +1523,8 @@ public class ProfilesService(
                                 Manufacturer = filamentProfile.Manufacturer,
                                 Description = $"OrcaSlicer filament profile for {modelProfiles.Name} - {filamentProfile.Material}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 PrintSpeed = filamentProfile.PrintSpeed,
                                 NozzleTemperature = filamentProfile.NozzleTemperature,
                                 BedTemperature = filamentProfile.BedTemperature,
@@ -1560,6 +1577,8 @@ public class ProfilesService(
                                 Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                 Description = $"OrcaSlicer process profile for {modelProfiles.Name} - {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = processProfile.LayerHeight,
                                 InfillPercentage = processProfile.InfillPercentage,
@@ -2551,6 +2570,8 @@ public class ProfilesService(
             SlicerService? orcaWorker = allSlicers.FirstOrDefault(s =>
                 s.Status == "Online" &&
                 s.SlicerType == 1 &&
+                CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+                CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
                 !string.IsNullOrEmpty(s.Host));
 
             if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
@@ -2565,6 +2586,8 @@ public class ProfilesService(
             // Fallback: any OrcaSlicer worker regardless of status
             orcaWorker = allSlicers.FirstOrDefault(s =>
                 s.SlicerType == 1 &&
+                CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+                CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
                 !string.IsNullOrEmpty(s.Host));
 
             if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))

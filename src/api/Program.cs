@@ -100,7 +100,12 @@ builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environme
 // All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
 // In microservices mode, the slicer module runs in a separate slicer-host process.
 // The user-facing SlicerSettings.Enabled is set dynamically when a worker registers.
-bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+string? configuredDeploymentMode =
+    builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") ??
+    builder.Configuration.GetValue<string>("Deployment:Mode");
+bool slicerEnabled =
+    !string.Equals(configuredDeploymentMode, "microservices", StringComparison.OrdinalIgnoreCase) &&
+    !string.Equals(configuredDeploymentMode, "split", StringComparison.OrdinalIgnoreCase);
 
 // Platform-aware capability checks: auto-disable native x86-only features on ARM64 (Raspberry Pi)
 // unless explicitly overridden via configuration. Affects lib3mf, AssimpNetter, and slicer integration.
@@ -210,6 +215,9 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
+    Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
@@ -375,6 +383,7 @@ app.UseCors("Default");
 // When DEPLOYMENT_MODE=monolith, the API serves the React frontend directly from wwwroot
 // When DEPLOYMENT_MODE=microservices (or unset), frontend is served by separate nginx-proxy container
 string? deploymentMode = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+    ?? builder.Configuration.GetValue<string>("Deployment:Mode")
     ?? Environment.GetEnvironmentVariable("DEPLOYMENT_MODE");
 bool isMonolithMode = string.Equals(deploymentMode, "monolith", StringComparison.OrdinalIgnoreCase);
 

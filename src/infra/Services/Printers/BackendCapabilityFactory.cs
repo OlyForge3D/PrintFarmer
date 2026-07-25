@@ -39,7 +39,9 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         { typeof(ISupportsHistory), BackendCapabilities.History },
         { typeof(ISupportsFileDelete), BackendCapabilities.FileDelete },
         { typeof(ISupportsFilamentControl), BackendCapabilities.FilamentControl },
-        { typeof(ISupportsUploadAndPrint), BackendCapabilities.UploadAndPrint }
+        { typeof(ISupportsUploadAndPrint), BackendCapabilities.UploadAndPrint },
+        { typeof(ISupportsStatus), BackendCapabilities.Status },
+        { typeof(ISupportsGcodeExecution), BackendCapabilities.DirectCommand }
     };
 
     // Cache of capabilities for each backend (computed once at initialization)
@@ -143,7 +145,17 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
         // Prefer reflection on the concrete client type — this is the single source of truth.
         if (plugin.ClientType is { } clientType)
         {
-            return DetectCapabilitiesFromInterfaces(clientType);
+            BackendCapabilities detectedCapabilities = DetectCapabilitiesFromInterfaces(clientType);
+            if (plugin is IExtendedBackendPlugin
+                {
+                    StatusClientType: not null,
+                    StatusClientInterfaceType: not null,
+                })
+            {
+                detectedCapabilities |= BackendCapabilities.Status;
+            }
+
+            return detectedCapabilities;
         }
 
         // Fallback for mocks or plugins that don't set ClientType.
@@ -156,6 +168,15 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
             {
                 capabilities |= capabilityFlag;
             }
+        }
+
+        if (plugin is IExtendedBackendPlugin
+            {
+                StatusClientType: not null,
+                StatusClientInterfaceType: not null,
+            })
+        {
+            capabilities |= BackendCapabilities.Status;
         }
 
         return capabilities;
