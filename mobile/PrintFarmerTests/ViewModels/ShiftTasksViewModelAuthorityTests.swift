@@ -3,6 +3,86 @@ import XCTest
 
 @MainActor
 final class ShiftTasksViewModelAuthorityTests: XCTestCase {
+    func testReconnectRecoveryRefreshesCanonicalTasksOnceAndFencesStaleAuthority() async {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let viewModel = ShiftTasksViewModel(callbackEnqueuer: callbackQueue.enqueuer)
+        let oldService = ScriptedShiftTaskService(
+            defaultSnapshot: makeShiftTaskSnapshot(title: "Old canonical")
+        )
+        let oldSignalR = MockSignalRService()
+        let currentService = ScriptedShiftTaskService(
+            defaultSnapshot: makeShiftTaskSnapshot(title: "Current canonical")
+        )
+        let currentSignalR = MockSignalRService()
+        viewModel.configure(
+            taskService: oldService,
+            signalRService: oldSignalR,
+            shiftPlanEnabled: true
+        )
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        var oldLoadCount = await oldService.loadCallCount
+        XCTAssertEqual(oldLoadCount, 0)
+        oldSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        oldLoadCount = await oldService.loadCallCount
+        XCTAssertEqual(oldLoadCount, 0)
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        oldLoadCount = await oldService.loadCallCount
+        XCTAssertEqual(oldLoadCount, 1)
+        XCTAssertEqual(
+            viewModel.snapshot?.groups.first?.tasks.first?.title,
+            "Old canonical"
+        )
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 0)
+        oldLoadCount = await oldService.loadCallCount
+        XCTAssertEqual(oldLoadCount, 1)
+
+        viewModel.configure(
+            taskService: currentService,
+            signalRService: currentSignalR,
+            shiftPlanEnabled: true
+        )
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        oldLoadCount = await oldService.loadCallCount
+        var currentLoadCount = await currentService.loadCallCount
+        XCTAssertEqual(oldLoadCount, 1)
+        XCTAssertEqual(currentLoadCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        currentLoadCount = await currentService.loadCallCount
+        XCTAssertEqual(currentLoadCount, 0)
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        currentLoadCount = await currentService.loadCallCount
+        XCTAssertEqual(currentLoadCount, 1)
+        XCTAssertEqual(
+            viewModel.snapshot?.groups.first?.tasks.first?.title,
+            "Current canonical"
+        )
+
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.connected)
+        viewModel.deactivate()
+        await callbackQueue.runNext()
+        currentLoadCount = await currentService.loadCallCount
+        XCTAssertEqual(currentLoadCount, 1)
+        XCTAssertNil(viewModel.snapshot)
+        XCTAssertEqual(callbackQueue.count, 0)
+    }
+
     func testP1OldMutationCannotAbsorbCurrentInvalidation() async {
         let callbackQueue = ShiftTaskCallbackQueue()
         let viewModel = ShiftTasksViewModel(callbackEnqueuer: callbackQueue.enqueuer)

@@ -48,6 +48,356 @@ final class PrinterDetailViewModelTests: XCTestCase {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+    func testReconnectRecoveryRefreshesCanonicalDetailOnceAndFencesStaleService() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let oldPrinterService = MockPrinterService()
+        oldPrinterService.printerToReturn = try TestData.decodePrinter()
+        let oldSignalR = MockSignalRService()
+        let currentPrinterService = MockPrinterService()
+        currentPrinterService.printerToReturn = try TestData.decodePrinter(
+            from: TestJSON.printerMinimal
+        )
+        let currentSignalR = MockSignalRService()
+        let vm = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(printerService: oldPrinterService)
+        vm.configureSignalR(oldSignalR)
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.getPrinterCallCount, 0)
+        oldSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.getPrinterCallCount, 0)
+        oldSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        XCTAssertEqual(oldPrinterService.getPrinterCallCount, 1)
+        XCTAssertEqual(vm.printer?.name, "Prusa MK4")
+
+        oldSignalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 0)
+        XCTAssertEqual(oldPrinterService.getPrinterCallCount, 1)
+
+        vm.configure(printerService: currentPrinterService)
+        vm.configureSignalR(currentSignalR)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .reconnecting)
+        oldSignalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        XCTAssertEqual(oldPrinterService.getPrinterCallCount, 1)
+        XCTAssertEqual(currentPrinterService.getPrinterCallCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        XCTAssertEqual(currentPrinterService.getPrinterCallCount, 0)
+
+        currentSignalR.simulateConnectionStateChange(.connected)
+        vm.isViewActive = false
+        await callbackQueue.runNext()
+        XCTAssertEqual(currentPrinterService.getPrinterCallCount, 0)
+
+        vm.isViewActive = true
+        vm.configureSignalR(currentSignalR)
+        currentSignalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        currentSignalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
+
+        XCTAssertEqual(currentPrinterService.getPrinterCallCount, 1)
+        XCTAssertEqual(vm.printer?.name, "Ender 3")
+        XCTAssertEqual(callbackQueue.count, 0)
+        vm.stopSnapshotPolling()
+    }
+
+    func testCanonicalDetailRejectsReconfiguredInFlightDataAndSnapshotPublication() async throws {
+        let oldGate = ShiftTaskResultGate<Printer>()
+        let oldScript = ScriptedCanonicalResult<Printer>([.gated(oldGate)])
+        mockService.getHandler = { _ in try await oldScript.next() }
+        let currentService = MockPrinterService()
+        currentService.printerToReturn = try TestData.decodePrinter(
+            from: TestJSON.printerMinimal
+        )
+
+        let oldRequest = Task { await viewModel.loadPrinter() }
+        await oldScript.waitForCallCount(1)
+        viewModel.configure(printerService: currentService)
+        await viewModel.loadPrinter()
+        XCTAssertEqual(viewModel.printer?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.snapshotData)
+        XCTAssertFalse(viewModel.isLoading)
+
+        await oldGate.succeed(try TestData.decodePrinter())
+        await viewModel.waitForSupersededCanonicalLoads()
+        await oldRequest.value
+
+        XCTAssertEqual(viewModel.printer?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.snapshotData)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCanonicalDetailRejectsReconfiguredInFlightErrorPublication() async throws {
+        let oldGate = ShiftTaskResultGate<Printer>()
+        let oldScript = ScriptedCanonicalResult<Printer>([.gated(oldGate)])
+        mockService.getHandler = { _ in try await oldScript.next() }
+        let currentService = MockPrinterService()
+        currentService.printerToReturn = try TestData.decodePrinter(
+            from: TestJSON.printerMinimal
+        )
+
+        let oldRequest = Task { await viewModel.loadPrinter() }
+        await oldScript.waitForCallCount(1)
+        viewModel.configure(printerService: currentService)
+        await viewModel.loadPrinter()
+        await oldGate.fail(.forced("stale detail failure"))
+        await viewModel.waitForSupersededCanonicalLoads()
+        await oldRequest.value
+
+        XCTAssertEqual(viewModel.printer?.name, "Ender 3")
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.snapshotData)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testManualDetailRefreshCoalescesReconnectIntoOneAuthoritativeFollowUp() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let firstGate = ShiftTaskResultGate<Printer>()
+        let stale = try TestData.decodePrinter()
+        let current = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let script = ScriptedCanonicalResult<Printer>([
+            .gated(firstGate),
+            .value(current)
+        ])
+        mockService.getHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let vm = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(printerService: mockService)
+        vm.configureSignalR(signalR)
+
+        let manualRefresh = Task { await vm.loadPrinter() }
+        await script.waitForCallCount(1)
+        signalR.simulateConnectionStateChange(.reconnecting)
+        await callbackQueue.runNext()
+        signalR.simulateConnectionStateChange(.connected)
+        await callbackQueue.runNext()
+        var callCount = await script.callCount
+        XCTAssertEqual(callCount, 1)
+
+        await firstGate.succeed(stale)
+        await script.waitForCallCount(2)
+        await manualRefresh.value
+
+        callCount = await script.callCount
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(vm.printer?.name, "Ender 3")
+        signalR.simulateCapturedConnectionStateChange(at: 0, state: .connected)
+        await callbackQueue.runNext()
+        await vm.waitForCanonicalLoadToBecomeIdle()
+        callCount = await script.callCount
+        XCTAssertEqual(callCount, 2)
+        vm.stopSnapshotPolling()
+    }
+
+    func testSameServiceReconfigurePreservesQueuedDetailReconnectEdge() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let current = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let script = ScriptedCanonicalResult<Printer>([.value(current)])
+        mockService.getHandler = { _ in try await script.next() }
+        let signalR = MockSignalRService()
+        let vm = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(printerService: mockService)
+        vm.configureSignalR(signalR)
+
+        signalR.simulateConnectionStateChange(.reconnecting)
+        signalR.simulateConnectionStateChange(.connected)
+        XCTAssertEqual(callbackQueue.count, 2)
+        vm.configureSignalR(signalR)
+        await callbackQueue.runNext()
+        await callbackQueue.runNext()
+        await script.waitForCallCount(1)
+        await vm.waitForCanonicalLoadToBecomeIdle()
+
+        let callCount = await script.callCount
+        XCTAssertEqual(callCount, 1)
+        XCTAssertEqual(vm.printer?.name, "Ender 3")
+        vm.stopSnapshotPolling()
+    }
+
+    func testDeactivationRejectsParkedDetailPublication() async throws {
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+
+        let request = Task { await viewModel.loadPrinter() }
+        await script.waitForCallCount(1)
+        viewModel.isViewActive = false
+        await gate.succeed(try TestData.decodePrinter())
+        await viewModel.waitForSupersededCanonicalLoads()
+        await request.value
+
+        XCTAssertNil(viewModel.printer)
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertNil(viewModel.snapshotData)
+        XCTAssertFalse(viewModel.isLoading)
+    }
+
+    func testCancellingOneDetailCallerCompletesPromptlyAndPreservesPeerDemand() async throws {
+        let firstGate = ShiftTaskResultGate<Printer>()
+        let current = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        let script = ScriptedCanonicalResult<Printer>([
+            .gated(firstGate),
+            .value(current)
+        ])
+        mockService.getHandler = { _ in try await script.next() }
+
+        let cancelledCaller = Task { await viewModel.loadPrinter() }
+        await script.waitForCallCount(1)
+        let peerCaller = Task { await viewModel.loadPrinter() }
+        await viewModel.waitForCanonicalWaiterCount(2)
+
+        cancelledCaller.cancel()
+        await cancelledCaller.value
+        XCTAssertEqual(viewModel.canonicalWaiterCountForTesting, 1)
+        XAssertEqual(await script.callCount, 1)
+
+        await firstGate.succeed(try TestData.decodePrinter())
+        await peerCaller.value
+
+        XAssertEqual(await script.callCount, 2)
+        XCTAssertEqual(viewModel.printer?.id, current.id)
+        XCTAssertEqual(viewModel.canonicalWaiterCountForTesting, 0)
+    }
+
+    func testCancellingSoleDetailCallerUnwindsDemandWithoutWaitingForService() async throws {
+        let callbackQueue = ShiftTaskCallbackQueue()
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+        let vm = PrinterDetailViewModel(
+            printerId: TestData.testUUID,
+            callbackEnqueuer: callbackQueue.enqueuer
+        )
+        vm.configure(printerService: mockService)
+
+        let caller = Task { await vm.loadPrinter() }
+        await script.waitForCallCount(1)
+        caller.cancel()
+        await caller.value
+        XCTAssertEqual(callbackQueue.count, 1)
+        await callbackQueue.runNext()
+
+        XCTAssertEqual(vm.canonicalWaiterCountForTesting, 0)
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertNil(vm.printer)
+        XAssertEqual(await script.callCount, 1)
+
+        await gate.succeed(try TestData.decodePrinter())
+        await vm.waitForSupersededCanonicalLoads()
+        XCTAssertNil(vm.printer)
+    }
+
+    func testParkedDetailServiceDoesNotRetainViewModelOrCaller() async throws {
+        let gate = ShiftTaskResultGate<Printer>()
+        let script = ScriptedCanonicalResult<Printer>([.gated(gate)])
+        mockService.getHandler = { _ in try await script.next() }
+        var vm: PrinterDetailViewModel? = PrinterDetailViewModel(
+            printerId: TestData.testUUID
+        )
+        vm?.configure(printerService: mockService)
+        let weakVM = CanonicalOwnerWeakReference(vm)
+        let waiter = vm?.beginCanonicalLoadForTesting()
+        let caller = Task { await waiter?.wait() }
+        await script.waitForCallCount(1)
+
+        vm = nil
+        XCTAssertNil(weakVM.value)
+        await caller.value
+
+        await gate.succeed(try TestData.decodePrinter())
+    }
+
+    func testOldSnapshotPollCannotPublishIntoReactivatedNewService() async throws {
+        let oldPollGate = ShiftTaskResultGate<Data>()
+        let initialData = Data([0x01])
+        let staleData = Data([0x02])
+        let oldSnapshotScript = ScriptedCanonicalResult<Data>([
+            .value(initialData),
+            .gated(oldPollGate)
+        ])
+        mockService.snapshotHandler = { _ in try await oldSnapshotScript.next() }
+        mockService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        mockService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil,
+            snapshotUrl: nil,
+            accessMode: .snapshotOnly,
+            streamFormat: .unknown,
+            snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+
+        await viewModel.loadPrinter()
+        await oldSnapshotScript.waitForCallCount(2)
+        XCTAssertTrue(viewModel.isSnapshotPollingActive)
+        XCTAssertEqual(viewModel.snapshotData, initialData)
+
+        viewModel.setSnapshotPollingAllowed(false)
+        viewModel.isViewActive = false
+        let newService = MockPrinterService()
+        newService.printerToReturn = try TestData.decodePrinter(from: TestJSON.printerMinimal)
+        newService.cameraUrlToReturn = PrinterCameraUrl(
+            streamUrl: nil,
+            snapshotUrl: nil,
+            accessMode: .snapshotOnly,
+            streamFormat: .unknown,
+            snapshotStrategy: .snapmakerU1MonitorJpeg
+        )
+        let newCanonicalData = Data([0x03])
+        let newPollData = Data([0x04])
+        let newPollGate = ShiftTaskResultGate<Data>()
+        let newSnapshotScript = ScriptedCanonicalResult<Data>([
+            .value(newCanonicalData),
+            .gated(newPollGate)
+        ])
+        newService.snapshotHandler = { _ in try await newSnapshotScript.next() }
+        viewModel.configure(printerService: newService)
+        viewModel.isViewActive = true
+
+        await viewModel.loadPrinter()
+        XCTAssertEqual(viewModel.snapshotData, newCanonicalData)
+        XCTAssertFalse(viewModel.isSnapshotPollingActive)
+
+        await oldPollGate.succeed(staleData)
+        await viewModel.waitForSnapshotRequestsToBecomeIdle()
+        XCTAssertEqual(viewModel.snapshotData, newCanonicalData)
+        XCTAssertFalse(viewModel.snapshotPublicationsForTesting.contains(staleData))
+
+        viewModel.setSnapshotPollingAllowed(true)
+        await newSnapshotScript.waitForCallCount(2)
+        XCTAssertTrue(viewModel.isSnapshotPollingActive)
+        await newPollGate.succeed(newPollData)
+        await viewModel.waitForSnapshotRequestsToBecomeIdle()
+        viewModel.stopSnapshotPolling()
+
+        XCTAssertEqual(viewModel.snapshotData, newPollData)
+        XCTAssertEqual(
+            viewModel.snapshotPublicationsForTesting,
+            [initialData, newCanonicalData, newPollData]
+        )
+    }
+
     // MARK: - Computed State
 
     func testIsPrintingState() async throws {

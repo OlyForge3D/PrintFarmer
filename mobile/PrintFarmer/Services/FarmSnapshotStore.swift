@@ -216,6 +216,8 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     private let fileIO: FarmSnapshotFileIO
     private let rootURL: URL
     private let ownerStore: FarmSnapshotOwnerClearing?
+    private let storeIdentity = UUID()
+    private var activeCommitAuthorization: FarmSnapshotCommitAuthorization?
 
     init(
         authority: FarmSnapshotAuthority,
@@ -318,7 +320,11 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         // session the authority rejected (older/consumed token). A durable
         // persistence failure at the CAS is also a fail-closed outcome.
         do {
-            return try authority.adopt(session)
+            let activated = try authority.adopt(session)
+            if activated {
+                invalidateCommitAuthorization()
+            }
+            return activated
         } catch {
             return false
         }
@@ -328,11 +334,33 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     /// that landed during an await survives — this never globally revokes.
     @discardableResult
     func deactivate(session: FarmSnapshotSession) async -> Bool {
-        authority.deactivate(session)
+        let deactivated = authority.deactivate(session)
+        if deactivated {
+            invalidateCommitAuthorization()
+        }
+        return deactivated
     }
 
     func currentSession() async -> FarmSnapshotSession? {
         authority.currentSession()
+    }
+
+    func authorizeCommit(
+        capturedSession: FarmSnapshotSession
+    ) async -> FarmSnapshotCommitAuthorization? {
+        guard authority.isCurrent(capturedSession) else { return nil }
+        invalidateCommitAuthorization()
+        let authorization = FarmSnapshotCommitAuthorization(
+            capturedSession: capturedSession,
+            storeIdentity: storeIdentity
+        )
+        activeCommitAuthorization = authorization
+        return authorization
+    }
+
+    private func invalidateCommitAuthorization() {
+        activeCommitAuthorization?.invalidate()
+        activeCommitAuthorization = nil
     }
 
     // MARK: Hydrate
@@ -414,6 +442,34 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
     // MARK: Commit
 
     func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult {
+        await performCommit(
+            envelope,
+            capturedSession: capturedSession,
+            authorization: nil
+        )
+    }
+
+    func commit(
+        _ envelope: FarmSnapshotEnvelope,
+        capturedSession: FarmSnapshotSession,
+        authorization: FarmSnapshotCommitAuthorization
+    ) async -> FarmSnapshotCommitResult {
+        guard authorization.capturedSession == capturedSession,
+              authorization.storeIdentity == storeIdentity else {
+            return .superseded
+        }
+        return await performCommit(
+            envelope,
+            capturedSession: capturedSession,
+            authorization: authorization
+        )
+    }
+
+    private func performCommit(
+        _ envelope: FarmSnapshotEnvelope,
+        capturedSession: FarmSnapshotSession,
+        authorization: FarmSnapshotCommitAuthorization?
+    ) async -> FarmSnapshotCommitResult {
         // D/P4: gate on successful startup readiness before any commit.
         guard await ensureStartupPreparation() else { return .persistenceFailure(cleanupFailed: false) }
         // 1. Reject unsupported incoming schema before any durable mutation.
@@ -445,8 +501,13 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         } catch {
             return .integrityFailure(cleanupFailed: false) // no candidate written yet
         }
-        if let existing, existing.lastUpdatedAtMillis >= envelope.lastUpdatedAtMillis {
-            return .notNewer(cleanupFailed: false) // no candidate written yet
+        if let existing {
+            let isOlder = existing.lastUpdatedAtMillis > envelope.lastUpdatedAtMillis
+            let isLegacyEqual = authorization == nil
+                && existing.lastUpdatedAtMillis == envelope.lastUpdatedAtMillis
+            if isOlder || isLegacyEqual {
+                return .notNewer(cleanupFailed: false) // no candidate written yet
+            }
         }
 
         guard authority.isCurrent(capturedSession) else { return .superseded }
@@ -474,20 +535,30 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         //    single atomic install — all while holding the authority lock.
         let outcome: FarmSnapshotAuthority.PromotionOutcome?
         do {
-            outcome = try authority.withPromotion(capturedSession, cancelled: { Task.isCancelled }) {
-                let liveData = try self.fileIO.readDataSync(at: live)
-                if let liveData {
-                    guard let decoded = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: liveData),
-                          decoded.isSupportedSchema,
-                          decoded.namespace == capturedSession.namespace else {
-                        return .integrityFailure
+            let promote: () throws -> FarmSnapshotAuthority.PromotionOutcome? = {
+                try self.authority.withPromotion(capturedSession, cancelled: { Task.isCancelled }) {
+                    let liveData = try self.fileIO.readDataSync(at: live)
+                    if let liveData {
+                        guard let decoded = try? FarmSnapshotEnvelope.makeDecoder().decode(FarmSnapshotEnvelope.self, from: liveData),
+                              decoded.isSupportedSchema,
+                              decoded.namespace == capturedSession.namespace else {
+                            return .integrityFailure
+                        }
+                        let isOlder = decoded.lastUpdatedAtMillis > envelope.lastUpdatedAtMillis
+                        let isLegacyEqual = authorization == nil
+                            && decoded.lastUpdatedAtMillis == envelope.lastUpdatedAtMillis
+                        if isOlder || isLegacyEqual {
+                            return .notNewer
+                        }
                     }
-                    if decoded.lastUpdatedAtMillis >= envelope.lastUpdatedAtMillis {
-                        return .notNewer
-                    }
+                    try self.fileIO.promoteAtomically(candidate: candidate, to: live)
+                    return .promoted
                 }
-                try self.fileIO.promoteAtomically(candidate: candidate, to: live)
-                return .promoted
+            }
+            if let authorization {
+                outcome = try authorization.withAuthorization(promote) ?? nil
+            } else {
+                outcome = try promote()
             }
         } catch {
             // Atomic promotion threw — the live record still holds the exact prior
@@ -553,6 +624,7 @@ actor FarmSnapshotStore: FarmSnapshotStoring {
         //    guarantee a durable tombstone barrier.
         do {
             try authority.tombstone(serverID)
+            invalidateCommitAuthorization()
         } catch {
             return .failed(failureCount: 1)
         }

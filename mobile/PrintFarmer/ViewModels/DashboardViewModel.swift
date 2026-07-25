@@ -3,6 +3,10 @@ import os
 
 @MainActor @Observable
 final class DashboardViewModel {
+    typealias CallbackEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () async -> Void
+    ) -> Void
+
     var printers: [Printer] = []
     var queueOverview: [QueueOverview] = []
     var activeJobs: [QueuedPrintJobResponse] = []
@@ -12,7 +16,14 @@ final class DashboardViewModel {
     var upcomingJobs: [QueuedJobWithMeta] = []
     var isLoading = false
     var errorMessage: String?
-    var isViewActive = true
+    var isViewActive = true {
+        didSet {
+            if oldValue && !isViewActive {
+                invalidateCanonicalLoad()
+                tearDownSignalR()
+            }
+        }
+    }
 
     // MARK: - Cold-offline farm snapshot state (F10-C1b, #817)
 
@@ -64,10 +75,37 @@ final class DashboardViewModel {
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
+    @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
+    @ObservationIgnored private var canonicalLoadToken: UUID?
+    @ObservationIgnored private var canonicalLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var canonicalLoadRequested = false
+    @ObservationIgnored private var canonicalPassHasRecoveryDemand = false
+    @ObservationIgnored private var canonicalPendingRecoveryDemand = false
+    @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
+    @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
+    @ObservationIgnored private var canonicalCommitAuthorization: FarmSnapshotCommitAuthorization?
 
     // Snapshot lifecycle authority (#816), consumed unchanged.
     @ObservationIgnored private var snapshotStore: (any FarmSnapshotStoring)?
     @ObservationIgnored private var now: @Sendable () -> Date = { Date() }
+
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in await operation() }
+        }
+    ) {
+        self.callbackEnqueuer = callbackEnqueuer
+    }
+
+    deinit {
+        canonicalCommitAuthorization?.invalidate()
+        canonicalLoadTask?.cancel()
+        canonicalLoadWaiters.completeAll()
+    }
 
     func configure(
         printerService: any PrinterServiceProtocol,
@@ -75,6 +113,13 @@ final class DashboardViewModel {
         statisticsService: any StatisticsServiceProtocol,
         jobAnalyticsService: any JobAnalyticsServiceProtocol
     ) {
+        let changed = !Self.identical(self.printerService, printerService)
+            || !Self.identical(self.jobService, jobService)
+            || !Self.identical(self.statisticsService, statisticsService)
+            || !Self.identical(self.jobAnalyticsService, jobAnalyticsService)
+        if changed {
+            invalidateCanonicalLoad()
+        }
         self.printerService = printerService
         self.jobService = jobService
         self.statisticsService = statisticsService
@@ -89,20 +134,77 @@ final class DashboardViewModel {
         autoPrintService: (any AutoDispatchServiceProtocol)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        let changed = !Self.identical(self.snapshotStore, store)
+            || !Self.identical(self.autoPrintService, autoPrintService)
+        if changed {
+            invalidateCanonicalLoad()
+        }
         self.snapshotStore = store
         self.autoPrintService = autoPrintService
         self.now = now
     }
 
     func configureSignalR(_ service: any SignalRServiceProtocol) {
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        if signalRServiceIdentity == serviceIdentity, !signalRSubscriptions.isEmpty {
+            return
+        }
+        invalidateCanonicalLoad()
+        tearDownSignalR()
         self.signalRService = service
-        for subscription in signalRSubscriptions { subscription.cancel() }
-        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRAuthorityEpoch &+= 1
+        let authorityEpoch = signalRAuthorityEpoch
+        signalRServiceIdentity = serviceIdentity
+        let enqueue = callbackEnqueuer
         signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
-            Task { @MainActor [weak self] in
-                self?.applyPrinterUpdate(update)
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                self.applyPrinterUpdate(update)
             }
         })
+        let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                self.requestCanonicalLoad(isRecovery: true)
+            }
+        }
+        lastObservedConnectionState = connectionRegistration.initial
+        signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func tearDownSignalR() {
+        signalRAuthorityEpoch &+= 1
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRService = nil
+        signalRServiceIdentity = nil
+        lastObservedConnectionState = nil
+    }
+
+    private func hasSignalRAuthority(
+        epoch: UInt64,
+        serviceIdentity: ObjectIdentifier
+    ) -> Bool {
+        isViewActive
+            && signalRAuthorityEpoch == epoch
+            && signalRServiceIdentity == serviceIdentity
     }
 
     private func applyPrinterUpdate(_ update: PrinterStatusUpdate) {
@@ -149,92 +251,397 @@ final class DashboardViewModel {
     }
 
     func loadDashboard() async {
-        guard let printerService, let jobService, isViewActive else { return }
+        guard let waiter = beginCanonicalLoad() else { return }
+        await waiter.wait()
+    }
+
+    private func beginCanonicalLoad() -> CanonicalLoadWaiter? {
+        guard canLoadDashboard else { return nil }
+        let enqueue = callbackEnqueuer
+        let waiter = canonicalLoadWaiters.registerWaiter { [weak self] in
+            enqueue { [weak self] in
+                self?.canonicalWaiterCancelled()
+            }
+        }
+        requestCanonicalLoad()
+        return waiter
+    }
+
+    private var canLoadDashboard: Bool {
+        isViewActive && printerService != nil && jobService != nil
+    }
+
+    private func requestCanonicalLoad(isRecovery: Bool = false) {
+        guard canLoadDashboard else { return }
+        canonicalLoadRequested = true
+        if isRecovery {
+            canonicalPendingRecoveryDemand = true
+        }
+        canonicalCommitAuthorization?.invalidate()
+        guard canonicalLoadTask == nil else { return }
+
+        let token = UUID()
+        canonicalLoadToken = token
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+        canonicalPendingRecoveryDemand = false
         isLoading = true
         errorMessage = nil
+        let authority = makeCanonicalAuthority(token: token)
+        startCanonicalPass(authority: authority)
+    }
 
-        // Capture the authoritative session BEFORE the network round-trip so the
-        // commit is validated against the session in force when the load began.
-        let capturedSession = await snapshotStore?.currentSession()
-
-        do {
-            async let printersTask = printerService.list()
-            async let queueTask = jobService.list()
-            async let allJobsTask = jobService.listAllJobs()
-            let p = try await printersTask
-            let q = try await queueTask
-            let allJobs = try await allJobsTask
-            guard isViewActive else { return }
-            printers = p
-            queueOverview = q
-            activeJobs = allJobs.filter {
-                guard let status = $0.job.jobStatus else { return false }
-                return [.printing, .starting, .paused].contains(status)
+    private func startCanonicalPass(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority),
+              let printerService,
+              let jobService else {
+            return
+        }
+        let input = CanonicalLoadInput(
+            printerService: printerService,
+            jobService: jobService,
+            statisticsService: statisticsService,
+            jobAnalyticsService: jobAnalyticsService,
+            autoPrintService: autoPrintService,
+            snapshotStore: snapshotStore,
+            pendingReadyPrinterIDs: pendingReadyPrinterIDs,
+            summary: summary,
+            queueStats: queueStats,
+            modelStats: modelStats,
+            upcomingJobs: upcomingJobs,
+            now: now,
+            logger: logger
+        )
+        let installAuthorization: @MainActor @Sendable (
+            FarmSnapshotCommitAuthorization
+        ) -> Bool = { [weak self] authorization in
+            guard let self, self.isCanonicalPassCurrent(authority) else {
+                authorization.invalidate()
+                return false
             }
-            await refreshPendingReady()
+            self.canonicalCommitAuthorization = authorization
+            return true
+        }
+        let taskTracker = canonicalTaskTracker
+        taskTracker.taskStarted()
+        canonicalLoadTask = Task { [weak self, taskTracker, input] in
+            defer { taskTracker.taskFinished() }
+            let result = await Self.loadCanonicalSnapshot(
+                input: input,
+                installAuthorization: installAuthorization
+            )
+            self?.completeCanonicalPass(result, authority: authority)
+        }
+    }
 
-            do {
-                let s = try await statisticsService?.getSummary()
-                guard isViewActive else { return }
-                summary = s
-            } catch {
-                logger.warning("Failed to load statistics summary: \(error.localizedDescription)")
-            }
-
-            // Load farm status data
-            do {
-                async let statsTask = jobAnalyticsService?.getStats()
-                async let modelStatsTask = jobAnalyticsService?.getModelStats()
-                async let upcomingTask = jobAnalyticsService?.getQueuedJobs(
-                    filterStatus: "queued",
-                    filterModel: nil,
-                    filterMaterial: nil,
-                    limit: 5,
-                    offset: 0
-                )
-                let qs = try await statsTask
-                let ms = try await modelStatsTask ?? []
-                let uj = try await upcomingTask ?? []
-                guard isViewActive else { return }
-                queueStats = qs
-                modelStats = ms
-                upcomingJobs = uj
-            } catch {
-                logger.warning("Failed to load farm status data: \(error.localizedDescription)")
-            }
-
-            // Canonical response confirmed: publish it live, atomically replace
-            // the cached snapshot/timestamp once, and clear any stale shell.
-            await commitCanonicalSnapshot(printers, capturedSession: capturedSession)
-        } catch {
-            guard isViewActive else { return }
-            handleLoadFailure(error)
+    private func completeCanonicalPass(
+        _ result: CanonicalLoadResult,
+        authority: CanonicalAuthority
+    ) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        if canonicalLoadRequested {
+            canonicalLoadRequested = false
+            canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+            canonicalPendingRecoveryDemand = false
+            canonicalCommitAuthorization = nil
+            startCanonicalPass(authority: authority)
+            return
         }
 
-        guard isViewActive else { return }
+        switch result {
+        case .success(let snapshot):
+            publish(snapshot)
+        case .failure(let error):
+            handleLoadFailure(error)
+        case .superseded:
+            break
+        }
+        finishCanonicalLoad(authority: authority)
+    }
+
+    nonisolated private static func loadCanonicalSnapshot(
+        input: CanonicalLoadInput,
+        installAuthorization: @MainActor @Sendable (
+            FarmSnapshotCommitAuthorization
+        ) -> Bool
+    ) async -> CanonicalLoadResult {
+        let capturedSession = await input.snapshotStore?.currentSession()
+        guard !Task.isCancelled else { return .superseded }
+        let commitAuthorization: FarmSnapshotCommitAuthorization?
+        if let store = input.snapshotStore, let capturedSession {
+            commitAuthorization = await store.authorizeCommit(capturedSession: capturedSession)
+            guard !Task.isCancelled,
+                  let commitAuthorization,
+                  await installAuthorization(commitAuthorization) else {
+                commitAuthorization?.invalidate()
+                return .superseded
+            }
+        } else {
+            commitAuthorization = nil
+        }
+
+        do {
+            async let printersTask = input.printerService.list()
+            async let queueTask = input.jobService.list()
+            async let allJobsTask = input.jobService.listAllJobs()
+            let (loadedPrinters, loadedQueue, loadedJobs) = try await (
+                printersTask,
+                queueTask,
+                allJobsTask
+            )
+            guard !Task.isCancelled else { return .superseded }
+
+            var loadedPendingReady = input.pendingReadyPrinterIDs
+            if let autoPrintService = input.autoPrintService {
+                do {
+                    let statuses = try await autoPrintService.getAllStatus()
+                    guard !Task.isCancelled else { return .superseded }
+                    loadedPendingReady = Set(
+                        statuses.printers.filter { $0.state == "PendingReady" }.map(\.printerId)
+                    )
+                } catch {
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
+                }
+            }
+
+            var loadedSummary = input.summary
+            if let statisticsService = input.statisticsService {
+                do {
+                    loadedSummary = try await statisticsService.getSummary()
+                } catch {
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.warning("Failed to load statistics summary: \(error.localizedDescription)")
+                }
+                guard !Task.isCancelled else { return .superseded }
+            }
+
+            var loadedQueueStats = input.queueStats
+            var loadedModelStats = input.modelStats
+            var loadedUpcomingJobs = input.upcomingJobs
+            if let jobAnalyticsService = input.jobAnalyticsService {
+                do {
+                    async let statsTask = jobAnalyticsService.getStats()
+                    async let modelStatsTask = jobAnalyticsService.getModelStats()
+                    async let upcomingTask = jobAnalyticsService.getQueuedJobs(
+                        filterStatus: "queued",
+                        filterModel: nil,
+                        filterMaterial: nil,
+                        limit: 5,
+                        offset: 0
+                    )
+                    let (stats, models, upcoming) = try await (
+                        statsTask,
+                        modelStatsTask,
+                        upcomingTask
+                    )
+                    guard !Task.isCancelled else { return .superseded }
+                    loadedQueueStats = stats
+                    loadedModelStats = models
+                    loadedUpcomingJobs = upcoming
+                } catch {
+                    guard !Task.isCancelled else { return .superseded }
+                    input.logger.warning("Failed to load farm status data: \(error.localizedDescription)")
+                }
+            }
+
+            let instant = input.now()
+            if let store = input.snapshotStore,
+               let session = capturedSession,
+               let commitAuthorization {
+                let envelope = FarmSnapshotEnvelope(
+                    namespace: session.namespace,
+                    printers: loadedPrinters,
+                    pendingReadyPrinterIDs: loadedPendingReady,
+                    lastUpdatedAtMillis: Int64((instant.timeIntervalSince1970 * 1000).rounded())
+                )
+                _ = await store.commit(
+                    envelope,
+                    capturedSession: session,
+                    authorization: commitAuthorization
+                )
+                guard !Task.isCancelled,
+                      commitAuthorization.withAuthorization({ true }) == true else {
+                    return .superseded
+                }
+            }
+
+            return .success(
+                CanonicalSnapshot(
+                    printers: loadedPrinters,
+                    queueOverview: loadedQueue,
+                    activeJobs: loadedJobs.filter {
+                        guard let status = $0.job.jobStatus else { return false }
+                        return [.printing, .starting, .paused].contains(status)
+                    },
+                    summary: loadedSummary,
+                    queueStats: loadedQueueStats,
+                    modelStats: loadedModelStats,
+                    upcomingJobs: loadedUpcomingJobs,
+                    pendingReadyPrinterIDs: loadedPendingReady,
+                    lastUpdatedAt: instant
+                )
+            )
+        } catch {
+            guard !Task.isCancelled else { return .superseded }
+            return .failure(error)
+        }
+    }
+
+    private func publish(_ snapshot: CanonicalSnapshot) {
+        printers = snapshot.printers
+        queueOverview = snapshot.queueOverview
+        activeJobs = snapshot.activeJobs
+        summary = snapshot.summary
+        queueStats = snapshot.queueStats
+        modelStats = snapshot.modelStats
+        upcomingJobs = snapshot.upcomingJobs
+        pendingReadyPrinterIDs = snapshot.pendingReadyPrinterIDs
+        lastUpdatedAt = snapshot.lastUpdatedAt
+        farmSource = .live
+        errorMessage = nil
+    }
+
+    private func finishCanonicalLoad(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
+        canonicalCommitAuthorization = nil
         isLoading = false
+        canonicalLoadWaiters.completeAll()
+    }
+
+    private func invalidateCanonicalLoad() {
+        canonicalLifecycleEpoch &+= 1
+        canonicalCommitAuthorization?.invalidate()
+        canonicalCommitAuthorization = nil
+        canonicalLoadTask?.cancel()
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
+        isLoading = false
+        canonicalLoadWaiters.completeAll()
+    }
+
+    private func canonicalWaiterCancelled() {
+        guard canonicalLoadWaiters.activeCount == 0,
+              !canonicalPassHasRecoveryDemand,
+              !canonicalPendingRecoveryDemand else {
+            return
+        }
+        invalidateCanonicalLoad()
+    }
+
+    private func makeCanonicalAuthority(token: UUID) -> CanonicalAuthority {
+        CanonicalAuthority(
+            token: token,
+            lifecycleEpoch: canonicalLifecycleEpoch,
+            printerServiceIdentity: Self.identity(printerService),
+            jobServiceIdentity: Self.identity(jobService),
+            statisticsServiceIdentity: Self.identity(statisticsService),
+            jobAnalyticsServiceIdentity: Self.identity(jobAnalyticsService),
+            autoPrintServiceIdentity: Self.identity(autoPrintService),
+            snapshotStoreIdentity: Self.identity(snapshotStore)
+        )
+    }
+
+    private func isCanonicalLoadCurrent(_ authority: CanonicalAuthority) -> Bool {
+        isViewActive
+            && canonicalLoadToken == authority.token
+            && canonicalLifecycleEpoch == authority.lifecycleEpoch
+            && Self.identity(printerService) == authority.printerServiceIdentity
+            && Self.identity(jobService) == authority.jobServiceIdentity
+            && Self.identity(statisticsService) == authority.statisticsServiceIdentity
+            && Self.identity(jobAnalyticsService) == authority.jobAnalyticsServiceIdentity
+            && Self.identity(autoPrintService) == authority.autoPrintServiceIdentity
+            && Self.identity(snapshotStore) == authority.snapshotStoreIdentity
+    }
+
+    private func isCanonicalPassCurrent(_ authority: CanonicalAuthority) -> Bool {
+        isCanonicalLoadCurrent(authority) && !canonicalLoadRequested
+    }
+
+    private static func identity<T>(_ value: T?) -> ObjectIdentifier? {
+        value.map { ObjectIdentifier($0 as AnyObject) }
+    }
+
+    private static func identical<T>(_ lhs: T?, _ rhs: T?) -> Bool {
+        identity(lhs) == identity(rhs)
+    }
+
+#if DEBUG
+    func beginCanonicalLoadForTesting() -> CanonicalLoadWaiter? {
+        beginCanonicalLoad()
+    }
+
+    var canonicalWaiterCountForTesting: Int {
+        canonicalLoadWaiters.activeCount
+    }
+
+    func waitForCanonicalWaiterCount(_ count: Int) async {
+        await canonicalLoadWaiters.waitForActiveCount(count)
+    }
+
+    func waitForCanonicalLoadToBecomeIdle() async {
+        await canonicalTaskTracker.waitForIdle()
+    }
+
+    func waitForSupersededCanonicalLoads() async {
+        await canonicalTaskTracker.waitForIdle()
+    }
+#endif
+
+    private struct CanonicalAuthority {
+        let token: UUID
+        let lifecycleEpoch: UInt64
+        let printerServiceIdentity: ObjectIdentifier?
+        let jobServiceIdentity: ObjectIdentifier?
+        let statisticsServiceIdentity: ObjectIdentifier?
+        let jobAnalyticsServiceIdentity: ObjectIdentifier?
+        let autoPrintServiceIdentity: ObjectIdentifier?
+        let snapshotStoreIdentity: ObjectIdentifier?
+    }
+
+    private struct CanonicalSnapshot {
+        let printers: [Printer]
+        let queueOverview: [QueueOverview]
+        let activeJobs: [QueuedPrintJobResponse]
+        let summary: StatisticsSummary?
+        let queueStats: QueueStats?
+        let modelStats: [QueuePrinterModelStats]
+        let upcomingJobs: [QueuedJobWithMeta]
+        let pendingReadyPrinterIDs: Set<UUID>
+        let lastUpdatedAt: Date
+    }
+
+    private struct CanonicalLoadInput: Sendable {
+        let printerService: any PrinterServiceProtocol
+        let jobService: any JobServiceProtocol
+        let statisticsService: (any StatisticsServiceProtocol)?
+        let jobAnalyticsService: (any JobAnalyticsServiceProtocol)?
+        let autoPrintService: (any AutoDispatchServiceProtocol)?
+        let snapshotStore: (any FarmSnapshotStoring)?
+        let pendingReadyPrinterIDs: Set<UUID>
+        let summary: StatisticsSummary?
+        let queueStats: QueueStats?
+        let modelStats: [QueuePrinterModelStats]
+        let upcomingJobs: [QueuedJobWithMeta]
+        let now: @Sendable () -> Date
+        let logger: Logger
+    }
+
+    private enum CanonicalLoadResult {
+        case success(CanonicalSnapshot)
+        case failure(Error)
+        case superseded
     }
 
     // MARK: - Snapshot commit / failure handling (#817)
-
-    /// Mark the on-screen fleet confirmed-live and persist it. The visible data
-    /// is authoritative regardless of whether the durable write lands, so live
-    /// state and `lastUpdatedAt` are published even if the store rejects/misses
-    /// the commit (older-or-equal, superseded, persistence failure).
-    private func commitCanonicalSnapshot(_ printers: [Printer], capturedSession: FarmSnapshotSession?) async {
-        let instant = now()
-        farmSource = .live
-        lastUpdatedAt = instant
-        errorMessage = nil
-        guard let store = snapshotStore, let session = capturedSession else { return }
-        let envelope = FarmSnapshotEnvelope(
-            namespace: session.namespace,
-            printers: printers,
-            pendingReadyPrinterIDs: pendingReadyPrinterIDs,
-            lastUpdatedAtMillis: Int64((instant.timeIntervalSince1970 * 1000).rounded())
-        )
-        _ = await store.commit(envelope, capturedSession: session)
-    }
 
     /// A canonical load failed. Preserve a valid cached shell (stale) instead of
     /// replacing it — a `.preserve` outcome never touches the durable record and
@@ -270,21 +677,6 @@ final class DashboardViewModel {
              .methodNotAllowed, .conflict, .partsInventoryConflict,
              .clientError, .serverError, .unexpectedStatus, .staleServerResponse:
             return .serverError
-        }
-    }
-
-    /// Refresh the H6-compliant pending-ready projection from the authoritative
-    /// auto-dispatch source. Non-critical: cards fall back to plain state on error.
-    private func refreshPendingReady() async {
-        guard let autoPrintService else { return }
-        do {
-            let statuses = try await autoPrintService.getAllStatus()
-            guard isViewActive else { return }
-            pendingReadyPrinterIDs = Set(
-                statuses.printers.filter { $0.state == "PendingReady" }.map(\.printerId)
-            )
-        } catch {
-            logger.info("Auto-dispatch status unavailable: \(error.localizedDescription)")
         }
     }
 

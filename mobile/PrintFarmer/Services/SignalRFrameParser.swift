@@ -5,40 +5,88 @@ enum SignalRFrameParserError: Error, Equatable, Sendable {
 }
 
 struct SignalRFrameParser {
+    struct AppendDecision: Equatable, Sendable {
+        let bufferedBytes: Int
+        let incomingBytes: Int
+        let maximumBytes: Int
+        let canAppend: Bool
+    }
+
+#if DEBUG
+    struct DebugAppendObservation: Equatable, Sendable {
+        let decision: AppendDecision
+        let bufferedBytesBeforeMutation: Int
+    }
+#endif
+
     static let recordSeparator: UInt8 = 0x1E
     static let maximumFrameBytes = 1_048_576
 
     private var buffer = Data()
+#if DEBUG
+    private(set) var debugAppendObservations: [DebugAppendObservation] = []
+    var debugBufferedBytes: Int { buffer.count }
+#endif
+
+    static func appendDecision(
+        bufferedBytes: Int,
+        incomingBytes: Int,
+        maximumBytes: Int = maximumFrameBytes
+    ) -> AppendDecision {
+        let canAppend: Bool
+        if bufferedBytes < 0
+            || incomingBytes < 0
+            || maximumBytes < 0
+            || bufferedBytes > maximumBytes {
+            canAppend = false
+        } else {
+            canAppend = incomingBytes <= maximumBytes - bufferedBytes
+        }
+        return AppendDecision(
+            bufferedBytes: bufferedBytes,
+            incomingBytes: incomingBytes,
+            maximumBytes: maximumBytes,
+            canAppend: canAppend
+        )
+    }
 
     mutating func append(_ chunk: Data) throws -> [Data] {
-        buffer.append(chunk)
         var frames: [Data] = []
+        var segmentStart = chunk.startIndex
 
-        while let separator = buffer.firstIndex(of: Self.recordSeparator) {
-            let frameLength = buffer.distance(
-                from: buffer.startIndex,
-                to: separator
-            )
-            guard frameLength <= Self.maximumFrameBytes else {
-                reset()
-                throw SignalRFrameParserError.frameTooLarge(
-                    maximumBytes: Self.maximumFrameBytes
-                )
+        while let separator = chunk[segmentStart...].firstIndex(of: Self.recordSeparator) {
+            try appendBounded(chunk[segmentStart..<separator])
+            if !buffer.isEmpty {
+                frames.append(buffer)
+                buffer = Data()
             }
-            let frame = Data(buffer[..<separator])
-            buffer.removeSubrange(...separator)
-            if !frame.isEmpty {
-                frames.append(frame)
-            }
+            segmentStart = chunk.index(after: separator)
         }
 
-        guard buffer.count <= Self.maximumFrameBytes else {
+        try appendBounded(chunk[segmentStart...])
+        return frames
+    }
+
+    private mutating func appendBounded(_ segment: Data.SubSequence) throws {
+        let decision = Self.appendDecision(
+            bufferedBytes: buffer.count,
+            incomingBytes: segment.count
+        )
+#if DEBUG
+        debugAppendObservations.append(
+            DebugAppendObservation(
+                decision: decision,
+                bufferedBytesBeforeMutation: buffer.count
+            )
+        )
+#endif
+        guard decision.canAppend else {
             reset()
             throw SignalRFrameParserError.frameTooLarge(
                 maximumBytes: Self.maximumFrameBytes
             )
         }
-        return frames
+        buffer.append(contentsOf: segment)
     }
 
     mutating func reset() {
