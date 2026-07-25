@@ -349,7 +349,7 @@ export function AdminControlCenterPage() {
           {isError && (
             <AdminError
               title="Couldn't load the admin overview"
-              description="The admin overview endpoint didn't respond. Health, attention, and destinations will populate once the fetch succeeds."
+              description="The admin overview endpoint didn't respond, so health and attention are unavailable. Your admin destinations below still work."
               error={error}
               onRetry={() => {
                 void refetch();
@@ -379,6 +379,9 @@ export function AdminControlCenterPage() {
         </section>
 
         {/* ── Band 2: attention ── */}
+        {/* Suppressed on error — band 1 already reports the failure, and an
+            "Needs attention" heading with nothing beneath it reads as broken. */}
+        {!isError && (
         <section
           aria-labelledby="admin-hub-attention-heading"
           className="flex flex-col gap-3"
@@ -401,7 +404,7 @@ export function AdminControlCenterPage() {
 
           {isLoading && <AdminLoading variant="list" label="Loading attention items" rows={3} />}
 
-          {!isLoading && !isError && data && data.attention.length === 0 && (
+          {!isLoading && data && data.attention.length === 0 && (
             <AdminEmpty
               icon={<CheckCircleIcon className="h-10 w-10 text-pf-success" ariaLabel="" />}
               title="Nothing needs your attention"
@@ -410,7 +413,7 @@ export function AdminControlCenterPage() {
             />
           )}
 
-          {!isLoading && !isError && data && data.attention.length > 0 && (
+          {!isLoading && data && data.attention.length > 0 && (
             <ul
               className="flex flex-col gap-2"
               data-testid="admin-hub-attention"
@@ -421,6 +424,7 @@ export function AdminControlCenterPage() {
             </ul>
           )}
         </section>
+        )}
 
         {/* ── Band 3: domains ── */}
         <section
