@@ -7,10 +7,14 @@
 #pragma warning disable CA1056 // URI-like properties should not be strings
 public sealed record CameraUrlResult
 {
+    private const string PrinterRoutePrefix = "/api/printers/";
+    private const string SnapshotRouteSuffix = "/camera/snapshot";
+    private const string StreamRouteSuffix = "/camera/stream";
+
     public CameraUrlResult(string? streamUrl, string? snapshotUrl)
     {
-        StreamUrl = ValidateProxyRoute(streamUrl, nameof(streamUrl));
-        SnapshotUrl = ValidateProxyRoute(snapshotUrl, nameof(snapshotUrl));
+        StreamUrl = ValidateProxyRoute(streamUrl, StreamRouteSuffix, nameof(streamUrl));
+        SnapshotUrl = ValidateProxyRoute(snapshotUrl, SnapshotRouteSuffix, nameof(snapshotUrl));
     }
 
     public string? StreamUrl { get; }
@@ -23,15 +27,28 @@ public sealed record CameraUrlResult
         snapshotUrl = SnapshotUrl;
     }
 
-    private static string? ValidateProxyRoute(string? value, string parameterName)
+    private static string? ValidateProxyRoute(
+        string? value,
+        string expectedSuffix,
+        string parameterName)
     {
         if (value is null)
         {
             return null;
         }
 
-        if (!value.StartsWith("/api/printers/", StringComparison.Ordinal) ||
-            Uri.TryCreate(value, UriKind.Absolute, out _))
+        ReadOnlySpan<char> route = value.AsSpan();
+        if (!route.StartsWith(PrinterRoutePrefix, StringComparison.Ordinal) ||
+            !route.EndsWith(expectedSuffix, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "Camera routes must be relative PrintFarmer printer API routes.",
+                parameterName);
+        }
+
+        ReadOnlySpan<char> printerId = route[
+            PrinterRoutePrefix.Length..^expectedSuffix.Length];
+        if (!Guid.TryParseExact(printerId, "D", out _))
         {
             throw new ArgumentException(
                 "Camera routes must be relative PrintFarmer printer API routes.",

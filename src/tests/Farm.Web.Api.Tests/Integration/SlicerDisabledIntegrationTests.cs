@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// <summary>
 /// Ensures slicer-disabled tests run serially (env var side-effect).
 /// </summary>
-[CollectionDefinition("SlicerDisabled")]
+[CollectionDefinition("SlicerDisabled", DisableParallelization = true)]
 public class SlicerDisabledCollection { }
 
 /// <summary>
