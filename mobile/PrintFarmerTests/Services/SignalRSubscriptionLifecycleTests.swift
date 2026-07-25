@@ -4072,6 +4072,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         var completion = Data(invocation[splitIndex...])
         completion.append(SignalRFrameParser.recordSeparator)
         socket.completeReceive(with: .data(completion))
+        await socket.waitForReceiveEnrollments(count: 3)
         await recorder.waitForCount(1)
         service.drainHubCoordinatorForTesting()
 
@@ -4465,6 +4466,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
                 )
             )
         )
+        await secondSocket.waitForReceiveEnrollments(count: 2)
         await states.waitFor(
             state: .connected,
             afterCount: reconnectWatermark
