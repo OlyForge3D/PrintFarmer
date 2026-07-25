@@ -126,7 +126,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetSuppressedSourceKeysAsync(
+    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)>> GetSuppressedSourceKeysAsync(
         DateTime updatedAfterUtc, CancellationToken ct = default)
     {
         // Fix F: user-initiated Skipped/Dismissed compiler tasks suppress re-creation
@@ -142,15 +142,17 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
 
         // Post-materialize guard: rows whose persisted SourceKind string is not a known
         // enum member surface as Unspecified via the value converter — drop them so
-        // unknown/future kinds never suppress a real source key.
+        // unknown/future kinds never suppress a real source key. Collapse to one row per
+        // key carrying the greatest mutation version (issue #823 replay detection).
         return rows
             .Where(t => t.SourceKind != UserTaskSourceKind.Unspecified && !string.IsNullOrEmpty(t.SourceId))
-            .Select(t => (t.SourceKind, t.SourceId!))
-            .ToHashSet();
+            .GroupBy(t => (t.SourceKind, SourceId: t.SourceId!))
+            .Select(g => (g.Key.SourceKind, g.Key.SourceId, Version: g.Max(t => t.LastMutationSequence)))
+            .ToList();
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)>> GetOpenSuppressedByKeysAsync(
+    public async Task<IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId, long Version)>> GetOpenSuppressedByKeysAsync(
         IReadOnlyCollection<(UserTaskSourceKind SourceKind, string SourceId)> activeKeys,
         DateTime? maxAgeUtc = null,
         CancellationToken ct = default)
@@ -160,7 +162,7 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
             .ToHashSet();
         if (keySet.Count == 0)
         {
-            return Array.Empty<(UserTaskSourceKind, string)>();
+            return Array.Empty<(UserTaskSourceKind, string, long)>();
         }
 
         // A bounded bootstrap avoids treating ancient terminal rows as current
@@ -182,8 +184,9 @@ public class EfUserTaskRepository(AppDbContext db) : IUserTaskRepository
 
         return rows
             .Where(t => t.SourceId is not null && keySet.Contains((t.SourceKind, t.SourceId)))
-            .Select(t => (t.SourceKind, t.SourceId!))
-            .ToHashSet();
+            .GroupBy(t => (t.SourceKind, SourceId: t.SourceId!))
+            .Select(g => (g.Key.SourceKind, g.Key.SourceId, Version: g.Max(t => t.LastMutationSequence)))
+            .ToList();
     }
 
     /// <summary>
