@@ -417,12 +417,12 @@ test('validateLicenseMetadata rejects release gates in the wrong order', async (
   }
 });
 
-test('validateLicenseMetadata rejects changed preserved third-party terms', async () => {
+test('validateLicenseMetadata normalizes line endings and rejects changed preserved terms', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-vendored-license-'));
   try {
     await writeFile(path.join(root, 'LICENSE'), 'canonical\n');
     await writeFile(path.join(root, 'VERSION'), 'v0.2.3\n');
-    await writeFile(path.join(root, 'vendored-license.txt'), 'changed terms\n');
+    await writeFile(path.join(root, 'vendored-license.txt'), 'expected terms\r\n');
     await writeFile(path.join(root, 'component.sh'), '#!/bin/sh\n');
     const policy = {
       licenseExpression: 'AGPL-3.0-only',
@@ -446,6 +446,9 @@ test('validateLicenseMetadata rejects changed preserved third-party terms', asyn
       forbiddenScanPaths: [],
       exceptions: [],
     };
+    assert.deepEqual(await validateLicenseMetadata(root, policy), []);
+
+    await writeFile(path.join(root, 'vendored-license.txt'), 'changed terms\n');
     const errors = await validateLicenseMetadata(root, policy);
     assert.ok(hasCode(errors, 'THIRD_PARTY_LICENSE_CHANGED'));
   } finally {

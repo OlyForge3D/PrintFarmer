@@ -62,6 +62,11 @@ export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function normalizedLicenseSha256(value) {
+  const text = Buffer.isBuffer(value) ? value.toString('utf8') : value;
+  return sha256(normalizedLicenseText(text));
+}
+
 export function createError(code, filePath, message) {
   return { code, path: normalizeRelativePath(filePath), message };
 }
@@ -428,7 +433,7 @@ export async function createNpmLicenseInventory(repoRoot, policy) {
     }
     try {
       const licenseBytes = await readFile(licensePath);
-      const digest = createHash('sha256').update(licenseBytes).digest('hex');
+      const digest = normalizedLicenseSha256(licenseBytes);
       if (digest !== fallback.sha256) {
         errors.push(createError(
           'LICENSE_EVIDENCE_MISMATCH',
@@ -1152,7 +1157,7 @@ export async function validateLicenseMetadata(repoRoot, licensingPolicy) {
       errors.push(createError('THIRD_PARTY_LICENSE_MISSING', contextPath, 'preserved license file is missing'));
       continue;
     }
-    const actualDigest = sha256(await readFile(absolutePath));
+    const actualDigest = normalizedLicenseSha256(await readFile(absolutePath));
     if (actualDigest !== licenseRecord.sha256) {
       errors.push(createError(
         'THIRD_PARTY_LICENSE_CHANGED',
