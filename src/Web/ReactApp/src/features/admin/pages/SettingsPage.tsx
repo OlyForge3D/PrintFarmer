@@ -556,6 +556,10 @@ export function SettingsPage({
         <HelpButton onClick={startTour} />
       </div>
 
+      {/* Some tabs (e.g. Farm) render only `afterContent` and have no metadata-driven
+          settings at all. Showing a filter toggle and a search box there would give the
+          user two controls that visibly do nothing. */}
+      {totalSettingsCount > 0 && (
       <div
         className="flex flex-wrap items-center gap-3 rounded-lg border border-pf-border bg-pf-bg-0 p-3"
         data-testid="settings-mode-controls"
@@ -601,6 +605,7 @@ export function SettingsPage({
           </div>
         )}
       </div>
+      )}
 
       {noMatchingResults && (
         <EmptyState
