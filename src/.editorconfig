@@ -50,7 +50,7 @@ trim_trailing_whitespace = false
 
 # Dotnet code style settings:
 [*.{cs,vb}]
-file_header_template = Licensed under the MIT License. See LICENSE in the project root.
+file_header_template = SPDX-License-Identifier: AGPL-3.0-only
 
 # Global diagnostic suppressions
 dotnet_diagnostic.IDE0130.severity = none       # Namespace doesn't match folder structure
@@ -170,8 +170,8 @@ dotnet_naming_style.pascal_case_style.capitalization = pascal_case
 # Workaround for https://github.com/dotnet/roslyn/issues/70570
 dotnet_diagnostic.IDE0055.severity = warning
 
-# IDE0060: Remove unused parameter
-dotnet_diagnostic.IDE0060.severity = warning
+# IDE0060: Keep as an editor suggestion because framework, route-binding, and interface signatures may require parameters
+dotnet_diagnostic.IDE0060.severity = suggestion
 
 # Namespace declaration preferences (IDE0160 and IDE0161)
 csharp_style_namespace_declarations = file_scoped:warning

@@ -2,6 +2,21 @@
 
 This document explains how to create and configure the repository Personal Access Token (PAT) used by the release workflow (`.github/workflows/release.yml`) to push tags so downstream workflows (for example container builds) are triggered.
 
+Every release must also publish exact-commit source archives, source metadata,
+license and notice files, and validated SPDX JSON SBOMs. Follow
+[Licensing, Corresponding Source, and Provenance](LICENSING_AND_SOURCE.md)
+for required assets, retention, correction, and rollback procedures. A release
+must not proceed if compliance or SBOM validation fails.
+
+The exact-tag container workflow is the source-publication authority. After all
+five image digests and SPDX records are validated, signed, and smoke tested, it
+creates or verifies the GitHub release and publishes the exact source archive,
+source manifest, license, notices, SBOMs, and digest records. It verifies those
+assets are public before assigning any semantic image tag. The dispatching
+release workflow then finalizes release notes without replacing compliance
+assets. A direct tag push therefore cannot publish versioned images without a
+matching public corresponding-source release.
+
 Why a PAT is required
 
 - GitHub Actions workflows that run using the automatically-provided `GITHUB_TOKEN` cannot create events that trigger other workflows in some scenarios (for example, creating a tag will not trigger workflows that listen for tag pushes). To ensure a tag push triggers the containers/image-publish workflow, the release job must push the tag using a repository Personal Access Token (PAT).

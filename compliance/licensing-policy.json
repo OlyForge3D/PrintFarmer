@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "licenseExpression": "AGPL-3.0-only",
+  "repositoryUrl": "https://github.com/OlyForge3D/PrintFarmer",
+  "canonicalLicense": {
+    "path": "LICENSE",
+    "normalizedSha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+  },
+  "decision": {
+    "approver": "Jeff Papiez, PrintFarmer repository owner",
+    "approvalDate": "2026-07-24",
+    "approvalReference": "https://github.com/OlyForge3D/PrintFarmer/issues/902",
+    "approvalType": "Repository-owner licensing decision; not external legal approval",
+    "effectiveVersion": "v0.2.3",
+    "lastHistoricalVersion": "v0.2.2"
+  },
+  "requiredFiles": [
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "compliance/calibration-provenance.json",
+    "compliance/calibration-provenance.schema.json",
+    "compliance/dependency-license-policy.json",
+    "compliance/licenses/dotnet-install-MIT.txt",
+    "docs/LICENSING_AND_SOURCE.md"
+  ],
+  "preservedThirdPartyLicenses": [
+    {
+      "path": "compliance/licenses/dotnet-install-MIT.txt",
+      "sha256": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+      "source": "https://github.com/dotnet/install-scripts/blob/a6dd53ae9c18d045e8f5dc7db84485a5bef04d43/LICENSE.TXT",
+      "appliesTo": [
+        "scripts/dotnet-install.sh",
+        "src/dotnet-install.sh"
+      ]
+    }
+  ],
+  "packageManifests": [
+    "src/Web/ReactApp/package.json",
+    "src/Web/ReactApp/eslint-rules/package.json",
+    "tests/ui-validation/package.json",
+    "tools/package.json"
+  ],
+  "metadataAssertions": [
+    {
+      "path": "Directory.Build.props",
+      "contains": [
+        "<PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>",
+        "<RepositoryUrl>https://github.com/OlyForge3D/PrintFarmer</RepositoryUrl>"
+      ]
+    },
+    {
+      "path": "scripts/dotnet-install.sh",
+      "contains": [
+        "See compliance/licenses/dotnet-install-MIT.txt"
+      ]
+    },
+    {
+      "path": "src/dotnet-install.sh",
+      "contains": [
+        "See compliance/licenses/dotnet-install-MIT.txt"
+      ]
+    },
+    {
+      "path": "README.md",
+      "contains": [
+        "GNU Affero General Public License v3.0 only",
+        "GET /api/system/source"
+      ]
+    },
+    {
+      "path": "mobile/README.md",
+      "contains": [
+        "GNU Affero General Public License v3.0 only"
+      ]
+    },
+    {
+      "path": ".github/workflows/docker-publish.yml",
+      "contains": [
+        "org.opencontainers.image.licenses=AGPL-3.0-only",
+        "org.opencontainers.image.revision=${{ github.sha }}",
+        "outputs: type=image,name=",
+        "cosign attest --yes --type spdxjson",
+        "--include-npm",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "Smoke test ARM64 image digests",
+        "printfarmer-monolith@${monolith_digest}",
+        "Publish and verify public corresponding-source assets",
+        "gh release upload \"$VERSION\"",
+        "release_is_draft",
+        "Promote validated digests"
+      ],
+      "orderedContains": [
+        "  build-containers:",
+        "    permissions:",
+        "      contents: read",
+        "      id-token: write",
+        "      packages: write",
+        "    strategy:",
+        "Smoke test ARM64 image digests",
+        "Publish and verify public corresponding-source assets",
+        "Promote validated digests"
+      ],
+      "notContains": [
+        "--clobber"
+      ]
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "contains": [
+        "bash scripts/sync-monorepo-version.sh --check",
+        "--branch \"$VERSION\"",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "cosign verify-attestation",
+        "Finalize GitHub Release"
+      ],
+      "notContains": [
+        "Verify image signatures (best-effort)",
+        "Verify failed for",
+        "Create corresponding-source assets",
+        "release-artifacts/*",
+        "artifacts/**/*.spdx.json"
+      ]
+    },
+    {
+      "path": ".github/workflows/consolidated-release.yml",
+      "contains": [
+        "bash scripts/sync-monorepo-version.sh --check",
+        "--branch \"$VERSION\"",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "cosign verify-attestation",
+        "Finalize GitHub Release"
+      ],
+      "notContains": [
+        "uses: ./.github/workflows/docker-publish.yml",
+        "Create corresponding-source assets",
+        "release-artifacts/*",
+        "artifacts/**/*.spdx.json"
+      ]
+    },
+    {
+      "path": "scripts/docker/dockerfiles/Dockerfile.multistage",
+      "contains": [
+        "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
+        "PFARM__SourceInfo__Revision"
+      ]
+    }
+  ],
+  "forbiddenFirstPartyDeclarations": [
+    "licensed under the MIT License",
+    "org.opencontainers.image.licenses=MIT",
+    "\"license\": \"ISC\""
+  ],
+  "forbiddenScanPaths": [
+    "README.md",
+    "mobile/README.md",
+    "Directory.Build.props",
+    "src/.editorconfig",
+    ".github/agents/code-review-codex.agent.md",
+    ".github/agents/code-review-gemini.agent.md",
+    ".github/agents/code-review-opus.agent.md",
+    "src/Web/ReactApp/package.json",
+    "src/Web/ReactApp/eslint-rules/package.json",
+    "tests/ui-validation/package.json",
+    "tools/package.json",
+    ".github/workflows/docker-publish.yml",
+    "scripts/docker/dockerfiles/Dockerfile",
+    "scripts/docker/dockerfiles/Dockerfile.api",
+    "scripts/docker/dockerfiles/Dockerfile.frontend",
+    "scripts/docker/dockerfiles/Dockerfile.multistage",
+    "scripts/docker/dockerfiles/Dockerfile.printer-discovery"
+  ],
+  "publication": {
+    "requiredArchivePaths": [
+      ".github/workflows",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md",
+      "compliance",
+      "Directory.Build.props",
+      "global.json",
+      "scripts",
+      "src"
+    ],
+    "deniedTrackedPathPatterns": [
+      "(^|/)\\.env$",
+      "(^|/)\\.env\\.(?!(example|development|template)$)",
+      "(^|/)(credentials|secrets?)(/|\\.|$)",
+      "\\.(db|sqlite|sqlite3|p12|pfx|pem|key)$",
+      "(^|/)id_(rsa|dsa|ecdsa|ed25519)$"
+    ],
+    "secretPatterns": [
+      "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+      "github_pat_[A-Za-z0-9_]{20,}",
+      "gh[pousr]_[A-Za-z0-9]{20,}",
+      "AKIA[0-9A-Z]{16}",
+      "https?://[^\\s/:]+:[^\\s/@]+@"
+    ]
+  },
+  "exceptions": []
+}

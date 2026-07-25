@@ -762,6 +762,24 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 ]
 ```
 
+## System Source API
+
+### Get License and Corresponding Source
+
+```http
+GET /api/system/source
+```
+
+This endpoint is intentionally unauthenticated so every network user can
+identify the license and exact corresponding source for the running version.
+Release builds return the full immutable revision, source tree, source archive,
+license, notices, and SPDX SBOM links. Development builds without a full commit
+return `sourceAvailable: false` and omit versioned links.
+
+See
+[Licensing, Corresponding Source, and Provenance](LICENSING_AND_SOURCE.md) for
+operator requirements.
+
 ## Health Check API
 
 ### System Health
