@@ -256,6 +256,68 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         _ = adminContext.RootElement.GetProperty("eligible").GetBoolean().Should().BeTrue();
     }
 
+    [Fact]
+    public async Task UpdateAsync_WithMissingPrintablePolygonCoordinate_ReturnsBadRequestAndDoesNotPersist()
+    {
+        Guid printerId = await SeedEligiblePrinterAsync();
+        string? originalPrintablePolygonJson = await GetPrintablePolygonJsonAsync(printerId);
+        using HttpClient client = CreateFarmAdminClient();
+        const string payload =
+            """{"printablePolygon":[{"x":0,"y":0},{"x":250},{"x":250,"y":250}]}""";
+
+        HttpResponseMessage response = await PutPrinterJsonAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        _ = (await GetPrintablePolygonJsonAsync(printerId)).Should().Be(originalPrintablePolygonJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithMissingExcludedRegionCoordinate_ReturnsBadRequestAndDoesNotPersist()
+    {
+        Guid printerId = await SeedEligiblePrinterAsync();
+        string? originalExcludedRegionsJson = await GetExcludedRegionsJsonAsync(printerId);
+        using HttpClient client = CreateFarmAdminClient();
+        const string payload =
+            """
+            {"excludedRegions":[{"name":"unsafe","polygon":[{"x":10,"y":10},{"y":20},{"x":20,"y":20}]}]}
+            """;
+
+        HttpResponseMessage response = await PutPrinterJsonAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        _ = (await GetExcludedRegionsJsonAsync(printerId)).Should().Be(originalExcludedRegionsJson);
+    }
+
+    [Fact]
+    public async Task UpdateAsync_WithCompleteCalibrationGeometry_ReturnsOkAndPersistsGeometry()
+    {
+        Guid printerId = await SeedEligiblePrinterAsync();
+        using HttpClient client = CreateFarmAdminClient();
+        const string payload =
+            """
+            {
+              "printablePolygon":[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250}],
+              "excludedRegions":[{"name":"unsafe","polygon":[{"x":10,"y":10},{"x":20,"y":10},{"x":20,"y":20}]}]
+            }
+            """;
+
+        HttpResponseMessage response = await PutPrinterJsonAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        CalibrationPointDto[] printablePolygon =
+            JsonSerializer.Deserialize<CalibrationPointDto[]>(await GetPrintablePolygonJsonAsync(printerId) ?? "[]")
+            ?? [];
+        CalibrationExcludedRegionDto[] excludedRegions =
+            JsonSerializer.Deserialize<CalibrationExcludedRegionDto[]>(await GetExcludedRegionsJsonAsync(printerId) ?? "[]")
+            ?? [];
+        _ = printablePolygon.Should().HaveCount(3);
+        _ = excludedRegions.Should().ContainSingle()
+            .Which.Polygon.Should().HaveCount(3);
+    }
+
     private HttpClient CreateCalibrationReaderClient(Guid? userId = null)
     {
         HttpClient client = _factory.CreateClient();
@@ -277,6 +339,33 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
             "X-Test-Roles",
             PrintFarmerPermissions.FarmAdminRole);
         return client;
+    }
+
+    private static async Task<HttpResponseMessage> PutPrinterJsonAsync(
+        HttpClient client,
+        Guid printerId,
+        string payload)
+    {
+        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+        return await client.PutAsync($"/api/printers/{printerId}", content);
+    }
+
+    private async Task<string?> GetPrintablePolygonJsonAsync(Guid printerId)
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = await db.Printers.FindAsync(printerId)
+            ?? throw new InvalidOperationException("Missing seeded printer.");
+        return printer.PrintablePolygonJson;
+    }
+
+    private async Task<string?> GetExcludedRegionsJsonAsync(Guid printerId)
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = await db.Printers.FindAsync(printerId)
+            ?? throw new InvalidOperationException("Missing seeded printer.");
+        return printer.ExcludedRegionsJson;
     }
 
     private async Task<Guid> SeedEligiblePrinterAsync(

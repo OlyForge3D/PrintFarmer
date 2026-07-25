@@ -73,7 +73,7 @@ public record UpdatePrinterDto(
     FirmwareDetectionSource? FirmwareDetectionSource = null,
     string? FirmwareVersion = null,
     string? FirmwareDetectionVersion = null,
-    [property: Range(typeof(decimal), "0", "1")]
+    [Range(typeof(decimal), "0", "1")]
     decimal? FirmwareDetectionConfidence = null,
     DateTime? FirmwareDetectedAtUtc = null,
     bool? FirmwareIdentityVerified = null,

@@ -37,6 +37,44 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = candidate.SupportsMultiExtruderStatus.Should().BeFalse();
     }
 
+    [Fact]
+    public async Task GetCandidatesAsync_WithPrintablePolygonPointMissingCoordinate_ReturnsTypedGeometryReason()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.PrintablePolygonJson =
+            """[{"x":0,"y":0},{"x":250},{"x":250,"y":250}]""";
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.PrintablePolygon.Should().BeNull();
+        _ = candidate.RejectionReasons.Should().ContainSingle(reason =>
+            reason.Code == "geometry_json_invalid" &&
+            reason.Field == "printablePolygon");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithExcludedRegionPointMissingCoordinate_ReturnsTypedGeometryReason()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.ExcludedRegionsJson =
+            """[{"name":"unsafe","polygon":[{"x":10,"y":10},{"y":20},{"x":20,"y":20}]}]""";
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.ExcludedRegions.Should().BeNull();
+        _ = candidate.RejectionReasons.Should().ContainSingle(reason =>
+            reason.Code == "geometry_json_invalid" &&
+            reason.Field == "excludedRegions");
+    }
+
     [Theory]
     [InlineData(PrinterBackend.Moonraker)]
     [InlineData(PrinterBackend.OctoPrint)]

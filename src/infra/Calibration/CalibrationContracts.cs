@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.PrinterCalibration;
@@ -52,10 +53,14 @@ public static class CalibrationContractConstants
     }
 }
 
-public sealed record CalibrationPointDto(double X, double Y);
+public sealed record CalibrationPointDto(
+    [property: JsonPropertyName("x"), JsonRequired] double X,
+    [property: JsonPropertyName("y"), JsonRequired] double Y);
 
 public sealed record CalibrationExcludedRegionDto(
+    [property: JsonPropertyName("name")]
     string? Name,
+    [property: JsonPropertyName("polygon"), JsonRequired]
     IReadOnlyList<CalibrationPointDto> Polygon);
 
 public sealed record CalibrationBuildVolumeDto(double? X, double? Y, double? Z);
