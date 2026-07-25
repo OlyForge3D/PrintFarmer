@@ -10,7 +10,6 @@ import {
   PrinterIcon,
   LayersIcon,
   SettingsIcon,
-  DashboardIcon,
   MenuIcon,
   CloseIcon,
   GearIcon,
@@ -220,22 +219,13 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
-    id: 'system-settings',
-    name: 'System Settings',
-    href: '/admin/settings',
-    icon: GearIcon,
+    id: 'admin',
+    name: 'Admin',
+    href: '/admin',
+    icon: SettingsIcon,
     requiredRole: 'farm_admin',
     anchored: true,
-    matches: (pathname) => pathname.startsWith('/admin/settings')
-  },
-  {
-    id: 'admin-console',
-    name: 'Admin Console',
-    href: '/admin/manage',
-    icon: DashboardIcon,
-    requiredRole: 'farm_admin',
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
+    matches: (pathname) => pathname === '/admin' || pathname.startsWith('/admin/')
   },
 ];
 

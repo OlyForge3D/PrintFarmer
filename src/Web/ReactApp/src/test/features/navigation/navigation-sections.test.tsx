@@ -101,8 +101,7 @@ describe('Navigation rail sections', () => {
     expect(within(desktopNav).getByRole('link', { name: /print queue/i })).toHaveAttribute('href', '/printQueue');
     expect(desktopNav.querySelector('a[href="/files"]')).not.toBeNull();
     expect(desktopNav.querySelector('a[href="/projects"]')).not.toBeNull();
-    expect(desktopNav.querySelector('a[href="/admin/settings"]')).not.toBeNull();
-    expect(desktopNav.querySelector('a[href="/admin/manage"]')).not.toBeNull();
+    expect(desktopNav.querySelector('a[href="/admin"]')).not.toBeNull();
   });
 
   it('renders exactly one divider immediately before the anchored Admin group', async () => {
@@ -116,7 +115,7 @@ describe('Navigation rail sections', () => {
     const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
     expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
     expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
-    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
   it('renders each default desktop nav link once', async () => {
@@ -124,7 +123,7 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(15);
+      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(14);
     });
 
     const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));
@@ -155,8 +154,7 @@ describe('Navigation rail sections', () => {
     const { container } = renderLayout();
     const desktopNav = getDesktopNav(container);
 
-    expect(container.querySelector('a[href="/admin/settings"]')).toBeNull();
-    expect(container.querySelector('a[href="/admin/manage"]')).toBeNull();
+    expect(container.querySelector('a[href="/admin"]')).toBeNull();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
     expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(0);
   });
@@ -230,16 +228,15 @@ describe('Navigation rail sections', () => {
     const desktopRail = desktopNav.parentElement as HTMLElement;
 
     expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
-    expect(within(desktopNav).getByRole('link', { name: 'System Settings' })).toHaveAttribute('href', '/admin/settings');
-    expect(within(desktopNav).getByRole('link', { name: 'Admin Console' })).toHaveAttribute('href', '/admin/manage');
+    expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
 
     fireEvent.click(within(desktopRail).getByRole('button', { name: 'Customize navigation' }));
 
     const customizePanel = within(desktopNav).getByRole('region', { name: 'Customize navigation' });
     expect(within(customizePanel).queryByText('Maintenance')).not.toBeInTheDocument();
-    expect(within(customizePanel).queryByText('Admin Console')).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByText('Admin')).not.toBeInTheDocument();
     expect(within(customizePanel).queryByRole('button', { name: 'Move Maintenance up' })).not.toBeInTheDocument();
-    expect(within(customizePanel).queryByRole('button', { name: 'Move Admin Console down' })).not.toBeInTheDocument();
+    expect(within(customizePanel).queryByRole('button', { name: 'Move Admin down' })).not.toBeInTheDocument();
   });
 
   it('does not mark the "PrintFarmer" brand wordmark as a heading', () => {
