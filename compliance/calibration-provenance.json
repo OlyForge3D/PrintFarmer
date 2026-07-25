@@ -497,6 +497,19 @@
       }
     },
     {
+      "id": "calibration-project-toolhead-selection-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectServiceToolheadSelectionTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 immutable toolhead snapshot selection requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-slicer-profile-identity-postgresql",
       "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725095116_AddCalibrationProfileIdentity.cs",
       "referenceUrls": [
