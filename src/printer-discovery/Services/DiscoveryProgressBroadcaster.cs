@@ -37,6 +37,15 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
 {
     private const string ServiceKeyHeaderName = "X-Discovery-Service-Key";
 
+    /// <summary>Request path used for progress events. Kept as a constant so tests can pin it to the controller route template.</summary>
+    public const string ProgressPath = "api/internal/discovery/events/progress";
+
+    /// <summary>Request path used for printer-found events. Kept as a constant so tests can pin it to the controller route template.</summary>
+    public const string PrinterFoundPath = "api/internal/discovery/events/printer-found";
+
+    /// <summary>Request path used for completion events. Kept as a constant so tests can pin it to the controller route template.</summary>
+    public const string CompletedPath = "api/internal/discovery/events/completed";
+
     private readonly HttpClient _httpClient;
     private readonly ILogger<DiscoveryProgressBroadcaster> _logger;
     private readonly string? _sharedKey;
@@ -66,7 +75,7 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
         DiscoveryProgressDto progress,
         CancellationToken cancellationToken = default) =>
         SendAsync(
-            "api/internal/discovery/events/progress",
+            ProgressPath,
             new InternalDiscoveryProgressDto(
                 progress.SessionId,
                 progress.TotalIps,
@@ -83,14 +92,14 @@ public sealed class DiscoveryProgressBroadcaster : IDiscoveryProgressBroadcaster
     public Task BroadcastPrinterFoundAsync(
         InternalDiscoveryPrinterFoundDto printerFound,
         CancellationToken cancellationToken = default) =>
-        SendAsync("api/internal/discovery/events/printer-found", printerFound, cancellationToken);
+        SendAsync(PrinterFoundPath, printerFound, cancellationToken);
 
     /// <inheritdoc />
     public Task BroadcastCompletedAsync(
         DiscoveryCompletedDto completed,
         CancellationToken cancellationToken = default) =>
         SendAsync(
-            "api/internal/discovery/events/completed",
+            CompletedPath,
             new InternalDiscoveryCompletedDto(
                 completed.SessionId,
                 completed.TotalPrintersFound,

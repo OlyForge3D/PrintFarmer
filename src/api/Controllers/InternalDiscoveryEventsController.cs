@@ -4,6 +4,7 @@ using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Services.Discovery;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 
@@ -12,9 +13,17 @@ namespace Farm.Web.Api.Controllers;
 /// <summary>
 /// Receives authenticated discovery-service events and publishes redacted client events.
 /// </summary>
+/// <remarks>
+/// [AllowAnonymous] bypasses the global JWT fallback policy so that the shared-key
+/// authenticator below (X-Discovery-Service-Key via <see cref="DiscoveryServiceAuthenticator"/>)
+/// is the sole authentication mechanism. Every action still calls
+/// <see cref="GetAuthenticationFailure"/> first, so missing or invalid keys remain
+/// fail-closed with a 401 ProblemDetails response.
+/// </remarks>
 [ApiController]
+[AllowAnonymous]
 [ApiExplorerSettings(IgnoreApi = true)]
-[Route("api/internal/discovery")]
+[Route(RouteBase)]
 public sealed class InternalDiscoveryEventsController(
     DiscoveryServiceAuthenticator authenticator,
     IDiscoverySessionRegistry sessions,
@@ -22,6 +31,12 @@ public sealed class InternalDiscoveryEventsController(
     IHubContext<PrinterHub> hubContext,
     IWebhookService webhookService) : ControllerBase
 {
+    /// <summary>
+    /// Route template shared with the printer-discovery broadcaster so both sides cannot drift.
+    /// The broadcaster's regression test compares its request paths against this constant.
+    /// </summary>
+    public const string RouteBase = "api/internal/discovery/events";
+
     private readonly DiscoveryServiceAuthenticator _authenticator = authenticator;
     private readonly IDiscoverySessionRegistry _sessions = sessions;
     private readonly IDiscoveryProgressCache _progressCache = progressCache;
