@@ -33,6 +33,9 @@ public class CameraUrlResultTests
     [InlineData("https://camera.example/stream")]
     [InlineData("")]
     [InlineData("/camera/stream")]
+    [InlineData("/api/printers/not-a-guid/camera/stream")]
+    [InlineData("/api/printers/00000000-0000-0000-0000-000000000001/camera/snapshot")]
+    [InlineData("/api/printers/00000000-0000-0000-0000-000000000001/camera/stream?target=private")]
     public void Constructor_WithNonProxyRoute_Throws(string route)
     {
         Action create = () => _ = new CameraUrlResult(route, null);
