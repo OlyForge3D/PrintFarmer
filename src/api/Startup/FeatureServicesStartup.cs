@@ -102,7 +102,12 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
 
         // SPA services (only for monolithic deployments)
-        bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+        string? deploymentMode =
+            configuration.GetValue<string>("DEPLOYMENT_MODE") ??
+            configuration.GetValue<string>("Deployment:Mode");
+        bool isMonolithicDeployment =
+            !string.Equals(deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(deploymentMode, "split", StringComparison.OrdinalIgnoreCase);
         if (isMonolithicDeployment)
         {
             services.AddSpaStaticFiles(configuration =>

@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
@@ -152,19 +153,8 @@ public class ProfilesServiceTests
     public async Task GetMachineProfilesForCatalogModelAsync_AliasReturnsEmpty_DoesNotFallbackToManufacturerModel()
     {
         Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
-        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Strict);
-        _ = slicersService
-            .Setup(s => s.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<SlicerService>
-            {
-                new()
-                {
-                    Name = "orca",
-                    SlicerType = 1,
-                    Host = "http://worker",
-                    Status = "Online"
-                }
-            });
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService =
+            CreateOnlineSlicerService();
 
         List<string> requestedPaths = [];
         using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
@@ -360,7 +350,10 @@ public class ProfilesServiceTests
                     Name = "orca",
                     SlicerType = 1,
                     Host = "http://worker",
-                    Status = "Online"
+                    Status = "Online",
+                    Version = CalibrationContractConstants.SlicerVersion,
+                    CapabilitiesJson =
+                        $"[\"{CalibrationContractConstants.UpstreamSlicerCapability}\"]"
                 }
             });
 

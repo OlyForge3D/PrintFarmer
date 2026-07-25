@@ -24,11 +24,14 @@ internal sealed class SlicerDisabledWebApplicationFactory : CustomWebApplication
     private const string EnvVarName = "DEPLOYMENT_MODE";
     private readonly string? _originalEnvValue;
 
-    public SlicerDisabledWebApplicationFactory()
+    public SlicerDisabledWebApplicationFactory(
+        string deploymentMode = "microservices",
+        Dictionary<string, string?>? configOverrides = null)
+        : base(configOverrides)
     {
         // Capture and override env var BEFORE the host boots (host is built lazily)
         _originalEnvValue = Environment.GetEnvironmentVariable(EnvVarName);
-        Environment.SetEnvironmentVariable(EnvVarName, "microservices");
+        Environment.SetEnvironmentVariable(EnvVarName, deploymentMode);
     }
 
     protected override void Dispose(bool disposing)

@@ -3571,6 +3571,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("ActiveToolheadIndex")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ApiKey")
                         .HasColumnType("TEXT");
 
@@ -3582,8 +3585,22 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
+                    b.Property<string>("BackendApiVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("BackendPort")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("BackendVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("BedOriginX")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("BedOriginY")
+                        .HasColumnType("REAL");
 
                     b.Property<Guid?>("BedTypeId")
                         .HasColumnType("TEXT");
@@ -3591,6 +3608,50 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("BuddyCameraIp")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationFilamentProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CalibrationHardwareVerifiedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool?>("CalibrationHasEnclosure")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("CalibrationHasHeatedBed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("CalibrationMachineProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("CalibrationMotionType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("CalibrationProcessProfileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationProfileFormat")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationSlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationSlicerEngine")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationSlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ConfigurationRevision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
                     b.Property<string>("CurrentMaterial")
                         .HasColumnType("TEXT");
 
@@ -3600,13 +3661,52 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("DateAcquired")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ExcludedRegionsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("FirmwareDetectedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<decimal?>("FirmwareDetectionConfidence")
+                        .HasPrecision(5, 4)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FirmwareDetectionSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<string>("FirmwareDetectionVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FirmwareFamily")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
+
+                    b.Property<bool>("FirmwareIdentityVerified")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FirmwareVersion")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<int?>("FrontendPort")
                         .HasColumnType("INTEGER");
+
+                    b.Property<int>("GcodeDialect")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(0);
 
                     b.Property<bool>("HasEnclosure")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("HasHeatedBed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool?>("HasMmu")
@@ -3633,6 +3733,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid>("ManufacturerId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("MaxAcceleration")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("MaxBedTemp")
                         .HasColumnType("INTEGER");
 
@@ -3645,7 +3748,16 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<double?>("MaxBuildVolumeZ")
                         .HasColumnType("REAL");
 
+                    b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("MaxPrintSpeed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxTravelAcceleration")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxTravelSpeed")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid>("ModelId")
@@ -3675,6 +3787,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("Password")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PrintablePolygonJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterGroupId")
                         .HasColumnType("TEXT");
 
@@ -3689,6 +3804,12 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("SupportsAutoLeveling")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("SupportsFirmwareRetraction")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("SupportsPressureAdvance")
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("TemplateMachineProfileId")
@@ -4633,8 +4754,19 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<int?>("CurrentSpoolId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("DriveType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtruderGearRatio")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("ExtruderModelId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("HotendMaxTemperature")
+                        .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("HotendModelId")
                         .HasColumnType("TEXT");
@@ -4642,18 +4774,49 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<int>("Index")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool?>("IsDirectDrive")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsPrimary")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
+
+                    b.Property<double?>("MaxVolumetricFlow")
+                        .HasColumnType("REAL");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("REAL");
+
+                    b.Property<bool?>("NozzleIsHardened")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("NozzleMaterial")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("NozzleMaxTemperature")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid?>("NozzleModelId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("NozzleType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("OffsetX")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("OffsetY")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("OffsetZ")
+                        .HasColumnType("REAL");
 
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("TEXT");

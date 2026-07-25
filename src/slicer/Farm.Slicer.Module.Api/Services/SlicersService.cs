@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
@@ -322,14 +323,17 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         // Seed profiles from the worker (OrcaSlicer only) - only if explicitly enabled
         // Default is pull-based (profiles imported on-demand when printers are added)
-        if (svc.SlicerType == 1 && dto.SeedProfilesOnRegistration)
+        if (svc.SlicerType == 1 &&
+            dto.SeedProfilesOnRegistration &&
+            CalibrationContractConstants.IsSupportedSlicerVersion(svc.Version) &&
+            CalibrationContractConstants.AttestsUpstreamSlicer(svc.CapabilitiesJson))
         {
             try
             {
                 _logger.LogInformation(
                     "OrcaSlicer service {SlicerServiceId} registered with push seeding enabled",
                     svc.Id);
-                await SeedProfilesFromWorkerAsync(svc.Host ?? string.Empty, ct);
+                await SeedProfilesFromWorkerAsync(svc, ct);
                 _logger.LogInformation("Profile seeding completed");
             }
             catch (Exception ex)
@@ -340,7 +344,8 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         }
         else if (svc.SlicerType == 1)
         {
-            _logger.LogInformation("OrcaSlicer service registered (pull-based seeding - profiles imported on-demand when printers are added)");
+            _logger.LogInformation(
+                "OrcaSlicer service registered without upstream profile seeding");
         }
 
         // Record metrics
@@ -667,7 +672,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         // Find an available OrcaSlicer worker
         IReadOnlyList<SlicerService> slicers = await _repo.ListAsync(ct);
-        SlicerService? orcaWorker = slicers.FirstOrDefault(s => s.SlicerType == 1 && !string.IsNullOrWhiteSpace(s.Host));
+        SlicerService? orcaWorker = slicers.FirstOrDefault(s =>
+            s.SlicerType == 1 &&
+            CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+            CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
+            !string.IsNullOrWhiteSpace(s.Host));
 
         if (orcaWorker == null)
         {
@@ -807,6 +816,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                 Manufacturer = manufacturerName,
                                 Description = $"OrcaSlicer machine profile for {modelDisplayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : string.Empty),
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                SlicerVersion = orcaWorker.Version,
                                 PrinterModelId = printerModelId,
                                 IsSystem = true,
                                 IsPublic = true,
@@ -852,6 +864,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                 Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
                                 Description = filamentProfile.Description ?? $"OrcaSlicer filament profile: {filamentProfile.Material}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                SlicerVersion = orcaWorker.Version,
                                 NozzleTemperature = filamentProfile.NozzleTemperature,
                                 BedTemperature = filamentProfile.BedTemperature,
                                 PrintSpeed = filamentProfile.PrintSpeed,
@@ -900,6 +915,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                 Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                 Description = processProfile.Description ?? $"OrcaSlicer process profile: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                SlicerVersion = orcaWorker.Version,
                                 PrinterModelId = printerModelId,
                                 Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = processProfile.LayerHeight,
@@ -951,8 +969,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// Uses a distributed lock to ensure seeding happens only once, even with multiple concurrent worker registrations.
     /// Profiles are filtered to only include those for manufacturers and models in the catalog.
     /// </summary>
-    private async Task SeedProfilesFromWorkerAsync(string workerHost, CancellationToken ct)
+    private async Task SeedProfilesFromWorkerAsync(
+        SlicerService worker,
+        CancellationToken ct)
     {
+        string workerHost = worker.Host ?? string.Empty;
         const string SEED_LOCK_KEY = "SystemOrcaSlicerProfilesSeedLock";
 
         try
@@ -1181,6 +1202,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                         Manufacturer = manufacturerName,
                                         Description = $"OrcaSlicer machine profile for {displayName}" + (machineProfile.NozzleDiameter.HasValue ? $" ({machineProfile.NozzleDiameter}mm nozzle)" : string.Empty),
                                         SlicerType = SlicerType.OrcaSlicer,
+                                        SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                        ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                        SlicerVersion = worker.Version,
                                         PrinterModelId = printerModelId,
                                         IsSystem = true,
                                         IsPublic = true,
@@ -1237,6 +1261,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                         Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
                                         Description = filamentProfile.Description ?? $"OrcaSlicer filament profile: {filamentProfile.Material}",
                                         SlicerType = SlicerType.OrcaSlicer,
+                                        SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                        ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                        SlicerVersion = worker.Version,
                                         NozzleTemperature = filamentProfile.NozzleTemperature,
                                         BedTemperature = filamentProfile.BedTemperature,
                                         PrintSpeed = filamentProfile.PrintSpeed,
@@ -1301,6 +1328,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                                         Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                         Description = processProfile.Description ?? $"OrcaSlicer process profile: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                         SlicerType = SlicerType.OrcaSlicer,
+                                        SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                        ProfileFormat = CalibrationContractConstants.ProfileFormat,
+                                        SlicerVersion = worker.Version,
                                         PrinterModelId = printerModelId,
                                         Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                         LayerHeight = processProfile.LayerHeight,

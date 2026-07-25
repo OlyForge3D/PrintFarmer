@@ -1,10 +1,14 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Farm.Web.Api.Services.Capabilities;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Tests.Capabilities;
 
@@ -50,7 +54,11 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = root.TryGetProperty("minimumApiContractVersion", out _).Should().BeFalse();
         _ = root.GetProperty("calibrationApiVersion").GetString().Should().Be("1.0");
         _ = root.GetProperty("calibrationSchemaVersion").GetString().Should().Be("1.0");
-        _ = root.GetProperty("calibration").GetProperty("operational").GetBoolean().Should().BeFalse();
+        _ = root.GetProperty("calibration").GetProperty("contextImplemented")
+            .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibration").GetProperty("operational")
+            .GetBoolean().Should().BeTrue();
+        _ = root.GetProperty("calibrationContextEnabled").GetBoolean().Should().BeTrue();
         _ = root.GetProperty("supportedSlicerEngines")[0].GetProperty("type")
             .GetString().Should().Be("OrcaSlicer");
         _ = root.GetProperty("supportedSlicerEngines")[0].GetProperty("version")
@@ -66,7 +74,6 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             .Select(value => value.GetString()).Should().Equal("Klipper");
         foreach (string flag in new[]
                  {
-                     "calibrationContextEnabled",
                      "calibrationPersistenceEnabled",
                      "calibrationSyncEnabled",
                      "calibrationPhotosEnabled",
@@ -174,8 +181,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = root.GetProperty("effectiveCapabilities").GetProperty("canReadArtifacts")
             .GetBoolean().Should().BeFalse();
         _ = root.GetProperty("effectiveCapabilities").GetProperty("canRead")
-            .GetBoolean().Should().BeFalse(
-                "calibration context is intentionally not implemented by issue 895");
+            .GetBoolean().Should().BeTrue();
     }
 
     [Fact]
@@ -278,6 +284,30 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task GetCapabilitiesAsync_WithUnreachableProfileStore_ReportsContextUnavailable()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection()
+            .Build();
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ICalibrationProfileResolver>(
+            new UnavailableCalibrationProfileResolver());
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationCapabilityService service = new(
+            configuration,
+            provider,
+            NullLogger<CalibrationCapabilityService>.Instance);
+
+        var capabilities =
+            await service.GetCapabilitiesAsync(null, CancellationToken.None);
+
+        _ = capabilities.CalibrationContextEnabled.Should().BeFalse();
+        _ = capabilities.Calibration.Operational.Should().BeFalse();
+        _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
+            .Should().Contain("profile_service_unavailable");
+    }
+
     private static Task AddHealthyOrcaServiceAsync(CustomWebApplicationFactory factory) =>
         AddOrcaWorkerAsync(factory, "2.3.1", DateTime.UtcNow);
 
@@ -328,5 +358,21 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow,
         });
         _ = await db.SaveChangesAsync();
+    }
+
+    private sealed class UnavailableCalibrationProfileResolver
+        : ICalibrationProfileResolver
+    {
+        public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(false);
+
+        public Task<ResolvedCalibrationProfiles> ResolveAsync(
+            Guid machineProfileId,
+            Guid processProfileId,
+            Guid filamentProfileId,
+            CalibrationProfileAccessScope accessScope,
+            CancellationToken cancellationToken) =>
+            Task.FromException<ResolvedCalibrationProfiles>(
+                new CalibrationProfileResolverUnavailableException());
     }
 }

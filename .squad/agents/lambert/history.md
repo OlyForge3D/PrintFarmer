@@ -159,3 +159,41 @@ Participated in multi-round trio review cycle. Key learnings:
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+
+## Learnings — #941 backend fix (2026-07-25)
+
+**Bulk vs per-key POST split is a common source of drift.** When two endpoints
+target the same underlying resource, the "cheap" per-item endpoint tends to
+grow independently of the "canonical" bulk one and drops guarantees the bulk
+side owns. In this repo that manifested as (a) the per-key endpoint missing
+the `farm_admin` role gate the bulk endpoint has, and (b) missing the
+`IValidatableSetting.Validate()` call. Both slipped because the frontend
+migration in #935 flipped the primary save path without either side asking
+"does this endpoint have parity with the one it's replacing?"
+
+**Attribute-level defects need HTTP-level tests.** Unit tests that `new` the
+controller and call the method directly bypass the auth pipeline and model
+binding entirely — that's why zero tests caught the missing
+`[Authorize(Roles)]` attribute for weeks. When gating on filters or
+attributes, use `CustomWebApplicationFactory`'s `CreateAuthenticatedClientAsync`
+(non-admin) vs `CreateAdminClientAsync` (with farm_admin) and assert on the
+HttpStatusCode. Those two helpers exist for exactly this scenario.
+
+**Deliberate-break proof works.** Removing each fix in turn and confirming the
+corresponding test failed (then restoring) is the cheapest possible way to
+prove that new tests actually exercise the change. Skipping this step is how
+every prior #941 reviewer submitted "green" work that still had holes.
+
+**Shared error-response shape matters.** The React SettingsPage error parser
+splits `errors`-dict keys on `.` into `section.field` — meaning a per-key
+endpoint returning `errors[string.Empty] = message` vs `errors[sectionKey] = message`
+renders in different places in the UI (or nowhere). When copying a validation
+response shape across endpoints, match it byte-for-byte. Extract a shared
+helper so drift is impossible.
+
+**CA1859 fires on ActionResult return types.** When adding a private helper
+that always returns a `BadRequestObjectResult`, declare its return type as
+`BadRequestObjectResult` (not the broader `ActionResult`) or the analyzer
+warns about a boxed return. Small detail but worth remembering — the "0
+warnings" baseline is unforgiving.

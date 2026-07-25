@@ -276,16 +276,185 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnsureCalibrationPrintersTracked();
+        UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
-    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
+        UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         StampRowVersions();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnsureCalibrationPrintersTracked()
+    {
+        Guid[] printerIds = GetUntrackedChangedToolheadPrinterIds();
+        if (printerIds.Length > 0)
+        {
+            Printers.Where(printer => printerIds.Contains(printer.Id)).Load();
+        }
+    }
+
+    private async Task EnsureCalibrationPrintersTrackedAsync(
+        CancellationToken cancellationToken)
+    {
+        Guid[] printerIds = GetUntrackedChangedToolheadPrinterIds();
+        if (printerIds.Length > 0)
+        {
+            await Printers
+                .Where(printer => printerIds.Contains(printer.Id))
+                .LoadAsync(cancellationToken);
+        }
+    }
+
+    private Guid[] GetUntrackedChangedToolheadPrinterIds()
+    {
+        ChangeTracker.DetectChanges();
+        HashSet<Guid> trackedPrinterIds = ChangeTracker
+            .Entries<Printer>()
+            .Select(entry => entry.Entity.Id)
+            .ToHashSet();
+        return ChangeTracker
+            .Entries<Toolhead>()
+            .Where(entry =>
+                entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted &&
+                !trackedPrinterIds.Contains(entry.Entity.PrinterId))
+            .Select(entry => entry.Entity.PrinterId)
+            .Distinct()
+            .ToArray();
+    }
+
+    private void UpdateCalibrationConfigurationRevisions()
+    {
+        ChangeTracker.DetectChanges();
+        DateTime changedAtUtc = DateTime.UtcNow;
+        Dictionary<Guid, EntityEntry<Printer>> trackedPrinters = ChangeTracker
+            .Entries<Printer>()
+            .ToDictionary(entry => entry.Entity.Id);
+
+        foreach (EntityEntry<Printer> entry in trackedPrinters.Values)
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.ConfigurationRevision = Math.Max(1, entry.Entity.ConfigurationRevision);
+                entry.Entity.CalibrationConfigurationUpdatedAtUtc ??= changedAtUtc;
+                continue;
+            }
+
+            if (entry.State == EntityState.Modified &&
+                entry.Properties.Any(property =>
+                    property.IsModified &&
+                    IsCalibrationRelevantPrinterProperty(property.Metadata.Name)))
+            {
+                IncrementCalibrationRevision(entry, changedAtUtc);
+            }
+        }
+
+        foreach (EntityEntry<Toolhead> toolheadEntry in ChangeTracker.Entries<Toolhead>().ToArray())
+        {
+            if (toolheadEntry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted) ||
+                !trackedPrinters.TryGetValue(toolheadEntry.Entity.PrinterId, out EntityEntry<Printer>? printerEntry))
+            {
+                continue;
+            }
+
+            if (toolheadEntry.State != EntityState.Modified ||
+                toolheadEntry.Properties.Any(property =>
+                    property.IsModified &&
+                    IsCalibrationRelevantToolheadProperty(property.Metadata.Name)))
+            {
+                IncrementCalibrationRevision(printerEntry, changedAtUtc);
+            }
+        }
+    }
+
+    private static bool IsCalibrationRelevantPrinterProperty(string propertyName) =>
+        propertyName is
+            nameof(Printer.Backend) or
+            nameof(Printer.ModelId) or
+            nameof(Printer.MaxBuildVolumeX) or
+            nameof(Printer.MaxBuildVolumeY) or
+            nameof(Printer.MaxBuildVolumeZ) or
+            nameof(Printer.MaxBedTemp) or
+            nameof(Printer.MaxPrintSpeed) or
+            nameof(Printer.FirmwareFamily) or
+            nameof(Printer.GcodeDialect) or
+            nameof(Printer.FirmwareDetectionSource) or
+            nameof(Printer.FirmwareVersion) or
+            nameof(Printer.FirmwareDetectionVersion) or
+            nameof(Printer.FirmwareDetectionConfidence) or
+            nameof(Printer.FirmwareDetectedAtUtc) or
+            nameof(Printer.FirmwareIdentityVerified) or
+            nameof(Printer.BackendVersion) or
+            nameof(Printer.BackendApiVersion) or
+            nameof(Printer.BedOriginX) or
+            nameof(Printer.BedOriginY) or
+            nameof(Printer.PrintablePolygonJson) or
+            nameof(Printer.ExcludedRegionsJson) or
+            nameof(Printer.CalibrationMotionType) or
+            nameof(Printer.MaxTravelSpeed) or
+            nameof(Printer.MaxAcceleration) or
+            nameof(Printer.MaxTravelAcceleration) or
+            nameof(Printer.CalibrationHasHeatedBed) or
+            nameof(Printer.CalibrationHasEnclosure) or
+            nameof(Printer.HasHeatedChamber) or
+            nameof(Printer.MaxChamberTemp) or
+            nameof(Printer.ActiveToolheadIndex) or
+            nameof(Printer.SupportsPressureAdvance) or
+            nameof(Printer.SupportsFirmwareRetraction) or
+            nameof(Printer.CalibrationHardwareVerifiedAtUtc) or
+            nameof(Printer.CalibrationSlicerEngine) or
+            nameof(Printer.CalibrationSlicerDistribution) or
+            nameof(Printer.CalibrationSlicerVersion) or
+            nameof(Printer.CalibrationProfileFormat) or
+            nameof(Printer.CalibrationMachineProfileId) or
+            nameof(Printer.CalibrationProcessProfileId) or
+            nameof(Printer.CalibrationFilamentProfileId);
+
+    private static bool IsCalibrationRelevantToolheadProperty(string propertyName) =>
+        propertyName is
+            nameof(Toolhead.Name) or
+            nameof(Toolhead.Index) or
+            nameof(Toolhead.IsPrimary) or
+            nameof(Toolhead.ToolheadType) or
+            nameof(Toolhead.SupportedMaterials) or
+            nameof(Toolhead.OffsetX) or
+            nameof(Toolhead.OffsetY) or
+            nameof(Toolhead.OffsetZ) or
+            nameof(Toolhead.NozzleDiameter) or
+            nameof(Toolhead.NozzleType) or
+            nameof(Toolhead.NozzleMaterial) or
+            nameof(Toolhead.NozzleMaxTemperature) or
+            nameof(Toolhead.NozzleIsHardened) or
+            nameof(Toolhead.HotendMaxTemperature) or
+            nameof(Toolhead.MaxVolumetricFlow) or
+            nameof(Toolhead.DriveType) or
+            nameof(Toolhead.IsDirectDrive) or
+            nameof(Toolhead.ExtruderGearRatio);
+
+    private static void IncrementCalibrationRevision(
+        EntityEntry<Printer> entry,
+        DateTime changedAtUtc)
+    {
+        if (entry.State is EntityState.Added or EntityState.Deleted)
+        {
+            return;
+        }
+
+        if (!entry.Property(p => p.ConfigurationRevision).IsModified)
+        {
+            entry.Entity.ConfigurationRevision = Math.Max(1, entry.Entity.ConfigurationRevision) + 1;
+            entry.Property(p => p.ConfigurationRevision).IsModified = true;
+        }
+
+        entry.Entity.CalibrationConfigurationUpdatedAtUtc = changedAtUtc;
+        entry.Property(p => p.CalibrationConfigurationUpdatedAtUtc).IsModified = true;
     }
 
     private void PopulateCaseInsensitiveShadowColumns()

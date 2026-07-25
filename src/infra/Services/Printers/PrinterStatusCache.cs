@@ -24,6 +24,20 @@ public interface IPrinterStatusCacheReader
     IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses();
 }
 
+/// <summary>Reads freshness-aware status snapshots for safety-sensitive operations.</summary>
+public interface IPrinterStatusSnapshotReader
+{
+    /// <summary>Gets the latest status observation and last-seen timestamp for a printer.</summary>
+    PrinterStatusSnapshot? GetStatusSnapshot(Guid printerId);
+}
+
+/// <summary>Freshness metadata attached when a backend status update reaches the server.</summary>
+public sealed record PrinterStatusSnapshot(
+    PrinterStatusDto Status,
+    DateTime? ObservedAtUtc,
+    DateTime? LastSeenAtUtc,
+    string Source);
+
 /// <summary>
 /// Thread-safe in-memory cache for printer status updates from SignalR.
 /// Stores the latest status for each printer to enable fast list operations without external API calls.
@@ -31,9 +45,9 @@ public interface IPrinterStatusCacheReader
 /// - Backend services (MoonrakerSubscriptionService, PrusaLinkPollingService) - write updates
 /// - API layer (PrintersService) - read cached data for list endpoints
 /// </summary>
-public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCacheWriter
+public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusSnapshotReader, IPrinterStatusCacheWriter
 {
-    private readonly Dictionary<Guid, PrinterStatusDto> _cache = new();
+    private readonly Dictionary<Guid, PrinterStatusSnapshot> _cache = new();
     private readonly Lock _lockObj = new();
     private readonly ILogger<PrinterStatusCache> _logger;
     private readonly IDiagnosticChannelService _diagnostics;
@@ -48,8 +62,8 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            _cache.TryGetValue(printerId, out PrinterStatusDto? status);
-            return status;
+            _cache.TryGetValue(printerId, out PrinterStatusSnapshot? snapshot);
+            return snapshot?.Status;
         }
     }
 
@@ -57,7 +71,16 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            return new Dictionary<Guid, PrinterStatusDto>(_cache);
+            return _cache.ToDictionary(pair => pair.Key, pair => pair.Value.Status);
+        }
+    }
+
+    public PrinterStatusSnapshot? GetStatusSnapshot(Guid printerId)
+    {
+        lock (_lockObj)
+        {
+            _cache.TryGetValue(printerId, out PrinterStatusSnapshot? snapshot);
+            return snapshot;
         }
     }
 
@@ -65,9 +88,15 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
-            _cache[status.Id] = status.WithNormalizedFileName();
-            LogTransitionIfChanged(status.Id, existing, status);
+            DateTime observedAtUtc = DateTime.UtcNow;
+            _cache.TryGetValue(status.Id, out PrinterStatusSnapshot? existing);
+            PrinterStatusDto normalized = status.WithNormalizedFileName();
+            _cache[status.Id] = new PrinterStatusSnapshot(
+                normalized,
+                observedAtUtc,
+                normalized.IsOnline ? observedAtUtc : existing?.LastSeenAtUtc,
+                "backend");
+            LogTransitionIfChanged(status.Id, existing?.Status, normalized);
         }
     }
 
@@ -82,9 +111,15 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
         {
             foreach (PrinterStatusDto status in statuses)
             {
-                _cache.TryGetValue(status.Id, out PrinterStatusDto? existing);
-                _cache[status.Id] = status.WithNormalizedFileName();
-                LogTransitionIfChanged(status.Id, existing, status);
+                DateTime observedAtUtc = DateTime.UtcNow;
+                _cache.TryGetValue(status.Id, out PrinterStatusSnapshot? existing);
+                PrinterStatusDto normalized = status.WithNormalizedFileName();
+                _cache[status.Id] = new PrinterStatusSnapshot(
+                    normalized,
+                    observedAtUtc,
+                    normalized.IsOnline ? observedAtUtc : existing?.LastSeenAtUtc,
+                    "backend");
+                LogTransitionIfChanged(status.Id, existing?.Status, normalized);
             }
         }
     }
@@ -93,11 +128,13 @@ public class PrinterStatusCache : IPrinterStatusCacheReader, IPrinterStatusCache
     {
         lock (_lockObj)
         {
-            _cache.TryGetValue(printerId, out PrinterStatusDto? existing);
-            PrinterStatusDto updated = (existing ?? new PrinterStatusDto(Id: printerId, IsOnline: false, State: "Unknown"))
+            _cache.TryGetValue(printerId, out PrinterStatusSnapshot? existing);
+            PrinterStatusDto updated = (existing?.Status ?? new PrinterStatusDto(Id: printerId, IsOnline: false, State: "Unknown"))
                 with
             { SpoolInfo = spoolInfo };
-            _cache[printerId] = updated;
+            _cache[printerId] = existing is null
+                ? new PrinterStatusSnapshot(updated, null, null, "unknown")
+                : existing with { Status = updated };
             return updated;
         }
     }
