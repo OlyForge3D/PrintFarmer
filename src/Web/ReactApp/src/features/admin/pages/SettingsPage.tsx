@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { type ReactNode, useEffect, useState, useCallback, useMemo } from 'react';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
@@ -144,32 +144,18 @@ function GroupSaveBlock({
   initialValues,
 }: GroupSaveBlockProps) {
   const state = useDirtyState<GroupValues>(initialValues);
+  // No re-baselining effect here, deliberately. The parent unmounts every block
+  // while `loading` is true, so a reload always produces a *fresh mount* with the
+  // correct baseline rather than a prop update on a live block. There is also no
+  // parent refetch after save (see the note beside `loadSettings`), so
+  // `initialValues` cannot change underneath a mounted block.
+  //
+  // If a refetch-while-mounted is ever introduced, re-baseline by changing the
+  // block's `key` so React remounts it — do NOT reintroduce a syncing effect,
+  // which trips `react-hooks/set-state-in-effect` and needs a suppression.
   const [fieldErrors, setFieldErrors] = useState<Record<string, Record<string, string>>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-
-  // Re-baseline when the parent hands us a new snapshot (fresh load).
-  // Uses a JSON key so we only re-baseline when the content actually changes,
-  // not on every render. We intentionally do NOT re-baseline while the block
-  // is dirty — that would silently discard the user's in-flight edits.
-  const initialKey = useMemo(() => {
-    try {
-      return JSON.stringify(initialValues);
-    } catch {
-      return String(Date.now());
-    }
-  }, [initialValues]);
-  const lastBaseline = useRef(initialKey);
-  useEffect(() => {
-    if (lastBaseline.current === initialKey) return;
-    if (state.isDirty) return;
-    lastBaseline.current = initialKey;
-    state.markPristine(initialValues);
-    setFieldErrors({});
-    setSaveError(null);
-  // markPristine identity changes with values; we only want this effect on baseline changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialKey]);
 
   const handleFieldChange = useCallback((sectionKey: string, field: string, value: SettingValue) => {
     const nextSection = { ...(state.values[sectionKey] ?? {}), [field]: value };
@@ -364,7 +350,7 @@ export function SettingsPage({
     [allowedGroups],
   );
 
-  const { groupedNavItems, groupOrderMap, sortedGroups, metadataByGroup } = useMemo(() => {
+  const { sortedGroups, metadataByGroup } = useMemo(() => {
     const visibleMetadata = metadata.filter(
       (item) => !allowedGroupSet || allowedGroupSet.has(item.group || 'Other'),
     );
@@ -405,17 +391,14 @@ export function SettingsPage({
         .filter((m): m is SettingMetadata => Boolean(m));
     }
 
+    // `byGroup` and `orderMap` are intermediates only — they feed `sorted` and
+    // `metaByGroup` and are deliberately not returned. Exposing them "for a
+    // future consumer" would mean shipping values nobody reads.
     return {
-      groupedNavItems: byGroup,
-      groupOrderMap: orderMap,
       sortedGroups: sorted,
       metadataByGroup: metaByGroup,
     };
   }, [allowedGroupSet, groupMetadata, isSlicerAvailable, metadata]);
-  // groupedNavItems and groupOrderMap are exposed so future consumers (e.g. a
-  // future scroll-linked TOC) don't need to reproduce the derivation.
-  void groupedNavItems;
-  void groupOrderMap;
 
   const getGroupDisplayName = useCallback((groupKey: string): string => {
     const group = groupMetadata.find((g) => g.key === groupKey);
