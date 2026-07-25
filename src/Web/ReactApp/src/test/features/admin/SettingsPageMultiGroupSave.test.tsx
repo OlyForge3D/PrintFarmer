@@ -74,7 +74,6 @@ vi.mock('@/services/settingsApi', async () => {
       SlicerDefaults: { layerHeight: 0.2 },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: vi.fn(),
   };
 });
 
@@ -201,27 +200,5 @@ describe('SettingsPage — save-scoping across independent groups (#939)', () =>
     expect((screen.getByLabelText('Layer Height') as HTMLInputElement).value).toBe('0.28');
     expect(screen.getByRole('button', { name: /save slicing/i })).toBeInTheDocument();
     expect(saveSettingsMock).not.toHaveBeenCalled();
-  });
-
-  it('never invokes the retired batch endpoint even with multiple groups dirty', async () => {
-    // saveAllSettings still exists in the API wrapper for backward compatibility
-    // but nothing in production should reach it. If a future change reintroduces
-    // a "save all" affordance, this catches it before it ships.
-    const settingsApi = await import('@/services/settingsApi');
-    const saveAllSpy = vi.spyOn(settingsApi, 'saveAllSettings');
-
-    await renderPage();
-    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '55' } });
-    fireEvent.change(screen.getByLabelText('Layer Height'), { target: { value: '0.15' } });
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save system/i }));
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save slicing/i }));
-    });
-
-    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(2));
-    expect(saveAllSpy).not.toHaveBeenCalled();
   });
 });

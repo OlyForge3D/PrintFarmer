@@ -44,6 +44,7 @@ import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroups
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
+import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage })),
@@ -110,7 +111,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.farm': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['General']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.farm']}
         introText="Configure farm identity, timezone, and other farm-wide defaults."
         afterContent={<FarmSettingsSection />}
       />
@@ -119,7 +120,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.system': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['System', 'Networking', 'Catalog', 'Files', 'Printers']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.system']}
         introText="Configure database, logging, network discovery, and file parameters."
       />
     </SettingsSection>
@@ -127,7 +128,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.automation': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Operations', 'Monitoring', 'Maintenance', 'Job Queue']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.automation']}
         introText="Configure cost tracking, Obico print failure detection, and automatic tag rules."
       />
     </SettingsSection>
@@ -135,7 +136,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'integrations.connections': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Integrations']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
         introText="Configure third-party services, Smart Plugs, and slicer API connections."
         afterContent={<TelegramSettingsCard />}
       />
@@ -165,7 +166,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'slicing.defaults': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Slicing']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['slicing.defaults']}
         introText="Configure slicer defaults, process behavior, and plate-related settings for the farm."
       />
     </SettingsSection>

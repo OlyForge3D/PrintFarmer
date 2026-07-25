@@ -69,7 +69,6 @@ vi.mock('@/services/settingsApi', async () => {
       },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: vi.fn(),
   };
 });
 

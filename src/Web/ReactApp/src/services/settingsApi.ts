@@ -27,10 +27,6 @@ export async function fetchSettingsUnified(): Promise<Record<string, unknown>> {
   return apiClient.getAllSettings();
 }
 
-export async function saveAllSettings(values: Record<string, unknown>): Promise<void> {
-  return apiClient.saveAllSettings(values);
-}
-
 export async function fetchSettingsValues(keyName: string): Promise<Record<string, unknown>> {
   return apiClient.getSettings(keyName);
 }

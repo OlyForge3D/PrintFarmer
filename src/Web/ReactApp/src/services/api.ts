@@ -422,13 +422,6 @@ export class ApiClient {
     return res.data;
   }
 
-  /**
-   * Save all unified settings
-   */
-  async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
-    await this.client.post("/settings", settings);
-  }
-
   // ============ Cost Tracking Settings ============
 
   /** Get cost tracking settings. */

@@ -6,6 +6,7 @@ import {
   resolveSettingsNavigationTarget,
   SETTINGS_GROUP_TO_LOCATION,
 } from '@/features/settings/settings-navigation';
+import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 import type { AdminDestination } from '@/features/admin/registry/adminDestinations';
 import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
@@ -224,5 +225,61 @@ describe('SETTINGS_GROUP_TO_LOCATION', () => {
     expect(SETTINGS_GROUP_TO_LOCATION.General).toBeDefined();
     expect(SETTINGS_GROUP_TO_LOCATION.Slicing).toBeDefined();
     expect(SETTINGS_GROUP_TO_LOCATION.Integrations).toBeDefined();
+  });
+
+  it('maps every group referenced from a sub-page\'s allowedGroups', () => {
+    // Adding a settings group requires editing BOTH `SUB_PAGE_ALLOWED_GROUPS`
+    // in `SettingsShell.tsx` AND `SETTINGS_GROUP_TO_LOCATION` here. Miss either
+    // and the group silently disappears from both the UI (the shell doesn't
+    // render it) and the command palette (`if (!location) continue`). This is
+    // exactly how the Job Queue group went missing in the first place.
+    const referencedGroups = new Set<string>();
+    for (const groups of Object.values(SUB_PAGE_ALLOWED_GROUPS)) {
+      for (const group of groups) {
+        referencedGroups.add(group);
+      }
+    }
+    for (const group of referencedGroups) {
+      expect(
+        SETTINGS_GROUP_TO_LOCATION[group],
+        `group "${group}" appears in a sub-page's allowedGroups but has no SETTINGS_GROUP_TO_LOCATION mapping`,
+      ).toBeDefined();
+    }
+  });
+
+  it('every mapped location is reachable from some sub-page\'s allowedGroups', () => {
+    // The reverse direction — every group with a palette mapping must also
+    // render on some page. If a group is mapped here but no sub-page owns it,
+    // the palette will deep-link to a page that doesn't display the setting.
+    const owningGroups = new Set<string>();
+    for (const groups of Object.values(SUB_PAGE_ALLOWED_GROUPS)) {
+      for (const group of groups) {
+        owningGroups.add(group);
+      }
+    }
+    for (const group of Object.keys(SETTINGS_GROUP_TO_LOCATION)) {
+      expect(
+        owningGroups.has(group),
+        `group "${group}" is mapped in SETTINGS_GROUP_TO_LOCATION but no sub-page's allowedGroups renders it`,
+      ).toBe(true);
+    }
+  });
+
+  it('each sub-page\'s mapped locations resolve to that sub-page', () => {
+    // The palette lands the user on the sub-page pointed at by the group's
+    // SETTINGS_GROUP_TO_LOCATION entry. If those entries drift from the shell's
+    // wiring, clicking a Job Queue setting could route the user to (say) the
+    // Farm sub-page — where the field is nowhere to be seen.
+    for (const [subPageKey, groups] of Object.entries(SUB_PAGE_ALLOWED_GROUPS)) {
+      const [, expectedSubPageId] = subPageKey.split('.');
+      for (const group of groups) {
+        const location = SETTINGS_GROUP_TO_LOCATION[group];
+        expect(location, `mapping missing for group "${group}"`).toBeDefined();
+        expect(
+          location.subPageId,
+          `group "${group}" is rendered on ${subPageKey} but SETTINGS_GROUP_TO_LOCATION points elsewhere`,
+        ).toBe(expectedSubPageId);
+      }
+    }
   });
 });
