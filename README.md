@@ -366,7 +366,16 @@ This installs two hooks:
 
 ## 📝 License
 
-This project is licensed under the MIT License - see [LICENSE](./LICENSE) file for details.
+PrintFarmer is licensed under the
+[GNU Affero General Public License v3.0 only](./LICENSE)
+(`AGPL-3.0-only`) beginning with v0.2.3. Releases through v0.2.2 retain
+their historically applicable terms.
+
+Network users can identify and retrieve the exact corresponding source from
+the unauthenticated `GET /api/system/source` endpoint. See
+[Licensing, source availability, and provenance](./docs/LICENSING_AND_SOURCE.md)
+for operator and contributor procedures. Third-party components retain their
+own terms and notices in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
 
 ## 🙏 Acknowledgments
 

@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "reviewedOn": "2026-07-25",
+  "allowedExpressions": [
+    "(MIT AND Zlib)",
+    "(MIT OR GPL-3.0-or-later)",
+    "(MPL-2.0 OR Apache-2.0)",
+    "MS-PL OR Apache-2.0",
+    "0BSD",
+    "AGPL-3.0-only",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BlueOak-1.0.0",
+    "CC-BY-4.0",
+    "CC0-1.0",
+    "GPL-3.0-or-later WITH GCC-exception-3.1",
+    "ISC",
+    "LicenseRef-Microsoft-SNI-Distributable-Code",
+    "LicenseRef-Sonar-Source-Available-1.0",
+    "MIT",
+    "MIT AND ISC",
+    "MIT-0",
+    "MPL-2.0",
+    "PostgreSQL",
+    "Unlicense",
+    "Zlib",
+    "blessing"
+  ],
+  "deniedValues": [
+    "",
+    "NONE",
+    "NOASSERTION",
+    "UNKNOWN",
+    "UNLICENSED"
+  ],
+  "npmLockFiles": [
+    "src/Web/ReactApp/package-lock.json",
+    "tests/ui-validation/package-lock.json",
+    "tools/package-lock.json"
+  ],
+  "nuget": {
+    "assetsRoot": "src",
+    "excludedProjectPathSegments": [
+      "/tests/",
+      "/tools/"
+    ]
+  },
+  "npm": {
+    "licenseTextFallbacks": [
+      {
+        "package": "@microsoft/signalr",
+        "version": "10.0.0",
+        "license": "MIT",
+        "licenseFile": "compliance/licenses/npm/microsoft-signalr-10.0.0.txt",
+        "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+        "source": "https://github.com/dotnet/aspnetcore/blob/v10.0.0/LICENSE.txt",
+        "reason": "The npm package declares MIT but excludes the repository-root license from its published files.",
+        "reviewedBy": "repository owner",
+        "reviewedOn": "2026-02-20",
+        "reviewIssue": "OlyForge3D/PrintFarmer#902"
+      },
+      {
+        "package": "fetch-cookie",
+        "version": "2.2.0",
+        "license": "Unlicense",
+        "licenseFile": "compliance/licenses/npm/fetch-cookie-2.2.0.txt",
+        "sha256": "640514163b17f977adc997cb16f51871122cfb0555ebad1a3f01e167b7ba8857",
+        "source": "https://github.com/valeriangalliat/fetch-cookie/blob/v2.2.0/UNLICENSE",
+        "reason": "The npm package declares Unlicense but excludes the repository-root terms from its published files.",
+        "reviewedBy": "repository owner",
+        "reviewedOn": "2026-02-20",
+        "reviewIssue": "OlyForge3D/PrintFarmer#902"
+      },
+      {
+        "package": "tr46",
+        "version": "0.0.3",
+        "license": "MIT",
+        "licenseFile": "compliance/licenses/npm/tr46-0.0.3.txt",
+        "sha256": "bc1cba5482e40f9fa65efa657f6a3d1682cccaa6b65eda57788a8ea8a57c03dc",
+        "source": "https://github.com/jsdom/tr46/blob/7f1eb920768c794be40962a4f0cbad670a398d04/LICENSE.md",
+        "reason": "The v0.0.3 package declares MIT and names Sebastian Mayr as author but predates the repository license file containing those MIT terms.",
+        "reviewedBy": "repository owner",
+        "reviewedOn": "2026-02-20",
+        "reviewIssue": "OlyForge3D/PrintFarmer#902"
+      },
+      {
+        "package": "victory-vendor",
+        "version": "37.3.6",
+        "license": "MIT AND ISC",
+        "licenseFile": "compliance/licenses/npm/victory-vendor-37.3.6.txt",
+        "sha256": "a87141942619a6573651b0706f97c2589ff70d67fa76575466f865067485eeb8",
+        "source": "https://github.com/FormidableLabs/victory/blob/v37.3.6/LICENSE.txt",
+        "reason": "The npm package includes vendored dependency licenses below lib-vendor but excludes Victory's repository-root MIT license.",
+        "reviewedBy": "repository owner",
+        "reviewedOn": "2026-02-20",
+        "reviewIssue": "OlyForge3D/PrintFarmer#902"
+      }
+    ]
+  },
+  "sbom": {
+    "npmBundleLockFile": "src/Web/ReactApp/package-lock.json",
+    "deniedLicensePatterns": [
+      "BUSL",
+      "Commons-Clause",
+      "LicenseRef-.*[Pp]roprietary",
+      "NonCommercial",
+      "PolyForm",
+      "SSPL"
+    ],
+    "reviewedEcosystems": [
+      {
+        "purlPrefixes": [
+          "pkg:deb/debian/",
+          "pkg:deb/ubuntu/"
+        ],
+        "evidence": "Debian and Ubuntu package identities and license expressions emitted by Syft from the installed dpkg database and copyright files; SPDX LicenseRef values must carry extracted text in the same document",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "Distribution packages remain separately licensed aggregate components. Missing expressions, missing custom-license text, and denied source-available or proprietary patterns still fail."
+      },
+      {
+        "purlPrefixes": [
+          "pkg:apk/alpine/"
+        ],
+        "evidence": "Alpine package identities and license expressions emitted by Syft from the installed apk database; SPDX LicenseRef values must carry extracted text in the same document",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "Alpine packages remain separately licensed aggregate components. Missing expressions, missing custom-license text, and denied source-available or proprietary patterns still fail."
+      }
+    ],
+    "runtimePackageEvidence": [
+      {
+        "namePattern": "^Microsoft\\.NETCore\\.App\\.Runtime\\.[A-Za-z0-9.-]+$",
+        "approvedExpression": "MIT",
+        "supplier": "Organization: Microsoft Corporation",
+        "sourceUrl": "https://github.com/dotnet/runtime",
+        "evidence": "Microsoft.NETCore.App.Runtime packages are produced from dotnet/runtime under its repository MIT license",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "The exact runtime package identity is preserved in its PURL while the source repository supplies the declared MIT license."
+      },
+      {
+        "namePattern": "^Microsoft\\.AspNetCore\\.App\\.Runtime\\.[A-Za-z0-9.-]+$",
+        "approvedExpression": "MIT",
+        "supplier": "Organization: Microsoft Corporation",
+        "sourceUrl": "https://github.com/dotnet/aspnetcore",
+        "evidence": "Microsoft.AspNetCore.App.Runtime packages are produced from dotnet/aspnetcore under its repository MIT license",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "The exact runtime package identity is preserved in its PURL while the source repository supplies the declared MIT license."
+      }
+    ],
+    "packageEvidence": [
+      {
+        "purlType": "deb",
+        "namePattern": "^(gcc-14|gcc-14-base|libgcc-s1|libstdc\\+\\+6)$",
+        "versionPattern": "^14\\.",
+        "approvedExpression": "GPL-3.0-or-later WITH GCC-exception-3.1",
+        "supplier": "Organization: Canonical",
+        "sourceUrl": "https://changelogs.ubuntu.com/changelogs/pool/main/g/gcc-14/",
+        "evidence": "Ubuntu gcc-14 source-package copyright and GCC Runtime Library Exception 3.1; applies to runtime library records detected from libgcc and libstdc++ paths",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "Syft 1.49 does not populate the gcc-14 runtime package license. This narrow major-version rule records the applicable GCC runtime exception and leaves other GCC identities unresolved."
+      },
+      {
+        "purlType": "golang",
+        "namespacePattern": "^github\\.com/tianon$",
+        "namePattern": "^gosu$",
+        "versionPattern": "^UNKNOWN$",
+        "approvedExpression": "Apache-2.0",
+        "supplier": "Organization: tianon/gosu contributors",
+        "sourceUrl": "https://github.com/tianon/gosu",
+        "evidence": "tianon/gosu LICENSE blob d645695673349e3947e8e5ae42332d0ac3164cd7 identifies Apache-2.0",
+        "reviewer": "Jeff Papiez",
+        "reviewDate": "2026-07-24",
+        "reviewAfter": "2027-07-24",
+        "rationale": "Syft detects the installed gosu binary from its Go module path but cannot recover a build version or license; the exact upstream module and immutable license blob supply the missing declaration."
+      }
+    ],
+    "distroAliases": [
+      {
+        "name": "libzstd",
+        "licenseSourcePackage": "libzstd1"
+      },
+      {
+        "name": "openssl",
+        "licenseSourcePackage": "libssl3t64"
+      },
+      {
+        "name": "systemd",
+        "licenseSourcePackage": "libsystemd0"
+      }
+    ]
+  },
+  "reviewedEvidence": [
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:3e6ed02b718eec8e95805b3515e380fe83767b753b69e21641f9ed6f66580fe1",
+      "approvedExpression": "MIT",
+      "evidence": "AssimpNetter 6.0.5 License.txt; SHA-256 3e6ed02b718eec8e95805b3515e380fe83767b753b69e21641f9ed6f66580fe1",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact bundled text is the MIT License."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:4753a420125d1685de65b061413aa1ea86193ece84391721f129b78cc38e34a2",
+      "approvedExpression": "Apache-2.0",
+      "evidence": "J2N 2.1.0 LICENSE.txt; SHA-256 4753a420125d1685de65b061413aa1ea86193ece84391721f129b78cc38e34a2",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact bundled text is the Apache License 2.0."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:ff3ab72fd9804fe27973a1e45f35c4c5fa2ce5f8ad48ea4279371778051d413b",
+      "approvedExpression": "Apache-2.0",
+      "evidence": "Lucene.Net 4.8.0-beta00018 LICENSE.txt; SHA-256 ff3ab72fd9804fe27973a1e45f35c4c5fa2ce5f8ad48ea4279371778051d413b",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact bundled text is the Apache License 2.0."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:9335e8bad875dd7be4eebd55d2335eb6433d1cea61aadb3817af7807bef8932a",
+      "approvedExpression": "LicenseRef-Microsoft-SNI-Distributable-Code",
+      "evidence": "Microsoft.Data.SqlClient.SNI.runtime 6.0.2 LICENSE.txt; SHA-256 9335e8bad875dd7be4eebd55d2335eb6433d1cea61aadb3817af7807bef8932a",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact separate Microsoft terms designate the runtime as Distributable Code and permit copying and distribution as part of an application; the component is not relicensed as AGPL."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:bc3327857d8449f52eb29e0c677a756a6cb8a2e42f61349f64fd681455b474a5",
+      "approvedExpression": "MIT",
+      "evidence": "QuestPDF 2026.2.3 PackageLicense.md; SHA-256 bc3327857d8449f52eb29e0c677a756a6cb8a2e42f61349f64fd681455b474a5",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact package license permits an open-source project to select the included Community MIT License; this review selects MIT for PrintFarmer."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:fdb7f24db8a6838eba1477242d2457bf6db2f3682b7cb3a16824e9f2f07936c2",
+      "approvedExpression": "Apache-2.0",
+      "evidence": "Six Labors Split License 1.0 bundled by Fonts 2.1.3, ImageSharp 3.1.12, and ImageSharp.Drawing 2.1.7; SHA-256 fdb7f24db8a6838eba1477242d2457bf6db2f3682b7cb3a16824e9f2f07936c2",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact split-license text grants Apache-2.0 when the work is consumed in software under an Open Source or Source Available license; this review selects Apache-2.0 for PrintFarmer."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "FILE-SHA256:b93b383060f0b26e95538455d8a92b0c9bc5bf61c3a1fd42583fc3d535330a03",
+      "approvedExpression": "LicenseRef-Sonar-Source-Available-1.0",
+      "evidence": "SonarAnalyzer.CSharp 10.20.0.135146 licenses/LICENSE.txt; SHA-256 b93b383060f0b26e95538455d8a92b0c9bc5bf61c3a1fd42583fc3d535330a03; Directory.Build.props references it with PrivateAssets=all",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The analyzer is a private build-time tool and is not included in distributed application artifacts. The custom expression prevents treating its source-available terms as an OSI license."
+    },
+    {
+      "ecosystem": "nuget",
+      "observedLicense": "URL:https://raw.githubusercontent.com/aspnet/AspNetCore/2.0.0/LICENSE.txt",
+      "approvedExpression": "Apache-2.0",
+      "evidence": "Legacy NuGet license URL for ASP.NET Core 2.0.0 packages; package repository commits include ad30aa9595095b855c8787236996876f9f757191 and 3b98d5b5a4ab8478cd99ce65efdbdd1ab122207b",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The exact legacy URL identifies the ASP.NET Core 2.0.0 Apache License 2.0 text."
+    }
+  ],
+  "reviewedExceptions": [
+    {
+      "ecosystem": "nuget",
+      "package": "Portable.BouncyCastle",
+      "version": "1.9.0",
+      "observedLicense": "URL:https://www.bouncycastle.org/csharp/licence.html",
+      "approvedExpression": "MIT",
+      "evidence": "Portable.BouncyCastle 1.9.0 repository commit 0f827cc3e74a8f45669fba5c525adacd6b897503, crypto/License.html",
+      "reviewer": "PrintFarmer development forward-port review",
+      "reviewDate": "2026-07-25",
+      "reviewAfter": "2027-07-25",
+      "rationale": "The package repository pins the Bouncy Castle permission text corresponding to the legacy license URL; the package remains separately licensed under those MIT-compatible terms."
+    },
+    {
+      "ecosystem": "nuget",
+      "package": "SourceGear.sqlite3",
+      "version": "3.50.4.5",
+      "observedLicense": "FILE-SHA256:99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95",
+      "approvedExpression": "blessing",
+      "evidence": "SourceGear.sqlite3 3.50.4.5 LICENSE.txt; SHA-256 99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95; https://sqlite.org/copyright.html",
+      "reviewer": "PrintFarmer development forward-port review",
+      "reviewDate": "2026-07-25",
+      "reviewAfter": "2027-07-25",
+      "rationale": "The exact bundled notice identifies SQLite as public domain and links to SQLite's canonical public-domain dedication; SPDX blessing records those separate terms without relicensing the component."
+    },
+    {
+      "ecosystem": "nuget",
+      "package": "WebPush",
+      "version": "1.0.13",
+      "observedLicense": "URL:https://github.com/web-push-libs/web-push-csharp/blob/master/LICENSE",
+      "approvedExpression": "MPL-2.0",
+      "evidence": "WebPush 1.0.13 repository commit 5f707831ebb2088561a0a4324facced6126e3fa7, LICENSE",
+      "reviewer": "PrintFarmer development forward-port review",
+      "reviewDate": "2026-07-25",
+      "reviewAfter": "2027-07-25",
+      "rationale": "The package's immutable repository commit contains the MPL-2.0 text referenced by its mutable legacy license URL."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "rgbcolor",
+      "version": "1.0.1",
+      "observedLicense": "MIT OR SEE LICENSE IN FEEL-FREE.md",
+      "approvedExpression": "MIT",
+      "evidence": "npm package rgbcolor@1.0.1 LICENSE.md; lock integrity sha512-9aZLIrhRaD97sgVhtJOW6ckOEh6/GnvQtdVNfdZ6s67+3/XwLS9lBcQYzEEhYVeUowN7pRzMLsyGhK2i/xvWbw==",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The package explicitly permits choosing its bundled MIT license."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "webgl-constants",
+      "version": "1.1.1",
+      "observedLicense": "MISSING",
+      "approvedExpression": "MIT",
+      "evidence": "npm package webgl-constants@1.1.1 LICENSE; lock integrity sha512-LkBXKjU5r9vAW7Gcu3T5u+5cvSvh5WwINdr0C+9jpzVB41cjQAP5ePArDtk/WHYdVj0GefCgM73BA7FlIiNtdg==",
+      "reviewer": "Jeff Papiez",
+      "reviewDate": "2026-07-24",
+      "reviewAfter": "2027-07-24",
+      "rationale": "The published tarball includes an unmodified MIT license even though registry metadata omits the expression."
+    }
+  ]
+}

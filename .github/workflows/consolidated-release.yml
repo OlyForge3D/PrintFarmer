@@ -16,14 +16,6 @@ on:
       version:
         description: 'Version tag (vX.Y.Z or vX.Y.Z-beta.N or vX.Y.Z-rc.N)'
         required: true
-      skip_docker:
-        description: 'Skip Docker/server release'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
       skip_mobile:
         description: 'Skip iOS/TestFlight release'
         required: false
@@ -34,6 +26,7 @@ on:
           - 'true'
 
 permissions:
+  actions: read
   contents: write
   packages: write
   id-token: write
@@ -91,34 +84,16 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
 
-      - name: Verify VERSION file matches
+      - name: Verify repository version metadata
         run: |
           VERSION="${{ steps.parse.outputs.version }}"
           BASE="${{ steps.parse.outputs.base_version }}"
           FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
-
-          # For prereleases, base version should match VERSION file
-          # For stable releases, exact match required
-          if [[ "${{ steps.parse.outputs.is_prerelease }}" == "true" ]]; then
-            if [[ "v${FILE_VERSION#v}" != "$BASE" ]] && [[ "${FILE_VERSION#v}" != "${BASE#v}" ]]; then
-              echo "⚠️  VERSION file ($FILE_VERSION) doesn't match base version ($BASE)"
-              echo "   Updating VERSION file to match..."
-              echo "$BASE" > VERSION
-            fi
-          else
-            EXPECTED="${BASE#v}"
-            ACTUAL="${FILE_VERSION#v}"
-            if [[ "$ACTUAL" != "$EXPECTED" ]]; then
-              echo "Updating VERSION file: $FILE_VERSION → $BASE"
-              echo "$BASE" > VERSION
-            fi
+          if [[ "${FILE_VERSION#v}" != "${BASE#v}" ]]; then
+            echo "Requested release $VERSION does not match VERSION ($FILE_VERSION)"
+            exit 1
           fi
-
-      - name: Sync monorepo versions
-        run: |
-          if [[ -x ./scripts/sync-monorepo-version.sh ]]; then
-            ./scripts/sync-monorepo-version.sh
-          fi
+          bash scripts/sync-monorepo-version.sh --check
 
       - name: Create and push tag
         run: |
@@ -126,13 +101,6 @@ jobs:
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
           TAG="${{ steps.parse.outputs.version }}"
-
-          # Commit VERSION sync if changed
-          if [[ -n "$(git status --porcelain VERSION mobile/)" ]]; then
-            git add VERSION mobile/PrintFarmer.xcodeproj/project.pbxproj 2>/dev/null || true
-            git commit -m "chore(release): sync version to $TAG" || true
-            git push origin HEAD
-          fi
 
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; aborting to avoid overwrite."
@@ -143,20 +111,7 @@ jobs:
           echo "✅ Tag $TAG created and pushed"
 
   # ====================
-  # JOB 2: Docker / Server Release
-  # ====================
-  docker-release:
-    name: Server Release (Docker)
-    needs: validate-and-tag
-    if: github.event.inputs.skip_docker != 'true'
-    uses: ./.github/workflows/docker-publish.yml
-    permissions:
-      contents: read
-      packages: write
-    secrets: inherit
-
-  # ====================
-  # JOB 3: iOS / TestFlight Release
+  # JOB 2: iOS / TestFlight Release
   # ====================
   mobile-release:
     name: iOS Release (TestFlight)
@@ -315,18 +270,118 @@ jobs:
           rm -f "$API_KEY_JSON" || true
 
   # ====================
-  # JOB 4: Create GitHub Release
+  # JOB 3: Create GitHub Release
   # ====================
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [validate-and-tag, docker-release, mobile-release]
-    if: always() && needs.validate-and-tag.result == 'success'
+    needs: [validate-and-tag, mobile-release]
+    if: >-
+      always() &&
+      needs.validate-and-tag.result == 'success' &&
+      (needs.mobile-release.result == 'success' || needs.mobile-release.result == 'skipped')
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ needs.validate-and-tag.outputs.version }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+
+      - name: Wait for exact-tag Docker workflow
+        id: docker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.validate-and-tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse "${VERSION}^{commit}")"
+          RUN_ID=""
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list \
+              --workflow docker-publish.yml \
+              --branch "$VERSION" \
+              --commit "$COMMIT" \
+              --event push \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 10
+          done
+          if [[ -z "$RUN_ID" ]]; then
+            echo "Could not find the Docker workflow for $VERSION ($COMMIT)"
+            exit 1
+          fi
+          gh run watch "$RUN_ID" --exit-status
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download Docker release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ steps.docker.outputs.run_id }}" \
+            --pattern 'sbom-*' \
+            --dir artifacts
+          gh run download "${{ steps.docker.outputs.run_id }}" \
+            --pattern 'digest-*' \
+            --dir artifacts
+
+      - name: Require and revalidate all image artifacts
+        run: |
+          set -euo pipefail
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest_file="artifacts/digest-${image}/digest-${image}.txt"
+            if [[ ! -s "$digest_file" ]]; then
+              echo "Missing digest artifact for $image"
+              exit 1
+            fi
+            digest="$(tr -d '[:space:]' < "$digest_file")"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid digest artifact for $image: $digest"
+              exit 1
+            fi
+            mapfile -d '' sboms < <(
+              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
+            )
+            if [[ "${#sboms[@]}" -ne 1 ]]; then
+              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
+              exit 1
+            fi
+            node scripts/compliance/validate-compliance.mjs \
+              --skip-dependencies \
+              --sbom "${sboms[0]}"
+          done
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify all image signatures and SPDX attestations
+        env:
+          VERSION: ${{ needs.validate-and-tag.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          CERTIFICATE_IDENTITY="https://github.com/${REPOSITORY}/.github/workflows/docker-publish.yml@refs/tags/${VERSION}"
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            reference="ghcr.io/${OWNER_LC}/printfarmer-${image}@${digest}"
+            cosign verify "$reference" \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            cosign verify-attestation "$reference" \
+              --type spdxjson \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          done
 
       - name: Generate changelog
         id: cliff
@@ -340,7 +395,6 @@ jobs:
         env:
           VERSION: ${{ needs.validate-and-tag.outputs.version }}
           IS_PRERELEASE: ${{ needs.validate-and-tag.outputs.is_prerelease }}
-          DOCKER_RESULT: ${{ needs.docker-release.result }}
           MOBILE_RESULT: ${{ needs.mobile-release.result }}
           CHANGELOG: ${{ steps.cliff.outputs.changelog }}
         run: |
@@ -350,15 +404,7 @@ jobs:
             echo "### Release Components"
             echo ""
 
-            if [[ "${{ github.event.inputs.skip_docker }}" != "true" ]]; then
-              if [[ "$DOCKER_RESULT" == "success" ]]; then
-                echo "- ✅ **Server (Docker images)** — Published to GHCR"
-              else
-                echo "- ❌ **Server (Docker images)** — Build failed or skipped"
-              fi
-            else
-              echo "- ⏭️ **Server (Docker images)** — Skipped"
-            fi
+            echo "- ✅ **Server (Docker images)** — Validated, attested, signed, and published to GHCR"
 
             if [[ "${{ github.event.inputs.skip_mobile }}" != "true" ]] && [[ "$IS_PRERELEASE" == "true" ]]; then
               if [[ "$MOBILE_RESULT" == "success" ]]; then
@@ -393,11 +439,20 @@ jobs:
             echo '```bash'
             echo "docker pull ghcr.io/olyforge3d/printfarmer-api:${VERSION#v}"
             echo "docker pull ghcr.io/olyforge3d/printfarmer-frontend:${VERSION#v}"
+            echo "docker pull ghcr.io/olyforge3d/printfarmer-printer-discovery:${VERSION#v}"
+            echo "docker pull ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:${VERSION#v}"
             echo "docker pull ghcr.io/olyforge3d/printfarmer-monolith:${VERSION#v}"
             echo '```'
+            echo ""
+            echo "### License and Corresponding Source"
+            echo ""
+            echo "- License: GNU AGPL v3.0 only (AGPL-3.0-only)"
+            echo "- Exact source archive: PrintFarmer-${VERSION}-source.tar.gz"
+            echo "- Source manifest: PrintFarmer-${VERSION}-source.json"
+            echo "- Third-party notices: THIRD-PARTY-NOTICES.md"
           } > RELEASE_NOTES.md
 
-      - name: Create GitHub Release
+      - name: Finalize GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ needs.validate-and-tag.outputs.version }}

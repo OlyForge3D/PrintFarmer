@@ -108,6 +108,7 @@ echo "Bumping version: ${CURRENT_RAW} -> ${NEW_VERSION}"
 echo "Tag to create: ${NEW_TAG}"
 
 printf "%s\n" "$NEW_VERSION" > "$VERSION_FILE"
+"$ROOT/scripts/sync-monorepo-version.sh"
 
 # Ensure we have tags and full history (works even if checkout was shallow)
 git fetch --prune --unshallow --tags || true
