@@ -881,6 +881,193 @@ final class ShiftTasksCoalescerHardeningTests: XCTestCase {
         XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
     }
 
+    // MARK: - Authoritative pre-cancellation contract: zero load / zero publication
+
+    /// A SOLE caller cancelled before it can reserve demand must satisfy the
+    /// side-effect-free pre-cancellation contract: return `false`, issue ZERO
+    /// service loads, publish nothing, and leave owner / pending / waiter / mailbox
+    /// state idle — proven WITHOUT a second refresh masking the cleanup. The load
+    /// step is gated and would trap if ever reached, so a non-zero load count is
+    /// impossible to hide.
+    ///
+    /// Discriminator vs base `db74ec1d`: there the caller reserved and started the
+    /// owner BEFORE the cancellation was observed, so `loadCallCount` reached 1 and
+    /// the owner stayed active. The `loads == 0` / owner-idle assertions below are
+    /// the behavioral gate.
+    func testSolePreCancelledRequestPerformsNoLoadOrPublication() async {
+        let viewModel = ShiftTasksViewModel()
+        let counter = CompletionCounter()
+
+        let gate = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(loadSteps: [.gated(gate)])
+        viewModel.configure(
+            taskService: service,
+            signalRService: MockSignalRService(),
+            shiftPlanEnabled: true
+        )
+
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        caller.cancel()
+        _ = await caller.value
+
+        let counts = await counter.snapshot()
+        XCTAssertEqual(counts.total, 1)
+        XCTAssertEqual(counts.falseCount, 1)
+
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 0)                 // ZERO service loads
+        XCTAssertNil(viewModel.snapshot)         // ZERO publication
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.scheduledPassCountForTesting, 0)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+    }
+
+    /// The race the final trio flagged: cancellation lands AFTER a reservation
+    /// exists but BEFORE the caller registers its waiter. The owner is held in the
+    /// reserved-but-not-begun window (so no load can start), the caller is parked in
+    /// the reserve→registration window via `preRegistrationHook`, then cancelled.
+    /// The demandless reservation must be unwound: `false`, ZERO loads, ZERO
+    /// publication, owner retired, and — after its pre-begin gate finally opens — the
+    /// abandoned owner terminates WITHOUT ever issuing a load.
+    func testReserveToRegistrationRaceUnwindsDemandlessOwnerWithoutLoad() async {
+        let viewModel = ShiftTasksViewModel()
+        let counter = CompletionCounter()
+
+        let beginGate = ShiftTaskResultGate<Void>()
+        viewModel.ownerPassWillBeginHook = { _ = try? await beginGate.wait() }
+
+        let reserved = ShiftTaskResultGate<Void>()
+        let releaseRegistration = ShiftTaskResultGate<Void>()
+        viewModel.preRegistrationHook = {
+            await reserved.succeed(())
+            _ = try? await releaseRegistration.wait()
+        }
+
+        let gate = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(loadSteps: [.gated(gate)])
+        viewModel.configure(
+            taskService: service,
+            signalRService: MockSignalRService(),
+            shiftPlanEnabled: true
+        )
+
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        // Caller has reserved (owner started, pass not begun) and is parked at the
+        // pre-registration hook.
+        _ = try? await reserved.wait()
+
+        // Grab the reserved-but-pre-begin owner so we can join it deterministically
+        // after the race instead of polling.
+        let ownerTask = viewModel.refreshOwnerTaskForTesting
+        XCTAssertNotNil(ownerTask)
+        let loadsBeforeRace = await service.loadCallCount
+        XCTAssertEqual(loadsBeforeRace, 0)
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.scheduledPassCountForTesting, 1)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0) // not registered yet
+
+        // Cancellation lands in the reserve→registration window; releasing the hook
+        // lets the caller enter `awaitGeneration`, where the cancellation is seen.
+        caller.cancel()
+        await releaseRegistration.succeed(())
+        _ = await caller.value
+
+        let counts = await counter.snapshot()
+        XCTAssertEqual(counts.total, 1)
+        XCTAssertEqual(counts.falseCount, 1)
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 0)
+        XCTAssertNil(viewModel.snapshot)
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.scheduledPassCountForTesting, 0)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+
+        // Open the pre-begin gate and join the abandoned owner: it must terminate
+        // without issuing a load even after the gate releases.
+        await beginGate.succeed(())
+        await ownerTask?.value
+        let loadsAfter = await service.loadCallCount
+        XCTAssertEqual(loadsAfter, 0)
+    }
+
+    /// A cancelled registrant must NEVER retire a peer's demand. Peer P starts the
+    /// owner and registers a real waiter on generation 1; then a second caller C
+    /// joins the SAME pre-begin generation, parks in the reserve→registration
+    /// window, and cancels. C's unwind must observe P's peer awaiter and leave the
+    /// owner and P's demand entirely intact, so the single covering pass still runs
+    /// exactly one load, publishes, and resolves P `true` while C alone gets `false`.
+    func testCancelledRegistrantDoesNotRetirePeerDemand() async {
+        let barrier = RefreshWaiterRegistrationBarrier()
+        let viewModel = ShiftTasksViewModel()
+        viewModel.refreshWaiterRegistrationObserver = barrier.signal
+        let counter = CompletionCounter()
+
+        let beginGate = ShiftTaskResultGate<Void>()
+        viewModel.ownerPassWillBeginHook = { _ = try? await beginGate.wait() }
+
+        let gate = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(loadSteps: [.gated(gate)])
+        viewModel.configure(
+            taskService: service,
+            signalRService: MockSignalRService(),
+            shiftPlanEnabled: true
+        )
+
+        // Peer P starts the owner and registers on gen 1 (pass not begun).
+        let peer = Task { await counter.record(await viewModel.refresh()) }
+        await barrier.waitForCount(1)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 1)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 1)
+
+        // Install the pre-registration hook only AFTER P has registered, so ONLY the
+        // second caller parks in the reserve→registration window.
+        let reserved = ShiftTaskResultGate<Void>()
+        let releaseRegistration = ShiftTaskResultGate<Void>()
+        viewModel.preRegistrationHook = {
+            await reserved.succeed(())
+            _ = try? await releaseRegistration.wait()
+        }
+
+        // Cancelled caller C joins the SAME running gen 1, then parks pre-registration.
+        let cancelled = Task { await counter.record(await viewModel.refresh()) }
+        _ = try? await reserved.wait()
+
+        cancelled.cancel()
+        await releaseRegistration.succeed(())
+        _ = await cancelled.value
+
+        let afterCancel = await counter.snapshot()
+        XCTAssertEqual(afterCancel.total, 1)
+        XCTAssertEqual(afterCancel.falseCount, 1)
+        // Peer demand untouched by C's unwind.
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 1)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 1)
+        XCTAssertEqual(viewModel.scheduledPassCountForTesting, 1)
+        let loadsMid = await service.loadCallCount
+        XCTAssertEqual(loadsMid, 0)
+
+        // The single covering pass runs exactly one load and resolves P.
+        await beginGate.succeed(())
+        await service.waitForLoadCount(1)
+        await gate.succeed(makeShiftTaskSnapshot(title: "Peer pass"))
+        _ = await peer.value
+
+        let final = await counter.snapshot()
+        XCTAssertEqual(final.total, 2)
+        XCTAssertEqual(final.trueCount, 1)   // peer P
+        XCTAssertEqual(final.falseCount, 1)  // cancelled caller C
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 1)             // ONE load — C did not retire it
+        XCTAssertNotNil(viewModel.snapshot)  // publication happened for the peer
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+    }
+
     // MARK: - Blocker 4: real deallocation after a gated refresh (no retain cycle)
 
     /// A gated in-flight service call must not retain the ViewModel forever after

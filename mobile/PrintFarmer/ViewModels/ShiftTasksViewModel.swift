@@ -123,6 +123,15 @@ final class ShiftTasksViewModel {
     /// exactly once (issue #814, blocker 4). Production never assigns it.
     @ObservationIgnored
     var invalidationCompletionObserver: (@MainActor @Sendable (Bool) -> Void)?
+
+    /// Deterministic test seam awaited by an explicit refresh caller in the window
+    /// AFTER it has reserved a covering generation but BEFORE it registers its
+    /// waiter. Production never assigns it (a single `?.` nil check). Tests use it to
+    /// park a caller mid-reservation so cancellation can land in the exact
+    /// reserve→registration race the pre-cancellation contract must clean up (issue
+    /// #814 authoritative pre-cancellation contract).
+    @ObservationIgnored
+    var preRegistrationHook: (@MainActor @Sendable () async -> Void)?
     #endif
 
     /// Overflow-safe, totally-ordered refresh generation. Ordering is lexicographic
@@ -349,11 +358,17 @@ final class ShiftTasksViewModel {
         service: any ShiftTaskServiceProtocol,
         shiftPlanEnabled: Bool
     ) async -> Bool {
-        guard matchesAuthority(
-            epoch: epoch,
-            taskIdentity: ObjectIdentifier(service as AnyObject),
-            signalRIdentity: signalRServiceIdentity
-        ) else {
+        // Side-effect-free pre-cancellation (issue #814 authoritative contract): a
+        // caller already cancelled before it can reserve demand returns `false`
+        // having performed ZERO service loads and ZERO publication. Evaluating
+        // cancellation BEFORE `reserveCoveringGeneration` guarantees the sole
+        // pre-cancelled caller never starts an owner/pass at all.
+        guard !Task.isCancelled,
+              matchesAuthority(
+                epoch: epoch,
+                taskIdentity: ObjectIdentifier(service as AnyObject),
+                signalRIdentity: signalRServiceIdentity
+              ) else {
             return false
         }
 
@@ -362,7 +377,22 @@ final class ShiftTasksViewModel {
             service: service,
             shiftPlanEnabled: shiftPlanEnabled
         )
-        return await awaitGeneration(reservation.generation, epoch: epoch)
+
+        #if DEBUG
+        // Deterministic race seam: hold the caller in the reserve→registration
+        // window so a test can cancel it AFTER a reservation exists but BEFORE it
+        // registers, exercising the demandless-reservation cleanup path. Production
+        // leaves the hook nil.
+        if let hook = preRegistrationHook {
+            await hook()
+        }
+        #endif
+
+        return await awaitGeneration(
+            reservation.generation,
+            didStartOwner: reservation.didStartOwner,
+            epoch: epoch
+        )
     }
 
     /// Supported invalidations are pure signals: they only need to guarantee a
@@ -399,7 +429,11 @@ final class ShiftTasksViewModel {
             return
         }
 
-        let result = await awaitGeneration(reservation.generation, epoch: epoch)
+        let result = await awaitGeneration(
+            reservation.generation,
+            didStartOwner: reservation.didStartOwner,
+            epoch: epoch
+        )
         #if DEBUG
         invalidationCompletionObserver?(result)
         #endif
@@ -549,14 +583,29 @@ final class ShiftTasksViewModel {
     /// resolves only that caller to `false`.
     private func awaitGeneration(
         _ generation: RefreshGeneration,
+        didStartOwner: Bool,
         epoch: UInt64
     ) async -> Bool {
         let waiterID = UUID()
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
-                guard !Task.isCancelled,
-                      isActive,
-                      lifecycleEpoch == epoch else {
+                // Stale authority / torn-down lifecycle takes precedence over
+                // cancellation: resume `false` and leave state to teardown.
+                guard isActive, lifecycleEpoch == epoch else {
+                    continuation.resume(returning: false)
+                    return
+                }
+                // Cancellation landing after reservation but before registration:
+                // resolve `false` and unwind any reservation this caller alone owns
+                // so no demandless owner/pass can issue a load or publish. Peer
+                // demand on the same generation is left untouched (issue #814
+                // authoritative pre-cancellation contract).
+                if Task.isCancelled {
+                    unwindDemandlessReservation(
+                        generation,
+                        didStartOwner: didStartOwner,
+                        epoch: epoch
+                    )
                     continuation.resume(returning: false)
                     return
                 }
@@ -578,6 +627,54 @@ final class ShiftTasksViewModel {
             Task { @MainActor [weak self] in
                 self?.cancelRefreshWaiter(id: waiterID, epoch: epoch)
             }
+        }
+    }
+
+    /// Retires a reservation whose sole owner cancelled in the reserve→registration
+    /// window — but ONLY when no peer still depends on that generation. If any peer
+    /// awaiter or coalesced invalidation targets the generation, everything is left
+    /// intact so peer coverage and the single bounded owner continue unaffected
+    /// (issue #814 authoritative pre-cancellation contract).
+    private func unwindDemandlessReservation(
+        _ generation: RefreshGeneration,
+        didStartOwner: Bool,
+        epoch: UInt64
+    ) {
+        guard isActive, lifecycleEpoch == epoch else { return }
+
+        // Peer demand present (another parked awaiter or a coalesced invalidation):
+        // never cancel, steal, or delay it.
+        if let completion = generationCompletions[generation], completion.awaiterCount > 0 {
+            return
+        }
+        if coalescedDemand.contains(generation) {
+            return
+        }
+
+        // Drop an empty, unresolved completion the cancelled caller may have created.
+        if let completion = generationCompletions[generation],
+           completion.awaiterCount == 0,
+           !completion.isResolved {
+            generationCompletions.removeValue(forKey: generation)
+        }
+
+        // A demandless queued pending pass: cancel just that reservation.
+        if pendingGeneration == generation {
+            pendingGeneration = nil
+            return
+        }
+
+        // This caller itself started the running owner, the pass has not begun, and
+        // nothing else needs it: retire the owner before it can issue a load. The
+        // extra guards ensure `abandonRefreshOwner` (which clears ALL coalesced
+        // demand) cannot strip peer work that lives on other generations.
+        if didStartOwner,
+           runningGeneration == generation,
+           !runningPassStarted,
+           pendingGeneration == nil,
+           coalescedDemand.isEmpty,
+           generationCompletions.isEmpty {
+            abandonRefreshOwner()
         }
     }
 
@@ -1048,6 +1145,11 @@ final class ShiftTasksViewModel {
     }
 
     var isRefreshOwnerActiveForTesting: Bool { refreshOwnerToken != nil }
+
+    /// The live refresh-owner task handle, so a race proof can deterministically
+    /// join a reserved-but-pre-begin (and possibly abandoned) owner after releasing
+    /// its gate — no polling. Nil when no owner is active.
+    var refreshOwnerTaskForTesting: Task<Void, Never>? { refreshOwnerTask }
 
     /// Count of canonical passes currently scheduled: the running pass (if any)
     /// plus the single queued pending pass (if any). Bounded to two regardless of
