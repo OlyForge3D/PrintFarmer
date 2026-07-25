@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
@@ -128,7 +129,11 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 
 async function renderPage() {
-  const result = render(<SettingsPage />);
+  const result = render(
+    <MemoryRouter>
+      <SettingsPage />
+    </MemoryRouter>,
+  );
   // Wait for load to finish — the mode-controls bar is always visible in the
   // loaded state and doesn't depend on which mode we started in.
   await waitFor(() => {
