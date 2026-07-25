@@ -175,6 +175,43 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Catalog version tracking for update detection
     public DbSet<CatalogVersion> CatalogVersions => Set<CatalogVersion>();
 
+    // Calibration is an AppDbContext bounded context. Soft identifiers are used for
+    // separately deployed slicer and storage services; no cross-context FK is modeled.
+    public DbSet<CalibrationProject> CalibrationProjects => Set<CalibrationProject>();
+
+    public DbSet<PrinterConfigurationSnapshot> PrinterConfigurationSnapshots =>
+        Set<PrinterConfigurationSnapshot>();
+
+    public DbSet<CalibrationDraft> CalibrationDrafts => Set<CalibrationDraft>();
+
+    public DbSet<CalibrationAttempt> CalibrationAttempts => Set<CalibrationAttempt>();
+
+    public DbSet<CalibrationAttemptEvent> CalibrationAttemptEvents => Set<CalibrationAttemptEvent>();
+
+    public DbSet<CalibrationObservation> CalibrationObservations => Set<CalibrationObservation>();
+
+    public DbSet<CalibrationPhoto> CalibrationPhotos => Set<CalibrationPhoto>();
+
+    public DbSet<CalibrationBlobCleanup> CalibrationBlobCleanups => Set<CalibrationBlobCleanup>();
+
+    public DbSet<GeneratedProfileRevision> GeneratedProfileRevisions => Set<GeneratedProfileRevision>();
+
+    public DbSet<GeneratedProfileRevisionOperation> GeneratedProfileRevisionOperations =>
+        Set<GeneratedProfileRevisionOperation>();
+
+    public DbSet<CalibrationIdempotencyRecord> CalibrationIdempotencyRecords =>
+        Set<CalibrationIdempotencyRecord>();
+
+    public DbSet<CalibrationOrchestration> CalibrationOrchestrations =>
+        Set<CalibrationOrchestration>();
+
+    public DbSet<CalibrationChange> CalibrationChanges => Set<CalibrationChange>();
+
+    public DbSet<CalibrationChangeFeedState> CalibrationChangeFeedStates =>
+        Set<CalibrationChangeFeedState>();
+
+    public DbSet<CalibrationSyncCursor> CalibrationSyncCursors => Set<CalibrationSyncCursor>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -183,6 +220,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // This enables separation of entity configurations into individual files
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
@@ -201,8 +239,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         }
     }
 
+    private void ConfigureCalibrationProviderSpecificIndexes(ModelBuilder modelBuilder)
+    {
+        string filter = Database.ProviderName switch
+        {
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "\"DeletedAtUtc\" IS NULL",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "[DeletedAtUtc] IS NULL",
+            _ => "DeletedAtUtc IS NULL",
+        };
+        _ = modelBuilder.Entity<CalibrationDraft>()
+            .HasIndex(draft => new
+            {
+                draft.ProjectId,
+                draft.StepId,
+                draft.DeviceLineageId,
+            })
+            .HasFilter(filter);
+    }
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnsureCalibrationHistoryIsImmutable();
         EnsureCalibrationPrintersTracked();
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
@@ -211,10 +268,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        EnsureCalibrationHistoryIsImmutable();
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnsureCalibrationHistoryIsImmutable()
+    {
+        ChangeTracker.DetectChanges();
+        EnsureImmutable<PrinterConfigurationSnapshot>();
+        EnsureImmutable<CalibrationAttempt>();
+        EnsureImmutable<CalibrationAttemptEvent>();
+        EnsureImmutable<CalibrationObservation>();
+        EnsureImmutable<GeneratedProfileRevision>();
+        EnsureImmutable<GeneratedProfileRevisionOperation>();
+        EnsureImmutable<CalibrationChange>();
+    }
+
+    private void EnsureImmutable<TEntity>()
+        where TEntity : class
+    {
+        foreach (EntityEntry<TEntity> entry in ChangeTracker.Entries<TEntity>())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted)
+            {
+                throw new InvalidOperationException(
+                    $"{typeof(TEntity).Name} rows are immutable calibration history.");
+            }
+        }
     }
 
     private void EnsureCalibrationPrintersTracked()

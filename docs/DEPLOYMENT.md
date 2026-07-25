@@ -217,6 +217,15 @@ configuration and restart only when the schema is known to match the release;
 otherwise restore the provider-native backup and the previous application
 version. Rollback is backup restoration, not an automatic down-migration.
 
+Calibration photo bytes are stored outside the database under the private
+`Calibration:BlobStorage:RootPath` configuration value. In environment
+variables, use `PFARM__Calibration__BlobStorage__RootPath`. Mount this directory
+as persistent storage, do not expose it through a static-file server, and back
+it up at the same consistency point as the database. Restore the database and
+blob root together; the hosted reconciliation service retries pending
+two-phase deletes and removes orphaned blobs recorded during failed metadata
+writes.
+
 The migration-safe contract in this release does not include MySQL. Do not
 upgrade an existing MySQL deployment to this release until a provider-correct
 MySQL migration assembly is available.

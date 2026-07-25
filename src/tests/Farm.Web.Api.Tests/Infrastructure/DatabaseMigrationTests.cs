@@ -252,6 +252,109 @@ public sealed class DatabaseMigrationTests
     }
 
     [Theory]
+    [InlineData("sqlite", "Farm.Migrations.Sqlite")]
+    [InlineData("postgres", "Farm.Migrations.PostgreSQL")]
+    [InlineData("sqlserver", "Farm.Migrations.SqlServer")]
+    public void CalibrationPersistenceMigration_ForEveryProvider_CreatesOnlyCoreTopology(
+        string provider,
+        string migrationAssembly)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using AppDbContext context = new(options.Options);
+        IMigrationsAssembly migrationsAssembly = context.GetService<IMigrationsAssembly>();
+        KeyValuePair<string, System.Reflection.TypeInfo> migrationDefinition =
+            migrationsAssembly.Migrations.Single(migration =>
+                migration.Key.EndsWith(
+                    "_AddCalibrationPersistenceSync",
+                    StringComparison.Ordinal));
+        Migration migration = migrationsAssembly.CreateMigration(
+            migrationDefinition.Value,
+            context.Database.ProviderName!);
+        string[] tables = migration.UpOperations
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .ToArray();
+
+        _ = tables.Should().Contain(
+            "CalibrationProjects",
+            "PrinterConfigurationSnapshots",
+            "CalibrationDrafts",
+            "CalibrationAttempts",
+            "CalibrationAttemptEvents",
+            "CalibrationObservations",
+            "CalibrationPhotos",
+            "GeneratedProfileRevisions",
+            "CalibrationIdempotencyRecords",
+            "CalibrationOrchestrations",
+            "CalibrationChanges",
+            "CalibrationSyncCursors");
+        _ = migration.UpOperations
+            .OfType<AddForeignKeyOperation>()
+            .Should()
+            .NotContain(operation =>
+                operation.PrincipalTable.Contains("Slicer", StringComparison.OrdinalIgnoreCase) ||
+                operation.PrincipalTable.Contains("Artifact", StringComparison.OrdinalIgnoreCase));
+
+        foreach (string tableName in new[]
+                 {
+                     "CalibrationAttemptEvents",
+                     "CalibrationObservations",
+                     "CalibrationOrchestrations",
+                     "CalibrationPhotos",
+                 })
+        {
+            CreateTableOperation table = migration.UpOperations
+                .OfType<CreateTableOperation>()
+                .Single(operation => operation.Name == tableName);
+            _ = table.ForeignKeys.Single(foreignKey =>
+                    foreignKey.PrincipalTable == "CalibrationProjects")
+                .OnDelete.Should().Be(ReferentialAction.Restrict);
+            _ = table.ForeignKeys.Single(foreignKey =>
+                    foreignKey.PrincipalTable == "CalibrationAttempts")
+                .OnDelete.Should().Be(ReferentialAction.Cascade);
+        }
+
+        Migration allocatorMigration = CreateMigration(
+            migrationsAssembly,
+            context,
+            "_AddCalibrationChangeFeedAllocator");
+        _ = allocatorMigration.UpOperations
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .Should().ContainSingle()
+            .Which.Should().Be("CalibrationChangeFeedStates");
+
+        Migration cleanupMigration = CreateMigration(
+            migrationsAssembly,
+            context,
+            "_AddCalibrationBlobCleanup");
+        _ = cleanupMigration.UpOperations
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .Should().ContainSingle()
+            .Which.Should().Be("CalibrationBlobCleanups");
+    }
+
+    [Theory]
     [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite")]
     [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL")]
     [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer")]
@@ -307,6 +410,19 @@ public sealed class DatabaseMigrationTests
             "FilamentProfiles");
         _ = identityColumns.Should().OnlyContain(operation =>
             operation.IsNullable && operation.DefaultValue == null);
+    }
+
+    private static Migration CreateMigration(
+        IMigrationsAssembly migrationsAssembly,
+        DbContext context,
+        string migrationSuffix)
+    {
+        KeyValuePair<string, System.Reflection.TypeInfo> definition =
+            migrationsAssembly.Migrations.Single(candidate =>
+                candidate.Key.EndsWith(migrationSuffix, StringComparison.Ordinal));
+        return migrationsAssembly.CreateMigration(
+            definition.Value,
+            context.Database.ProviderName!);
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()

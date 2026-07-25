@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.Sqlite.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260725105008_AddCalibrationPersistenceSync")]
+    partial class AddCalibrationPersistenceSync
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.3");
@@ -295,33 +298,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("CalibrationAttemptEvents");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationBlobCleanup", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTime>("CreatedAtUtc")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OpaqueStorageKey")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedAtUtc");
-
-                    b.HasIndex("OpaqueStorageKey")
-                        .IsUnique();
-
-                    b.ToTable("CalibrationBlobCleanups");
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationChange", b =>
                 {
                     b.Property<long>("Sequence")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("ActorSubject")
@@ -378,26 +358,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("CalibrationChanges");
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationChangeFeedState", b =>
-                {
-                    b.Property<int>("Id")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<long>("LastSequence")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("CalibrationChangeFeedStates");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            LastSequence = 0L
-                        });
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.CalibrationDraft", b =>
                 {
                     b.Property<Guid>("Id")
@@ -433,7 +393,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("Revision")
-                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("StepId")
@@ -663,7 +622,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("Revision")
-                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("SliceJobId")
@@ -754,7 +712,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("Revision")
-                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Sha256")
@@ -889,7 +846,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("Revision")
-                        .IsConcurrencyToken()
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("SelectedToolheadId")
