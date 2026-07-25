@@ -17,7 +17,6 @@ final class ServerManagementViewModelTests: XCTestCase {
         userDefaults.removePersistentDomain(forName: suiteName)
         userDefaults = nil
         suiteName = nil
-        MockURLProtocol.reset()
         super.tearDown()
     }
 
@@ -71,8 +70,8 @@ final class ServerManagementViewModelTests: XCTestCase {
     }
 
     func testHealthCheckUsesHealthEndpointAndStoresReachableState() async throws {
-        let session = MockURLProtocol.mockSession()
-        MockURLProtocol.requestHandler = { request in
+        let transport = MockURLProtocol.makeSession()
+        transport.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/health")
             let response = HTTPURLResponse(
                 url: request.url!,
@@ -86,7 +85,7 @@ final class ServerManagementViewModelTests: XCTestCase {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let viewModel = ServerManagementViewModel(
             registry: registry,
-            healthChecker: URLSessionServerHealthChecker(session: session)
+            healthChecker: URLSessionServerHealthChecker(session: transport.urlSession)
         )
         viewModel.prepareForAdd()
         viewModel.serverURL = "https://print.example.com"
@@ -95,13 +94,13 @@ final class ServerManagementViewModelTests: XCTestCase {
 
         XCTAssertEqual(result, ServerHealthCheckResult(isReachable: true, statusCode: 204, message: "Reachable (HTTP 204)"))
         XCTAssertEqual(viewModel.healthState, .reachable("Reachable (HTTP 204)"))
-        XCTAssertEqual(MockURLProtocol.capturedRequests.count, 1)
+        XCTAssertEqual(transport.capturedRequests.count, 1)
     }
 
     func testHealthCheckFallsBackToHealthzAfterNetworkFailure() async throws {
-        let session = MockURLProtocol.mockSession()
+        let transport = MockURLProtocol.makeSession()
         var requestCount = 0
-        MockURLProtocol.requestHandler = { request in
+        transport.requestHandler = { request in
             requestCount += 1
             if request.url?.path == "/health" {
                 throw URLError(.cannotConnectToHost)
@@ -119,7 +118,7 @@ final class ServerManagementViewModelTests: XCTestCase {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
         let viewModel = ServerManagementViewModel(
             registry: registry,
-            healthChecker: URLSessionServerHealthChecker(session: session)
+            healthChecker: URLSessionServerHealthChecker(session: transport.urlSession)
         )
         viewModel.prepareForAdd()
         viewModel.serverURL = "https://print.example.com"
@@ -132,13 +131,13 @@ final class ServerManagementViewModelTests: XCTestCase {
     }
 
     func testURLSessionHealthCheckerTreatsCancelledURLErrorAsCancellation() async throws {
-        let session = MockURLProtocol.mockSession()
-        MockURLProtocol.requestHandler = { _ in
+        let transport = MockURLProtocol.makeSession()
+        transport.requestHandler = { _ in
             throw URLError(.cancelled)
         }
 
         do {
-            _ = try await URLSessionServerHealthChecker(session: session)
+            _ = try await URLSessionServerHealthChecker(session: transport.urlSession)
                 .check(baseURL: URL(string: "https://print.example.com")!)
             XCTFail("Expected cancellation to be rethrown.")
         } catch is CancellationError {

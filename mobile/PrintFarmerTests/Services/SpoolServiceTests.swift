@@ -2,20 +2,21 @@ import XCTest
 @testable import PrintFarmer
 
 final class SpoolServiceTests: XCTestCase {
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var service: SpoolService!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
         service = SpoolService(apiClient: apiClient)
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         service = nil
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -23,7 +24,7 @@ final class SpoolServiceTests: XCTestCase {
     // not a bare array. Regression test for the "Failed to decode response for
     // Array<SpoolmanFilament>" barcode-scan error.
     func testListFilamentsDecodesPagedWrapper() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/api/spoolman/filaments")
             let json = """
             {
@@ -48,7 +49,7 @@ final class SpoolServiceTests: XCTestCase {
     }
 
     func testListFilamentsDecodesEmptyPage() async throws {
-        MockAPIClient.stubResponse(json: #"{ "items": [], "totalCount": 0 }"#)
+        mockAPIClient.stubResponse(json: #"{ "items": [], "totalCount": 0 }"#)
 
         let filaments = try await service.listFilaments()
 
