@@ -66,7 +66,6 @@ vi.mock('@/services/settingsApi', async () => {
       SystemLog: { enabled: true, retentionDays: 30, verboseTracing: true },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: vi.fn(),
   };
 });
 

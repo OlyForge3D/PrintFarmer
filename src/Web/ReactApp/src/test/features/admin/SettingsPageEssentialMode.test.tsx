@@ -88,7 +88,6 @@ vi.mock('@/services/settingsApi', async () => {
       AdvancedTuning: { threadPoolSize: 4 },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: vi.fn(),
   };
 });
 

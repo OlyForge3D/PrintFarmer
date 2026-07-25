@@ -69,7 +69,8 @@ export interface SettingsCommandItem {
   onExecute?: (helpers: { close: () => void }) => void | Promise<void>;
   /**
    * Confirmation prompt used by destructive `action` items. When present the
-   * provider prompts via `window.confirm` before invoking `onExecute`.
+   * provider prompts via the in-app `ConfirmationModal` before invoking
+   * `onExecute`.
    */
   confirmMessage?: string;
 }

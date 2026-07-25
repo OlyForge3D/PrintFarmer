@@ -41,7 +41,12 @@ function renderObico(): ReactNode {
 }
 
 function renderPerEngine({ values, onChange }: SectionRendererContext): ReactNode {
-  const perEngine = values['PerEngine'];
+  // Backend key is camelCase (`[JsonPropertyName("perEngine")]` on
+  // `SlicerSettings.PerEngine`), and values arriving from `GET /api/settings/{key}`
+  // are the raw wire JSON with no normalization. Indexing with the .NET
+  // PascalCase name would always return `undefined` and the whole editor would
+  // silently render nothing.
+  const perEngine = values['perEngine'];
   if (!perEngine || typeof perEngine !== 'object') {
     return null;
   }
@@ -76,7 +81,7 @@ function renderPerEngine({ values, onChange }: SectionRendererContext): ReactNod
                       typeof engineSettings === 'object' && engineSettings !== null
                         ? (engineSettings as Record<string, unknown>)
                         : {};
-                    onChange('PerEngine', {
+                    onChange('perEngine', {
                       ...perEngineRecord,
                       [engine]: {
                         ...currentEngine,

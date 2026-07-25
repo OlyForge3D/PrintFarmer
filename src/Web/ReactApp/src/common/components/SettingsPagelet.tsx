@@ -196,7 +196,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex-1 min-w-0">
               <Checkbox
                 id={fieldId}
-                name={prop.name}
+                name={fieldId}
                 aria-label={displayName}
                 checked={Boolean(values[prop.name])}
                 invalid={invalid}
@@ -210,7 +210,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex-1 min-w-0">
               <Textarea
                 id={fieldId}
-                name={prop.name}
+                name={fieldId}
                 rows={2}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
@@ -227,7 +227,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex-1 min-w-0">
               <Input
                 id={fieldId}
-                name={prop.name}
+                name={fieldId}
                 type="number"
                 value={getInputValue(values[prop.name] as SettingValue)}
                 min={prop.display?.minValue}
@@ -247,7 +247,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex-1 min-w-0">
               <Select
                 id={fieldId}
-                name={prop.name}
+                name={fieldId}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 aria-label={displayName}
@@ -266,7 +266,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div className="flex-1 min-w-0">
               <Input
                 id={fieldId}
-                name={prop.name}
+                name={fieldId}
                 type={prop.display?.inputType === SettingInputType.Password ? 'password' : 'text'}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}

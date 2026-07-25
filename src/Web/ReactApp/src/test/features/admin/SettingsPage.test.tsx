@@ -17,7 +17,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  */
 
 const saveSettingsMock = vi.fn();
-const saveAllSettingsMock = vi.fn();
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
 
@@ -73,7 +72,6 @@ vi.mock('@/services/settingsApi', async () => {
       NotificationSettings: { emailEnabled: false },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: (...args: unknown[]) => saveAllSettingsMock(...args),
   };
 });
 
@@ -133,7 +131,6 @@ describe('SettingsPage — per-group save', () => {
     // synthetic section keys that don't appear in the essential manifest.
     window.localStorage.setItem('pf.settings.mode', 'everything');
     saveSettingsMock.mockReset();
-    saveAllSettingsMock.mockReset();
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     saveSettingsMock.mockResolvedValue(undefined);
@@ -171,8 +168,6 @@ describe('SettingsPage — per-group save', () => {
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
     expect(saveSettingsMock).toHaveBeenCalledWith('SystemLogSettings', { retentionDays: 45 });
-    // Batch endpoint must NOT be used.
-    expect(saveAllSettingsMock).not.toHaveBeenCalled();
     // Untouched section (NotificationSettings) is not persisted.
     expect(saveSettingsMock.mock.calls.map((c) => c[0])).not.toContain('NotificationSettings');
     // Success toast fires.

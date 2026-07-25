@@ -86,7 +86,6 @@ vi.mock('@/services/settingsApi', async () => {
       CatalogUpdates: { enabled: false, autoApply: false },
     }),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
-    saveAllSettings: vi.fn(),
   };
 });
 

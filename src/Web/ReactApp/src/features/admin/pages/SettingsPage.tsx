@@ -47,7 +47,7 @@ interface NavItem {
 }
 
 interface SettingsPageProps {
-  allowedGroups?: string[];
+  allowedGroups?: readonly string[];
   introText?: string;
   afterContent?: ReactNode;
 }
@@ -102,13 +102,21 @@ function validateSection(
 
 /**
  * Extract per-section field errors from a save failure. The unified controller
- * returns `data.errors` as either a flat `{ [dottedKey]: message }` map or a
- * plain `{ [fieldName]: message }` map when a single section is saved. We
- * normalise both into `{ [sectionKey]: { [fieldName]: message } }`.
+ * returns `data.errors` as either a `{ [section.field]: message }` map or a
+ * `{ [fieldName]: message }` map for bare keys. We normalise both into
+ * `{ [sectionKey]: { [fieldName]: message } }`.
+ *
+ * `defaultSectionKey` is the section the caller just posted. Because saves are
+ * per-section (one `POST /api/settings/{key}` per changed group), any bare
+ * error key returned by the server *must* belong to that section — searching
+ * metadata for the first section that happens to declare the same property
+ * name mis-attributes the error to whichever section renders first, which is
+ * almost never the one the user was editing (`Enabled` alone is declared on 13
+ * settings classes). Structured `section.field` keys from the backend still
+ * override the default.
  */
 function extractFieldErrors(
   err: unknown,
-  metadata: SettingMetadata[],
   defaultSectionKey: string,
 ): { fieldErrors: Record<string, Record<string, string>>; message?: string } {
   const result: { fieldErrors: Record<string, Record<string, string>>; message?: string } = {
@@ -125,12 +133,9 @@ function extractFieldErrors(
   if (errorsObj && typeof errorsObj === 'object') {
     for (const [key, msg] of Object.entries(errorsObj)) {
       const parts = key.split('.');
-      let section = parts.length > 1 ? parts[0] : undefined;
-      const fieldName = parts.length > 1 ? parts.slice(1).join('.') : parts[0];
-      if (!section) {
-        const found = metadata.find((m) => m.properties.some((p) => p.name === fieldName));
-        section = found?.key ?? defaultSectionKey;
-      }
+      const hasSection = parts.length > 1;
+      const section = hasSection ? parts[0] : defaultSectionKey;
+      const fieldName = hasSection ? parts.slice(1).join('.') : parts[0];
       result.fieldErrors[section] = result.fieldErrors[section] ?? {};
       result.fieldErrors[section][fieldName] = String(msg ?? 'Invalid value');
     }
@@ -244,7 +249,7 @@ function GroupSaveBlock({
         await saveSettingsValues(sectionKey, state.values[sectionKey] ?? {});
       } catch (err) {
         failed.push(meta.displayName || meta.className);
-        const extracted = extractFieldErrors(err, metadataItems, sectionKey);
+        const extracted = extractFieldErrors(err, sectionKey);
         Object.assign(perSectionErrors, extracted.fieldErrors);
         if (!firstMessage && extracted.message) firstMessage = extracted.message;
       }
