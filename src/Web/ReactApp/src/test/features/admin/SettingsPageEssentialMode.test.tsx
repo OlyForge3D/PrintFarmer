@@ -197,7 +197,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
     await renderPage();
     expect(screen.queryByLabelText('Thread Pool Size')).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByPlaceholderText('Search all settings…'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter fields on this page…'), {
       target: { value: 'thread' },
     });
 
@@ -209,7 +209,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
 
   it('search matching a section name shows every property in that section', async () => {
     await renderPage();
-    fireEvent.change(screen.getByPlaceholderText('Search all settings…'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter fields on this page…'), {
       target: { value: 'advanced tuning' },
     });
 
@@ -221,7 +221,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
 
   it('editing a search result routes through the per-section save endpoint', async () => {
     await renderPage();
-    fireEvent.change(screen.getByPlaceholderText('Search all settings…'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter fields on this page…'), {
       target: { value: 'thread' },
     });
 
@@ -241,11 +241,11 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
 
   it('clears search via the Clear button and restores mode-filtered view', async () => {
     await renderPage();
-    const searchInput = screen.getByPlaceholderText('Search all settings…');
+    const searchInput = screen.getByPlaceholderText('Filter fields on this page…');
     fireEvent.change(searchInput, { target: { value: 'thread' } });
     expect(await screen.findByLabelText('Thread Pool Size')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+    fireEvent.click(screen.getByRole('button', { name: /clear (filter|field filter)/i }));
 
     // Essential mode is back, so the advanced section disappears again.
     expect(screen.queryByLabelText('Thread Pool Size')).not.toBeInTheDocument();
@@ -254,17 +254,17 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
 
   it('shows an empty state with a clear action when nothing matches', async () => {
     await renderPage();
-    fireEvent.change(screen.getByPlaceholderText('Search all settings…'), {
+    fireEvent.change(screen.getByPlaceholderText('Filter fields on this page…'), {
       target: { value: 'zzzzzz-nothing-matches' },
     });
 
-    const empty = await screen.findByText(/no settings match your search/i);
+    const empty = await screen.findByText(/no fields match your filter/i);
     expect(empty).toBeInTheDocument();
     const clearBtn = within(empty.parentElement as HTMLElement).getByRole('button', {
-      name: /clear search/i,
+      name: /clear (filter|field filter)/i,
     });
     fireEvent.click(clearBtn);
-    expect(screen.queryByText(/no settings match your search/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no fields match your filter/i)).not.toBeInTheDocument();
   });
 
   it('exposes the mode toggle as an accessible radiogroup', async () => {

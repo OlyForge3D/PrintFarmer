@@ -575,8 +575,8 @@ export function SettingsPage({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Search all settings…"
-            aria-label="Search all settings"
+            placeholder="Filter fields on this page…"
+            aria-label="Filter setting fields on this page"
             className="flex-1"
           />
           {searchActive && (
@@ -586,7 +586,7 @@ export function SettingsPage({
               size="sm"
               iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
               onClick={() => setQuery('')}
-              aria-label="Clear search"
+              aria-label="Clear field filter"
             >
               Clear
             </Button>
@@ -600,7 +600,7 @@ export function SettingsPage({
           >
             {toggleHelperText}
             <span className="ml-2 text-pf-text-tertiary">
-              Search always looks across every setting, including advanced ones.
+              This filter covers every field on this page, including advanced ones.
             </span>
           </div>
         )}
@@ -610,8 +610,8 @@ export function SettingsPage({
       {noMatchingResults && (
         <EmptyState
           icon={<SettingsIcon className="w-10 h-10" />}
-          title="No settings match your search"
-          description={`Nothing matches “${trimmedQuery}”. Try a different term, or clear the search to browse settings.`}
+          title="No fields match your filter"
+          description={`Nothing on this page matches “${trimmedQuery}”. Try a different term, clear the filter, or use the search box above to look across other settings pages.`}
           action={
             <Button
               type="button"
@@ -619,7 +619,7 @@ export function SettingsPage({
               size="sm"
               onClick={() => setQuery('')}
             >
-              Clear search
+              Clear filter
             </Button>
           }
         />
