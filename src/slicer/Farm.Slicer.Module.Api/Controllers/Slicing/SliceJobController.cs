@@ -512,7 +512,19 @@ public partial class SliceJobController(
     /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>
     [HttpGet("{id}/model")]
     [WorkerApiKeySecurity]
-    public async Task<IActionResult> DownloadWorkerModelAsync(Guid id, CancellationToken ct)
+    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: null, ct);
+
+    /// <summary>Downloads one model from a multi-model job assigned to the authenticated worker.</summary>
+    [HttpGet("{id}/models/{modelIndex:int}")]
+    [WorkerApiKeySecurity]
+    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, int modelIndex, CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: (int?)modelIndex, ct);
+
+    private async Task<IActionResult> DownloadWorkerModelAsync(
+        Guid id,
+        int? modelIndex,
+        CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
         if (worker is null)
@@ -536,10 +548,26 @@ public partial class SliceJobController(
             return StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
 
+        string modelUrl = job.ModelFileUrl;
+        string modelFileName = job.ModelFileName;
+        if (modelIndex is not null)
+        {
+            List<string>? modelUrls = DeserializeJsonList<string>(job.ModelFileUrlsJson);
+            if (modelUrls is null || modelIndex.Value < 0 || modelIndex.Value >= modelUrls.Count)
+            {
+                return NotFound();
+            }
+
+            modelUrl = modelUrls[modelIndex.Value];
+            modelFileName = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? modelUri)
+                ? Path.GetFileName(modelUri.LocalPath)
+                : Path.GetFileName(modelUrl);
+        }
+
         try
         {
-            Stream model = await _fileStorage.DownloadFileAsync(job.ModelFileUrl, ct);
-            return File(model, "application/octet-stream", SanitizeFileName(job.ModelFileName, "model.stl"));
+            Stream model = await _fileStorage.DownloadFileAsync(modelUrl, ct);
+            return File(model, "application/octet-stream", SanitizeFileName(modelFileName, "model.stl"));
         }
         catch (FileNotFoundException)
         {
@@ -767,19 +795,45 @@ public partial class SliceJobController(
         ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
     };
 
-    private static WorkerSliceJobResponse MapToWorkerResponse(SliceJob job) => new()
+    private static WorkerSliceJobResponse MapToWorkerResponse(SliceJob job)
     {
-        Id = job.Id,
-        UserId = job.UserId,
-        PrinterId = job.PrinterId,
-        Status = job.Status,
-        ModelFileUrl = $"/api/slice/{job.Id}/model",
-        ModelFileName = SanitizeFileName(job.ModelFileName, "model.stl"),
-        SlicerEngine = job.SlicerEngine,
-        SlicerProfileJson = job.SlicerProfileJson,
-        RequiredCapabilitiesJson = job.RequiredCapabilitiesJson,
-        Priority = job.Priority,
-    };
+        List<string>? modelUrls = DeserializeJsonList<string>(job.ModelFileUrlsJson);
+        return new WorkerSliceJobResponse
+        {
+            Id = job.Id,
+            UserId = job.UserId,
+            PrinterId = job.PrinterId,
+            Status = job.Status,
+            ModelFileUrl = $"/api/slice/{job.Id}/model",
+            ModelFileName = SanitizeFileName(job.ModelFileName, "model.stl"),
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson,
+            ModelTransformJson = job.ModelTransformJson,
+            ModelFileUrls = modelUrls?
+                .Select((_, index) => $"/api/slice/{job.Id}/models/{index}")
+                .ToList(),
+            ModelFileTransforms = DeserializeJsonList<string?>(job.ModelFileTransformsJson),
+            RequiredCapabilitiesJson = job.RequiredCapabilitiesJson,
+            Priority = job.Priority,
+        };
+    }
+
+    private static List<T>? DeserializeJsonList<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<T>>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private async Task<Worker?> GetAuthorizedWorkerAsync()
     {

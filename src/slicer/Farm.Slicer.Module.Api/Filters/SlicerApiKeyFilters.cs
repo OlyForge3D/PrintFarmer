@@ -1,5 +1,6 @@
-using Farm.Slicer.Module.Api.Authorization;
+﻿using Farm.Slicer.Module.Api.Authorization;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
@@ -110,7 +111,7 @@ internal static class SlicerApiKeyFilterHelpers
 /// Authentication remains in <see cref="IWorkerAuthService"/> so actions can use the resolved worker.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method)]
-public sealed class WorkerApiKeySecurityAttribute : Attribute
+public sealed class WorkerApiKeySecurityAttribute : Attribute, IAllowAnonymous
 {
 }
 

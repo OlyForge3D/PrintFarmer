@@ -4,6 +4,7 @@ using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Services;
 
@@ -11,14 +12,19 @@ namespace Farm.Slicer.Module.Api.Services;
 public sealed class SlicerApiKeyValidator(
     IConfiguration configuration,
     IHostEnvironment environment,
-    ISlicersRepository slicersRepository) : ISlicerApiKeyValidator
+    ISlicersRepository slicersRepository,
+    ILogger<SlicerApiKeyValidator> logger) : ISlicerApiKeyValidator
 {
-    private readonly string? _sharedKey =
-        configuration[$"{WorkerAuthSettings.SectionName}:SharedKey"]
-        ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+    private readonly string? _sharedKey = FirstNonBlank(
+        configuration[$"{WorkerAuthSettings.SectionName}:SharedKey"],
+        configuration[$"{WorkerAuthSettings.SectionName}:SharedApiKey"],
+        configuration["SlicerRegistry:ApiKey"],
+        Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
+        Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
 
     private readonly IHostEnvironment _environment = environment;
     private readonly ISlicersRepository _slicersRepository = slicersRepository;
+    private readonly ILogger<SlicerApiKeyValidator> _logger = logger;
 
     /// <inheritdoc />
     public Task<bool> ValidateSharedKeyAsync(
@@ -26,10 +32,20 @@ public sealed class SlicerApiKeyValidator(
         CancellationToken ct = default)
     {
         _ = ct;
-        bool valid = string.IsNullOrWhiteSpace(_sharedKey)
-            ? _environment.IsEnvironment("Testing")
-            : FixedTimeEquals(_sharedKey, apiKey);
-        return Task.FromResult(valid);
+        if (string.IsNullOrWhiteSpace(_sharedKey))
+        {
+            bool bypass = _environment.IsDevelopment() || _environment.IsEnvironment("Testing");
+            if (bypass)
+            {
+                _logger.LogWarning(
+                    "No slicer shared API key is configured; allowing registration only in {EnvironmentName}.",
+                    _environment.EnvironmentName);
+            }
+
+            return Task.FromResult(bypass);
+        }
+
+        return Task.FromResult(FixedTimeEquals(_sharedKey, apiKey));
     }
 
     /// <inheritdoc />
@@ -54,4 +70,7 @@ public sealed class SlicerApiKeyValidator(
         return expectedBytes.Length == presentedBytes.Length &&
                CryptographicOperations.FixedTimeEquals(expectedBytes, presentedBytes);
     }
+
+    private static string? FirstNonBlank(params string?[] candidates) =>
+        candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
 }

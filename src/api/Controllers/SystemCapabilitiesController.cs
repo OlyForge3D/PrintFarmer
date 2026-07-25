@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.FeatureFlags;
+using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Services.Capabilities;
 using Microsoft.AspNetCore.Authorization;
@@ -17,10 +18,12 @@ namespace Farm.Web.Api.Controllers;
 [AllowAnonymous]
 public class SystemCapabilitiesController(
     ICalibrationCapabilityService capabilityService,
-    IFeatureFlagService featureFlagService) : ControllerBase
+    IFeatureFlagService featureFlagService,
+    IOperatorFeatureGate operatorFeatureGate) : ControllerBase
 {
     private readonly ICalibrationCapabilityService _capabilityService = capabilityService;
     private readonly IFeatureFlagService _featureFlagService = featureFlagService;
+    private readonly IOperatorFeatureGate _operatorFeatureGate = operatorFeatureGate;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -47,7 +50,10 @@ public class SystemCapabilitiesController(
         };
 
         PlatformCapabilitiesDto capabilities =
-            await _capabilityService.GetCapabilitiesAsync(user: null, cancellationToken);
+            (await _capabilityService.GetCapabilitiesAsync(user: null, cancellationToken)) with
+            {
+                OperatorFeatures = _operatorFeatureGate.GetEffectiveFlags(),
+            };
         return Ok(capabilities);
     }
 

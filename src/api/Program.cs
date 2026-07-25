@@ -460,10 +460,10 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 
-// Hub authentication tightening is tracked separately; current React clients connect without tokens.
-app.MapHub<PrinterHub>("/hubs/printers").AllowAnonymous();
-app.MapHub<HarvestHub>("/hubs/harvest").AllowAnonymous();
-app.MapHub<MaintenanceHub>("/hubs/maintenance").AllowAnonymous();
+// Public farm hubs require authenticated clients; NFC retains its existing anonymous contract.
+app.MapHub<PrinterHub>("/hubs/printers");
+app.MapHub<HarvestHub>("/hubs/harvest");
+app.MapHub<MaintenanceHub>("/hubs/maintenance");
 app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar

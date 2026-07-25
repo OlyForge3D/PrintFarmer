@@ -121,9 +121,9 @@ public static class SlicerApiExtensions
     /// <returns>The endpoint route builder for chaining.</returns>
     public static IEndpointRouteBuilder MapSlicerHubs(this IEndpointRouteBuilder endpoints)
     {
-        // Slicer workers authenticate via API key (not bearer); hub-level API-key enforcement is tracked in issue #650.
-        _ = endpoints.MapHub<SlicerHub>("/hubs/slicer-registry").AllowAnonymous();
-        _ = endpoints.MapHub<SlicerProgressHub>("/hubs/slicers").AllowAnonymous();
+        // Registry and progress hubs require the host's authenticated bearer identity.
+        _ = endpoints.MapHub<SlicerHub>("/hubs/slicer-registry");
+        _ = endpoints.MapHub<SlicerProgressHub>("/hubs/slicers");
         return endpoints;
     }
 

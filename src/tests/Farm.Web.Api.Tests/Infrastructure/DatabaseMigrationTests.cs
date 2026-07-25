@@ -113,7 +113,7 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         result.LegacySchemaBaselined.Should().BeFalse();
-        result.AppliedMigrations.Should().ContainSingle();
+        result.AppliedMigrations.Should().HaveCount(2);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

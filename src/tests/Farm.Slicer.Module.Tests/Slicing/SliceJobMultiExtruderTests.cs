@@ -47,12 +47,9 @@ public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifeti
         _ = submitted.Should().NotBeNull();
         _output.WriteLine($"Submitted multi-extruder job: {submitted!.JobId}");
 
-        // Fetch the job back and verify the SlicerProfileJson has the array embedded
-        HttpResponseMessage getResp = await _client.GetAsync($"/api/slice/{submitted.JobId}");
-        _ = getResp.StatusCode.Should().Be(HttpStatusCode.OK);
-        SliceJobStatusResponse? status = await getResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse status = await ClaimJobAsync();
         _ = status.Should().NotBeNull();
-        _ = status!.SlicerProfileJson.Should().NotBeNullOrEmpty();
+        _ = status.SlicerProfileJson.Should().NotBeNullOrEmpty();
 
         using JsonDocument doc = JsonDocument.Parse(status.SlicerProfileJson!);
         JsonElement root = doc.RootElement;
@@ -84,11 +81,10 @@ public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifeti
         _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
-        HttpResponseMessage getResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        SliceJobStatusResponse? status = await getResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse status = await ClaimJobAsync();
 
         // Verify the JSON was not modified (no extruderFilamentProfileNames injected)
-        using JsonDocument doc = JsonDocument.Parse(status!.SlicerProfileJson!);
+        using JsonDocument doc = JsonDocument.Parse(status.SlicerProfileJson!);
         doc.RootElement.TryGetProperty("extruderFilamentProfileNames", out _).Should().BeFalse(
             "no extruder names should be added for single-extruder jobs");
     }
@@ -111,13 +107,31 @@ public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifeti
         _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
         SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
-        HttpResponseMessage getResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        SliceJobStatusResponse? status = await getResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse status = await ClaimJobAsync();
 
         // The JSON should still only have one extruderFilamentProfileNames array
-        using JsonDocument doc = JsonDocument.Parse(status!.SlicerProfileJson!);
+        using JsonDocument doc = JsonDocument.Parse(status.SlicerProfileJson!);
         JsonElement root = doc.RootElement;
         root.TryGetProperty("extruderFilamentProfileNames", out JsonElement elem).Should().BeTrue();
         elem.GetArrayLength().Should().Be(2, "should not duplicate the array");
     }
+
+    private async Task<WorkerSliceJobResponse> ClaimJobAsync()
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            "/api/slice/claim",
+            new ClaimJobRequest
+            {
+                WorkerId = GetWorkerId(),
+                Capabilities = ["orcaslicer"],
+            });
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        WorkerSliceJobResponse? claimed =
+            await response.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        claimed.Should().NotBeNull();
+        return claimed!;
+    }
+
+    private Guid GetWorkerId() =>
+        Guid.Parse(_client.DefaultRequestHeaders.GetValues("X-Worker-Id").Single());
 }

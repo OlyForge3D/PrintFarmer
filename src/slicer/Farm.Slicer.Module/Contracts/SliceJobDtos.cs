@@ -183,7 +183,7 @@ public class SliceJobProgressUpdateRequest
 /// The API deliberately replaces the supplied detail with a generic public error.
 /// </summary>
 /// <param name="ErrorMessage">Worker-local failure detail; never returned to API clients.</param>
-public sealed record FailSliceJobRequest([property: MaxLength(1024)] string ErrorMessage);
+public sealed record FailSliceJobRequest([MaxLength(1024)] string ErrorMessage);
 
 /// <summary>
 /// Response after successful job completion.
