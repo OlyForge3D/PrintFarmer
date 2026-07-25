@@ -106,6 +106,7 @@ These are the main documentation files you should read first:
 ### Controls & Settings
 
 - **docs/CONTROLS_GUIDE.md** - Printer controls documentation
+- **docs/SETTINGS_ARCHITECTURE.md** - Admin and settings surface (SettingsShell, URL contract, per-group save, command palette, admin overview) — canonical reference
 - **docs/SETTINGS_ADVANCED_UI_PLAN.md** - Advanced settings UI
 - **docs/ENUM_BACKEND_SELECTOR.md** - Backend selection enum
 
