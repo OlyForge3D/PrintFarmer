@@ -14,8 +14,19 @@ on:
   push:
     branches:
       - release
+    # Tag globs use GitHub Actions filter-pattern syntax (not regex): `+` means
+    # one-or-more of the preceding character, `.` is literal, `*` is zero-or-more
+    # of any non-`/` character. The three patterns below must match — and only
+    # match — the release-tag set accepted by consolidated-release.yml's
+    # validator (^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$).
+    # consolidated-release.yml polls this workflow for the exact tag; missing
+    # prerelease coverage causes its "Wait for exact-tag Docker workflow" step
+    # to time out for `-beta.N` / `-rc.N` releases. See regression guard at
+    # scripts/ci/tests/test-release-tag-triggers.mjs.
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
   workflow_dispatch:
     inputs:
       tag_suffix:
