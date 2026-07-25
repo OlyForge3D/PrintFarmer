@@ -123,6 +123,10 @@ async function renderPage() {
 
 describe('SettingsPage — per-group save', () => {
   beforeEach(() => {
+    // Force Everything mode so the pre-existing tests see the same fields they
+    // did before the Essential/Everything toggle (#937) — the fixture uses
+    // synthetic section keys that don't appear in the essential manifest.
+    window.localStorage.setItem('pf.settings.mode', 'everything');
     saveSettingsMock.mockReset();
     saveAllSettingsMock.mockReset();
     toastSuccessMock.mockReset();
@@ -131,6 +135,7 @@ describe('SettingsPage — per-group save', () => {
   });
 
   afterEach(() => {
+    window.localStorage.removeItem('pf.settings.mode');
     // Detach any lingering beforeunload handler leftovers.
     // useDirtyState cleans up on unmount but the guard against leaks is cheap.
   });
