@@ -28,39 +28,39 @@ public class MappedEndpointAnonymousAccessTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task PrinterHubNegotiate_Unauthenticated_ReturnsOk()
+    public async Task PrinterHubNegotiate_Unauthenticated_ReturnsUnauthorized()
     {
         using HttpClient anon = _factory.CreateClient();
         HttpResponseMessage response = await anon.PostAsync("/hubs/printers/negotiate?negotiateVersion=1", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
-    public async Task HarvestHubNegotiate_Unauthenticated_ReturnsOk()
+    public async Task HarvestHubNegotiate_Unauthenticated_ReturnsUnauthorized()
     {
         using HttpClient anon = _factory.CreateClient();
         HttpResponseMessage response = await anon.PostAsync("/hubs/harvest/negotiate?negotiateVersion=1", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
-    public async Task SlicerRegistryHubNegotiate_Unauthenticated_ReturnsOk()
+    public async Task SlicerRegistryHubNegotiate_Unauthenticated_ReturnsUnauthorized()
     {
         using HttpClient anon = _factory.CreateClient();
         HttpResponseMessage response = await anon.PostAsync("/hubs/slicer-registry/negotiate?negotiateVersion=1", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
-    public async Task SlicerProgressHubNegotiate_Unauthenticated_ReturnsOk()
+    public async Task SlicerProgressHubNegotiate_Unauthenticated_ReturnsUnauthorized()
     {
         using HttpClient anon = _factory.CreateClient();
         HttpResponseMessage response = await anon.PostAsync("/hubs/slicers/negotiate?negotiateVersion=1", content: null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact]
