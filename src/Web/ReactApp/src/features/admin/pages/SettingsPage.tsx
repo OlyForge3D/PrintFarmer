@@ -3,7 +3,8 @@ import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
 import { SettingInputType } from '@/types/SettingInputType';
-import { Card } from '@/common/components/ui';
+import { Button, Card, EmptyState, Input } from '@/common/components/ui';
+import { CloseIcon, SearchIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { settingsTour } from '@/features/admin/tours/settings.tour';
 import { HelpButton } from '@/common/components/HelpButton';
@@ -22,6 +23,15 @@ import {
   adminToast,
 } from '@/common/components/admin';
 import { getSectionRenderer } from '@/features/admin/settings/section-renderers';
+import { isEssentialProperty } from '@/features/admin/settings/essential-manifest';
+import { SettingsModeToggle } from '@/features/admin/settings/SettingsModeToggle';
+import { useSettingsMode } from '@/features/admin/settings/useSettingsMode';
+import { HighlightedText } from '@/features/admin/settings/HighlightedText';
+import {
+  groupMatchesQuery,
+  propertyMatchesQuery,
+  sectionMatchesQuery,
+} from '@/features/admin/settings/search-utils';
 
 /**
  * Sidebar navigation item for settings sections. `order` is nominally optional
@@ -43,6 +53,13 @@ interface SettingsPageProps {
 
 type SectionValues = Record<string, SettingValue>;
 type GroupValues = Record<string, SectionValues>;
+
+/**
+ * Per-section allowlist of property names to render inside a `GroupSaveBlock`.
+ * The map is authoritative for *rendering only* — save and validation always
+ * walk the full metadata so hidden fields survive round-trips.
+ */
+type PropertyVisibility = Readonly<Record<string, ReadonlySet<string>>>;
 
 function validateSection(
   metaItem: SettingMetadata,
@@ -127,6 +144,24 @@ interface GroupSaveBlockProps {
   groupDisplayName: string;
   metadataItems: SettingMetadata[];
   initialValues: GroupValues;
+  /**
+   * Optional per-section render filter. When present, only the listed property
+   * names render for each section (empty set = hide the section's card
+   * entirely). Save and validation still walk the full `metadataItems`, so
+   * unfiltered fields survive round-trips even if they aren't currently
+   * displayed — this is what lets Essential mode and search results share the
+   * same save path.
+   */
+  propertyFilter?: PropertyVisibility;
+  /**
+   * Suppresses section-renderer extensions (Obico servers table, per-engine
+   * slicer map, material price defaults). Enabled during active search because
+   * those extensions are not scoped to search matches and would drown out the
+   * hit list.
+   */
+  suppressExtensions?: boolean;
+  /** Substring to highlight in property labels. Empty string disables highlighting. */
+  searchQuery?: string;
 }
 
 /**
@@ -142,6 +177,9 @@ function GroupSaveBlock({
   groupDisplayName,
   metadataItems,
   initialValues,
+  propertyFilter,
+  suppressExtensions,
+  searchQuery,
 }: GroupSaveBlockProps) {
   const state = useDirtyState<GroupValues>(initialValues);
   // No re-baselining effect here, deliberately. The parent unmounts every block
@@ -237,14 +275,35 @@ function GroupSaveBlock({
       });
   }, [metadataItems, state.changedKeys]);
 
+  const query = searchQuery ?? '';
+
   return (
     <>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {metadataItems.map((meta) => {
+          // Filter the section's properties for display without touching the
+          // metadata used for save / validation above.
+          let displayProps = meta.properties;
+          if (propertyFilter) {
+            const allowed = propertyFilter[meta.key];
+            if (!allowed) {
+              // Section not in the filter map => nothing visible => skip card.
+              return null;
+            }
+            displayProps = meta.properties.filter((p) => allowed.has(p.name));
+            if (displayProps.length === 0) {
+              return null;
+            }
+          }
+          const displayMeta = displayProps.length === meta.properties.length
+            ? meta
+            : { ...meta, properties: displayProps };
+
           const renderer = getSectionRenderer(meta);
           const fullWidth = Boolean(renderer?.fullWidth);
-          const extensionRender = renderer?.extension;
+          const extensionRender = suppressExtensions ? undefined : renderer?.extension;
           const sectionValues = (state.values[meta.key] ?? {}) as SectionValues;
+          const cardTitle = displayMeta.displayName || displayMeta.className;
 
           return (
             <Card
@@ -256,21 +315,24 @@ function GroupSaveBlock({
             >
               <Card.Header className="pb-2">
                 <h4 className="text-sm font-semibold text-pf-text-primary">
-                  {meta.displayName || meta.className}
+                  {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
                 </h4>
                 {meta.description && (
                   <p className="text-xs text-pf-text-secondary mt-0.5">
-                    {meta.description}
+                    {query
+                      ? <HighlightedText text={meta.description} query={query} />
+                      : meta.description}
                   </p>
                 )}
               </Card.Header>
               <Card.Body className="flex-1 pt-0">
                 <SettingsPagelet
-                  metadata={meta}
+                  metadata={displayMeta}
                   values={sectionValues}
                   onChange={(field, value) => handleFieldChange(meta.key, field, value)}
                   fieldErrors={fieldErrors[meta.key]}
                   compact
+                  searchQuery={query}
                 />
                 {extensionRender?.({
                   values: sectionValues,
@@ -303,6 +365,8 @@ export function SettingsPage({
 }: SettingsPageProps = {}) {
   const { isSlicerAvailable } = useSlicer();
   const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour });
+  const { mode, setMode } = useSettingsMode();
+  const [query, setQuery] = useState('');
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [values, setValues] = useState<GroupValues>({});
@@ -405,6 +469,68 @@ export function SettingsPage({
     return group?.displayName || groupKey;
   }, [groupMetadata]);
 
+  // Aggregate visibility: given the current mode and query, decide which
+  // property in each section should render. This drives filtering AND is the
+  // single source of truth for the "N of M shown" counter — pure memo, no side
+  // effects or ref writes.
+  const trimmedQuery = query.trim();
+
+  const { visibleByKey, totalSettingsCount, visibleSettingsCount, matchingSectionCount } = useMemo(() => {
+    const filter: Record<string, ReadonlySet<string>> = {};
+    let total = 0;
+    let visible = 0;
+    let sectionsWithHits = 0;
+
+    for (const group of sortedGroups) {
+      const groupDisplay = groupMetadata.find((g) => g.key === group)?.displayName || group;
+      const groupMatched = groupMatchesQuery(group, groupDisplay, trimmedQuery);
+
+      for (const section of metadataByGroup[group]) {
+        total += section.properties.length;
+        const sectionMatched = sectionMatchesQuery(section, trimmedQuery);
+        const allowed = new Set<string>();
+
+        if (trimmedQuery) {
+          if (groupMatched || sectionMatched) {
+            // Section itself matched — show every property so the user can see
+            // exactly what's in the section they searched for.
+            for (const p of section.properties) allowed.add(p.name);
+          } else {
+            for (const p of section.properties) {
+              if (propertyMatchesQuery(p, trimmedQuery)) allowed.add(p.name);
+            }
+          }
+        } else if (mode === 'essential') {
+          for (const p of section.properties) {
+            if (isEssentialProperty(section.key, p.name)) allowed.add(p.name);
+          }
+        } else {
+          for (const p of section.properties) allowed.add(p.name);
+        }
+
+        filter[section.key] = allowed;
+        visible += allowed.size;
+        if (allowed.size > 0) sectionsWithHits += 1;
+      }
+    }
+
+    return {
+      visibleByKey: filter,
+      totalSettingsCount: total,
+      visibleSettingsCount: visible,
+      matchingSectionCount: sectionsWithHits,
+    };
+  }, [sortedGroups, metadataByGroup, groupMetadata, mode, trimmedQuery]);
+
+  const toggleHelperText = useMemo(() => {
+    if (trimmedQuery) {
+      if (visibleSettingsCount === 0) return 'No matching settings';
+      return `${visibleSettingsCount} match${visibleSettingsCount === 1 ? '' : 'es'} in ${matchingSectionCount} section${matchingSectionCount === 1 ? '' : 's'}`;
+    }
+    if (totalSettingsCount === 0) return undefined;
+    return `Showing ${visibleSettingsCount} of ${totalSettingsCount} settings`;
+  }, [matchingSectionCount, totalSettingsCount, trimmedQuery, visibleSettingsCount]);
+
   if (loading) {
     return <AdminLoading variant="form" label="Loading settings" rows={5} />;
   }
@@ -420,16 +546,94 @@ export function SettingsPage({
     );
   }
 
+  const searchActive = trimmedQuery.length > 0;
+  const noMatchingResults = searchActive && visibleSettingsCount === 0;
+
   return (
     <div className="space-y-6" data-tour="settings-content">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <p className="text-sm text-pf-text-secondary">{introText}</p>
         <HelpButton onClick={startTour} />
       </div>
 
+      {/* Some tabs (e.g. Farm) render only `afterContent` and have no metadata-driven
+          settings at all. Showing a filter toggle and a search box there would give the
+          user two controls that visibly do nothing. */}
+      {totalSettingsCount > 0 && (
+      <div
+        className="flex flex-wrap items-center gap-3 rounded-lg border border-pf-border bg-pf-bg-0 p-3"
+        data-testid="settings-mode-controls"
+      >
+        <SettingsModeToggle
+          mode={mode}
+          onModeChange={setMode}
+          helperText={searchActive ? undefined : toggleHelperText}
+        />
+        <div className="ml-auto flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
+          <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
+          <Input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.currentTarget.value)}
+            placeholder="Search all settings…"
+            aria-label="Search all settings"
+            className="flex-1"
+          />
+          {searchActive && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+        {searchActive && (
+          <div
+            className="basis-full text-xs text-pf-text-secondary"
+            aria-live="polite"
+            role="status"
+          >
+            {toggleHelperText}
+            <span className="ml-2 text-pf-text-tertiary">
+              Search always looks across every setting, including advanced ones.
+            </span>
+          </div>
+        )}
+      </div>
+      )}
+
+      {noMatchingResults && (
+        <EmptyState
+          icon={<SettingsIcon className="w-10 h-10" />}
+          title="No settings match your search"
+          description={`Nothing matches “${trimmedQuery}”. Try a different term, or clear the search to browse settings.`}
+          action={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setQuery('')}
+            >
+              Clear search
+            </Button>
+          }
+        />
+      )}
+
       {sortedGroups.map((group) => {
         const groupMeta = metadataByGroup[group] ?? [];
         if (groupMeta.length === 0) return null;
+
+        // Skip the whole group when every one of its sections is filtered out.
+        // Keep the underlying `groupMeta` (full list) as the block's authority
+        // for save / validation so we don't accidentally strand any dirty edits.
+        const groupHasVisible = groupMeta.some((m) => (visibleByKey[m.key]?.size ?? 0) > 0);
+        if (!groupHasVisible) return null;
 
         // Build a slim initial-values object scoped to this group so the
         // GroupSaveBlock's dirty state only tracks its own sections.
@@ -447,7 +651,9 @@ export function SettingsPage({
             >
               <span className="h-px flex-1 bg-pf-border" />
               <span className="px-3 text-pf-text-secondary uppercase tracking-wider text-xs">
-                {groupDisplay}
+                {searchActive
+                  ? <HighlightedText text={groupDisplay} query={trimmedQuery} />
+                  : groupDisplay}
               </span>
               <span className="h-px flex-1 bg-pf-border" />
             </h3>
@@ -457,6 +663,9 @@ export function SettingsPage({
               groupDisplayName={groupDisplay}
               metadataItems={groupMeta}
               initialValues={initialGroupValues}
+              propertyFilter={visibleByKey}
+              suppressExtensions={searchActive}
+              searchQuery={trimmedQuery}
             />
           </section>
         );

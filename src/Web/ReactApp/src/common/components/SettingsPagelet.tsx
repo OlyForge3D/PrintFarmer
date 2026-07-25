@@ -2,6 +2,7 @@ import React from 'react';
 import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { HighlightedText } from '@/features/admin/settings/HighlightedText';
 
 export type SettingValue = string | number | boolean | string[] | number[] | (string | number)[] | Record<string, unknown> | undefined;
 
@@ -45,6 +46,13 @@ export interface SettingsPageletProps {
   error?: string | null;
   /** When true, renders only fields without the outer card wrapper and title */
   compact?: boolean;
+  /**
+   * Optional case-insensitive substring to highlight in property labels. Empty
+   * string / undefined renders labels unchanged. Only the visible label is
+   * highlighted — descriptions live in the info tooltip's `title` attribute,
+   * which cannot contain rich markup, so no highlighting is applied there.
+   */
+  searchQuery?: string;
 }
 
 // Helper — string / number are directly usable as input values; anything else
@@ -75,7 +83,8 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
  * or SlicerSettings' per-engine map) is contributed via the section-renderer
  * registry (`section-renderers.tsx`) and rendered by `SettingsPage`, not here.
  */
-export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact }) => {
+export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact, searchQuery }) => {
+  const query = searchQuery ?? '';
   const content = (
     <div className="space-y-2">
       {metadata.properties.map((prop0: SettingPropertyMetadata) => {
@@ -91,7 +100,9 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             className="flex items-center shrink-0 w-64 text-sm font-medium text-pf-text-primary"
             htmlFor={prop.name}
           >
-            <span className="break-words">{displayName}</span>
+            <span className="break-words">
+              {query ? <HighlightedText text={displayName} query={query} /> : displayName}
+            </span>
             {isRequired && <span className="text-pf-accent ml-1">*</span>}
             {hasDescription && <InfoTooltip description={prop.display!.description!} />}
           </label>
