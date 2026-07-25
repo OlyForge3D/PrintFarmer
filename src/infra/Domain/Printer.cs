@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
 using Farm.Infrastructure.Domain;
@@ -21,16 +22,21 @@ public class Printer
     public string Name { get; set; } = string.Empty;
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
+    [JsonIgnore]
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
+    [JsonIgnore]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
 
+    [JsonIgnore]
     public int BackendPort { get; set; } // Port for backend connection: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). ALWAYS SET BY DISCOVERY PROBES - NEVER DEFAULT!
 
+    [JsonIgnore]
     public int? FrontendPort { get; set; } // null for non-Moonraker, 80 for Moonraker by default
 
     [NotMapped]
+    [JsonIgnore]
     public Uri? ServerUri
     {
         get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
@@ -38,6 +44,7 @@ public class Printer
     }
 
     [NotMapped]
+    [JsonIgnore]
     public Uri? OriginalServerUri
     {
         get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
@@ -49,6 +56,7 @@ public class Printer
     /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public string BackendUrl
     {
         get
@@ -85,6 +93,7 @@ public class Printer
     /// Returns BackendUrl if FrontendPort is not set.
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public string FrontendUrl
     {
         get
@@ -124,18 +133,21 @@ public class Printer
 
     public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
 
+    [JsonIgnore]
     public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
 
     /// <summary>
     /// Username for HTTP Digest Authentication (used by PrusaLink for privileged API access).
     /// Combined with Password, enables access to additional endpoints not available with API key alone.
     /// </summary>
+    [JsonIgnore]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for HTTP Digest Authentication (used by PrusaLink for privileged API access).
     /// Stored encrypted in the database. Combined with Username for full API access.
     /// </summary>
+    [JsonIgnore]
     public string? Password { get; set; }
 
     /// <summary>
@@ -144,6 +156,7 @@ public class Printer
     /// Contains ApiKey, Username, and Password - backend clients use whatever they need.
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
@@ -156,6 +169,7 @@ public class Printer
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>
+    [JsonIgnore]
     public ICollection<Camera> Cameras { get; set; } = new List<Camera>();
 
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer

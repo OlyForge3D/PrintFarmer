@@ -23,6 +23,7 @@ public class DiscoveryProxyServiceTests
     public async Task StartDiscoveryStreamAsync_ForwardsRequestAndCachesInitialProgress()
     {
         Mock<IDiscoveryProgressCache> progressCache = new Mock<IDiscoveryProgressCache>();
+        Mock<IDiscoverySessionRegistry> discoverySessions = new Mock<IDiscoverySessionRegistry>();
         Mock<IHubContext<PrinterHub>> hubContext = CreateHubContextMock();
         Mock<ISettingsService> settingsService = new Mock<ISettingsService>();
         settingsService.Setup(s => s.Get<NetworkDiscoverySettings>())
@@ -45,14 +46,25 @@ public class DiscoveryProxyServiceTests
         Mock<IHttpClientFactory> httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(new HttpClient(handler));
 
-        DiscoveryProxyService service = CreateService(httpClientFactory, hubContext, progressCache, settingsService);
+        DiscoveryProxyService service = CreateService(
+            httpClientFactory,
+            hubContext,
+            progressCache,
+            settingsService,
+            discoverySessions);
 
-        DiscoveryStreamResponse result = await service.StartDiscoveryStreamAsync(new[] { PrinterBackend.Moonraker }, autoRegister: true, cancellationToken: CancellationToken.None);
+        Guid ownerUserId = Guid.NewGuid();
+        DiscoveryStreamResponse result = await service.StartDiscoveryStreamAsync(
+            backends: new[] { PrinterBackend.Moonraker },
+            autoRegister: true,
+            ownerUserId: ownerUserId,
+            cancellationToken: CancellationToken.None);
 
         Assert.Equal("session-123", result.SessionId);
         Assert.Equal("ok", result.Message);
 
         progressCache.Verify(c => c.Set("session-123", It.Is<DiscoveryProgressDto>(p => p.Status == DiscoveryStatus.Starting)), Times.Once);
+        discoverySessions.Verify(s => s.RegisterSession("session-123", ownerUserId), Times.Once);
 
         Assert.NotNull(handler.LastRequest);
         Assert.Equal("/api/discovery/stream", handler.LastRequest!.RequestUri!.AbsolutePath);
@@ -122,7 +134,8 @@ public class DiscoveryProxyServiceTests
         Mock<IHttpClientFactory> httpClientFactory,
         Mock<IHubContext<PrinterHub>> hubContext,
         Mock<IDiscoveryProgressCache> progressCache,
-        Mock<ISettingsService> settingsService)
+        Mock<ISettingsService> settingsService,
+        Mock<IDiscoverySessionRegistry>? discoverySessions = null)
     {
         Mock<ILogger<DiscoveryProxyService>> logger = new Mock<ILogger<DiscoveryProxyService>>();
 
@@ -134,6 +147,7 @@ public class DiscoveryProxyServiceTests
             httpClientFactory.Object,
             hubContext.Object,
             progressCache.Object,
+            (discoverySessions ?? new Mock<IDiscoverySessionRegistry>()).Object,
             settingsService.Object,
             logger.Object,
             config);

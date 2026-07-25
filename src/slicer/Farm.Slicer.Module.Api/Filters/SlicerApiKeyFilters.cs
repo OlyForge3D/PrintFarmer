@@ -1,7 +1,8 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Filters;
 
@@ -25,20 +26,14 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            if (SlicerApiKeyFilterHelpers.AllowMissingValidatorInDevelopment(context, nameof(RequireSlicerApiKeyAttribute)))
-            {
-                await next();
-                return;
-            }
-
-            context.Result = new UnauthorizedObjectResult(new { error = "Slicer API key validation is not configured." });
+            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
             return;
         }
 
         string? apiKey = SlicerApiKeyFilterHelpers.ReadHeader(context, HeaderName, AlternateHeaderName);
         if (!await validator.ValidateSharedKeyAsync(apiKey, context.HttpContext.RequestAborted))
         {
-            context.Result = new UnauthorizedObjectResult(new { error = "Invalid or missing slicer API key." });
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 
@@ -66,21 +61,16 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            if (SlicerApiKeyFilterHelpers.AllowMissingValidatorInDevelopment(context, nameof(RequireSlicerServiceApiKeyAttribute)))
-            {
-                await next();
-                return;
-            }
-
-            context.Result = new UnauthorizedObjectResult(new { error = "Slicer service API key validation is not configured." });
+            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
             return;
         }
 
         string? apiKey = SlicerApiKeyFilterHelpers.ReadHeader(context, HeaderName, AlternateHeaderName, RequireSlicerApiKeyAttribute.AlternateHeaderName);
         Guid? serviceId = TryGetServiceId(context);
-        if (!await validator.ValidateServiceKeyAsync(apiKey, serviceId, context.HttpContext.RequestAborted))
+        if (serviceId is null ||
+            !await validator.ValidateServiceKeyAsync(serviceId.Value, apiKey, context.HttpContext.RequestAborted))
         {
-            context.Result = new UnauthorizedObjectResult(new { error = "Invalid or missing service API key." });
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 
@@ -114,21 +104,15 @@ internal static class SlicerApiKeyFilterHelpers
 
         return null;
     }
+}
 
-    public static bool AllowMissingValidatorInDevelopment(ActionExecutingContext context, string filterName)
-    {
-        IHostEnvironment? env = context.HttpContext.RequestServices.GetService<IHostEnvironment>();
-        ILogger? logger = context.HttpContext.RequestServices.GetService<ILoggerFactory>()?.CreateLogger(filterName);
-
-        if (env is not null && (env.IsDevelopment() || env.IsEnvironment("Testing")))
-        {
-            logger?.LogWarning("{FilterName} has no ISlicerApiKeyValidator registered; bypassing only because environment is {EnvironmentName}.", filterName, env.EnvironmentName);
-            return true;
-        }
-
-        logger?.LogError("{FilterName} has no ISlicerApiKeyValidator registered; rejecting request fail-closed.", filterName);
-        return false;
-    }
+/// <summary>
+/// Marks worker endpoints that require both the worker key and registry-issued service identity.
+/// Authentication remains in <see cref="IWorkerAuthService"/> so actions can use the resolved worker.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class WorkerApiKeySecurityAttribute : Attribute, IAllowAnonymous
+{
 }
 
 /// <summary>
@@ -140,6 +124,9 @@ public interface ISlicerApiKeyValidator
     /// <summary>Validate a shared slicer API key.</summary>
     Task<bool> ValidateSharedKeyAsync(string? apiKey, CancellationToken ct = default);
 
-    /// <summary>Validate a per-service slicer API key.</summary>
-    Task<bool> ValidateServiceKeyAsync(string? apiKey, Guid? serviceId, CancellationToken ct = default);
+    /// <summary>Validate a per-service slicer API key for the addressed service.</summary>
+    Task<bool> ValidateServiceKeyAsync(
+        Guid serviceId,
+        string? apiKey,
+        CancellationToken ct = default);
 }

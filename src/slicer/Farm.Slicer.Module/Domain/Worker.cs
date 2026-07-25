@@ -1,4 +1,6 @@
-﻿namespace Farm.Slicer.Module.Domain;
+﻿using System.Text.Json.Serialization;
+
+namespace Farm.Slicer.Module.Domain;
 
 /// <summary>
 /// Represents a worker node in the distributed slicing system.
@@ -20,11 +22,13 @@ public class Worker
     /// <summary>
     /// Endpoint URL for communicating with the worker.
     /// </summary>
+    [JsonIgnore]
     public string EndpointUrl { get; set; } = string.Empty;
 
     /// <summary>
     /// JSON array of worker capabilities (e.g., ["orcaslicer", "prusaslicer", "fast-slicing"]).
     /// </summary>
+    [JsonIgnore]
     public string CapabilitiesJson { get; set; } = "[]";
 
     /// <summary>
@@ -85,6 +89,7 @@ public class Worker
     /// <summary>
     /// API key for authenticating worker requests (if required).
     /// </summary>
+    [JsonIgnore]
     public string? ApiKey { get; set; }
 
     /// <summary>
@@ -95,6 +100,7 @@ public class Worker
     /// <summary>
     /// Additional metadata (JSON).
     /// </summary>
+    [JsonIgnore]
     public string? MetadataJson { get; set; }
 
     public DateTime CreatedAt { get; set; }

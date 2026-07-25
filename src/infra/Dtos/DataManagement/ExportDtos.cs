@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 
 namespace Farm.Infrastructure.Dtos.DataManagement;
@@ -202,8 +203,10 @@ public class PrinterExportDto
 
     public string Name { get; set; } = string.Empty;
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string ServerUrl { get; set; } = string.Empty;
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? OriginalServerUrl { get; set; }
 
     public int BackendPort { get; set; }
@@ -221,16 +224,19 @@ public class PrinterExportDto
     /// <summary>
     /// API key for backend authentication (OctoPrint and some PrusaLink setups).
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ApiKey { get; set; }
 
     /// <summary>
     /// Username for Digest authentication (PrusaLink)
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for Digest authentication (PrusaLink)
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Password { get; set; }
 }
 

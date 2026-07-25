@@ -33,6 +33,7 @@ import {
   PrinterFast,
   PrintJobObjectListDto,
   QueuedPrintJobWithFileMetaDto,
+  RegisterDiscoveredPrinterRequest,
   StartDiscoveryRequest,
   ToolheadModelDefinition,
   UpdateExtruderModelDto,
@@ -480,6 +481,23 @@ export function useStartDiscoveryStream() {
 export function useCancelDiscoveryStream() {
   return useMutation({
     mutationFn: (sessionId: string) => apiClient.cancelDiscoveryStream(sessionId),
+  });
+}
+
+export function useRegisterDiscoveredPrinter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      request,
+    }: {
+      sessionId: string;
+      request: RegisterDiscoveredPrinterRequest;
+    }) => apiClient.registerDiscoveredPrinter(sessionId, request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    },
   });
 }
 

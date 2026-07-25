@@ -2,6 +2,9 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -20,7 +23,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [ApiController]
 [Route("api/slice")]
 [Tags("Slice Jobs")]
-public class SliceJobController(
+public partial class SliceJobController(
     ISliceJobRepository jobRepository,
     ISliceJobEventService eventService,
     ILogger<SliceJobController> logger,
@@ -29,7 +32,10 @@ public class SliceJobController(
     SliceJobMetrics metrics,
     IWorkerAuthService workerAuth,
     IWorkerRepository workerRepository,
-    IWorkerCircuitBreakerService? circuitBreaker = null) : ControllerBase
+    ISlicerFileStorage? fileStorage = null,
+    IWorkerCircuitBreakerService? circuitBreaker = null,
+    ISlicerResourceAccessAuthorizer? resourceAccess = null,
+    IPrinterAccessValidator? printerAccess = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
@@ -39,7 +45,10 @@ public class SliceJobController(
     private readonly SliceJobMetrics _metrics = metrics;
     private readonly IWorkerAuthService _workerAuth = workerAuth;
     private readonly IWorkerRepository _workerRepository = workerRepository;
+    private readonly ISlicerFileStorage? _fileStorage = fileStorage;
     private readonly IWorkerCircuitBreakerService? _circuitBreaker = circuitBreaker;
+    private readonly ISlicerResourceAccessAuthorizer? _resourceAccess = resourceAccess;
+    private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
 
     /// <summary>
     /// Submits a new slice job.
@@ -48,9 +57,19 @@ public class SliceJobController(
     /// <param name="ct">Cancellation token.</param>
     [HttpPost]
     [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitAsync([FromBody] SubmitSliceJobRequest request, CancellationToken ct)
     {
-        string userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        if (_printerAccess is not null &&
+            !await _printerAccess.IsEnabledAsync(request.PrinterId, ct))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
 
         // Rate limiting
         SlicerRateLimitResult rateLimitResult = await _rateLimitService.CheckAsync($"slice-job:{userId}", ct);
@@ -118,7 +137,7 @@ public class SliceJobController(
         var job = new SliceJob
         {
             Id = Guid.NewGuid(),
-            UserId = Guid.TryParse(userId, out Guid uid) ? uid : Guid.Empty,
+            UserId = userId,
             PrinterId = request.PrinterId,
             ModelFileUrl = modelFileUrl,
             ModelFileName = request.ModelFileName,
@@ -158,15 +177,22 @@ public class SliceJobController(
     /// <param name="id">The job ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}")]
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
         if (job is null)
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceNotFound(this);
         }
 
-        return Ok(MapToStatusResponse(job));
+        if (!CanAccess(job))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        return Ok(MapToPublicStatusResponse(job));
     }
 
     /// <summary>
@@ -176,6 +202,7 @@ public class SliceJobController(
     /// <param name="offset">Number of jobs to skip (default 0).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("my-jobs")]
+    [Authorize]
     public async Task<IActionResult> GetMyJobsAsync(
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0,
@@ -193,44 +220,51 @@ public class SliceJobController(
         }
 
         IReadOnlyList<SliceJob> jobs = await _jobRepository.GetByUserIdAsync(userGuid, limit, offset, ct);
-        return Ok(jobs.Select(MapToStatusResponse).ToList());
+        return Ok(jobs.Select(MapToPublicStatusResponse).ToList());
     }
 
     /// <summary>
-    /// Lists slice jobs with pagination and optional filtering.
+    /// Lists slice jobs. Farm admins see all jobs; other users see only their own.
     /// </summary>
-    /// <param name="page">Page number (1-based, default 1).</param>
-    /// <param name="pageSize">Items per page (default 20, max 100).</param>
     /// <param name="status">Optional status filter.</param>
-    /// <param name="sortBy">Sort field: CreatedAt (default) or CompletedAt.</param>
-    /// <param name="sortDir">Sort direction: asc or desc (default desc).</param>
+    /// <param name="limit">Maximum number of jobs to return (default 50, max 200).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet]
-    public async Task<IActionResult> ListAsync(
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 20,
-        [FromQuery] string? status = null,
-        [FromQuery] string? sortBy = null,
-        [FromQuery] string? sortDir = "desc",
-        CancellationToken ct = default)
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    public async Task<IActionResult> ListAsync([FromQuery] string? status, [FromQuery] int limit = 50, CancellationToken ct = default)
     {
-        if (page < 1)
+        limit = Math.Clamp(limit, 1, 200);
+        IReadOnlyList<SliceJob> jobs;
+        if (PrintFarmerPermissions.IsFarmAdmin(User))
         {
-            page = 1;
+            LogAdminBypass("slice-job-list", Guid.Empty);
+            if (!string.IsNullOrEmpty(status))
+            {
+                jobs = await _jobRepository.GetByStatusAsync(status, limit, ct);
+            }
+            else
+            {
+                jobs = await _jobRepository.GetQueuedJobsAsync(limit, ct);
+            }
+        }
+        else
+        {
+            if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+            {
+                return SlicerApiProblems.ResourceForbidden(this);
+            }
+
+            jobs = await _jobRepository.GetByUserIdAsync(userId, limit, 0, ct);
+            if (!string.IsNullOrEmpty(status))
+            {
+                jobs = jobs
+                    .Where(job => string.Equals(job.Status, status, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
         }
 
-        pageSize = Math.Clamp(pageSize, 1, 100);
-
-        int totalCount = await _jobRepository.CountAsync(status, ct);
-        IReadOnlyList<SliceJob> jobs = await _jobRepository.GetPagedAsync(page, pageSize, status, sortBy, sortDir, ct);
-        int totalPages = totalCount == 0 ? 1 : (int)Math.Ceiling((double)totalCount / pageSize);
-
-        return Ok(new PagedResult<SliceJobStatusResponse>(
-            jobs.Select(MapToStatusResponse).ToList(),
-            totalCount,
-            page,
-            pageSize,
-            totalPages));
+        return Ok(jobs.Select(MapToPublicStatusResponse).ToList());
     }
 
     /// <summary>
@@ -239,33 +273,40 @@ public class SliceJobController(
     /// <param name="request">Claim request with worker details.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("claim")]
+    [WorkerApiKeySecurity]
     public async Task<IActionResult> ClaimAsync([FromBody] ClaimJobRequest request, CancellationToken ct)
     {
-        if (!_workerAuth.IsAuthorized(HttpContext))
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null ||
+            !string.Equals(worker.ServiceId, request.WorkerId.ToString(), StringComparison.OrdinalIgnoreCase))
         {
-            return Unauthorized(new { error = "Invalid worker credentials." });
+            return SlicerApiProblems.AuthenticationRequired(this);
         }
 
         // Check circuit breaker
         if (_circuitBreaker is not null)
         {
-            WorkerCircuitState state = _circuitBreaker.GetCircuitState(request.WorkerId);
+            WorkerCircuitState state = _circuitBreaker.GetCircuitState(worker.Id);
             if (state == WorkerCircuitState.Open)
             {
                 return StatusCode(503, new { error = "Circuit breaker is open for this worker.", state = state.ToString() });
             }
         }
 
-        SliceJob? job = await _jobRepository.ClaimNextJobAsync(request.WorkerId, request.Capabilities, request.LeaseDurationSeconds, ct);
+        SliceJob? job = await _jobRepository.ClaimNextJobAsync(
+            worker.Id,
+            request.Capabilities,
+            request.LeaseDurationSeconds,
+            ct);
         if (job is null)
         {
             return NoContent();
         }
 
         await _eventService.NotifyJobStartedAsync(job, ct);
-        _logger.LogInformation("Job {JobId} claimed by worker {WorkerId}", job.Id, request.WorkerId);
+        _logger.LogInformation("Job {JobId} claimed by worker {WorkerId}", job.Id, worker.Id);
 
-        return Ok(MapToStatusResponse(job));
+        return Ok(MapToWorkerResponse(job));
     }
 
     /// <summary>
@@ -275,11 +316,13 @@ public class SliceJobController(
     /// <param name="request">Progress update.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/progress")]
+    [WorkerApiKeySecurity]
     public async Task<IActionResult> ReportProgressAsync(Guid id, [FromBody] SliceJobProgressUpdateRequest request, CancellationToken ct)
     {
-        if (!_workerAuth.IsAuthorized(HttpContext))
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
         {
-            return Unauthorized();
+            return SlicerApiProblems.AuthenticationRequired(this);
         }
 
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
@@ -288,9 +331,15 @@ public class SliceJobController(
             return NotFound();
         }
 
-        await _jobRepository.UpdateProgressAsync(id, request.ProgressPercent, request.ProgressMessage ?? string.Empty, ct);
+        if (!CanWorkerAccess(job, worker))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        string progressMessage = GetPublicProgressMessage(request.ProgressPercent);
+        await _jobRepository.UpdateProgressAsync(id, request.ProgressPercent, progressMessage, ct);
         job.ProgressPercent = request.ProgressPercent;
-        job.ProgressMessage = request.ProgressMessage;
+        job.ProgressMessage = progressMessage;
         await _eventService.NotifyJobProgressAsync(job, ct);
 
         return NoContent();
@@ -303,11 +352,13 @@ public class SliceJobController(
     /// <param name="request">Completion details.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/complete")]
+    [WorkerApiKeySecurity]
     public async Task<IActionResult> CompleteAsync(Guid id, [FromBody] CompleteSliceJobRequest request, CancellationToken ct)
     {
-        if (!_workerAuth.IsAuthorized(HttpContext))
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
         {
-            return Unauthorized();
+            return SlicerApiProblems.AuthenticationRequired(this);
         }
 
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
@@ -316,29 +367,35 @@ public class SliceJobController(
             return NotFound();
         }
 
-        // Upload log text as artifact if provided
-        Artifact? logArtifact = null;
-        if (!string.IsNullOrWhiteSpace(request.LogText))
+        if (!CanWorkerAccess(job, worker))
         {
-            logArtifact = await _artifactsService.UploadTextAsync(
-                request.LogText, "slicing.log", id, job.WorkerId, "log", ct);
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
-        // Collect all artifact IDs
         var artifactIds = new List<Guid> { request.PrimaryArtifactId };
         if (request.AdditionalArtifactIds is { Length: > 0 })
         {
             artifactIds.AddRange(request.AdditionalArtifactIds);
         }
 
-        if (logArtifact is not null)
+        if (artifactIds.Count != artifactIds.Distinct().Count())
         {
-            artifactIds.Add(logArtifact.Id);
+            return BadRequest(new { error = "Artifact identifiers must be unique." });
         }
 
-        // Resolve result file URL from primary artifact
-        Artifact? primary = await _artifactsService.GetAsync(request.PrimaryArtifactId, ct);
-        string resultFileUrl = primary?.RelativePath ?? string.Empty;
+        var artifacts = new List<Artifact>(artifactIds.Count);
+        foreach (Guid artifactId in artifactIds)
+        {
+            Artifact? artifact = await _artifactsService.GetAsync(artifactId, ct);
+            if (artifact is null || artifact.JobId != id || artifact.WorkerId != worker.Id)
+            {
+                return BadRequest(new { error = "One or more artifacts are invalid for this job." });
+            }
+
+            artifacts.Add(artifact);
+        }
+
+        string resultFileUrl = $"/api/artifacts/{request.PrimaryArtifactId}";
 
         await _jobRepository.MarkCompletedWithArtifactsAsync(
             id, resultFileUrl, artifactIds, request.EstimatedPrintTimeSeconds, request.FilamentUsedGrams, ct);
@@ -355,7 +412,7 @@ public class SliceJobController(
             await _circuitBreaker.RecordJobSuccessAsync(successWorkerId, _workerRepository, ct);
         }
 
-        _metrics.RecordJobCompletion(artifactIds.Count, logArtifact is not null);
+        _metrics.RecordJobCompletion(artifactIds.Count, hasLog: false);
 
         return Ok(new CompleteSliceJobResponse
         {
@@ -366,8 +423,9 @@ public class SliceJobController(
             ArtifactIds = artifactIds.ToArray(),
             EstimatedPrintTimeSeconds = request.EstimatedPrintTimeSeconds,
             FilamentUsedGrams = request.FilamentUsedGrams,
-            LogArtifactId = logArtifact?.Id,
+            LogArtifactId = null,
             ArtifactsCount = artifactIds.Count,
+            ArtifactsTotalBytes = artifacts.Sum(artifact => artifact.SizeBytes),
         });
     }
 
@@ -378,11 +436,14 @@ public class SliceJobController(
     /// <param name="request">Failure details.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/fail")]
+    [WorkerApiKeySecurity]
     public async Task<IActionResult> FailAsync(Guid id, [FromBody] FailSliceJobRequest request, CancellationToken ct)
     {
-        if (!_workerAuth.IsAuthorized(HttpContext))
+        _ = request;
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
         {
-            return Unauthorized();
+            return SlicerApiProblems.AuthenticationRequired(this);
         }
 
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
@@ -391,7 +452,12 @@ public class SliceJobController(
             return NotFound();
         }
 
-        await _jobRepository.MarkFailedAsync(id, request.ErrorMessage, ct);
+        if (!CanWorkerAccess(job, worker))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        await _jobRepository.MarkFailedAsync(id, "Slicing worker reported a failure.", ct);
 
         job = await _jobRepository.GetByIdAsync(id, ct);
         if (job is not null)
@@ -418,11 +484,13 @@ public class SliceJobController(
     /// <param name="request">Lease renewal request.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/renew-lease")]
+    [WorkerApiKeySecurity]
     public async Task<IActionResult> RenewLeaseAsync(Guid id, [FromBody] RenewLeaseRequest request, CancellationToken ct)
     {
-        if (!_workerAuth.IsAuthorized(HttpContext))
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
         {
-            return Unauthorized();
+            return SlicerApiProblems.AuthenticationRequired(this);
         }
 
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
@@ -431,9 +499,128 @@ public class SliceJobController(
             return NotFound();
         }
 
+        if (!CanWorkerAccess(job, worker))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         await _jobRepository.RenewLeaseAsync(id, request.LeaseDurationSeconds, ct);
 
         return NoContent();
+    }
+
+    /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>
+    [HttpGet("{id}/model")]
+    [WorkerApiKeySecurity]
+    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: null, ct);
+
+    /// <summary>Downloads one model from a multi-model job assigned to the authenticated worker.</summary>
+    [HttpGet("{id}/models/{modelIndex:int}")]
+    [WorkerApiKeySecurity]
+    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, int modelIndex, CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: (int?)modelIndex, ct);
+
+    private async Task<IActionResult> DownloadWorkerModelAsync(
+        Guid id,
+        int? modelIndex,
+        CancellationToken ct)
+    {
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
+        {
+            return SlicerApiProblems.AuthenticationRequired(this);
+        }
+
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanWorkerAccess(job, worker))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        if (_fileStorage is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        string modelUrl = job.ModelFileUrl;
+        string modelFileName = job.ModelFileName;
+        if (modelIndex is not null)
+        {
+            List<string>? modelUrls = DeserializeJsonList<string>(job.ModelFileUrlsJson);
+            if (modelUrls is null || modelIndex.Value < 0 || modelIndex.Value >= modelUrls.Count)
+            {
+                return NotFound();
+            }
+
+            modelUrl = modelUrls[modelIndex.Value];
+            modelFileName = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? modelUri)
+                ? Path.GetFileName(modelUri.LocalPath)
+                : Path.GetFileName(modelUrl);
+        }
+
+        try
+        {
+            Stream model = await _fileStorage.DownloadFileAsync(modelUrl, ct);
+            return File(model, "application/octet-stream", SanitizeFileName(modelFileName, "model.stl"));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
+        }
+    }
+
+    /// <summary>Uploads a G-code artifact for a job owned by the authenticated worker.</summary>
+    [HttpPost("{id}/artifacts")]
+    [WorkerApiKeySecurity]
+    public async Task<IActionResult> UploadWorkerArtifactAsync(
+        Guid id,
+        IFormFile file,
+        CancellationToken ct)
+    {
+        Worker? worker = await GetAuthorizedWorkerAsync();
+        if (worker is null)
+        {
+            return SlicerApiProblems.AuthenticationRequired(this);
+        }
+
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is null)
+        {
+            return NotFound();
+        }
+
+        if (!CanWorkerAccess(job, worker))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
+        try
+        {
+            Artifact artifact = await _artifactsService.UploadAsync(file, id, worker.Id, "gcode", ct);
+            return Created($"/api/artifacts/{artifact.Id}", new
+            {
+                id = artifact.Id,
+                jobId = artifact.JobId,
+                fileName = artifact.FileName,
+                contentType = artifact.ContentType,
+                sizeBytes = artifact.SizeBytes,
+                createdAt = artifact.CreatedAt,
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return BadRequest(new { error = "The artifact is empty, too large, or unsupported." });
+        }
     }
 
     /// <summary>
@@ -443,12 +630,18 @@ public class SliceJobController(
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/cancel")]
     [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     public async Task<IActionResult> CancelAsync(Guid id, CancellationToken ct)
     {
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
         if (job is null)
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceNotFound(this);
+        }
+
+        if (!CanAccess(job))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         if (job.Status is SliceJobStatus.Completed or SliceJobStatus.Failed or SliceJobStatus.Cancelled)
@@ -501,7 +694,7 @@ public class SliceJobController(
             await _eventService.NotifyJobQueuedAsync(job, ct);
         }
 
-        return Ok(job is not null ? MapToStatusResponse(job) : null);
+        return Ok(job is not null ? MapToPublicStatusResponse(job) : null);
     }
 
     /// <summary>
@@ -509,6 +702,7 @@ public class SliceJobController(
     /// </summary>
     [HttpGet("circuit-breakers")]
     [Authorize]
+    [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     public IActionResult GetCircuitBreakerStates()
     {
         if (_circuitBreaker is null)
@@ -518,58 +712,6 @@ public class SliceJobController(
 
         _circuitBreaker.CheckCircuits();
         return Ok(new { enabled = true });
-    }
-
-    private static SliceJobStatusResponse MapToStatusResponse(SliceJob job)
-    {
-        List<string>? modelUrls = null;
-        if (!string.IsNullOrEmpty(job.ModelFileUrlsJson))
-        {
-            try
-            {
-                modelUrls = JsonSerializer.Deserialize<List<string>>(job.ModelFileUrlsJson);
-            }
-            catch (JsonException)
-            {
-                // Ignore malformed JSON; fall back to single URL
-            }
-        }
-
-        List<string?>? modelTransforms = null;
-        if (!string.IsNullOrEmpty(job.ModelFileTransformsJson))
-        {
-            try
-            {
-                modelTransforms = JsonSerializer.Deserialize<List<string?>>(job.ModelFileTransformsJson);
-            }
-            catch (JsonException)
-            {
-                // Ignore malformed JSON
-            }
-        }
-
-        return new()
-        {
-            Id = job.Id,
-            Status = job.Status,
-            ProgressPercent = job.ProgressPercent,
-            ProgressMessage = job.ProgressMessage,
-            QueuedAt = job.QueuedAt,
-            StartedAt = job.StartedAt,
-            CompletedAt = job.CompletedAt,
-            ResultFileUrl = job.ResultFileUrl,
-            ErrorMessage = job.ErrorMessage,
-            EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
-            FilamentUsedGrams = job.FilamentUsedGrams,
-            WorkerId = job.WorkerId,
-            ModelFileUrl = job.ModelFileUrl,
-            ModelFileName = job.ModelFileName,
-            SlicerEngine = job.SlicerEngine,
-            SlicerProfileJson = job.SlicerProfileJson,
-            ModelTransformJson = job.ModelTransformJson,
-            ModelFileUrls = modelUrls,
-            ModelFileTransforms = modelTransforms,
-        };
     }
 
     /// <summary>
@@ -605,7 +747,113 @@ public class SliceJobController(
             return slicerProfileJson;
         }
     }
-}
 
-/// <summary>Request body for reporting a failed slice job.</summary>
-public record FailSliceJobRequest(string ErrorMessage);
+    private bool CanAccess(SliceJob job)
+    {
+        if (_resourceAccess is not null)
+        {
+            return _resourceAccess.CanAccess(User, job.UserId, "slice-job", job.Id);
+        }
+
+        if (PrintFarmerPermissions.IsFarmAdmin(User))
+        {
+            LogAdminBypass("slice-job", job.Id);
+            return true;
+        }
+
+        return PrintFarmerPermissions.TryGetUserId(User, out Guid userId) &&
+               userId == job.UserId;
+    }
+
+    private void LogAdminBypass(string resourceType, Guid resourceId)
+    {
+        PrintFarmerPermissions.TryGetUserId(User, out Guid userId);
+        _logger.LogInformation(
+            "Audited farm-admin resource bypass by user {UserId} for {ResourceType} {ResourceId}",
+            userId,
+            resourceType,
+            resourceId);
+    }
+
+    private static SliceJobStatusResponse MapToPublicStatusResponse(SliceJob job) => new()
+    {
+        Id = job.Id,
+        Status = job.Status,
+        ProgressPercent = job.ProgressPercent,
+        ProgressMessage = job.Status == SliceJobStatus.Processing
+            ? GetPublicProgressMessage(job.ProgressPercent)
+            : null,
+        QueuedAt = job.QueuedAt,
+        StartedAt = job.StartedAt,
+        CompletedAt = job.CompletedAt,
+        ErrorMessage = string.IsNullOrWhiteSpace(job.ErrorMessage) ? null : "Slicing failed.",
+        EstimatedPrintTimeSeconds = job.EstimatedPrintTimeSeconds,
+        FilamentUsedGrams = job.FilamentUsedGrams,
+        WorkerId = null,
+        ModelFileName = SanitizeFileName(job.ModelFileName, "model"),
+        SlicerEngine = job.SlicerEngine,
+        ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
+    };
+
+    private static WorkerSliceJobResponse MapToWorkerResponse(SliceJob job)
+    {
+        List<string>? modelUrls = DeserializeJsonList<string>(job.ModelFileUrlsJson);
+        return new WorkerSliceJobResponse
+        {
+            Id = job.Id,
+            UserId = job.UserId,
+            PrinterId = job.PrinterId,
+            Status = job.Status,
+            ModelFileUrl = $"/api/slice/{job.Id}/model",
+            ModelFileName = SanitizeFileName(job.ModelFileName, "model.stl"),
+            SlicerEngine = job.SlicerEngine,
+            SlicerProfileJson = job.SlicerProfileJson,
+            ModelTransformJson = job.ModelTransformJson,
+            ModelFileUrls = modelUrls?
+                .Select((_, index) => $"/api/slice/{job.Id}/models/{index}")
+                .ToList(),
+            ModelFileTransforms = DeserializeJsonList<string?>(job.ModelFileTransformsJson),
+            RequiredCapabilitiesJson = job.RequiredCapabilitiesJson,
+            Priority = job.Priority,
+        };
+    }
+
+    private static List<T>? DeserializeJsonList<T>(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<T>>(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<Worker?> GetAuthorizedWorkerAsync()
+    {
+        return await _workerAuth.AuthenticateAsync(HttpContext);
+    }
+
+    private static bool CanWorkerAccess(SliceJob job, Worker worker) =>
+        job.WorkerId == worker.Id &&
+        job.Status == SliceJobStatus.Processing;
+
+    private static string GetPublicProgressMessage(int progressPercent) =>
+        $"Slicing in progress ({Math.Clamp(progressPercent, 0, 100)}%).";
+
+    private static string SanitizeFileName(string? fileName, string fallback)
+    {
+        string baseName = Path.GetFileName((fileName ?? string.Empty).Replace('\\', '/'));
+        string sanitized = NonFileNameCharacterRegex().Replace(baseName, "_");
+        return string.IsNullOrWhiteSpace(sanitized) ? fallback : sanitized;
+    }
+
+    [GeneratedRegex("[^a-zA-Z0-9._-]+")]
+    private static partial Regex NonFileNameCharacterRegex();
+}

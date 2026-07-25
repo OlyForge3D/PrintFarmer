@@ -14,9 +14,6 @@ public class WorkerResponse
     /// <summary>Gets or sets the worker name.</summary>
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets the worker endpoint URL.</summary>
-    public string EndpointUrl { get; set; } = string.Empty;
-
     /// <summary>Gets or sets the worker capabilities.</summary>
     public string[] Capabilities { get; set; } = Array.Empty<string>();
 

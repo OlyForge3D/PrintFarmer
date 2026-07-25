@@ -27,7 +27,7 @@ public class SlicersController(ISlicersService service) : ControllerBase
     public async Task<IActionResult> ListAsync()
     {
         IReadOnlyList<SlicerService> list = await _service.ListAsync(HttpContext.RequestAborted);
-        return Ok(list.Select(ToResponseDto).ToList());
+        return Ok(list.Select(MapToResponse));
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public class SlicersController(ISlicersService service) : ControllerBase
     public async Task<IActionResult> GetAsync(Guid id)
     {
         SlicerService? svc = await _service.GetAsync(id, HttpContext.RequestAborted);
-        return svc == null ? NotFound() : Ok(ToResponseDto(svc));
+        return svc == null ? NotFound() : Ok(MapToResponse(svc));
     }
 
     /// <summary>
@@ -93,25 +93,17 @@ public class SlicersController(ISlicersService service) : ControllerBase
         return newApiKey == null ? NotFound() : Ok(new { id, apiKey = newApiKey });
     }
 
-    private static SlicerServiceResponseDto ToResponseDto(SlicerService service)
+    private static SlicerServiceResponse MapToResponse(SlicerService service) => new()
     {
-        return new SlicerServiceResponseDto
-        {
-            Id = service.Id,
-            Name = service.Name,
-            SlicerType = service.SlicerType,
-            Version = service.Version,
-            Host = service.Host,
-            UiManifestUrl = service.UiManifestUrl,
-            CapabilitiesJson = service.CapabilitiesJson,
-            MaxConcurrentJobs = service.MaxConcurrentJobs,
-            Status = service.Status,
-            LastSeen = service.LastSeen,
-            ApiKeyRotatedAt = service.ApiKeyRotatedAt,
-            CreatedAt = service.CreatedAt,
-            UpdatedAt = service.UpdatedAt,
-            Tags = service.Tags,
-            InstanceId = service.InstanceId,
-        };
-    }
+        Id = service.Id,
+        Name = service.Name,
+        SlicerType = service.SlicerType,
+        Version = service.Version,
+        MaxConcurrentJobs = service.MaxConcurrentJobs,
+        Status = service.Status,
+        LastSeen = service.LastSeen,
+        CreatedAt = service.CreatedAt,
+        UpdatedAt = service.UpdatedAt,
+        Tags = service.Tags,
+    };
 }

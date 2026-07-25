@@ -406,7 +406,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
             .Returns(Task.CompletedTask);
 
         Mock<IHubClients> clients = new();
-        clients.Setup(x => x.All).Returns(proxy.Object);
+        clients.Setup(x => x.Group(It.IsAny<string>())).Returns(proxy.Object);
 
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.Setup(x => x.Clients).Returns(clients.Object);

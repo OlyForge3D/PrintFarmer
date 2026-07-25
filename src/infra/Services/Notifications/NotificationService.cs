@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
@@ -269,7 +270,7 @@ public class NotificationService(
             // Broadcast realtime/webhook first so UI and integrations are not delayed by channel fan-out work.
             if (hubContext != null)
             {
-                await hubContext.Clients.All.SendAsync(
+                await hubContext.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
                     "notificationreceived",
                     new { type = type.ToString(), subject, body, jobId = parsedJobId },
                     cancellationToken);

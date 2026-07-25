@@ -1,4 +1,6 @@
-﻿using System.Security.Claims;
+﻿using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
@@ -20,11 +22,13 @@ namespace Farm.Slicer.Module.Api.Controllers;
 public class ArtifactsController(
     IArtifactsService service,
     ISliceJobRepository jobRepository,
-    IOptions<SlicerArtifactStorageSettings> settings) : ControllerBase
+    IOptions<SlicerArtifactStorageSettings> settings,
+    ISlicerResourceAccessAuthorizer? resourceAccess = null) : ControllerBase
 {
     private readonly IArtifactsService _service = service;
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly SlicerArtifactStorageSettings _settings = settings.Value;
+    private readonly ISlicerResourceAccessAuthorizer? _resourceAccess = resourceAccess;
 
     /// <summary>
     /// Uploads an artifact for a slice job.
@@ -33,6 +37,7 @@ public class ArtifactsController(
     /// <param name="file">The uploaded file.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> UploadAsync(Guid jobId, IFormFile file, CancellationToken ct)
     {
         if (file.Length == 0)
@@ -49,6 +54,11 @@ public class ArtifactsController(
         if (job is null)
         {
             return NotFound(new { error = "Slice job not found." });
+        }
+
+        if (!CanAccess(job))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         Artifact artifact = await _service.UploadAsync(file, jobId, null, "gcode", ct);
@@ -69,6 +79,7 @@ public class ArtifactsController(
     /// <param name="id">The artifact ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}")]
+    [RequirePermission(PrintFarmerPermissions.Slicing.ReadArtifact)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -85,14 +96,12 @@ public class ArtifactsController(
         SliceJob? job = await _jobRepository.GetByIdAsync(artifact.JobId, ct);
         if (job is null)
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceNotFound(this);
         }
 
-        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        bool isAdmin = User.IsInRole("farm_admin") || User.IsInRole("slicer_admin");
-        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        if (!CanAccess(job))
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         return PhysicalFile(filePath, artifact.ContentType ?? "application/octet-stream", artifact.FileName);
@@ -104,6 +113,7 @@ public class ArtifactsController(
     /// <param name="jobId">The slice job ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("job/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Slicing.ReadArtifact)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -112,14 +122,12 @@ public class ArtifactsController(
         SliceJob? job = await _jobRepository.GetByIdAsync(jobId, ct);
         if (job is null)
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceNotFound(this);
         }
 
-        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        bool isAdmin = User.IsInRole("farm_admin") || User.IsInRole("slicer_admin");
-        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        if (!CanAccess(job))
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         IReadOnlyList<Artifact> artifacts = await _service.ListByJobAsync(jobId, ct);
@@ -143,6 +151,7 @@ public class ArtifactsController(
     /// <param name="id">The artifact ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id}/metadata")]
+    [RequirePermission(PrintFarmerPermissions.Slicing.ReadArtifact)]
     [ProducesResponseType(typeof(ArtifactMetadataDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -157,14 +166,12 @@ public class ArtifactsController(
         SliceJob? job = await _jobRepository.GetByIdAsync(artifact.JobId, ct);
         if (job is null)
         {
-            return NotFound();
+            return SlicerApiProblems.ResourceNotFound(this);
         }
 
-        string? callerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        bool isAdmin = User.IsInRole("farm_admin");
-        if (!isAdmin && (!Guid.TryParse(callerIdStr, out Guid callerId) || job.UserId != callerId))
+        if (!CanAccess(job))
         {
-            return Forbid();
+            return SlicerApiProblems.ResourceForbidden(this);
         }
 
         string downloadUrl = $"/api/artifacts/{artifact.Id}";
@@ -176,5 +183,17 @@ public class ArtifactsController(
             downloadUrl,
             artifact.CreatedAt,
             artifact.JobId));
+    }
+
+    private bool CanAccess(SliceJob job)
+    {
+        if (_resourceAccess is not null)
+        {
+            return _resourceAccess.CanAccess(User, job.UserId, "slice-job-artifact", job.Id);
+        }
+
+        return PrintFarmerPermissions.IsFarmAdmin(User) ||
+               (PrintFarmerPermissions.TryGetUserId(User, out Guid userId) &&
+                userId == job.UserId);
     }
 }

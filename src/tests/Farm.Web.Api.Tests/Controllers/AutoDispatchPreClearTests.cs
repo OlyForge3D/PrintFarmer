@@ -45,7 +45,7 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()

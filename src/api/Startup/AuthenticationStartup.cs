@@ -3,6 +3,7 @@ using Farm.Infrastructure.Authorization;
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Startup;
@@ -24,8 +25,8 @@ public static class AuthenticationStartup
         services.AddAuthentication("Bearer")
             .AddJwtBearer("Bearer", options =>
             {
-                // Always accept ?access_token= for SignalR hub transports; keep verbose diagnostics disabled here
-                // because startup logging is only wired for Development/Testing elsewhere.
+                // Avoid building a temporary service provider here. The event handlers resolve
+                // request-scoped services when needed and also support SignalR access tokens.
                 options.Events = ProgramHelpers.CreateJwtEvents(null, null);
 
                 // Allow HTTP in test runs and relax validation for test environment
@@ -115,6 +116,7 @@ public static class AuthenticationStartup
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationProblemDetailsResultHandler>();
 
         return services;
     }

@@ -55,7 +55,7 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         // Claim job
         ClaimJobRequest claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = Guid.Parse(_client.DefaultRequestHeaders.GetValues("X-Worker-Id").Single()),
             Capabilities = new[] { "orcaslicer" },
             LeaseDurationSeconds = 120
         };
@@ -77,7 +77,8 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = status.Should().NotBeNull();
         _ = status!.ProgressPercent.Should().Be(42);
-        _ = status.ProgressMessage.Should().Be("Layer slicing");
+        _ = status.ProgressMessage.Should().Be("Slicing in progress (42%).");
+        _ = status.ProgressMessage.Should().NotContain("Layer slicing");
         _ = status.Status.Should().Be("Processing");
     }
 }

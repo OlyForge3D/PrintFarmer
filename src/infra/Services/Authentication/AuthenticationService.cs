@@ -294,6 +294,7 @@ public class AuthenticationService(
 
         if (string.IsNullOrEmpty(user.PasswordHash))
         {
+            _logger.LogWarning("Password change rejected because user {UserId} has no password hash", userId);
             return false;
         }
 
