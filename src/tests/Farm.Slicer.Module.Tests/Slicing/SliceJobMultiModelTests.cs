@@ -55,21 +55,16 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
-
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         submitted.Should().NotBeNull();
 
-        // Retrieve status and verify ModelFileUrls round-trip
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        statusResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
+        claimed.ModelFileUrls.Should().NotBeNull();
+        claimed.ModelFileUrls.Should().HaveCount(3);
+        claimed.ModelFileUrls.Should().OnlyContain(
+            url => url.StartsWith($"/api/slice/{submitted!.JobId}/models/", StringComparison.Ordinal));
 
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status.Should().NotBeNull();
-        status!.ModelFileUrls.Should().NotBeNull();
-        status.ModelFileUrls.Should().HaveCount(3);
-        status.ModelFileUrls.Should().ContainInOrder(modelUrls);
-
-        _output.WriteLine($"Multi-model job {status.Id} stored {status.ModelFileUrls!.Count} URLs");
+        _output.WriteLine($"Multi-model job {claimed.Id} exposed {claimed.ModelFileUrls!.Count} protected routes");
     }
 
     [Fact(DisplayName = "Submit without ModelFileUrls returns null (backward compat)")]
@@ -90,15 +85,11 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         submitted.Should().NotBeNull();
 
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        statusResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
+        claimed.ModelFileUrls.Should().BeNull();
+        claimed.ModelFileUrl.Should().Be($"/api/slice/{submitted.JobId}/model");
 
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status.Should().NotBeNull();
-        status!.ModelFileUrls.Should().BeNull();
-        status.ModelFileUrl.Should().Be("http://example.com/model.stl");
-
-        _output.WriteLine($"Single-model job {status.Id} returned null ModelFileUrls (backward compat OK)");
+        _output.WriteLine($"Single-model job {claimed.Id} returned one protected model route");
     }
 
     [Fact(DisplayName = "Submit with empty ModelFileUrls list returns null")]
@@ -119,9 +110,8 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status!.ModelFileUrls.Should().BeNull();
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
+        claimed.ModelFileUrls.Should().BeNull();
     }
 
     [Fact(DisplayName = "Submit with relative ModelFileUrls resolves them to absolute")]
@@ -148,19 +138,17 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
 
-        status!.ModelFileUrls.Should().NotBeNull();
-        status.ModelFileUrls.Should().HaveCount(2);
-        // All relative URLs should have been resolved to absolute
-        foreach (string url in status.ModelFileUrls!)
+        claimed.ModelFileUrls.Should().NotBeNull();
+        claimed.ModelFileUrls.Should().HaveCount(2);
+        foreach (string url in claimed.ModelFileUrls!)
         {
-            url.Should().StartWith("http", "relative URLs should be resolved to absolute");
-            url.Should().NotStartWith("/", "no relative URLs should remain");
+            url.Should().StartWith($"/api/slice/{submitted!.JobId}/models/");
+            url.Should().NotContain("models/files", "workers receive only identity-bound proxy routes");
         }
 
-        _output.WriteLine($"Resolved URLs: {string.Join(", ", status.ModelFileUrls)}");
+        _output.WriteLine($"Protected URLs: {string.Join(", ", claimed.ModelFileUrls)}");
     }
 
     [Fact(DisplayName = "Claimed multi-model job includes ModelFileUrls in status")]
@@ -184,22 +172,24 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
+        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        submitted.Should().NotBeNull();
 
         // Claim the job
         var claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = GetWorkerId(),
             Capabilities = ["orcaslicer"],
         };
         HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         claimResp.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var claimed = await claimResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        var claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
         claimed.Should().NotBeNull();
         claimed!.ModelFileUrls.Should().NotBeNull();
         claimed.ModelFileUrls.Should().HaveCount(2);
-        claimed.ModelFileUrls.Should().Contain("http://example.com/left.stl");
-        claimed.ModelFileUrls.Should().Contain("http://example.com/right.stl");
+        claimed.ModelFileUrls.Should().Contain($"/api/slice/{submitted!.JobId}/models/0");
+        claimed.ModelFileUrls.Should().Contain($"/api/slice/{submitted.JobId}/models/1");
 
         _output.WriteLine($"Claimed job {claimed.Id} has {claimed.ModelFileUrls!.Count} model URLs");
     }
@@ -236,17 +226,13 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
         submitted.Should().NotBeNull();
 
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        statusResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
+        claimed.ModelFileTransforms.Should().NotBeNull();
+        claimed.ModelFileTransforms.Should().HaveCount(2);
+        claimed.ModelFileTransforms![0].Should().Contain("\"position\":[10,20,0]");
+        claimed.ModelFileTransforms[1].Should().Contain("\"rotation\":[1.5707963,0,0]");
 
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status.Should().NotBeNull();
-        status!.ModelFileTransforms.Should().NotBeNull();
-        status.ModelFileTransforms.Should().HaveCount(2);
-        status.ModelFileTransforms![0].Should().Contain("\"position\":[10,20,0]");
-        status.ModelFileTransforms[1].Should().Contain("\"rotation\":[1.5707963,0,0]");
-
-        _output.WriteLine($"Multi-model job {status.Id} stored {status.ModelFileTransforms.Count} per-model transforms");
+        _output.WriteLine($"Multi-model job {claimed.Id} stored {claimed.ModelFileTransforms.Count} per-model transforms");
     }
 
     [Fact(DisplayName = "Submit without ModelFileTransforms returns null (backward compat)")]
@@ -273,9 +259,8 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
 
         var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
-        HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted!.JobId}");
-        var status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
-        status!.ModelFileTransforms.Should().BeNull();
+        WorkerSliceJobResponse claimed = await ClaimJobAsync();
+        claimed.ModelFileTransforms.Should().BeNull();
     }
 
     [Fact(DisplayName = "Submit rejects mismatched ModelFileTransforms and ModelFileUrls lengths")]
@@ -307,4 +292,23 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         submitResp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
+
+    private async Task<WorkerSliceJobResponse> ClaimJobAsync()
+    {
+        HttpResponseMessage response = await _client.PostAsJsonAsync(
+            "/api/slice/claim",
+            new ClaimJobRequest
+            {
+                WorkerId = GetWorkerId(),
+                Capabilities = ["orcaslicer"],
+            });
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        WorkerSliceJobResponse? claimed =
+            await response.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        claimed.Should().NotBeNull();
+        return claimed!;
+    }
+
+    private Guid GetWorkerId() =>
+        Guid.Parse(_client.DefaultRequestHeaders.GetValues("X-Worker-Id").Single());
 }

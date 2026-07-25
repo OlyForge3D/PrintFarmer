@@ -6,13 +6,15 @@ import XCTest
 @MainActor
 final class ConnectionMonitorTests: XCTestCase {
 
+    nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
+
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
+        mockAPIClient = MockAPIClient()
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -56,12 +58,12 @@ final class ConnectionMonitorTests: XCTestCase {
     // MARK: - refresh() integration
 
     func testRefreshReportsConnectedWhenHealthyAndHubConnected() async {
-        MockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
         let signalR = MockSignalRService()
         signalR.connectionState = .connected
 
         let monitor = ConnectionMonitor()
-        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
 
@@ -70,12 +72,12 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     func testRefreshReportsDegradedWhenHealthyButHubDisconnected() async {
-        MockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
         let signalR = MockSignalRService()
         signalR.connectionState = .disconnected
 
         let monitor = ConnectionMonitor()
-        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
 
@@ -84,12 +86,12 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     func testRefreshReportsOfflineOnTransportError() async {
-        MockAPIClient.stubError(.cannotConnectToHost)
+        mockAPIClient.stubError(.cannotConnectToHost)
         let signalR = MockSignalRService()
         signalR.connectionState = .connected
 
         let monitor = ConnectionMonitor()
-        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
 
@@ -98,12 +100,12 @@ final class ConnectionMonitorTests: XCTestCase {
     }
 
     func testRefreshReportsOfflineOnServerError() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 503)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 503)
         let signalR = MockSignalRService()
         signalR.connectionState = .connected
 
         let monitor = ConnectionMonitor()
-        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
 
@@ -114,12 +116,12 @@ final class ConnectionMonitorTests: XCTestCase {
     // MARK: - stop() resets displayed state
 
     func testStopClearsPreviousStatusImmediately() async {
-        MockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
         let signalR = MockSignalRService()
         signalR.connectionState = .connected
 
         let monitor = ConnectionMonitor()
-        monitor.configure(apiClient: MockAPIClient.makeAPIClient(), signalRService: signalR)
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
         XCTAssertEqual(monitor.status, .connected)

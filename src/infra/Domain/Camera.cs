@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -20,6 +21,7 @@ public class Camera
     /// <summary>
     /// Navigation property to the printer this camera is attached to (if any).
     /// </summary>
+    [JsonIgnore]
     public Printer? Printer { get; set; }
 
     /// <summary>
@@ -39,12 +41,14 @@ public class Camera
     /// URL for the camera stream (MJPEG or similar)
     /// </summary>
     [MaxLength(500)]
+    [JsonIgnore]
     public string? StreamUrl { get; set; }
 
     /// <summary>
     /// URL for snapshot images
     /// </summary>
     [MaxLength(500)]
+    [JsonIgnore]
     public string? SnapshotUrl { get; set; }
 
     /// <summary>
@@ -97,6 +101,7 @@ public class Camera
     /// Optional message from the last health check (error details, etc.)
     /// </summary>
     [MaxLength(500)]
+    [JsonIgnore]
     public string? HealthMessage { get; set; }
 
     /// <summary>

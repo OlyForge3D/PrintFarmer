@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -63,7 +64,7 @@ public class BatchDispatchService(
         Guid batchId = Guid.NewGuid();
 
         // Broadcast batch started
-        await hub.Clients.All.SendAsync("batchdispatchstarted", new BatchDispatchStartedEvent
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("batchdispatchstarted", new BatchDispatchStartedEvent
         {
             BatchId = batchId,
             JobCount = jobs.Count,
@@ -89,7 +90,7 @@ public class BatchDispatchService(
         }
 
         // Broadcast batch completed
-        await hub.Clients.All.SendAsync("batchdispatchcompleted", new BatchDispatchCompletedEvent
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("batchdispatchcompleted", new BatchDispatchCompletedEvent
         {
             BatchId = batchId,
             DispatchedCount = result.DispatchedCount,

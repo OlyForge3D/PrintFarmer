@@ -100,4 +100,6 @@ git push origin v1.0-beta.<N>
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+The in-repository mobile client is licensed under the
+[GNU Affero General Public License v3.0 only](../LICENSE)
+(`AGPL-3.0-only`) beginning with PrintFarmer v0.2.3.

@@ -1,57 +1,44 @@
-﻿using Farm.Slicer.Module.Services;
-using Farm.Slicer.Module.Services.Configuration;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Slicer.Module.Data.Repositories;
+using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services;
 using Microsoft.Extensions.Primitives;
 
 namespace Farm.Slicer.Module.Api.Services;
 
-public sealed class WorkerAuthService(IConfiguration configuration, IHostEnvironment env) : IWorkerAuthService
+public sealed class WorkerAuthService(IWorkerRepository workerRepository) : IWorkerAuthService
 {
-    private readonly string? _sharedKey = configuration.GetSection(WorkerAuthSettings.SectionName)["SharedKey"]
-                     ?? configuration.GetSection(WorkerAuthSettings.SectionName)["SharedApiKey"]
-                     ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
-
-    private readonly IHostEnvironment _env = env;
+    private readonly IWorkerRepository _workerRepository = workerRepository;
 
     public const string HeaderName = "X-Worker-Key";
+    public const string ServiceIdHeaderName = "X-Worker-Id";
 
-    public bool IsAuthorized(HttpContext httpContext)
+    public async Task<Worker?> AuthenticateAsync(HttpContext httpContext)
     {
-        if (httpContext == null)
+        if (httpContext is null ||
+            !httpContext.Request.Headers.TryGetValue(ServiceIdHeaderName, out StringValues serviceValues) ||
+            !Guid.TryParse(serviceValues.FirstOrDefault(), out Guid serviceId) ||
+            !httpContext.Request.Headers.TryGetValue(HeaderName, out StringValues keyValues))
         {
-            return false;
+            return null;
         }
 
-        // Allow bypass when no key configured and environment is Development or Testing.
-        if (string.IsNullOrWhiteSpace(_sharedKey))
+        string? presentedKey = keyValues.FirstOrDefault();
+        Worker? worker = await _workerRepository.GetByServiceIdAsync(serviceId.ToString());
+        if (worker is null ||
+            worker.IsDisabled ||
+            string.IsNullOrEmpty(worker.ApiKey) ||
+            string.IsNullOrEmpty(presentedKey))
         {
-            return _env.IsDevelopment() || _env.IsEnvironment("Testing");
+            return null;
         }
 
-        if (!httpContext.Request.Headers.TryGetValue(HeaderName, out StringValues values))
-        {
-            return false;
-        }
-
-        string presented = values.ToString();
-        if (string.IsNullOrWhiteSpace(presented))
-        {
-            return false;
-        }
-
-        // Constant time compare minimal implementation (length + equality) – adequate for single shared key.
-        if (presented.Length != _sharedKey.Length)
-        {
-            return false;
-        }
-
-        bool equal = true;
-        for (int i = 0; i < presented.Length; i++)
-        {
-            equal &= presented[i] == _sharedKey[i];
-        }
-
-        return equal;
+        byte[] presentedBytes = Encoding.UTF8.GetBytes(presentedKey);
+        byte[] expectedBytes = Encoding.UTF8.GetBytes(worker.ApiKey);
+        return presentedBytes.Length == expectedBytes.Length &&
+               CryptographicOperations.FixedTimeEquals(presentedBytes, expectedBytes)
+            ? worker
+            : null;
     }
 }

@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Services.Queue.Dispatch;
+﻿using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,6 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/dispatch")]
 [Tags("Dispatch Dashboard")]
 [Authorize]
+[RequirePermission(PrintFarmerPermissions.Queue.Read)]
 public class DispatchController(
     IBatchDispatchService batchDispatchService) : ControllerBase
 {

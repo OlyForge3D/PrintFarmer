@@ -58,31 +58,31 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = submitted.Status.Should().Be("Queued");
         _output.WriteLine($"Submitted job: {submitted.JobId}");
 
-        // 3. Verify job appears in queue via paginated list
-        HttpResponseMessage listResp = await _workerClient.GetAsync("/api/slice?status=Queued&page=1&pageSize=10");
+        // 3. Verify job appears in the redacted queue list
+        HttpResponseMessage listResp = await _workerClient.GetAsync("/api/slice?status=Queued&limit=10");
         _ = listResp.StatusCode.Should().Be(HttpStatusCode.OK);
-        PagedResult<SliceJobStatusResponse>? pagedJobs = await listResp.Content.ReadFromJsonAsync<PagedResult<SliceJobStatusResponse>>();
-        _ = pagedJobs.Should().NotBeNull();
-        _ = pagedJobs!.TotalCount.Should().BeGreaterThanOrEqualTo(1);
-        _ = pagedJobs.Items.Should().Contain(j => j.Id == submitted.JobId);
-        _output.WriteLine($"Queue has {pagedJobs.TotalCount} job(s)");
+        List<SliceJobStatusResponse>? jobs =
+            await listResp.Content.ReadFromJsonAsync<List<SliceJobStatusResponse>>();
+        _ = jobs.Should().NotBeNull();
+        _ = jobs.Should().Contain(j => j.Id == submitted.JobId);
+        _output.WriteLine($"Queue has {jobs!.Count} job(s)");
 
         // 4. Claim the job as the mock worker
         var claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = GetWorkerId(),
             Capabilities = ["orcaslicer"],
             LeaseDurationSeconds = 300,
         };
 
         HttpResponseMessage claimResp = await _workerClient.PostAsJsonAsync("/api/slice/claim", claimReq);
         _ = claimResp.StatusCode.Should().Be(HttpStatusCode.OK, "Claim should return 200 OK");
-        SliceJobStatusResponse? claimed = await claimResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
         _ = claimed.Should().NotBeNull();
         _ = claimed!.Id.Should().Be(submitted.JobId);
         _ = claimed.Status.Should().Be("Processing");
-        _ = claimed.WorkerId.Should().NotBeNull();
-        _output.WriteLine($"Job claimed by worker {claimed.WorkerId}");
+        _ = claimed.ModelFileUrl.Should().Be($"/api/slice/{submitted.JobId}/model");
+        _output.WriteLine($"Job claimed with protected model route {claimed.ModelFileUrl}");
 
         // 5. Report progress (50%)
         var progressReq = new SliceJobProgressUpdateRequest
@@ -99,7 +99,7 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         HttpResponseMessage statusResp = await _workerClient.GetAsync($"/api/slice/{submitted.JobId}");
         SliceJobStatusResponse? midStatus = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = midStatus!.ProgressPercent.Should().Be(50);
-        _ = midStatus.ProgressMessage.Should().Be("Slicing layers 1-100");
+        _ = midStatus.ProgressMessage.Should().Be("Slicing in progress (50%).");
 
         // 6. Upload a mock G-code artifact
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; G28\n; G1 X0 Y0 Z0.3\n; Mock G-code output");
@@ -108,7 +108,8 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         gcodeContent.Add(fileContent, "file", "cube.gcode");
 
-        HttpResponseMessage uploadResp = await _workerClient.PostAsync($"/api/artifacts/{submitted.JobId}", gcodeContent);
+        HttpResponseMessage uploadResp =
+            await _workerClient.PostAsync($"/api/slice/{submitted.JobId}/artifacts", gcodeContent);
         _ = uploadResp.StatusCode.Should().Be(HttpStatusCode.Created, "Artifact upload should return 201");
         ArtifactUploadResponse? uploadedArtifact = await uploadResp.Content.ReadFromJsonAsync<ArtifactUploadResponse>();
         _ = uploadedArtifact.Should().NotBeNull();
@@ -142,8 +143,8 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = finalStatus.ProgressPercent.Should().Be(100);
         _ = finalStatus.EstimatedPrintTimeSeconds.Should().Be(3600);
         _ = finalStatus.FilamentUsedGrams.Should().Be(25.5m);
-        _ = finalStatus.ResultFileUrl.Should().NotBeNullOrEmpty();
-        _output.WriteLine($"Final status verified: {finalStatus.Status}, result: {finalStatus.ResultFileUrl}");
+        _ = finalStatus.ArtifactsRoute.Should().Be($"/api/artifacts/job/{submitted.JobId}");
+        _output.WriteLine($"Final status verified: {finalStatus.Status}");
 
         // 9. Verify artifacts are accessible via list endpoint
         HttpResponseMessage artifactListResp = await _workerClient.GetAsync($"/api/artifacts/job/{submitted.JobId}");
@@ -172,7 +173,7 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         // Claim
         var claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = GetWorkerId(),
             Capabilities = ["orcaslicer"],
             LeaseDurationSeconds = 300,
         };
@@ -181,13 +182,14 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         // Fail the job
         var failReq = new { ErrorMessage = "Slicer crashed: out of memory" };
         HttpResponseMessage failResp = await _workerClient.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/fail", failReq);
-        _ = failResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        string failBody = await failResp.Content.ReadAsStringAsync();
+        _ = failResp.StatusCode.Should().Be(HttpStatusCode.OK, failBody);
 
         // Verify it's failed
         HttpResponseMessage failedStatus = await _workerClient.GetAsync($"/api/slice/{submitted.JobId}");
         SliceJobStatusResponse? failedJob = await failedStatus.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = failedJob!.Status.Should().Be("Failed");
-        _ = failedJob.ErrorMessage.Should().Contain("out of memory");
+        _ = failedJob.ErrorMessage.Should().Be("Slicing failed.");
 
         // Retry the failed job
         HttpResponseMessage retryResp = await _workerClient.PostAsync($"/api/slice/{submitted.JobId}/retry", null);
@@ -210,4 +212,7 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         public long SizeBytes { get; init; }
         public DateTime CreatedAt { get; init; }
     }
+
+    private Guid GetWorkerId() =>
+        Guid.Parse(_workerClient.DefaultRequestHeaders.GetValues("X-Worker-Id").Single());
 }

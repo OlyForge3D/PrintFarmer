@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using System.Text.Json;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Configuration;
@@ -12,10 +13,13 @@ public class HttpProgressReporter : IProgressReporter
     private readonly HttpClient _httpClient;
     private readonly ILogger<HttpProgressReporter> _logger;
     private readonly string _apiBaseUrl;
-    private readonly string _workerId;
-    private readonly string? _workerApiKey;
+    private readonly IWorkerStateService _workerState;
 
-    public HttpProgressReporter(HttpClient httpClient, ILogger<HttpProgressReporter> logger, IConfiguration configuration)
+    public HttpProgressReporter(
+        HttpClient httpClient,
+        ILogger<HttpProgressReporter> logger,
+        IConfiguration configuration,
+        IWorkerStateService workerState)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -23,10 +27,7 @@ public class HttpProgressReporter : IProgressReporter
         _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
                    ?? configuration["Worker:ApiBaseUrl"]
                    ?? "http://api:5245";
-        _workerId = WorkerIdentity.Create();
-        _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
-                     ?? configuration["WorkerAuth:SharedKey"]
-                     ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
+        _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     }
 
     private static StringContent ToJsonContent(object payload)
@@ -35,28 +36,31 @@ public class HttpProgressReporter : IProgressReporter
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
-    private HttpRequestMessage CreateRequest(HttpMethod method, string url, object? payload = null)
-    {
-        HttpRequestMessage request = new(method, url);
-        if (payload is not null)
-        {
-            request.Content = ToJsonContent(payload);
-        }
-
-        if (!string.IsNullOrWhiteSpace(_workerApiKey))
-        {
-            request.Headers.Add("X-Worker-Key", _workerApiKey);
-        }
-
-        return request;
-    }
-
     public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
     {
         try
         {
-            var payload = new { ProgressPercent = progress, ProgressMessage = message };
-            using HttpRequestMessage request = CreateRequest(HttpMethod.Post, $"{_apiBaseUrl}/api/slice/{jobId}/progress", payload);
+            WorkerState workerState = _workerState.GetWorkerState();
+            Guid? serviceId = workerState.RegisteredServiceId;
+            if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
+            {
+                _logger.LogWarning("Progress report skipped because worker authentication is not ready for job {JobId}", jobId);
+                return;
+            }
+
+            SliceJobProgressUpdateRequest payload = new()
+            {
+                ProgressPercent = progress,
+                ProgressMessage = message,
+            };
+            using HttpRequestMessage request = new(
+                HttpMethod.Post,
+                $"{_apiBaseUrl}/api/slice/{jobId}/progress")
+            {
+                Content = ToJsonContent(payload),
+            };
+            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
+            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -73,39 +77,34 @@ public class HttpProgressReporter : IProgressReporter
     {
         ArgumentNullException.ThrowIfNull(job);
         ArgumentNullException.ThrowIfNull(result);
-        try
-        {
-            var payload = new
-            {
-                JobId = job.Id,
-                WorkerId = _workerId,
-                Status = SlicingJobStatus.Completed,
-                ResultFileUrl = result.ResultFileUrl,
-                EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds,
-                EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams,
-                OutputFileSizeBytes = result.OutputFileSizeBytes,
-                LayerCount = result.LayerCount,
-                CompletedAt = DateTime.UtcNow,
-                Metadata = result.Metadata
-            };
-            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/complete", ToJsonContent(payload), cancellationToken);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("Completion report failed {JobId} status {StatusCode}", job.Id, response.StatusCode);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error reporting completion {JobId}", job.Id);
-        }
+        await Task.CompletedTask;
+        _logger.LogDebug(
+            "Completion for job {JobId} is reported by the authenticated artifact workflow",
+            job.Id);
     }
 
     public async Task ReportFailureAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default)
     {
+        _ = errorMessage;
         try
         {
-            var payload = new { JobId = jobId, WorkerId = _workerId, Status = SlicingJobStatus.Error, ErrorMessage = errorMessage, CompletedAt = DateTime.UtcNow };
-            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/workers/failure", ToJsonContent(payload), cancellationToken);
+            WorkerState workerState = _workerState.GetWorkerState();
+            Guid? serviceId = workerState.RegisteredServiceId;
+            if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
+            {
+                _logger.LogWarning("Failure report skipped because worker authentication is not ready for job {JobId}", jobId);
+                return;
+            }
+
+            using HttpRequestMessage request = new(
+                HttpMethod.Post,
+                $"{_apiBaseUrl}/api/slice/{jobId}/fail")
+            {
+                Content = ToJsonContent(new FailSliceJobRequest("Slicing worker could not complete the job.")),
+            };
+            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
+            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failure report failed {JobId} status {StatusCode}", jobId, response.StatusCode);

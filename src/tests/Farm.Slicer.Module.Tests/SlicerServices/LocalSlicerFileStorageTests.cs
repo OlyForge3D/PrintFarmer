@@ -145,6 +145,44 @@ public class LocalSlicerFileStorageTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadFileAsync_PathTraversal_ThrowsUnauthorizedAccessException()
+    {
+        byte[] content = CreateTestFileContent();
+
+        Func<Task> upload = () => _storage.UploadFileAsync(
+            "../outside.stl",
+            content,
+            "model/stl");
+
+        _ = await upload.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_AbsolutePathOutsideStorageRoot_ThrowsUnauthorizedAccessException()
+    {
+        string outsidePath = Path.Combine(
+            Path.GetDirectoryName(_tempBasePath)!,
+            $"outside-{Guid.NewGuid():N}.stl");
+
+        Func<Task> download = async () => await _storage.DownloadFileAsync(outsidePath);
+
+        _ = await download.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_FileUriOutsideStorageRoot_ThrowsUnauthorizedAccessException()
+    {
+        string outsidePath = Path.Combine(
+            Path.GetDirectoryName(_tempBasePath)!,
+            $"outside-{Guid.NewGuid():N}.stl");
+        string outsideFileUri = new Uri(outsidePath, UriKind.Absolute).AbsoluteUri;
+
+        Func<Task> download = async () => await _storage.DownloadFileAsync(outsideFileUri);
+
+        _ = await download.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
     public async Task DownloadFileAsync_WithUrl_ShouldExtractKeyAndDownload()
     {
         // Arrange

@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-  <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
+    <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
     <!-- Plugin implementations - runtime-loaded, not compile-time referenced -->
@@ -79,6 +79,7 @@
     <ProjectReference Include="..\slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
     <ProjectReference Include=".\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
@@ -99,7 +100,12 @@
     <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
-    </ProjectReference>  </ItemGroup>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
 
 
   <ItemGroup>
@@ -163,6 +169,7 @@
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_4_0\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.PostgreSQL\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.SqlServer\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.Sqlite\bin\$(Configuration)\$(TargetFramework)\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_SlicerPluginDll)" DestinationFolder="$(_SlicerPluginsOutputDir)" SkipUnchangedFiles="true" />
   </Target>

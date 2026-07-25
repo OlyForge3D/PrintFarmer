@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Cryptography;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.SignalR;
@@ -62,10 +63,18 @@ public sealed class TestDiscoveryOverride(
                 model: "Ender 3 V3"),
         };
 
-        // Broadcast each found printer
+        // Broadcast each found printer as a redacted summary (secure discovery contract)
         foreach (DiscoveredPrinterDto printer in discovered)
         {
-            var found = new DiscoveryPrinterFoundDto(sessionId, printer);
+            var summary = new DiscoveredPrinterSummaryDto(
+                new Guid(RandomNumberGenerator.GetBytes(16)),
+                printer.Name,
+                printer.Backend,
+                printer.Manufacturer,
+                printer.Model,
+                printer.DiscoveredAt,
+                printer.IsReachable);
+            var found = new DiscoveryPrinterFoundDto(sessionId, summary);
             await hub.Clients.Group($"discovery-{sessionId}").SendAsync("discoveryprinterfound", found, ct);
         }
 

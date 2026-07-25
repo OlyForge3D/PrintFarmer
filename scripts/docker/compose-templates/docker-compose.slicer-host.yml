@@ -23,6 +23,11 @@ services:
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
         GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_VERSION: ${BUILD_VERSION:-development}
+        VCS_REF: ${VCS_REF:-unknown}
+        SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+        SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+        SBOM_URL: ${SBOM_URL:-}
     image: printfarmer-slicer-host
     container_name: printfarmer-slicer-host
     restart: unless-stopped
@@ -38,7 +43,7 @@ services:
       - ConnectionStrings__Default=${ConnectionStrings__Default}
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
-      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
       # JWT signing configuration - MUST match the main API's Jwt__Key so Desktop
       # API-key exchange tokens (see docs/SLICER_CONFIGURATION.md) issued by the
       # API are accepted here. Intentionally has NO baked-in default: unlike the

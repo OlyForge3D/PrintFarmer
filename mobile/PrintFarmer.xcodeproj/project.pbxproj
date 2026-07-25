@@ -112,6 +112,7 @@
 		A1B2C3D4E5F6789012345678 /* MockAPIServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F67890ABCDEF01 /* MockAPIServer.swift */; };
 		A2FC4CAC97D64CC8E4D8FDED /* LocationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23554EB41DA88AD092EB5C1 /* LocationListView.swift */; };
 		A391E9CBE39F5EAF1A94264D /* SpoolPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D305E8384A01A3EBE5866CF /* SpoolPickerView.swift */; };
+		A70A710000000000A0000201 /* PrinterBackendCapabilitiesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */; };
 		A5B292852C205CF923659C29 /* PrinterServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F0E4D85A3714214951C6D24 /* PrinterServiceTests.swift */; };
 		A5DAEF79F0E6036756BD6A96 /* SpoolInventoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD9A3AD3F5C5DD33CAF7C6CB /* SpoolInventoryView.swift */; };
 		A7F6E5D4C3B2A1F2E1D0C9B8 /* MockQRSpoolScannerService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6A7B8C9D0E1F2A3B4C5D6E7 /* MockQRSpoolScannerService.swift */; };
@@ -343,6 +344,7 @@
 		A2FA2A4FEFE32F898CA6799D /* JobListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobListView.swift; sourceTree = "<group>"; };
 		A3DB46B18B93F429B6F0DFBE /* AuthServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthServiceTests.swift; sourceTree = "<group>"; };
 		A59E2A16E7C0B2D793C038A6 /* PrinterListViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterListViewModelTests.swift; sourceTree = "<group>"; };
+		A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterBackendCapabilitiesTests.swift; sourceTree = "<group>"; };
 		A7B8C9D0E1F2A3B4C5D6E7F8 /* MockNFCService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockNFCService.swift; sourceTree = "<group>"; };
 		A9C4C4D554DEEE8404DCF48B /* MockNotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockNotificationService.swift; sourceTree = "<group>"; };
 		AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardViewModel.swift; sourceTree = "<group>"; };
@@ -953,6 +955,7 @@
 			children = (
 				6EC1B357CBA7677A4D4E3D61 /* ModelDecodingTests.swift */,
 				FB277001100B2C3D4E5F6A7B /* PrinterProgressContractTests.swift */,
+				A70A710000000000B0000201 /* PrinterBackendCapabilitiesTests.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -1129,6 +1132,7 @@
 				77900F336D89DB7A75E19D5B /* MockStatisticsService.swift in Sources */,
 				DBFCFDB1D7F8B850275D56D4 /* TestProtocols.swift in Sources */,
 				14548BCF3A6E9E12FB4673B2 /* ModelDecodingTests.swift in Sources */,
+				A70A710000000000A0000201 /* PrinterBackendCapabilitiesTests.swift in Sources */,
 				BF277001100A1B2C3D4E5F6A /* PrinterProgressContractTests.swift in Sources */,
 				BC1000000000000000000008 /* MockBarcodeIntakeService.swift in Sources */,
 				BC1000000000000000000009 /* BarcodeIntakeViewModelTests.swift in Sources */,
@@ -1363,7 +1367,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -1434,7 +1438,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.printfarmer.ios.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1499,7 +1503,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 2;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.printfarmer.ios.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -1530,7 +1534,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 0.2.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.olyforge3d.printfarmer.ios;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

@@ -8,10 +8,9 @@ import SnapshotTesting
 ///
 /// Closes OlyForge3D/PrintFarmer#289.
 ///
-/// Baselines are recorded on iOS 17 simulator (iPhone 15). When the SDK
-/// drifts (e.g., iOS 26.x), re-record on the CI simulator: set
-/// `isRecording = true` locally, run the suite, commit the regenerated
-/// `__Snapshots__/` directory, then flip back to false.
+/// SnapshotTesting stores references relative to this file under
+/// `Views/__Snapshots__/PrinterControlsSectionSnapshotTests/`. See the adjacent
+/// `__Snapshots__/README.md` before regenerating SDK-sensitive images.
 @MainActor
 final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
@@ -59,6 +58,15 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         return svc
     }
 
+    private func loadedSection(
+        printer: Printer,
+        service: MockPrinterService
+    ) async -> PrinterControlsSection {
+        let viewModel = PrinterControlsViewModel(printerService: service, printer: printer)
+        await viewModel.loadCapabilities()
+        return PrinterControlsSection(printer: printer, viewModel: viewModel)
+    }
+
     private func host(_ view: some View) -> UIViewController {
         let host = UIHostingController(rootView: view.frame(width: 390))
         host.view.backgroundColor = .systemBackground
@@ -67,24 +75,24 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
 
     // MARK: - Backend profile snapshots
 
-    func test_snapshot_moonrakerProfile() throws {
+    func test_snapshot_moonrakerProfile() async throws {
         let printer = try makePrinter(backend: .moonraker)
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    func test_snapshot_flashForgeProfile() throws {
+    func test_snapshot_flashForgeProfile() async throws {
         let printer = try makePrinter(backend: .flashForge)
         let svc = makeService(caps: Self.flashForgeCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    func test_snapshot_sdcpProfile() throws {
+    func test_snapshot_sdcpProfile() async throws {
         let printer = try makePrinter(backend: .sdcp)
         let svc = makeService(caps: Self.sdcpCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
@@ -102,14 +110,12 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 
-    /// Disabled stripe modifier from #288: triggered when the printer is
-    /// online but not in an idle/ready state that accepts control input.
-    /// `"error"` is not in the hidden-state set (offline only); the section
-    /// renders with disabled subgroup controls per spec §2.4.
-    func test_snapshot_disabledState_printerInError() throws {
-        let printer = try makePrinter(backend: .moonraker, state: "error")
+    /// The starting state keeps the section visible while `canControl` is false,
+    /// exercising disabled subgroup controls without the printing lockout banner.
+    func test_snapshot_disabledState_printerStarting() async throws {
+        let printer = try makePrinter(backend: .moonraker, state: "starting")
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
     // MARK: - Lockout banner (spec §2.2 — visible during print with disabled controls)
@@ -117,10 +123,10 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     /// Section remains visible during a print; a lockout banner is shown and
     /// all subgroup controls are disabled. The section is NOT hidden — only
     /// the offline state hides it (spec §2.2, §2.4).
-    func test_snapshot_lockoutBanner_printingState() throws {
+    func test_snapshot_lockoutBanner_printingState() async throws {
         let printer = try makePrinter(backend: .moonraker, state: "printing")
         let svc = makeService(caps: Self.moonrakerCaps)
-        let section = PrinterControlsSection(printer: printer, printerService: svc)
+        let section = await loadedSection(printer: printer, service: svc)
         assertSnapshot(of: host(section), as: .image(on: .iPhone13))
     }
 }

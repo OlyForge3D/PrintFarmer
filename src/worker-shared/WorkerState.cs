@@ -4,6 +4,10 @@ public class WorkerState
 {
     public string WorkerId { get; set; } = Environment.MachineName + "-" + Environment.ProcessId;
 
+    public Guid? RegisteredServiceId { get; set; }
+
+    public string? RegisteredServiceApiKey { get; set; }
+
     public bool IsInitialized { get; set; } = true;
 
     public bool IsShuttingDown { get; set; }

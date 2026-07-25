@@ -1,0 +1,354 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlyForge3D/PrintFarmer/blob/main/compliance/calibration-provenance.schema.json",
+  "title": "PrintFarmer calibration source provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "policyVersion",
+    "lastReviewed",
+    "allowedSourceLicenseExpressions",
+    "governedPathPatterns",
+    "approvedSources",
+    "entries",
+    "referenceRecords",
+    "exceptions"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "policyVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "lastReviewed": {
+      "type": "string",
+      "format": "date"
+    },
+    "allowedSourceLicenseExpressions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "governedPathPatterns": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "approvedSources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/approvedSource"
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/derivedEntry"
+      }
+    },
+    "referenceRecords": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/referenceRecord"
+      }
+    },
+    "exceptions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/exception"
+      }
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^(sha1:[0-9a-f]{40}|sha256:[0-9a-f]{64})$"
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "reviewDate",
+        "decision"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "decision": {
+          "const": "approved"
+        }
+      }
+    },
+    "approvedSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "repositoryUrl",
+        "tag",
+        "commitSha",
+        "licenseExpression",
+        "licenseEvidence",
+        "review"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "repositoryUrl": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "licenseExpression": {
+          "type": "string",
+          "minLength": 1
+        },
+        "licenseEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "blobDigest"
+          ],
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "blobDigest": {
+              "$ref": "#/$defs/digest"
+            }
+          }
+        },
+        "review": {
+          "$ref": "#/$defs/review"
+        }
+      }
+    },
+    "derivedEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sourceId",
+        "sourcePath",
+        "sourceBlobDigest",
+        "destinationPath",
+        "destinationSha256",
+        "derivation",
+        "upstreamCopyright",
+        "upstreamSpdx",
+        "preservedNotices",
+        "modificationSummary",
+        "architecturalChanges",
+        "review",
+        "firstPrintFarmerVersion",
+        "tests",
+        "replacementHistory"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "sourceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourcePath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceBlobDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "destinationPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "destinationSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "derivation": {
+          "enum": [
+            "adapted",
+            "copied",
+            "generated"
+          ]
+        },
+        "upstreamCopyright": {
+          "type": "string",
+          "minLength": 1
+        },
+        "upstreamSpdx": {
+          "type": "string",
+          "minLength": 1
+        },
+        "preservedNotices": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "modificationSummary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "architecturalChanges": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review": {
+          "$ref": "#/$defs/review"
+        },
+        "firstPrintFarmerVersion": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+([-.+][0-9A-Za-z.-]+)?$"
+        },
+        "tests": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "replacementHistory": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "date",
+              "summary"
+            ],
+            "properties": {
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "summary": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "referenceRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "destinationPath",
+        "referenceUrls",
+        "statement",
+        "review"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "destinationPath": {
+          "type": "string",
+          "minLength": 1
+        },
+        "referenceUrls": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        },
+        "review": {
+          "$ref": "#/$defs/review"
+        }
+      }
+    },
+    "exception": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "rationale",
+        "approver",
+        "approvalDate",
+        "reviewAfter",
+        "licenseCompatibility"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9.-]+$"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approver": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvalDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "reviewAfter": {
+          "type": "string",
+          "format": "date"
+        },
+        "licenseCompatibility": {
+          "const": "compatible"
+        }
+      }
+    }
+  }
+}

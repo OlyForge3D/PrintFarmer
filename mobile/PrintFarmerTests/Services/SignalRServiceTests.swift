@@ -11,13 +11,15 @@ import XCTest
 /// here instead of silently 401ing against a real server.
 final class SignalRServiceTests: XCTestCase {
 
+    private var mockSession: MockURLProtocol.Session!
+
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
+        mockSession = MockURLProtocol.makeSession()
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
+        mockSession = nil
         super.tearDown()
     }
 
@@ -25,12 +27,12 @@ final class SignalRServiceTests: XCTestCase {
     /// WebSocket upgrade — which `MockURLProtocol` cannot service — while still
     /// capturing the fully built negotiate request for header assertions.
     private func makeService(token: String?) -> SignalRService {
-        MockURLProtocol.requestHandler = { request in
+        mockSession.requestHandler = { request in
             (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
         }
         return SignalRService(
             serverURL: TestData.testBaseURL,
-            session: MockURLProtocol.mockSession(),
+            session: mockSession.urlSession,
             tokenProvider: { token }
         )
     }
@@ -48,7 +50,7 @@ final class SignalRServiceTests: XCTestCase {
         }
         await service.disconnect()
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockSession.capturedRequests.first
         XCTAssertNotNil(captured, "negotiate request should have been sent")
         XCTAssertEqual(captured?.url?.path.hasSuffix("/hubs/printers/negotiate"), true)
         XCTAssertEqual(
@@ -69,7 +71,7 @@ final class SignalRServiceTests: XCTestCase {
         }
         await service.disconnect()
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockSession.capturedRequests.first
         XCTAssertNotNil(captured, "negotiate request should have been sent")
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }

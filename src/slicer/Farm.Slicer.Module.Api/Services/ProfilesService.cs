@@ -1520,7 +1520,7 @@ public class ProfilesService(
         }
 
         // Emit start event
-        await _slicerHubContext.Clients.All.SendAsync("profileimportstarted", new
+        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimportstarted", new
         {
             message = $"Starting profile import from OrcaSlicer worker (v{orcaVersion ?? "unknown"})..."
         }, cancellationToken: ct);
@@ -1587,7 +1587,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = machineProfile.Name ?? "Unknown",
                                 profileType = "Machine",
@@ -1641,7 +1641,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = filamentProfile.Name ?? filamentProfile.Material ?? "Unknown",
                                 profileType = "Filament",
@@ -1696,7 +1696,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = processProfile.Name ?? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)",
                                 profileType = "Process",
@@ -1713,7 +1713,7 @@ public class ProfilesService(
         }
 
         // Emit completion event
-        await _slicerHubContext.Clients.All.SendAsync("profileimportcompleted", new
+        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimportcompleted", new
         {
             imported,
             skipped,
@@ -2829,7 +2829,10 @@ public class ProfilesService(
 
             if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
             {
-                _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
+                _logger.LogInformation(
+                    "Using OrcaSlicer worker from registry: {OrcaWorkerName} ({OrcaWorkerId})",
+                    orcaWorker.Name,
+                    orcaWorker.Id);
                 return orcaWorker.Host;
             }
 
@@ -2840,7 +2843,10 @@ public class ProfilesService(
 
             if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
             {
-                _logger.LogWarning("OrcaSlicer worker '{OrcaWorkerName}' is not online, but using endpoint anyway: {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
+                _logger.LogWarning(
+                    "OrcaSlicer worker {OrcaWorkerName} ({OrcaWorkerId}) is not online, but using its configured endpoint",
+                    orcaWorker.Name,
+                    orcaWorker.Id);
                 return orcaWorker.Host;
             }
 

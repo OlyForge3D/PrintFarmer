@@ -14,6 +14,8 @@ vi.mock('@/common/hooks/useApi', async () => ({
   usePrinters: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCancelDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRegisterDiscoveredPrinter: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreatePrinter: () => ({ mutateAsync: vi.fn() }),
   useBasicHealth: () => ({ data: { status: 'ok' }, isLoading: false, error: null }),
   useHealthStatus: () => ({ data: undefined, isLoading: false, error: null }),

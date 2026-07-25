@@ -46,7 +46,7 @@ public class CameraManagementTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -585,5 +585,33 @@ public class CameraManagementTests : IAsyncLifetime
         result.Source.Should().Be("unknown");
         result.StreamUrl.Should().BeNull();
         result.SnapshotUrl.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetDisplayCameras_ReturnsAuthenticatedProxyRoutesWithoutPrivateTargets()
+    {
+        CameraDto camera = await CreateTestCameraAsync(
+            name: "private-camera",
+            streamUrl: "http://camera.internal/stream?token=private-token",
+            snapshotUrl: "http://camera.internal/snapshot?token=private-token");
+
+        HttpResponseMessage response = await _client!.GetAsync("/api/cameras/display");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string json = await response.Content.ReadAsStringAsync();
+        _ = json.Should().Contain($"/api/cameras/{camera.Id:D}/stream");
+        _ = json.Should().Contain($"/api/cameras/{camera.Id:D}/snapshot");
+        _ = json.Should().NotContain("camera.internal");
+        _ = json.Should().NotContain("private-token");
+    }
+
+    [Fact]
+    public async Task GetDisplayCameras_WithoutAuthentication_ReturnsUnauthorized()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync("/api/cameras/display");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

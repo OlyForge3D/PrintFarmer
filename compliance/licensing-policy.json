@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "licenseExpression": "AGPL-3.0-only",
+  "repositoryUrl": "https://github.com/OlyForge3D/PrintFarmer",
+  "canonicalLicense": {
+    "path": "LICENSE",
+    "normalizedSha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+  },
+  "decision": {
+    "approver": "Jeff Papiez, PrintFarmer repository owner",
+    "approvalDate": "2026-07-24",
+    "approvalReference": "https://github.com/OlyForge3D/PrintFarmer/issues/902",
+    "approvalType": "Repository-owner licensing decision; not external legal approval",
+    "effectiveVersion": "v0.2.3",
+    "lastHistoricalVersion": "v0.2.2"
+  },
+  "requiredFiles": [
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "compliance/calibration-provenance.json",
+    "compliance/calibration-provenance.schema.json",
+    "compliance/dependency-license-policy.json",
+    "compliance/licenses/dotnet-install-MIT.txt",
+    "docs/LICENSING_AND_SOURCE.md"
+  ],
+  "preservedThirdPartyLicenses": [
+    {
+      "path": "compliance/licenses/dotnet-install-MIT.txt",
+      "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+      "source": "https://github.com/dotnet/install-scripts/blob/a6dd53ae9c18d045e8f5dc7db84485a5bef04d43/LICENSE.TXT",
+      "appliesTo": [
+        "scripts/dotnet-install.sh",
+        "src/dotnet-install.sh"
+      ]
+    }
+  ],
+  "packageManifests": [
+    "src/Web/ReactApp/package.json",
+    "src/Web/ReactApp/eslint-rules/package.json",
+    "tests/ui-validation/package.json",
+    "tools/package.json"
+  ],
+  "metadataAssertions": [
+    {
+      "path": "Directory.Build.props",
+      "contains": [
+        "<PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>",
+        "<RepositoryUrl>https://github.com/OlyForge3D/PrintFarmer</RepositoryUrl>"
+      ]
+    },
+    {
+      "path": "scripts/dotnet-install.sh",
+      "contains": [
+        "See compliance/licenses/dotnet-install-MIT.txt"
+      ]
+    },
+    {
+      "path": "src/dotnet-install.sh",
+      "contains": [
+        "See compliance/licenses/dotnet-install-MIT.txt"
+      ]
+    },
+    {
+      "path": "README.md",
+      "contains": [
+        "GNU Affero General Public License v3.0 only",
+        "GET /api/system/source"
+      ]
+    },
+    {
+      "path": "mobile/README.md",
+      "contains": [
+        "GNU Affero General Public License v3.0 only"
+      ]
+    },
+    {
+      "path": ".github/workflows/docker-publish.yml",
+      "contains": [
+        "org.opencontainers.image.licenses=AGPL-3.0-only",
+        "org.opencontainers.image.revision=${{ github.sha }}",
+        "outputs: type=image,name=",
+        "cosign attest --yes --type spdxjson",
+        "--include-npm",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "Smoke test ARM64 image digests",
+        "printfarmer-monolith@${monolith_digest}",
+        "Publish and verify public corresponding-source assets",
+        "gh release upload \"$VERSION\"",
+        "release_is_draft",
+        "Promote validated digests"
+      ],
+      "orderedContains": [
+        "  build-containers:",
+        "    permissions:",
+        "      contents: read",
+        "      id-token: write",
+        "      packages: write",
+        "    strategy:",
+        "Smoke test ARM64 image digests",
+        "Publish and verify public corresponding-source assets",
+        "Promote validated digests"
+      ],
+      "notContains": [
+        "--clobber"
+      ]
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "contains": [
+        "bash scripts/sync-monorepo-version.sh --check",
+        "--branch \"$VERSION\"",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "cosign verify-attestation",
+        "Finalize GitHub Release"
+      ],
+      "notContains": [
+        "Verify image signatures (best-effort)",
+        "Verify failed for",
+        "Create corresponding-source assets",
+        "release-artifacts/*",
+        "artifacts/**/*.spdx.json"
+      ]
+    },
+    {
+      "path": ".github/workflows/consolidated-release.yml",
+      "contains": [
+        "bash scripts/sync-monorepo-version.sh --check",
+        "--branch \"$VERSION\"",
+        "IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)",
+        "cosign verify-attestation",
+        "Finalize GitHub Release"
+      ],
+      "notContains": [
+        "uses: ./.github/workflows/docker-publish.yml",
+        "Create corresponding-source assets",
+        "release-artifacts/*",
+        "artifacts/**/*.spdx.json"
+      ]
+    },
+    {
+      "path": "scripts/docker/dockerfiles/Dockerfile.multistage",
+      "contains": [
+        "org.opencontainers.image.licenses=\"AGPL-3.0-only\"",
+        "PFARM__SourceInfo__Revision"
+      ]
+    }
+  ],
+  "forbiddenFirstPartyDeclarations": [
+    "licensed under the MIT License",
+    "org.opencontainers.image.licenses=MIT",
+    "\"license\": \"ISC\""
+  ],
+  "forbiddenScanPaths": [
+    "README.md",
+    "mobile/README.md",
+    "Directory.Build.props",
+    "src/.editorconfig",
+    ".github/agents/code-review-codex.agent.md",
+    ".github/agents/code-review-gemini.agent.md",
+    ".github/agents/code-review-opus.agent.md",
+    "src/Web/ReactApp/package.json",
+    "src/Web/ReactApp/eslint-rules/package.json",
+    "tests/ui-validation/package.json",
+    "tools/package.json",
+    ".github/workflows/docker-publish.yml",
+    "scripts/docker/dockerfiles/Dockerfile",
+    "scripts/docker/dockerfiles/Dockerfile.api",
+    "scripts/docker/dockerfiles/Dockerfile.frontend",
+    "scripts/docker/dockerfiles/Dockerfile.multistage",
+    "scripts/docker/dockerfiles/Dockerfile.printer-discovery"
+  ],
+  "publication": {
+    "requiredArchivePaths": [
+      ".github/workflows",
+      "LICENSE",
+      "THIRD-PARTY-NOTICES.md",
+      "compliance",
+      "Directory.Build.props",
+      "global.json",
+      "scripts",
+      "src"
+    ],
+    "deniedTrackedPathPatterns": [
+      "(^|/)\\.env$",
+      "(^|/)\\.env\\.(?!(example|development|template)$)",
+      "(^|/)(credentials|secrets?)(/|\\.|$)",
+      "\\.(db|sqlite|sqlite3|p12|pfx|pem|key)$",
+      "(^|/)id_(rsa|dsa|ecdsa|ed25519)$"
+    ],
+    "secretPatterns": [
+      "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+      "github_pat_[A-Za-z0-9_]{20,}",
+      "gh[pousr]_[A-Za-z0-9]{20,}",
+      "AKIA[0-9A-Z]{16}",
+      "https?://[^\\s/:]+:[^\\s/@]+@"
+    ],
+    "secretPatternExceptions": [
+      {
+        "path": ".copilot/skills/gh-auth-isolation/SKILL.md",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "da6ca128983ebff1c3bdbb015338f67aa62730ef903f496eccca176d2f8c2f3f",
+        "reason": "Documented fictional hard-coded credential used as a security anti-pattern example."
+      },
+      {
+        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+        "reason": "Private-key marker documented without key material in secret-handling guidance."
+      },
+      {
+        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
+        "reason": "RSA private-key marker documented without key material in secret-handling guidance."
+      },
+      {
+        "path": "scripts/compliance/compliance.test.mjs",
+        "pattern": "gh[pousr]_[A-Za-z0-9]{20,}",
+        "matchSha256": "d66f4cc7d7c08ec57ca73717f8625478602fd28781494d2876f871b01f4f35b9",
+        "reason": "Synthetic GitHub token used by the negative publication-scanner test."
+      },
+      {
+        "path": "scripts/compliance/compliance.test.mjs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "44de90237471c73eee56499f5e43c97119b04c0fd489502881d035cae8c3423c",
+        "reason": "Synthetic credentialed URL used by the negative source-archive test."
+      }
+    ]
+  },
+  "exceptions": []
+}

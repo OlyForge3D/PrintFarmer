@@ -168,6 +168,30 @@ jobs:
       - name: Pre-push hook tests
         run: bash .githooks/tests/test-pre-push.sh
 
+      - name: Test compliance controls
+        run: node --test scripts/compliance/compliance.test.mjs
+
+      - name: Test release tag-trigger policy
+        run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
+
+      # Full dependency-license validation requires restored NuGet assets
+      # (project.assets.json under src/**/obj/). Without a restore the
+      # validator emits NUGET_ASSETS_MISSING. `ci-tools` ALWAYS runs, so
+      # the restore-then-validate pair here keeps dependency validation
+      # fail-closed on every event — not gated behind the selector's
+      # `want_dotnet_build` decision.
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET (for dependency-license inventory)
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Validate licenses and provenance
+        run: node scripts/compliance/validate-compliance.mjs
+
   # ---------------------------------------------------------------------------
   # frontend — React build + tests. Runs only when the selector wants it.
   # ---------------------------------------------------------------------------
