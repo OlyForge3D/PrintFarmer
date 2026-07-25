@@ -1,7 +1,15 @@
 {
   "name": "printfarmer-react",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
+  "description": "PrintFarmer web dashboard",
+  "license": "AGPL-3.0-only",
+  "homepage": "https://github.com/OlyForge3D/PrintFarmer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OlyForge3D/PrintFarmer.git",
+    "directory": "src/Web/ReactApp"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

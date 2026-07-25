@@ -14,6 +14,11 @@ x-orcaslicer-build: &orcaslicer-build
     NGINX_TAG: ${NGINX_TAG}
     UBUNTU_TAG: ${UBUNTU_TAG}
     GIT_SHA: ${GIT_SHA:-unknown}
+    BUILD_VERSION: ${BUILD_VERSION:-development}
+    VCS_REF: ${VCS_REF:-unknown}
+    SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+    SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+    SBOM_URL: ${SBOM_URL:-}
     ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.1}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
@@ -73,4 +78,3 @@ services:
     restart: unless-stopped
     <<: *worker-security
     deploy: *worker-deployment
-

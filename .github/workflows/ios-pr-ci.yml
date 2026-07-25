@@ -11,6 +11,9 @@ concurrency:
   group: ios-pr-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   # Prefer a stable, explicit simulator over the newest available runtime/model.
   IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e

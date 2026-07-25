@@ -1,0 +1,31 @@
+{
+  "$schema": "./calibration-provenance.schema.json",
+  "schemaVersion": 1,
+  "policyVersion": "1.0.0",
+  "lastReviewed": "2026-07-24",
+  "allowedSourceLicenseExpressions": [
+    "0BSD",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unlicense",
+    "Zlib"
+  ],
+  "governedPathPatterns": [
+    "src/**/calibration/**",
+    "src/**/CalibrationDerived/**",
+    "src/**/calibration/derived/**",
+    "src/calibration-derived/**"
+  ],
+  "approvedSources": [],
+  "entries": [],
+  "referenceRecords": [],
+  "exceptions": []
+}

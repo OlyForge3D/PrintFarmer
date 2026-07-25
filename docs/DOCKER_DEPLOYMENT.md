@@ -2,6 +2,12 @@
 
 This guide covers deploying PrintFarmer using Docker containers for production or testing environments. For local development, see [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md).
 
+Production and hosted deployments must keep the unauthenticated
+`GET /api/system/source` endpoint reachable and publish the exact corresponding
+source and SBOM identified by the running image. See
+[Licensing, Corresponding Source, and Provenance](LICENSING_AND_SOURCE.md) for
+build arguments, verification, retention, correction, and rollback procedures.
+
 ## Architecture Overview
 
 PrintFarmer supports two Docker deployment architectures:
