@@ -2,25 +2,26 @@ import XCTest
 @testable import PrintFarmer
 
 final class BarcodeIntakeServiceTests: XCTestCase {
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var service: BarcodeIntakeService!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
         service = BarcodeIntakeService(apiClient: apiClient)
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         service = nil
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
     func testResolveFilamentMaps404ToNil() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/api/spoolman/filaments/by-barcode")
             XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "code" })?.value, "UNKNOWN")
             return (TestData.httpResponse(url: request.url, statusCode: 404), Data("{}".utf8))
@@ -32,7 +33,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testResolveFilamentUsesQueryParameterAndEncodesSpecialCharacters() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             XCTAssertEqual(request.url?.path, "/api/spoolman/filaments/by-barcode")
             XCTAssertEqual(request.url?.query, "code=ABC%2FDEF%2012")
             let code = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
@@ -49,7 +50,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testImportSpoolDecodesFullCreatedBackendResponse() async throws {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             {
               "id": 501,
@@ -97,7 +98,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testImportSpoolDecodesMinimalBackendResponseWithOmittedNulls() async throws {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             {
               "id": 502,
@@ -121,7 +122,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testImportSpoolMissingRequiredInUseThrowsKeyNotFoundWithServerVersionHint() async {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             {
               "id": 503,
@@ -149,7 +150,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testResolveFilamentDecodesFullBackendResponse() async throws {
-        MockAPIClient.stubResponse(
+        mockAPIClient.stubResponse(
             json: """
             {
               "id": 701,
@@ -188,7 +189,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testResolveFilamentDecodesIdOnlyBackendResponseWithOmittedNulls() async throws {
-        MockAPIClient.stubResponse(json: #"{ "id": 702 }"#)
+        mockAPIClient.stubResponse(json: #"{ "id": 702 }"#)
 
         let filament = try await service.resolveFilament(barcode: "FIL-702")
 
@@ -200,7 +201,7 @@ final class BarcodeIntakeServiceTests: XCTestCase {
     }
 
     func testResolveFilamentRethrowsNon404Errors() async {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             (TestData.httpResponse(url: request.url, statusCode: 500), Data("{}".utf8))
         }
 

@@ -9,6 +9,7 @@ import XCTest
 @MainActor
 final class AuthServiceTests: XCTestCase {
 
+    nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
     private var authService: AuthService!
     private var keychain: KeychainSwift!
@@ -18,15 +19,16 @@ final class AuthServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
         let suiteName = "AuthServiceTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let testKeychain = KeychainSwift(keyPrefix: "AuthServiceTests_\(UUID().uuidString)_")
-        let client = MockAPIClient.makeAPIClient()
+        let mockClient = MockAPIClient()
+        let client = mockClient.apiClient
         defaults.removePersistentDomain(forName: suiteName)
         testKeychain.clear()
 
         userDefaultsSuiteName = suiteName
+        mockAPIClient = mockClient
         userDefaults = defaults
         keychain = testKeychain
         credentialsStore = ServerCredentialsStore(keychain: testKeychain)
@@ -40,12 +42,12 @@ final class AuthServiceTests: XCTestCase {
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         keychain.clear()
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         // Clean up any persisted server URL from tests
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         apiClient = nil
+        mockAPIClient = nil
         authService = nil
         credentialsStore = nil
         keychain = nil
@@ -57,7 +59,7 @@ final class AuthServiceTests: XCTestCase {
     // MARK: - Login
 
     func testSuccessfulLoginReturnsAuthResponse() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let response = try await authService.login(
             serverURL: "https://print.example.com",
@@ -71,7 +73,7 @@ final class AuthServiceTests: XCTestCase {
     }
 
     func testSuccessfulLoginStoresTokenForActivatedServerAndAppliesItToAPIClient() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let response = try await authService.login(
             serverURL: "https://print.example.com",
@@ -88,7 +90,7 @@ final class AuthServiceTests: XCTestCase {
     }
 
     func testSuccessfulLoginAppliesServerBaseURLToSharedAPIClient() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         _ = try await authService.login(
             serverURL: "https://new-server.example.com",
@@ -114,7 +116,7 @@ final class AuthServiceTests: XCTestCase {
             migrateLegacyServerURL: false,
             serverRegistry: registry
         )
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let response = try await authService.login(
             serverURL: "https://print.example.com",
@@ -128,11 +130,11 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertEqual(currentAccessToken, response.token)
         XCTAssertEqual(credentialsStore.load(serverId: server.id)?.accessToken, response.token)
 
-        MockURLProtocol.reset()
-        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        mockAPIClient.reset()
+        mockAPIClient.stubResponse(json: TestJSON.userDTO)
         let _: UserDTO = try await apiClient.get("/api/auth/me")
 
-        let captured = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let captured = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         let token = try XCTUnwrap(response.token)
         XCTAssertEqual(captured.value(forHTTPHeaderField: "Authorization"), "Bearer " + token)
     }
@@ -140,7 +142,7 @@ final class AuthServiceTests: XCTestCase {
     func testLoginTokenExpiryCheckerUsesLoggedInServerAfterActiveServerChanges() async throws {
         let loggedInServer = try addServer(displayName: "First", urlString: "https://first.example.com", active: true)
         let otherServer = try addServer(displayName: "Second", urlString: "https://second.example.com")
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let response = try await authService.login(
             serverURL: loggedInServer.normalizedURLString,
@@ -154,11 +156,11 @@ final class AuthServiceTests: XCTestCase {
         )
         try setActiveServer(otherServer.id)
 
-        MockURLProtocol.reset()
-        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        mockAPIClient.reset()
+        mockAPIClient.stubResponse(json: TestJSON.userDTO)
         let user: UserDTO = try await apiClient.get("/api/auth/me")
 
-        let captured = try XCTUnwrap(MockURLProtocol.capturedRequests.first)
+        let captured = try XCTUnwrap(mockAPIClient.capturedRequests.first)
         let token = try XCTUnwrap(response.token)
         XCTAssertEqual(user.username, "admin")
         XCTAssertEqual(captured.url?.host, loggedInServer.baseURL.host)
@@ -166,7 +168,7 @@ final class AuthServiceTests: XCTestCase {
     }
 
     func testLoginNormalizesTrailingSlash() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         _ = try await authService.login(
             serverURL: "https://print.example.com/",
@@ -182,7 +184,7 @@ final class AuthServiceTests: XCTestCase {
         let firstServer = try addServer(displayName: "First", urlString: "https://first.example.com", active: true)
         let sharedClient = APIClient(
             baseURL: firstServer.baseURL,
-            session: MockURLProtocol.mockSession(),
+            session: mockAPIClient.urlSession,
             accessToken: "first-token"
         )
         authService = AuthService(
@@ -195,7 +197,7 @@ final class AuthServiceTests: XCTestCase {
 
         let requestStarted = DispatchSemaphore(value: 0)
         let allowResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             requestStarted.signal()
             _ = allowResponse.wait(timeout: .now() + 5)
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data(TestJSON.authResponseSuccess.utf8))
@@ -220,15 +222,15 @@ final class AuthServiceTests: XCTestCase {
         let sharedAccessToken = await sharedClient.currentAccessToken()
         XCTAssertEqual(sharedBaseURL, firstServer.baseURL)
         XCTAssertEqual(sharedAccessToken, "first-token")
-        XCTAssertEqual(MockURLProtocol.capturedRequests.first?.url?.host, "second.example.com")
-        XCTAssertNil(MockURLProtocol.capturedRequests.first?.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertEqual(mockAPIClient.capturedRequests.first?.url?.host, "second.example.com")
+        XCTAssertNil(mockAPIClient.capturedRequests.first?.value(forHTTPHeaderField: "Authorization"))
 
         allowResponse.signal()
         _ = try await loginTask.value
     }
 
     func testFailedLoginThrowsAuthFailed() async {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseFailure)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseFailure)
 
         do {
             _ = try await authService.login(
@@ -268,7 +270,7 @@ final class AuthServiceTests: XCTestCase {
     }
 
     func testLoginSendsCorrectRequest() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         _ = try await authService.login(
             serverURL: "https://print.example.com",
@@ -276,7 +278,7 @@ final class AuthServiceTests: XCTestCase {
             password: "secret"
         )
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNotNil(captured)
         XCTAssertEqual(captured?.httpMethod, "POST")
         XCTAssertTrue(captured?.url?.path.contains("/api/auth/login") ?? false)
@@ -296,7 +298,7 @@ final class AuthServiceTests: XCTestCase {
 
     func testLogoutClearsAccessToken() async throws {
         // Login first
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
         _ = try await authService.login(
             serverURL: "https://print.example.com",
             username: "admin",
@@ -304,16 +306,16 @@ final class AuthServiceTests: XCTestCase {
         )
 
         // Logout - stub the POST /api/auth/logout endpoint
-        MockURLProtocol.reset()
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.reset()
+        mockAPIClient.stubEmptySuccess()
         await authService.logout()
 
         // Next request should NOT have Authorization
-        MockURLProtocol.reset()
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.reset()
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
 
@@ -325,7 +327,7 @@ final class AuthServiceTests: XCTestCase {
 
         let requestStarted = DispatchSemaphore(value: 0)
         let allowResponse = DispatchSemaphore(value: 0)
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             requestStarted.signal()
             _ = allowResponse.wait(timeout: .now() + 5)
             return (TestData.httpResponse(url: request.url, statusCode: 200), Data())
@@ -371,7 +373,7 @@ final class AuthServiceTests: XCTestCase {
     func testRestoreSessionNetworkErrorDoesNotClearStoredCredentials() async throws {
         let server = try addServer(displayName: "PrintFarmer", urlString: "https://print.example.com", active: true)
         credentialsStore.save(ServerCredentials(accessToken: "stored-token", expiresAt: nil), serverId: server.id)
-        MockAPIClient.stubError(.notConnectedToInternet)
+        mockAPIClient.stubError(.notConnectedToInternet)
 
         let user = await authService.restoreSession()
 
@@ -384,7 +386,7 @@ final class AuthServiceTests: XCTestCase {
     func testRestoreSessionUnauthorizedClearsStoredCredentials() async throws {
         let server = try addServer(displayName: "PrintFarmer", urlString: "https://print.example.com", active: true)
         credentialsStore.save(ServerCredentials(accessToken: "stored-token", expiresAt: nil), serverId: server.id)
-        MockAPIClient.stubResponse(json: "{}", statusCode: 401)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 401)
 
         let user = await authService.restoreSession()
 
@@ -398,7 +400,7 @@ final class AuthServiceTests: XCTestCase {
         let server = try addServer(displayName: "Legacy", urlString: "https://legacy.example.com", active: true)
         userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
         keychain.set("legacy-token", forKey: ServerCredentialsStore.legacyTokenKey)
-        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        mockAPIClient.stubResponse(json: TestJSON.userDTO)
 
         let user = await authService.restoreSession()
 
@@ -411,14 +413,14 @@ final class AuthServiceTests: XCTestCase {
         let server = try addServer(displayName: "Active", urlString: "https://active.example.com", active: true)
         userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
         keychain.set("legacy-token", forKey: ServerCredentialsStore.legacyTokenKey)
-        MockAPIClient.stubResponse(json: TestJSON.userDTO)
+        mockAPIClient.stubResponse(json: TestJSON.userDTO)
 
         let user = await authService.restoreSession()
 
         XCTAssertNil(user)
         XCTAssertNil(credentialsStore.load(serverId: server.id))
         XCTAssertEqual(keychain.get(ServerCredentialsStore.legacyTokenKey), "legacy-token")
-        XCTAssertTrue(MockURLProtocol.capturedRequests.isEmpty)
+        XCTAssertTrue(mockAPIClient.capturedRequests.isEmpty)
     }
 
     @MainActor

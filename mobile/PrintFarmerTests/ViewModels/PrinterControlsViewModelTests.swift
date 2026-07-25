@@ -246,7 +246,7 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertFalse(vm.isExecuting)
     }
 
-    func test_isExecuting_falseAfterSuccess() async throws {
+    func test_isExecuting_staysTrueAfterSuccessfulSend_untilSignalRUpdate() async throws {
         let gate = AsyncGate()
         mockService.beforeSetTemperatures = { await gate.wait() }
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)
@@ -258,10 +258,21 @@ final class PrinterControlsViewModelTests: XCTestCase {
         while await !gate.hasWaiters { await Task.yield() }
         XCTAssertTrue(vm.isExecuting)
 
-        // Let it succeed (no error set).
+        // A successful HTTP response keeps the command pending until SignalR
+        // confirms that the command's effect reached the printer.
         await gate.open()
         await first
-        XCTAssertFalse(vm.isExecuting)
+        XCTAssertTrue(
+            vm.isExecuting,
+            "A successful send keeps the command pending until a matching printer update arrives"
+        )
+        XCTAssertNil(vm.lastError)
+
+        vm.handlePrinterUpdate(vm.printer)
+        XCTAssertFalse(
+            vm.isExecuting,
+            "The matching printer update clears pending command state"
+        )
     }
 }
 
