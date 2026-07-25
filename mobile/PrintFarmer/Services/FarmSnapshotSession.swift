@@ -105,6 +105,36 @@ enum FarmSnapshotCommitResult: Sendable, Equatable {
     case persistenceFailure(cleanupFailed: Bool)
 }
 
+/// Revocable authority for one canonical snapshot pass. The store evaluates this
+/// permit while holding its lock across the synchronous durable promotion, so a
+/// lifecycle invalidation either wins before promotion or observes the promotion
+/// as already complete.
+final class FarmSnapshotCommitAuthorization: @unchecked Sendable {
+    let capturedSession: FarmSnapshotSession
+    let storeIdentity: UUID?
+
+    private let lock = NSLock()
+    private var isValid = true
+
+    init(capturedSession: FarmSnapshotSession, storeIdentity: UUID? = nil) {
+        self.capturedSession = capturedSession
+        self.storeIdentity = storeIdentity
+    }
+
+    func invalidate() {
+        lock.withLock {
+            isValid = false
+        }
+    }
+
+    func withAuthorization<T>(_ body: () throws -> T) rethrows -> T? {
+        try lock.withLock {
+            guard isValid else { return nil }
+            return try body()
+        }
+    }
+}
+
 /// Result of a snapshot activation/bind attempt (issue #816 D). Distinguishes a
 /// legitimate no-op (`.notApplicable` — demo target, no active server, token-only /
 /// unverified owner, tombstoned) and supersession (`.superseded`) from a RETRYABLE
@@ -153,6 +183,12 @@ protocol FarmSnapshotStoring: Sendable {
     /// The currently authoritative session, if any.
     func currentSession() async -> FarmSnapshotSession?
 
+    /// Issues a revocable permit for one canonical pass. A newer permit for the
+    /// same store supersedes the prior permit before it can promote.
+    func authorizeCommit(
+        capturedSession: FarmSnapshotSession
+    ) async -> FarmSnapshotCommitAuthorization?
+
     /// Reads the active session's record, revalidating authority after every
     /// suspension. Distinguishes absent / present-empty / recovered / unreadable.
     func hydrateActive() async -> FarmSnapshotHydration
@@ -162,12 +198,40 @@ protocol FarmSnapshotStoring: Sendable {
     /// record is strictly newer than what is on disk.
     func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult
 
+    /// Commits through a pass permit that participates in the atomic durable
+    /// promotion boundary. This additive path is used by live canonical owners;
+    /// legacy callers retain strict timestamp monotonicity through `commit`.
+    func commit(
+        _ envelope: FarmSnapshotEnvelope,
+        capturedSession: FarmSnapshotSession,
+        authorization: FarmSnapshotCommitAuthorization
+    ) async -> FarmSnapshotCommitResult
+
     /// Purges an entire server namespace (base + quarantine + temp). Tombstones
     /// the server first so activation/commit cannot resurrect it mid-purge.
     func purge(serverID: UUID) async -> FarmSnapshotPurgeResult
 }
 
 extension FarmSnapshotStoring {
+    func authorizeCommit(
+        capturedSession: FarmSnapshotSession
+    ) async -> FarmSnapshotCommitAuthorization? {
+        guard await currentSession() == capturedSession else { return nil }
+        return FarmSnapshotCommitAuthorization(capturedSession: capturedSession)
+    }
+
+    func commit(
+        _ envelope: FarmSnapshotEnvelope,
+        capturedSession: FarmSnapshotSession,
+        authorization: FarmSnapshotCommitAuthorization
+    ) async -> FarmSnapshotCommitResult {
+        guard authorization.capturedSession == capturedSession,
+              authorization.withAuthorization({ true }) == true else {
+            return .superseded
+        }
+        return await commit(envelope, capturedSession: capturedSession)
+    }
+
     /// Read-only convenience for #817: apply a canonical load outcome. A
     /// `.preserve` outcome (offline / auth failure / partial decode / cancel /
     /// server error) never touches the durable record.

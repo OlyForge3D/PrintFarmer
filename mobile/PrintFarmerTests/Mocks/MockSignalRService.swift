@@ -20,6 +20,9 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private let capturedAttentionLock = NSLock()
     private var capturedAttentionHandlers:
         [@Sendable (AttentionChangedEvent) -> Void] = []
+    private let capturedConnectionStateLock = NSLock()
+    private var capturedConnectionStateHandlers:
+        [@Sendable (SignalRConnectionState) -> Void] = []
 
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
@@ -66,7 +69,10 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     func onConnectionStateChanged(
         _ handler: @escaping @Sendable (SignalRConnectionState) -> Void
     ) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
-        connectionStateHub.subscribe(handler)
+        capturedConnectionStateLock.lock()
+        capturedConnectionStateHandlers.append(handler)
+        capturedConnectionStateLock.unlock()
+        return connectionStateHub.subscribe(handler)
     }
 
     @discardableResult
@@ -140,6 +146,16 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         connectionStateHub.setStateSync(state)
     }
 
+    func simulateCapturedConnectionStateChange(
+        at index: Int,
+        state: SignalRConnectionState
+    ) {
+        capturedConnectionStateLock.lock()
+        let handler = capturedConnectionStateHandlers[index]
+        capturedConnectionStateLock.unlock()
+        handler(state)
+    }
+
     /// Simulate a printer status update for testing.
     func simulatePrinterUpdate(_ update: PrinterStatusUpdate) {
         printerUpdateHub.deliverSync(update)
@@ -159,6 +175,11 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     // MARK: - Test introspection
 
     var connectionStateSubscriberCount: Int { connectionStateHub.handlerCountForTesting }
+    var capturedConnectionStateHandlerCount: Int {
+        capturedConnectionStateLock.lock()
+        defer { capturedConnectionStateLock.unlock() }
+        return capturedConnectionStateHandlers.count
+    }
     var attentionSubscriberCount: Int { attentionChangedHub.handlerCountForTesting }
     var capturedAttentionHandlerCount: Int {
         capturedAttentionLock.lock()

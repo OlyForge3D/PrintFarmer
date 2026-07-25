@@ -452,6 +452,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
         do {
             try await performConnect(myGen: myGen)
+        } catch is CancellationError {
+            lifecycleSync {
+                guard self.generation == myGen, !self.intentionalDisconnect else {
+                    return
+                }
+                self.intentionalDisconnect = true
+                self.generation &+= 1
+                self.tearDownLocked()
+                self.connectionStateHub.setState(.disconnected)
+            }
+            throw CancellationError()
         } catch {
             // Only schedule a reconnect if this connect attempt is still
             // the current generation. Otherwise the user has already
@@ -581,7 +592,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // receive (r8 blocker #2: every suspension inside the
         // handshake path re-checks intent so disconnect() can
         // invalidate mid-handshake).
-        try await sendHandshake(myGen: myGen)
+        let handshakeTrailingData = try await sendHandshake(myGen: myGen)
         try checkGenerationStillCurrent(myGen)
 
         // Step 4: Publish `.connected` and start ancillary tasks — all
@@ -644,6 +655,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             self.receiveCompletionBarrier = barrier
             self.pingTask = self.makePingTask()
             self.connectionStateHub.setState(.connected)
+            if !handshakeTrailingData.isEmpty {
+                // The receive task cannot enter lifecycleSync until this
+                // transition returns, so handshake-adjacent bytes reach the
+                // shared parser before any later WebSocket receive.
+                self.processIncomingData(handshakeTrailingData)
+            }
             return true
         }
         if !started {
@@ -653,6 +670,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     }
 
     private func checkGenerationStillCurrent(_ myGen: UInt64) throws {
+        try Task.checkCancellation()
         let stillCurrent = lifecycleSync {
             self.generation == myGen && !self.intentionalDisconnect
         }
@@ -708,7 +726,15 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         return webSocketFactory(wsURL)
     }
 
-    private func sendHandshake(myGen: UInt64) async throws {
+    private struct HandshakeResponse: Decodable {
+        let error: String?
+    }
+
+    /// Consumes exactly one RS-delimited handshake response. A WebSocket
+    /// receive may legally coalesce the first hub invocation, or only its
+    /// prefix, after that separator; those bytes are returned untouched for
+    /// the connection transition to feed into the shared bounded frame parser.
+    private func sendHandshake(myGen: UInt64) async throws -> Data {
         try checkGenerationStillCurrent(myGen)
         let handshake = SignalRHandshakeRequest(protocol: "json", version: 1)
         let data = try JSONEncoder().encode(handshake)
@@ -740,23 +766,33 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // otherwise be the only line of defense).
         try checkGenerationStillCurrent(myGen)
 
+        let rawData: Data
         switch result {
         case .data(let data):
-            let trimmed = data.split(separator: Self.recordSeparator).first ?? data[...]
-            if let json = try? JSONSerialization.jsonObject(with: Data(trimmed)) as? [String: Any],
-               let error = json["error"] as? String {
-                throw NetworkError.authFailed("SignalR handshake failed: \(error)")
-            }
+            rawData = data
         case .string(let text):
-            let cleaned = text.replacingOccurrences(of: "\u{1e}", with: "")
-            if let data = cleaned.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let error = json["error"] as? String {
-                throw NetworkError.authFailed("SignalR handshake failed: \(error)")
-            }
+            rawData = Data(text.utf8)
         @unknown default:
-            break
+            throw NetworkError.invalidResponse
         }
+
+        guard let separator = rawData.firstIndex(of: Self.recordSeparator) else {
+            throw NetworkError.invalidResponse
+        }
+
+        let responseData = Data(rawData[..<separator])
+        let response: HandshakeResponse
+        do {
+            response = try JSONDecoder().decode(HandshakeResponse.self, from: responseData)
+        } catch {
+            throw NetworkError.invalidResponse
+        }
+        if let error = response.error {
+            throw NetworkError.authFailed("SignalR handshake failed: \(error)")
+        }
+
+        let trailingStart = rawData.index(after: separator)
+        return Data(rawData[trailingStart...])
     }
 
     // MARK: - Message Loop
@@ -924,6 +960,10 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         lifecycleSync {
             processIncomingData(data)
         }
+    }
+
+    func drainHubCoordinatorForTesting() {
+        coordinator.sync {}
     }
     #endif
 

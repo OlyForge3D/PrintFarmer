@@ -12,6 +12,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
     var snapshotHandler: (@Sendable (UUID) async throws -> Data)?
+    var listHandler: (@Sendable (Bool) async throws -> [Printer])?
+    var getHandler: (@Sendable (UUID) async throws -> Printer)?
     var queueOverviewToReturn: [QueueOverview] = []
     var spoolsToReturn: [SpoolmanSpool] = []
     var errorToThrow: Error?
@@ -25,6 +27,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getCameraUrlCalledWith: UUID?
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
+    var listPrintersCallCount = 0
+    var getPrinterCallCount = 0
     var getCurrentJobCalledWith: UUID?
     var getHistoryCalledWith: (id: UUID, limit: Int?)?
     var pauseCalledWith: UUID?
@@ -48,13 +52,21 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
+        listPrintersCallCount += 1
         listIncludeDisabledArg = includeDisabled
+        if let listHandler {
+            return try await listHandler(includeDisabled)
+        }
         if let error = errorToThrow { throw error }
         return printersToReturn
     }
 
     func get(id: UUID) async throws -> Printer {
         getPrinterCalledWith = id
+        getPrinterCallCount += 1
+        if let getHandler {
+            return try await getHandler(id)
+        }
         if let error = errorToThrow { throw error }
         guard let printer = printerToReturn else { throw NetworkError.notFound }
         return printer

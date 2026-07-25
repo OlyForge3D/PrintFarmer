@@ -50,6 +50,8 @@ final class ShiftTasksViewModel {
     @ObservationIgnored private var lifecycleEpoch: UInt64 = 0
     @ObservationIgnored private var isActive = false
     @ObservationIgnored private var taskInvalidationSubscription: SignalRSubscription?
+    @ObservationIgnored private var connectionStateSubscription: SignalRSubscription?
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
 
     /// Bounded, thread-safe coalescing mailbox for supported invalidations. The
     /// SignalR hub delivers events synchronously on its serial coordinator queue;
@@ -283,6 +285,30 @@ final class ShiftTasksViewModel {
                 )
             }
         }
+        let connectionRegistration = signalRService.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.matchesAuthority(
+                        epoch: epoch,
+                        taskIdentity: newTaskIdentity,
+                        signalRIdentity: newSignalRIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                _ = await self.requestCanonicalRefresh(
+                    epoch: epoch,
+                    service: taskService,
+                    shiftPlanEnabled: shiftPlanEnabled
+                )
+            }
+        }
+        lastObservedConnectionState = connectionRegistration.initial
+        connectionStateSubscription = connectionRegistration.subscription
     }
 
     func deactivate() {
@@ -1107,6 +1133,9 @@ final class ShiftTasksViewModel {
 
         taskInvalidationSubscription?.cancel()
         taskInvalidationSubscription = nil
+        connectionStateSubscription?.cancel()
+        connectionStateSubscription = nil
+        lastObservedConnectionState = nil
         invalidationMailbox?.reset()
         invalidationMailbox = nil
 

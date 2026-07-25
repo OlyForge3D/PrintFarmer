@@ -45,6 +45,52 @@ actor ShiftTaskResultGate<Value: Sendable> {
     }
 }
 
+enum CanonicalLoadStep<Value: Sendable>: Sendable {
+    case value(Value)
+    case failure(ShiftTaskProofError)
+    case gated(ShiftTaskResultGate<Value>)
+}
+
+actor ScriptedCanonicalResult<Value: Sendable> {
+    private var steps: [CanonicalLoadStep<Value>]
+    private(set) var callCount = 0
+    private var countWaiters:
+        [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    init(_ steps: [CanonicalLoadStep<Value>]) {
+        self.steps = steps
+    }
+
+    func next() async throws -> Value {
+        callCount += 1
+        resumeCountWaiters()
+        guard !steps.isEmpty else {
+            throw ShiftTaskProofError.forced("Unexpected canonical load call \(callCount)")
+        }
+        switch steps.removeFirst() {
+        case .value(let value):
+            return value
+        case .failure(let error):
+            throw error
+        case .gated(let gate):
+            return try await gate.wait()
+        }
+    }
+
+    func waitForCallCount(_ target: Int) async {
+        guard callCount < target else { return }
+        await withCheckedContinuation { continuation in
+            countWaiters.append((target, continuation))
+        }
+    }
+
+    private func resumeCountWaiters() {
+        let ready = countWaiters.filter { callCount >= $0.target }
+        countWaiters.removeAll { callCount >= $0.target }
+        ready.forEach { $0.continuation.resume() }
+    }
+}
+
 enum ShiftTaskLoadStep: Sendable {
     case value(ShiftTaskSnapshot)
     case failure(ShiftTaskProofError)
@@ -175,14 +221,14 @@ actor ScriptedShiftTaskService: ShiftTaskServiceProtocol {
 }
 
 final class ShiftTaskCallbackQueue: @unchecked Sendable {
-    private typealias Operation = @MainActor @Sendable () async -> Void
+    typealias Operation = @MainActor @Sendable () async -> Void
 
     private let lock = NSLock()
     private var operations: [Operation] = []
     private var countWaiters:
         [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
 
-    var enqueuer: ShiftTasksViewModel.CallbackEnqueuer {
+    var enqueuer: @Sendable (@escaping Operation) -> Void {
         { [weak self] operation in
             self?.append(operation)
         }
