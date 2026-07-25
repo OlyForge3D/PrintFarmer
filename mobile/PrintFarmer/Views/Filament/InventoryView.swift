@@ -25,11 +25,7 @@ struct InventoryView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
             .padding(.top, 8)
-            // Note: `ContentView`'s per-tab `.accessibilityIdentifier("tab.inventory")`
-            // (applied to this whole view as the Inventory tab's content) lands on
-            // this segmented control in the accessibility tree rather than a
-            // separately-assigned identifier here, matching the existing app-wide
-            // "tab.<name>" convention used to address each tab's root content.
+            .accessibilityIdentifier("inventory.segmentPicker")
 
             switch segment {
             case .spools:

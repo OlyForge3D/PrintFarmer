@@ -449,6 +449,7 @@ final class OperatorShellUITests: PrintFarmerUITestCase {
 // feature gate resolves `attentionEnabled == false`. This subclass
 // launches with the deterministic attention-disabled bootstrap so the
 // fallback surface is guaranteed to be on screen.
+@MainActor
 final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
 
     override var additionalLaunchArguments: [String] {
@@ -483,20 +484,17 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
             return
         }
 
-        // The fallback surface renders three buttons, all of which inherit
-        // the outer `attention.disabled.fallback` identifier (a SwiftUI
-        // a11y propagation quirk on a parent VStack). Disambiguate by
-        // label; this is the deterministic 'Notifications' entry.
-        let fallbackNotificationsButton = app.buttons
-            .matching(identifier: "attention.disabled.fallback")
-            .matching(NSPredicate(format: "label == %@", "Notifications"))
-            .firstMatch
+        let fallbackNotificationsButton = app.buttons["attention.fallback.notifications"]
         if !fallbackNotificationsButton.waitForExistence(timeout: 10) {
             let dump = app.debugDescription
-            XCTFail("Fallback Notifications button (label='Notifications', id='attention.disabled.fallback') must be on screen under --uitesting-attention-disabled. App hierarchy:\n\(dump)",
+            XCTFail("Fallback Notifications button (id='attention.fallback.notifications') must be on screen under --uitesting-attention-disabled. App hierarchy:\n\(dump)",
                     file: file, line: line)
             return
         }
+
+        XCTAssertEqual(fallbackNotificationsButton.label, "Notifications", file: file, line: line)
+        XCTAssertGreaterThanOrEqual(fallbackNotificationsButton.frame.width, 44, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(fallbackNotificationsButton.frame.height, 44, file: file, line: line)
 
         guard fallbackNotificationsButton.isHittable else {
             XCTFail("attention.fallback.notifications is not hittable — fallback surface is present but obscured",
@@ -596,10 +594,7 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
         // Wait for the sheet to dismiss — the fallback Notifications
         // button (an unambiguous sentinel of the disabled-attention
         // fallback surface) must be back on screen.
-        let fallbackNotificationsButton = app.buttons
-            .matching(identifier: "attention.disabled.fallback")
-            .matching(NSPredicate(format: "label == %@", "Notifications"))
-            .firstMatch
+        let fallbackNotificationsButton = app.buttons["attention.fallback.notifications"]
         XCTAssertTrue(
             fallbackNotificationsButton.waitForExistence(timeout: 5),
             "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface"
@@ -615,20 +610,15 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
             "Reopened fallback Notifications sheet did not present its root — #727 regression indicator"
         )
 
-        // 5b. Brief settle to catch asynchronous stale restoration
-        // where a legacy child re-pushes shortly after the root
-        // appears (the exact race #727's reset handler guards).
-        Thread.sleep(forTimeInterval: 0.5)
-
-        // 5c. After the async settle the Notifications root must
-        // still be the visible surface. If a stale child was
-        // restored, the root nav bar would no longer be on screen.
+        // 5b. The root-bar expectation above is the post-dismissal UI-idle
+        // barrier. If a stale child were restored, this root bar would no
+        // longer be the visible navigation surface.
         XCTAssertTrue(
             notificationsRootBar.exists,
-            "Notifications root disappeared after async settle — a stale child was asynchronously restored on reopen"
+            "Notifications root disappeared after reopen — a stale child was restored"
         )
 
-        // 5d. The IDENTICAL global sentinel used before dismissal
+        // 5c. The IDENTICAL global sentinel used before dismissal
         // must now be absent. Using the same query proves the
         // pushed child is truly gone — this is the #727 contract.
         XCTAssertFalse(

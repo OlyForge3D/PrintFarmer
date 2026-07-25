@@ -46,7 +46,12 @@ struct JobListView: View {
                             }
                             .tabViewStyle(.page(indexDisplayMode: .never))
                             
-                            PageIndicator(currentPage: $currentPage, pageCount: 3, labels: ["Queue", "Printing", "Recent"])
+                            PageIndicator(
+                                currentPage: $currentPage,
+                                pageCount: 3,
+                                labels: ["Queue", "Printing", "Recent"],
+                                accessibilityIdentifierPrefix: "jobList.page"
+                            )
                                 .padding(.bottom, 8)
                         }
                     } else {
@@ -141,6 +146,7 @@ struct JobListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .accessibilityIdentifier("jobList.recent.list")
                 .refreshable {
                     await viewModel.loadJobs()
                 }
@@ -192,6 +198,7 @@ struct JobListView: View {
             }
         }
         .listStyle(.plain)
+        .accessibilityIdentifier("jobList.combined.list")
     }
 
     // MARK: - Active Job Row
@@ -371,7 +378,19 @@ struct JobListView: View {
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(recentJobAccessibilityLabel(item))
         .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
+    }
+
+    private func recentJobAccessibilityLabel(_ item: QueuedPrintJobResponse) -> String {
+        var components = [item.job.name, "\(item.job.status) status"]
+        if let printerName = item.job.printerName {
+            components.append(printerName)
+        }
+        if let failureReason = item.job.failureReason {
+            components.append(failureReason)
+        }
+        return components.joined(separator: ", ")
     }
 
     // MARK: - Helpers

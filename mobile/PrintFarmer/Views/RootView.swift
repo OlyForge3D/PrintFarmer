@@ -52,12 +52,14 @@ struct RootView: View {
                         ContentView()
                             .id(services.activeServerGeneration)
                             .task(id: services.activeServerGeneration) {
-                                pendingReadyMonitor.configure(
-                                    autoPrintService: services.autoPrintService,
-                                    printerService: services.printerService
-                                )
-                                await pendingReadyMonitor.requestNotificationPermission()
-                                pendingReadyMonitor.startMonitoring()
+                                if !UITestBootstrap.isEnabled {
+                                    pendingReadyMonitor.configure(
+                                        autoPrintService: services.autoPrintService,
+                                        printerService: services.printerService
+                                    )
+                                    await pendingReadyMonitor.requestNotificationPermission()
+                                    pendingReadyMonitor.startMonitoring()
+                                }
                                 do {
                                     try await services.signalRService.connect()
                                 } catch {

@@ -13,6 +13,7 @@ import XCTest
 /// they apply only to this launched process and are never written to the
 /// persistent `UserDefaults.standard` plist. The demo `ServiceContainer`
 /// keeps the sign-in path off the real network.
+@MainActor
 final class LoginFlowUITests: PrintFarmerUITestCase {
 
     override var additionalLaunchArguments: [String] {
@@ -58,60 +59,63 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
 
     func testCanTypeInLoginFields() {
         let usernameField = app.textFields["usernameField"]
-        guard usernameField.waitForExistence(timeout: 5) else {
-            // Login screen may not be visible if already authenticated in mock mode
-            return
-        }
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 5))
 
         usernameField.tap()
+        assertKeyboardFocus(on: usernameField)
+        usernameField.typeText("admin")
+        XCTAssertEqual(usernameField.value as? String, "admin")
+
+        let passwordField = app.secureTextFields["passwordField"]
+        XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
+        passwordField.tap()
+        assertKeyboardFocus(on: passwordField)
+        passwordField.typeText("password123")
+        XCTAssertEqual(passwordField.value as? String, "•••••••••••")
+    }
+
+    // MARK: - Login to Operator Shell Transition
+
+    func testLoginTransitionsToOperatorShell() {
+        let loginButton = app.buttons["loginButton"]
+        XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
+
+        let usernameField = app.textFields["usernameField"]
+        XCTAssertTrue(usernameField.waitForExistence(timeout: 3))
+        usernameField.tap()
+        assertKeyboardFocus(on: usernameField)
         usernameField.typeText("admin")
 
         let passwordField = app.secureTextFields["passwordField"]
-        if passwordField.exists {
-            passwordField.tap()
-            passwordField.typeText("password123")
-        }
-    }
+        XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
+        passwordField.tap()
+        assertKeyboardFocus(on: passwordField)
+        passwordField.typeText("password")
 
-    // MARK: - Login to Dashboard Transition
-
-    func testLoginTransitionsToDashboard() {
-        // This test requires mock mode to return a successful auth response.
-        // When --uitesting is active, the app should auto-login or accept any credentials.
-        let loginButton = app.buttons["loginButton"]
-        guard loginButton.waitForExistence(timeout: 5) else {
-            // May already be on dashboard in mock mode
-            return
-        }
-
-        // Fill in fields if available
-        let serverField = app.textFields["serverURLField"]
-        if serverField.exists {
-            serverField.tap()
-            serverField.typeText("http://localhost:8080")
-        }
-
-        let usernameField = app.textFields["usernameField"]
-        if usernameField.exists {
-            usernameField.tap()
-            usernameField.typeText("admin")
-        }
-
-        let passwordField = app.secureTextFields["passwordField"]
-        if passwordField.exists {
-            passwordField.tap()
-            passwordField.typeText("password")
-        }
-
+        XCTAssertTrue(loginButton.isEnabled)
         loginButton.tap()
 
-        // After login, dashboard should appear (or an error if mock server isn't set up)
-        // Look for common dashboard elements
-        let dashboardElement = app.navigationBars["Dashboard"]
-        if dashboardElement.waitForExistence(timeout: 10) {
-            XCTAssertTrue(dashboardElement.exists, "Dashboard should appear after login")
-        }
-        // Note: This test will need mock server support to fully pass.
-        // Without it, it validates the login form interaction works.
+        XCTAssertTrue(
+            app.tabBars.buttons["Attention"].waitForExistence(timeout: 10),
+            "Successful authentication should present the operator shell"
+        )
+    }
+
+    private func assertKeyboardFocus(
+        on field: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasKeyboardFocus == true"),
+            object: field
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [focused], timeout: 3),
+            .completed,
+            "Tapping the field should retain keyboard focus",
+            file: file,
+            line: line
+        )
     }
 }

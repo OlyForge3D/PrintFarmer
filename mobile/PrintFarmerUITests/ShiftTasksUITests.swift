@@ -190,36 +190,33 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
             timelineHeader.waitForExistence(timeout: 5),
             "The Timeline anchor group header must render"
         )
-        XCTAssertTrue(
-            anytimeHeader.waitForExistence(timeout: 5),
-            "The Anytime Today anchor group header must render"
-        )
 
         let nowRow = app.otherElements["shiftTasks.row.info.\(nowTaskID)"]
         let timelineRow = app.otherElements["shiftTasks.row.info.\(timelineTaskID)"]
-        let anytimeRow = app.otherElements["shiftTasks.row.info.\(anytimeTaskID)"]
-
         XCTAssertTrue(nowRow.waitForExistence(timeout: 5))
         XCTAssertTrue(timelineRow.waitForExistence(timeout: 5))
-        XCTAssertTrue(anytimeRow.waitForExistence(timeout: 5))
+        XCTAssertLessThan(nowRow.frame.minY, timelineRow.frame.minY)
+        XCTAssertLessThan(nowHeader.frame.minY, timelineHeader.frame.minY)
 
-        // Causal server order: Now precedes Timeline precedes Anytime Today.
-        // Assert on stable row geometry (no sleeps / polling).
-        XCTAssertLessThan(
-            nowRow.frame.minY, timelineRow.frame.minY,
-            "The Now group must be presented above the Timeline group"
+        if !anytimeHeader.exists {
+            let list = app.collectionViews["shiftTasks.list"]
+            XCTAssertTrue(list.exists)
+            list.swipeUp()
+        }
+
+        XCTAssertTrue(
+            anytimeHeader.waitForExistence(timeout: 5),
+            "The Anytime Today anchor group header must render after scrolling the checklist"
         )
+
+        let anytimeRow = app.otherElements["shiftTasks.row.info.\(anytimeTaskID)"]
+        XCTAssertTrue(anytimeRow.waitForExistence(timeout: 5))
         XCTAssertLessThan(
             timelineRow.frame.minY, anytimeRow.frame.minY,
             "The Timeline group must be presented above the Anytime Today group"
         )
-
-        // Group headers share the same server ordering as their tasks.
-        XCTAssertLessThan(nowHeader.frame.minY, timelineHeader.frame.minY)
         XCTAssertLessThan(timelineHeader.frame.minY, anytimeHeader.frame.minY)
 
-        // The grouped list keeps the preserved print queue reachable
-        // from this destination.
         XCTAssertTrue(app.buttons["shiftTasks.printQueue"].exists)
     }
 }

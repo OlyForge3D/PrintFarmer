@@ -46,8 +46,6 @@ struct LoginView: View {
             .frame(maxWidth: sizeClass == .regular ? 500 : .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = nil }
         .accessibilityIdentifier("loginView")
         .animation(.easeInOut(duration: 0.2), value: authViewModel.errorMessage)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isServerURLExpanded)

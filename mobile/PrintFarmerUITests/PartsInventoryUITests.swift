@@ -6,19 +6,40 @@ import XCTest
 /// renders real demo catalog data (seeded by `DemoPartsInventoryService`)
 /// and that tapping a part row opens the reusable part-detail sheet with
 /// genuine adjustment controls.
+@MainActor
 final class PartsInventoryUITests: PrintFarmerUITestCase {
 
-    // The Inventory tab's segmented Spools/Printed Parts control surfaces
-    // under the app-wide "tab.<name>" identifier that `ContentView` assigns
-    // to each tab's root content (see `InventoryView.swift`), rather than a
-    // separately-named identifier — it is the first native accessibility
-    // element in that tab's view tree.
-    private func openPrintedPartsSegment() {
+    private func openInventory() {
         let inventoryTab = app.tabBars.buttons["Inventory"]
-        XCTAssertTrue(inventoryTab.waitForExistence(timeout: 5), "Inventory tab should exist in the operator shell")
-        inventoryTab.tap()
+        if inventoryTab.waitForExistence(timeout: 5) {
+            inventoryTab.tap()
+            return
+        }
 
-        let segmentPicker = app.segmentedControls["tab.inventory"]
+        let sidebarInventory = app.buttons["sidebar.inventory"]
+        if sidebarInventory.waitForExistence(timeout: 3) {
+            sidebarInventory.tap()
+            return
+        }
+
+        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
+            let toggle = app.navigationBars.buttons[label]
+            if toggle.exists {
+                toggle.tap()
+                if sidebarInventory.waitForExistence(timeout: 3) {
+                    sidebarInventory.tap()
+                    return
+                }
+            }
+        }
+
+        XCTFail("Inventory destination should be reachable from the operator shell")
+    }
+
+    private func openPrintedPartsSegment() {
+        openInventory()
+
+        let segmentPicker = app.segmentedControls["inventory.segmentPicker"]
         XCTAssertTrue(segmentPicker.waitForExistence(timeout: 5),
                       "Inventory tab should expose a Spools/Printed Parts segmented control")
 
@@ -28,11 +49,9 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
     }
 
     func testInventoryTabDefaultsToSpoolsSegment() {
-        let inventoryTab = app.tabBars.buttons["Inventory"]
-        XCTAssertTrue(inventoryTab.waitForExistence(timeout: 5))
-        inventoryTab.tap()
+        openInventory()
 
-        let segmentPicker = app.segmentedControls["tab.inventory"]
+        let segmentPicker = app.segmentedControls["inventory.segmentPicker"]
         XCTAssertTrue(segmentPicker.waitForExistence(timeout: 5))
         XCTAssertTrue(segmentPicker.buttons["Spools"].isSelected,
                       "Inventory tab should default to the existing Spools segment")
@@ -75,8 +94,7 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 5),
                       "Tapping a part row should present its detail sheet titled with the part's name")
 
-        XCTAssertTrue(app.otherElements["partScan.deltaStepper"].waitForExistence(timeout: 3)
-            || app.steppers["partScan.deltaStepper"].waitForExistence(timeout: 3),
+        XCTAssertTrue(app.steppers["partScan.deltaStepper"].waitForExistence(timeout: 3),
             "Part detail sheet should expose the manual adjustment stepper")
 
         let applyButton = app.buttons["partScan.applyAdjustment"]
@@ -86,18 +104,35 @@ final class PartsInventoryUITests: PrintFarmerUITestCase {
     func testReorderOnlyToggleFiltersList() {
         openPrintedPartsSegment()
 
-        XCTAssertTrue(app.buttons["partsInventory.row.CLIP-02"].waitForExistence(timeout: 5))
+        let clipRow = app.buttons["partsInventory.row.CLIP-02"]
+        XCTAssertTrue(clipRow.waitForExistence(timeout: 5))
 
         let toggle = app.switches["partsInventory.reorderToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 3))
-        // Tap the nested native switch control rather than the identified
-        // row container — the row's synthesized tap coordinate does not
-        // reliably land on the interactive switch inside a List/Form.
-        toggle.switches.firstMatch.tap()
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
 
-        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].waitForExistence(timeout: 3),
+        let toggleActivated = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == '1'"),
+            object: toggle
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [toggleActivated], timeout: 3),
+            .completed,
+            "Needs Reorder Only should expose its active state through the accessible switch control"
+        )
+
+        let clipRemoved = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: clipRow
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [clipRemoved], timeout: 3),
+            .completed,
+            "Filtering should remove non-reorder rows from the accessibility hierarchy"
+        )
+        XCTAssertTrue(app.buttons["partsInventory.row.BRKT-01"].exists,
                       "BRKT-01 needs reorder and should remain visible when the toggle is on")
-        XCTAssertFalse(app.buttons["partsInventory.row.CLIP-02"].exists,
+        XCTAssertFalse(clipRow.exists,
                        "CLIP-02 does not need reorder and should be hidden when the toggle is on")
     }
 }

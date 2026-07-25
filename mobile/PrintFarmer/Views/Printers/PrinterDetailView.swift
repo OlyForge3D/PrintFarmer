@@ -494,6 +494,7 @@ struct PrinterDetailView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Filament Slots")
                         .font(.headline)
+                        .accessibilityIdentifier("printer.detail.slots")
                     VStack(spacing: 8) {
                         ForEach(viewModel.toolheads) { toolhead in
                             toolheadSlotRow(toolhead)
@@ -510,7 +511,6 @@ struct PrinterDetailView: View {
 
             filamentSection(printer)
         }
-        .accessibilityIdentifier("printer.detail.slots")
     }
 
     private func toolheadSlotRow(_ toolhead: Toolhead) -> some View {

@@ -10,12 +10,36 @@ import XCTest
 /// expected to render disabled in this environment — that disabled state
 /// itself is asserted as deterministic, real rendered behavior rather than
 /// worked around.
+@MainActor
 final class ScanStationUITests: PrintFarmerUITestCase {
+
+    private let printerID = "10000000-0001-0000-0000-000000000001"
 
     private func openScanTab() {
         let scanTab = app.tabBars.buttons["Scan"]
-        XCTAssertTrue(scanTab.waitForExistence(timeout: 5), "Scan tab should exist in the operator shell")
-        scanTab.tap()
+        if scanTab.waitForExistence(timeout: 5) {
+            scanTab.tap()
+            return
+        }
+
+        let sidebarScan = app.buttons["sidebar.scan"]
+        if sidebarScan.waitForExistence(timeout: 3) {
+            sidebarScan.tap()
+            return
+        }
+
+        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
+            let toggle = app.navigationBars.buttons[label]
+            if toggle.exists {
+                toggle.tap()
+                if sidebarScan.waitForExistence(timeout: 3) {
+                    sidebarScan.tap()
+                    return
+                }
+            }
+        }
+
+        XCTFail("Scan destination should be reachable from the operator shell")
     }
 
     func testScanTabRendersPrimaryScanControl() {
@@ -93,15 +117,17 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(lookupTitle.waitForExistence(timeout: 5),
                       "Printer Lookup should present the printer lookup list")
 
-        let printerRowPredicate = NSPredicate(format: "label CONTAINS %@", "Prusa MK4 #1")
-        let printerRow = app.descendants(matching: .any).matching(printerRowPredicate).firstMatch
+        let printerRow = app.buttons["scan.printerLookup.row.\(printerID)"]
         XCTAssertTrue(printerRow.waitForExistence(timeout: 5),
                       "Seeded demo printer should render in the Printer Lookup list")
+        XCTAssertTrue(printerRow.label.contains("Prusa MK4 #1"))
         printerRow.tap()
 
         XCTAssertFalse(app.navigationBars["Printer Lookup"].exists,
                        "Selecting a printer should dismiss the lookup list")
-        XCTAssertTrue(app.staticTexts["Prusa MK4 #1"].waitForExistence(timeout: 5),
+        let destination = app.staticTexts["printer.detail.destination.\(printerID)"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 8),
                       "Selecting a printer should navigate to that printer's detail view")
+        XCTAssertEqual(destination.label, "Prusa MK4 #1, printer detail")
     }
 }
