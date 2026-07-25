@@ -184,3 +184,49 @@ Participated in multi-round trio review cycle. Key learnings:
 **Verified:** B3 auth ✓, migrations ✓, build ✓, 75 focused tests ✓, full suite 3251/3253 (2 unrelated).
 
 **Next Steps:** Fix above blockers on this branch. Jeff Papiez locked out for this revision cycle. Hicks will re-review after fixes.
+
+---
+
+## 2026-07-25 · #953 — SqlServer InitialV1 SET NULL vs required FK class (P0, epic #705 blocker)
+
+**Requested by:** Jeff Papiez (via coordinator, cross-session delegate from `Coordinating mobile backlog` on `feature/705-operator-redesign`).
+**Branch:** `jpapiez-super-invention` off `feature/705-operator-redesign` @ `436ddfe540b42b56c1957ef2a033d2c822d90f8c`.
+**Kane's canonical evidence:** #723 comment 5080524020, `qual-artifacts-723/provider-runtime/app-mssql.log`.
+
+### Bug frame
+`AppDbContext.InitialV1` used `ON DELETE SET NULL` against non-nullable FK columns. SQL Server rejects with error 1761 at CREATE TABLE, blocking every fresh SQL Server deployment.
+
+### Domain analysis
+- `HardwareModel.ManufacturerId` is `Guid` (non-null); base comment says "Required — use Community/Unknown/community entries."
+- `StoredFile.FolderId` is `Guid` with inline `// - REQUIRED` comment.
+- Sibling Hotend/Extruder/Nozzle configs use `Restrict` on their Manufacturer FKs.
+- Toolhead + GcodeFile were typo'd as `SetNull`, and both files had stale nullability comments that contradicted the actual non-nullable properties.
+
+### Fix
+- `ToolheadModelDefinitionConfiguration`: `SetNull → Restrict`; corrected FK comment.
+- `GcodeFileConfiguration` + `FolderNodeConfiguration`: `SetNull → Restrict` (both redundantly configure the same FK); documented rationale.
+- `ComponentModels.cs`: XML comment on `ToolheadModelDefinition` corrected — no longer claims nullability.
+- Both `InitialV1.cs` migrations (PG + SqlServer) in-place: `ReferentialAction.SetNull → NoAction` on the two offending FKs only.
+- Every `Designer.cs` snapshot for both providers (178 files) + both `AppDbContextModelSnapshot.cs` updated to `OnDelete(DeleteBehavior.Restrict)` for these two FKs.
+
+### Rewrite-baseline justification (kept in decisions inbox)
+Fresh SQL Server InitialV1 cannot be reached by a follow-up "corrective" migration because SQL Server aborts inside InitialV1 itself. Repo precedent for baseline rewrite exists (`f5f72e4c0`, "chore: squash all migrations into single InitialV1 baseline"), pre-1.0, epic branch is unreleased, no SQL Server install can exist because InitialV1 never applied there. Existing PG installs get a one-time SQL runbook (recorded in decisions inbox).
+
+### Regression coverage
+`src/tests/Farm.Web.Api.Tests/Migrations/ToolheadManufacturerFkDeleteBehaviorTests.cs` — 6 tests. Two are exhaustive scanners across every `CreateTableOperation` in `InitialV1.Up` for both providers; they fail on ANY `SetNull` FK against a `NOT NULL` column. Live-probed by temporarily reverting SqlServer `InitialV1` to `SetNull` — test failed with the exact issue reference; then restored.
+
+### Validation
+- Drift: all 4 provider/context pairs "No changes."
+- Build: 0 errors. 281 warnings — all pre-existing (NU1903 transitive `System.Security.Cryptography.Xml`; one CS9124 in `ShiftPlanCompilerTests.cs`).
+- Tests: 4793 / 4793 passed.
+- Format: `dotnet format --verify-no-changes` clean.
+- PG round-trip (ephemeral Docker `postgres:16`, isolated port 54953): apply → 87 rows; downgrade to `AddSpoolBurnRateSourceAttribution` → 86; reapply → 87. All rows in `__EFMigrationsHistory`.
+- SqlServer round-trip (ephemeral Docker `mssql/server:2022-latest` on Rosetta, isolated port 14953, empty `appdb`): error 1761 is GONE — but a **different class** of bug emerged.
+
+### Newly-surfaced P0 (out of scope for #953)
+Fresh SQL Server `InitialV1` now fails on **error 1785** (multiple cascade paths) at `FK_MaintenanceAlerts_Printers_PrinterId`. Two cascade paths from `Printers` to `MaintenanceAlerts` (direct `Cascade` + indirect via `PrinterMaintenanceSchedules` Cascade→SetNull). Kane's original qualification could not see this because SQL Server aborted at 1761 first.
+
+**Not fixing here.** It is a different class (cascade-path conflict, not SetNull-vs-required) requiring a real domain decision on printer/schedule/alert cascade semantics. Recommended: separate P0, domain-owner-scoped. Full trace and options are in `.squad/decisions/inbox/lambert-953-setnull-required-fk.md`.
+
+### Gates
+Frozen candidate committed to `jpapiez-super-invention` with `Closes #953` + Copilot trailers. No push, no PR, no `#953`/`#723` close, no Bishop/Hicks/Vasquez dispatch — coordinator owns those.

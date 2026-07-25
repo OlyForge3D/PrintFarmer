@@ -874,7 +874,7 @@ public partial class InitialV1 : Migration
                     column: x => x.ManufacturerId,
                     principalTable: "Manufacturers",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.NoAction);
                 table.ForeignKey(
                     name: "FK_ToolheadModelDefinitions_NozzleModelDefinitions_DefaultNozz~",
                     column: x => x.DefaultNozzleId,
@@ -1089,7 +1089,7 @@ public partial class InitialV1 : Migration
                     column: x => x.FolderId,
                     principalTable: "FolderNode",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.NoAction);
                 table.ForeignKey(
                     name: "FK_GcodeFiles_PrinterModels_PrinterModelId",
                     column: x => x.PrinterModelId,
