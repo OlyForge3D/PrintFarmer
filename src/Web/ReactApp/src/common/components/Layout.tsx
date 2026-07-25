@@ -44,6 +44,7 @@ import { printerSignalRService } from '@/services/printer-signalr';
 import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
 import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
 import { FloatingControlBar } from '@/common/components/FloatingControlBar';
+import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
 import {
   createDefaultNavPreferences,
@@ -1171,7 +1172,9 @@ export function Layout() {
                   </div>
                 }
               >
-                <Outlet />
+                <GlobalCommandPaletteProvider>
+                  <Outlet />
+                </GlobalCommandPaletteProvider>
               </Suspense>
             </RouteErrorBoundary>
           </div>

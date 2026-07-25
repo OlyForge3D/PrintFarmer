@@ -276,7 +276,11 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         }
 
         return (
-          <div className="flex items-center gap-3 py-1" key={prop.name}>
+          <div
+            className="flex items-center gap-3 py-1"
+            key={prop.name}
+            data-setting-property={`${metadata.key}.${prop.name}`}
+          >
             {label}
             {control}
           </div>

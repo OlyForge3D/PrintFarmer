@@ -1,4 +1,5 @@
-import { type ReactNode, useEffect, useState, useCallback, useMemo } from 'react';
+import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
@@ -366,12 +367,21 @@ export function SettingsPage({
   const { isSlicerAvailable } = useSlicer();
   const { startTour } = usePageTour({ tourId: 'settings', steps: settingsTour });
   const { mode, setMode } = useSettingsMode();
+  const [searchParams] = useSearchParams();
+  const fieldParam = searchParams.get('field');
   const [query, setQuery] = useState('');
   const [metadata, setMetadata] = useState<SettingMetadata[]>([]);
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [values, setValues] = useState<GroupValues>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
+  const scrolledFieldRef = useRef<string | null>(null);
+
+  // When the command palette deep-links to a specific setting the URL carries
+  // `?field=<PropertyName>`. That property might live in an "advanced" section
+  // that the Essential-mode filter would hide by default, so treat this URL as
+  // an override without touching the user's persisted Essential preference.
+  const effectiveMode = fieldParam ? 'everything' : mode;
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -402,6 +412,56 @@ export function SettingsPage({
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // When a `?field=<PropertyName>` deep-link resolves, scroll the matching row
+  // into view and highlight it briefly. Ref writes live inside the RAF callback
+  // (never during render), and this effect never calls setState — deliberately,
+  // per the React-compiler guidance the palette task calls out. The URL param
+  // stays put so the link remains copy-pasteable.
+  useEffect(() => {
+    if (loading || !fieldParam) {
+      return;
+    }
+    if (scrolledFieldRef.current === fieldParam) {
+      return;
+    }
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const raf = window.requestAnimationFrame(() => {
+      // The attribute value is quoted, so only backslashes and quotes need
+      // escaping. CSS.escape is for bare identifiers and would mangle the dot
+      // separator in a qualified `Section.Property` key.
+      const escapedField = fieldParam.replace(/["\\]/g, '\\$&');
+      // Property names are NOT unique across sections — `Enabled` alone appears
+      // in 13 settings classes, several of which render on the same page. A
+      // qualified `Section.Property` link therefore has to match exactly, or the
+      // deep-link scrolls to whichever section happens to render first. Bare
+      // property names keep the old suffix match so older links still resolve.
+      const selector = fieldParam.includes('.')
+        ? `[data-setting-property="${escapedField}"]`
+        : `[data-setting-property$=".${escapedField}"]`;
+      const target = document.querySelector<HTMLElement>(selector);
+      if (target) {
+        const prefersReducedMotion = typeof window.matchMedia === 'function'
+          && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        target.scrollIntoView({
+          block: 'center',
+          behavior: prefersReducedMotion ? 'auto' : 'smooth',
+        });
+        target.classList.add('pf-setting-focus');
+        window.setTimeout(() => {
+          target.classList.remove('pf-setting-focus');
+        }, 2000);
+      }
+      scrolledFieldRef.current = fieldParam;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(raf);
+    };
+  }, [loading, fieldParam]);
 
   // Intentionally NO parent-level refetch after per-group save. Each group's
   // block accepts its own successful save as the new baseline via
@@ -500,7 +560,7 @@ export function SettingsPage({
               if (propertyMatchesQuery(p, trimmedQuery)) allowed.add(p.name);
             }
           }
-        } else if (mode === 'essential') {
+        } else if (effectiveMode === 'essential') {
           for (const p of section.properties) {
             if (isEssentialProperty(section.key, p.name)) allowed.add(p.name);
           }
@@ -520,7 +580,7 @@ export function SettingsPage({
       visibleSettingsCount: visible,
       matchingSectionCount: sectionsWithHits,
     };
-  }, [sortedGroups, metadataByGroup, groupMetadata, mode, trimmedQuery]);
+  }, [sortedGroups, metadataByGroup, groupMetadata, effectiveMode, trimmedQuery]);
 
   const toggleHelperText = useMemo(() => {
     if (trimmedQuery) {

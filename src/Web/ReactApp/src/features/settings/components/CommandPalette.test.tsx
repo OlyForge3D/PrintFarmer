@@ -51,7 +51,7 @@ describe('CommandPalette', () => {
     );
 
     const input = screen.getByRole('combobox', { name: 'Search settings command palette' });
-    const listbox = screen.getByRole('listbox', { name: 'Settings search results' });
+    const listbox = screen.getByRole('listbox', { name: 'Command palette results' });
     const [firstOption, secondOption] = within(listbox).getAllByRole('option');
 
     expect(firstOption.tagName).toBe('DIV');

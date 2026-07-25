@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
@@ -114,7 +115,11 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 
 async function renderPage() {
-  const result = render(<SettingsPage />);
+  const result = render(
+    <MemoryRouter>
+      <SettingsPage />
+    </MemoryRouter>,
+  );
   await waitFor(() => {
     expect(screen.getByLabelText('Retention Days')).toBeInTheDocument();
   });

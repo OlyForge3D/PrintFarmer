@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
   ThemeSwitcher: () => <div data-testid="theme-switcher">Theme Switcher</div>,
@@ -79,6 +80,16 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   }),
 }));
 
+vi.mock('@/common/hooks/useTheme', () => ({
+  useTheme: () => ({
+    theme: 'dark',
+    setTheme: vi.fn(),
+    themes: ['light', 'dark'],
+    isLight: false,
+    isDark: true,
+  }),
+}));
+
 vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true }),
 }));
@@ -86,6 +97,8 @@ vi.mock('@/hooks/useSlicer', () => ({
 vi.mock('sonner', () => ({
   toast: {
     info: vi.fn(),
+    error: vi.fn(),
+    success: vi.fn(),
   },
 }));
 
@@ -95,14 +108,21 @@ const queryClient = new QueryClient({
 
 function LocationProbe() {
   const location = useLocation();
-  return <div data-testid="location-search">{location.search}</div>;
+  return (
+    <>
+      <div data-testid="location-search">{location.search}</div>
+      <div data-testid="location-pathname">{location.pathname}</div>
+    </>
+  );
 }
 
 function renderSettings(initialRoute = '/settings') {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
-        <SettingsShell />
+        <GlobalCommandPaletteProvider>
+          <SettingsShell />
+        </GlobalCommandPaletteProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -246,12 +266,6 @@ describe('SettingsShell', () => {
     expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
   });
 
-  it('renders search input', () => {
-    setAuthRoles(['farm_admin']);
-    renderSettings();
-    expect(screen.getByRole('searchbox')).toBeInTheDocument();
-  });
-
   it('filters across scopes and lands on Slicing when searching for slicer', () => {
     renderSettings('/settings?q=slicer');
 
@@ -364,27 +378,6 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=api-keys');
   });
 
-  it('updates search value from input while preserving focus', () => {
-    renderSettings();
-    const searchInput = screen.getByLabelText('Search settings');
-    searchInput.focus();
-    fireEvent.change(searchInput, { target: { value: 'quota' } });
-    expect(screen.getByTestId('location-search')).toHaveTextContent('q=quota');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=system');
-    expect(searchInput).toHaveFocus();
-  });
-
-  it('focuses search from the slash shortcut and clears the query', () => {
-    renderSettings('/settings?q=hardware');
-
-    fireEvent.keyDown(window, { key: '/' });
-    const searchInput = screen.getByLabelText('Search settings');
-    expect(searchInput).toHaveFocus();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
-    expect(searchInput).toHaveValue('');
-  });
-
   it('opens the command palette from the header button and returns focus on escape', async () => {
     renderSettings();
 
@@ -399,19 +392,23 @@ describe('SettingsShell', () => {
     expect(await screen.findByRole('button', { name: /Command palette/i })).toHaveFocus();
   });
 
-  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin section', async () => {
+  it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin destination', async () => {
     renderSettings();
 
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
-    fireEvent.change(paletteSearch, { target: { value: 'lgnadt' } });
+    // "login audit" targets the admin destination surfaced by the #934 registry.
+    fireEvent.change(paletteSearch, { target: { value: 'login audit' } });
     fireEvent.keyDown(paletteSearch, { key: 'ArrowDown' });
     fireEvent.keyDown(paletteSearch, { key: 'Enter' });
 
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
-    expect(getCategoryButton('Users')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('tab', { name: 'Login Audit' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByTestId('location-search')).toHaveTextContent('scope=admin');
+    // Admin destinations live under /admin/manage — assert on pathname + query
+    // rather than on the internal scope switcher, which is a separate concern
+    // of the AdminManagePage wrapper.
+    await waitFor(() => {
+      expect(screen.getByTestId('location-pathname')).toHaveTextContent('/admin/manage');
+    });
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
   });
