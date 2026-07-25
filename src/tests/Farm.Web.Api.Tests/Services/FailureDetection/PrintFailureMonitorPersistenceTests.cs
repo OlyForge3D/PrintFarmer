@@ -60,7 +60,7 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
             .Returns(Task.CompletedTask);
 
         Mock<IHubClients> hubClients = new();
-        hubClients.Setup(clients => clients.All).Returns(clientProxy.Object);
+        hubClients.Setup(clients => clients.Group(It.IsAny<string>())).Returns(clientProxy.Object);
 
         Mock<IHubContext<PrinterHub>> hub = new();
         hub.SetupGet(context => context.Clients).Returns(hubClients.Object);

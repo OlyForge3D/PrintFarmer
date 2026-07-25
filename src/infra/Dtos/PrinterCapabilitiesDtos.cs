@@ -12,6 +12,7 @@ public record PrinterCapabilitiesDto(
     Guid Id,
     Guid PrinterId,
     string PrinterName,
+    DateTime LastUpdated,
     double? NozzleDiameter = null,
     string[]? SupportedMaterials = null,
     double? MaxBuildVolumeX = null,
@@ -26,8 +27,7 @@ public record PrinterCapabilitiesDto(
     int? MaxPrintSpeed = null,
     [property: ImportExport(ImportExportTargets.Import)] string? CurrentMaterial = null,
     [property: ImportExport(ImportExportTargets.Import)] int? CurrentSpoolId = null,
-    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true,
-    DateTime LastUpdated = default);
+    [property: ImportExport(ImportExportTargets.Import)] bool IsAvailable = true);
 
 /// <summary>
 /// Creation payload for registering printer capabilities.
@@ -169,10 +169,10 @@ public class PrinterWithCapabilitiesDto
     public string? Notes { get; set; }
 
     // Connection
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ServerUrl { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? IpAddress { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -182,19 +182,19 @@ public class PrinterWithCapabilitiesDto
     public int? FrontendPort { get; set; }
 
     // Credentials
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ApiKey { get; set; }
 
     /// <summary>
     /// Username for HTTP Digest authentication (primarily for PrusaLink).
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for HTTP Digest authentication.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Password { get; set; }
 
     // Capabilities (unique to export DTO)

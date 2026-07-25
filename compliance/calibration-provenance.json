@@ -1,8 +1,8 @@
 {
   "$schema": "./calibration-provenance.schema.json",
   "schemaVersion": 1,
-  "policyVersion": "1.0.0",
-  "lastReviewed": "2026-07-24",
+  "policyVersion": "1.0.1",
+  "lastReviewed": "2026-07-25",
   "allowedSourceLicenseExpressions": [
     "0BSD",
     "AGPL-3.0-only",
@@ -27,6 +27,46 @@
   ],
   "approvedSources": [],
   "entries": [],
-  "referenceRecords": [],
+  "referenceRecords": [
+    {
+      "id": "calibration-capabilities-controller",
+      "destinationPath": "src/api/Controllers/CalibrationCapabilitiesController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #895 API contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-capabilities-service",
+      "destinationPath": "src/api/Services/Capabilities/CalibrationCapabilityService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #895 capability contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-capabilities-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Capabilities/CalibrationCapabilitiesTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #895 acceptance contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    }
+  ],
   "exceptions": []
 }

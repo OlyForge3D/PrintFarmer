@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// <summary>
 /// Ensures slicer-disabled tests run serially (env var side-effect).
 /// </summary>
-[CollectionDefinition("SlicerDisabled")]
+[CollectionDefinition("SlicerDisabled", DisableParallelization = true)]
 public class SlicerDisabledCollection { }
 
 /// <summary>
@@ -56,7 +56,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Get3DModels_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/3d-models");
 
@@ -69,7 +69,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Get3DModelsFolders_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/3d-models/folders");
 
@@ -82,7 +82,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PostModelsQuery_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.PostAsync("/api/3d-models/query", null);
 
@@ -155,7 +155,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task NonSlicerEndpoints_WhenSlicerDisabled_StillWork()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/printers");
 
@@ -191,7 +191,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
         db.Printers.Add(printer);
         await db.SaveChangesAsync();
 
-        HttpClient authClient = await _factory.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory.CreateAdminClientAsync();
         HttpResponseMessage response = await authClient.GetAsync("/api/printers");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

@@ -148,27 +148,33 @@ internal static class ProgramHelpers
             OnMessageReceived = context =>
             {
                 string auth = context.Request.Headers["Authorization"].ToString();
-                string snippet = string.Empty;
+                string? token = null;
                 if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    string tok = auth["Bearer ".Length..].Trim();
-                    snippet = tok.Length > 12 ? tok[..12] + "..." : tok;
-                    if (!string.IsNullOrEmpty(tok))
-                    {
-                        context.Token = tok;
-                    }
+                    token = auth["Bearer ".Length..].Trim();
+                }
+                else if (context.Request.Path.StartsWithSegments("/hubs") &&
+                         context.Request.Query.TryGetValue("access_token", out Microsoft.Extensions.Primitives.StringValues accessToken))
+                {
+                    token = accessToken.ToString();
+                }
+
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    context.Token = token;
+                    context.HttpContext.Items["PrintFarmer.RawJwt"] = token;
                 }
 
                 try
                 {
-                    string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
+                    string presence = !string.IsNullOrWhiteSpace(token) ? "present" : "missing";
                     if (startupUls != null)
                     {
-                        startupUls.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet={Snippet}", presence, snippet);
+                        startupUls.LogDebug("[JWT][OnMessageReceived] Bearer token: {Presence}", presence);
                     }
                     else
                     {
-                        startupLogger?.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet: {TokenSnippet}", presence, snippet);
+                        startupLogger?.LogDebug("[JWT][OnMessageReceived] Bearer token: {Presence}", presence);
                     }
                 }
                 catch
@@ -216,13 +222,17 @@ internal static class ProgramHelpers
                     // Check if token has been revoked. Prefer the raw token extracted from the Authorization header
                     // (context.Token) because that matches the original JWT string used to compute the stored token hash.
                     // Try to read raw token from Authorization header to ensure we compute the same hash
-                    string? token = null;
+                    string? token = context.HttpContext.Items["PrintFarmer.RawJwt"] as string;
                     try
                     {
-                        string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
-                        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        if (string.IsNullOrWhiteSpace(token))
                         {
-                            token = authHeader["Bearer ".Length..].Trim();
+                            string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
+                            if (!string.IsNullOrEmpty(authHeader) &&
+                                authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                token = authHeader["Bearer ".Length..].Trim();
+                            }
                         }
                     }
                     catch

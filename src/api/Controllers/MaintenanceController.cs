@@ -137,7 +137,7 @@ public class MaintenanceController(
             alert = await _alertRepository.GetByIdAsync(id, ct);
 
             // Broadcast status change
-            await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
+            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("alertstatuschanged", new
             {
                 id = alert!.Id,
                 printerId = alert.PrinterId,
@@ -204,7 +204,7 @@ public class MaintenanceController(
             alert = await _alertRepository.GetByIdAsync(id, ct);
 
             // Broadcast status change
-            await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
+            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("alertstatuschanged", new
             {
                 id = alert!.Id,
                 printerId = alert.PrinterId,
@@ -214,7 +214,7 @@ public class MaintenanceController(
             }, ct);
 
             // Broadcast maintenance completed
-            await _maintenanceHub.Clients.All.SendAsync("maintenancecompleted", new
+            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("maintenancecompleted", new
             {
                 logId = createdLog.Id,
                 printerId = createdLog.PrinterId,
@@ -267,7 +267,7 @@ public class MaintenanceController(
             alert = await _alertRepository.GetByIdAsync(id, ct);
 
             // Broadcast status change
-            await _maintenanceHub.Clients.All.SendAsync("alertstatuschanged", new
+            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("alertstatuschanged", new
             {
                 id = alert!.Id,
                 printerId = alert.PrinterId,
@@ -603,7 +603,7 @@ public class MaintenanceController(
             MaintenanceLog createdLog = await _logRepository.AddAsync(log, ct);
 
             // Broadcast maintenance completed
-            await _maintenanceHub.Clients.All.SendAsync("maintenancecompleted", new
+            await _maintenanceHub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync("maintenancecompleted", new
             {
                 logId = createdLog.Id,
                 printerId = createdLog.PrinterId,

@@ -1,6 +1,9 @@
-﻿using System.Runtime.InteropServices;
-using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Dtos;
+using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Services.Capabilities;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -10,10 +13,11 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/system")]
+[AllowAnonymous]
 public class SystemCapabilitiesController(
-    IConfiguration configuration) : ControllerBase
+    ICalibrationCapabilityService capabilityService) : ControllerBase
 {
-    private readonly IConfiguration _configuration = configuration;
+    private readonly ICalibrationCapabilityService _capabilityService = capabilityService;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -22,30 +26,25 @@ public class SystemCapabilitiesController(
     /// <returns>Platform capabilities for the running host.</returns>
     [HttpGet("capabilities")]
     [ProducesResponseType(typeof(PlatformCapabilitiesDto), StatusCodes.Status200OK)]
-    public ActionResult<PlatformCapabilitiesDto> GetCapabilities()
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status426UpgradeRequired)]
+    public async Task<ActionResult<PlatformCapabilitiesDto>> GetCapabilitiesAsync(
+        CancellationToken cancellationToken)
     {
-        var arch = RuntimeInformation.ProcessArchitecture;
-        bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
-
-        // Read resolved values — Program.cs writes these after applying ARM + DEPLOYMENT_MODE logic
-        bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
-        bool slicerEnabled = _configuration.GetValue("Slicer:Enabled", true);
-        bool thumbnailEnabled = _configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
-
-        string? platformNote = isArm && (!modelFilesEnabled || !slicerEnabled || !thumbnailEnabled)
-            ? "Running on ARM64 — 3D model and slicing features are disabled"
-            : null;
-
-        var dto = new PlatformCapabilitiesDto
+        ApiContractNegotiation.AddResponseHeaders(Response);
+        ObjectResult? negotiationFailure = ApiContractNegotiation.Negotiate(Request);
+        if (negotiationFailure is not null)
         {
-            Architecture = arch.ToString(),
-            SlicingEnabled = slicerEnabled,
-            ModelFilesEnabled = modelFilesEnabled,
-            ThumbnailGenerationEnabled = thumbnailEnabled,
-            GcodeUploadEnabled = true,
-            PlatformNote = platformNote,
+            return negotiationFailure;
+        }
+
+        Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
+        {
+            Public = true,
+            MaxAge = TimeSpan.FromSeconds(30),
         };
 
-        return Ok(dto);
+        PlatformCapabilitiesDto capabilities =
+            await _capabilityService.GetCapabilitiesAsync(user: null, cancellationToken);
+        return Ok(capabilities);
     }
 }

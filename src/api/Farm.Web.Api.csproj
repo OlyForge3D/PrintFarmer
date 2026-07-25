@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+  <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
   <ProjectReference Include="../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../discovery/Farm.Shared.Discovery.csproj" />
     <ProjectReference Include="../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj" />
@@ -54,10 +55,10 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="OpenTelemetry" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.15.3" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Exporter.Console" Version="1.15.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.3" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.14.0-beta.1" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.0" />
     <PackageReference Include="OpenTelemetry.Instrumentation.EntityFrameworkCore" Version="1.14.0-beta.1" />
@@ -74,6 +75,7 @@
     <ProjectReference Include="..\slicer\Farm.Slicer.Integration\Farm.Slicer.Integration.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.PostgreSQL\Farm.Migrations.PostgreSQL.csproj" />
     <ProjectReference Include="..\migrations\Farm.Migrations.SqlServer\Farm.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
     <ProjectReference Include=".\..\backends\Farm.Backend.Plugin.FlashForge\Farm.Backend.Plugin.FlashForge.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
@@ -94,7 +96,12 @@
     <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.SqlServer\Farm.Slicer.Migrations.SqlServer.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
-    </ProjectReference>  </ItemGroup>
+    </ProjectReference>
+    <ProjectReference Include="..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+  </ItemGroup>
 
 
   <ItemGroup>
@@ -158,6 +165,7 @@
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\Slicers\Farm.Slicers.OrcaSlicer.v2_3_1\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.PostgreSQL\bin\$(Configuration)\$(TargetFramework)\*.dll" />
       <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.SqlServer\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_SlicerPluginDll Include="$(MSBuildThisFileDirectory)..\migrations\Farm.Slicer.Migrations.Sqlite\bin\$(Configuration)\$(TargetFramework)\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_SlicerPluginDll)" DestinationFolder="$(_SlicerPluginsOutputDir)" SkipUnchangedFiles="true" />
   </Target>

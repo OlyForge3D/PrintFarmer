@@ -40,6 +40,8 @@ public class CameraService : ICameraService
         Description = camera.Description,
         StreamUrl = camera.StreamUrl,
         SnapshotUrl = camera.SnapshotUrl,
+        StreamConfigured = !string.IsNullOrWhiteSpace(camera.StreamUrl),
+        SnapshotConfigured = !string.IsNullOrWhiteSpace(camera.SnapshotUrl),
         IsEnabled = camera.IsEnabled,
         SortOrder = camera.SortOrder,
         Location = camera.Location,

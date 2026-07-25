@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
@@ -45,9 +46,15 @@ public class CameraDto
 
     public string? Description { get; set; }
 
+    [JsonIgnore]
     public string? StreamUrl { get; set; }
 
+    [JsonIgnore]
     public string? SnapshotUrl { get; set; }
+
+    public bool StreamConfigured { get; set; }
+
+    public bool SnapshotConfigured { get; set; }
 
     public bool IsEnabled { get; set; } = true;
 
@@ -203,9 +210,17 @@ public class DisplayCameraDto
 
     public string? Description { get; set; }
 
+    [JsonIgnore]
     public string? StreamUrl { get; set; }
 
+    [JsonIgnore]
     public string? SnapshotUrl { get; set; }
+
+    [JsonPropertyName("streamUrl")]
+    public string? StreamProxyUrl { get; set; }
+
+    [JsonPropertyName("snapshotUrl")]
+    public string? SnapshotProxyUrl { get; set; }
 
     public bool IsEnabled { get; set; } = true;
 

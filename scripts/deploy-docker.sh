@@ -3829,6 +3829,8 @@ export_slicer_worker_api_keys() {
 
 # Slicer Worker API Keys - Generated for automatic worker registration
 # Workers use these keys to authenticate with the API during registration
+# The shared key also authenticates worker-only job routes; registered service IDs scope access.
+WORKER_SHARED_API_KEY=$primary_api_key
 # Format: SlicerRegistry__ApiKey__<WorkerName> for individual workers
 # Format: SlicerRegistry__ApiKey for default/primary worker
 SlicerRegistry__ApiKey=$primary_api_key
@@ -3863,6 +3865,26 @@ EOF
         
         print_info "Exported worker API keys to $ENV_FILE"
     fi
+}
+
+# Export the shared credential used only for printer-discovery event ingestion.
+export_discovery_service_key() {
+    if [ "$ARCHITECTURE" != "microservices" ]; then
+        return 0
+    fi
+
+    if [ -z "${DISCOVERY_SHARED_API_KEY:-}" ]; then
+        DISCOVERY_SHARED_API_KEY=$(generate_slicer_api_key)
+        print_info "Generated a discovery service authentication key"
+    else
+        print_info "Reusing the existing discovery service authentication key"
+    fi
+
+    cat >> "$ENV_FILE" << EOF
+
+# Printer discovery service-to-service authentication
+DISCOVERY_SHARED_API_KEY=$DISCOVERY_SHARED_API_KEY
+EOF
 }
 
 # Generate the main environment file for docker deployment
@@ -4196,6 +4218,8 @@ Jwt__Key=$Jwt__Key
 Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
 Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
+
+    export_discovery_service_key
     
     # Generate and export slicer worker API keys (if workers are enabled)
     # This ensures workers can authenticate with the API during registration

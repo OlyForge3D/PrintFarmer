@@ -160,6 +160,27 @@ test_discovery_network_consistency() {
     pass_test
 }
 
+# Test that the API and discovery service receive the same generated shared key
+test_discovery_shared_key_wiring() {
+    start_test "discovery shared API key wiring"
+
+    local outdir="$TEST_TEMP_DIR/compose-discovery-auth"
+    mkdir -p "$outdir"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-discovery --output-dir $outdir"
+
+    local compose_content
+    compose_content=$(cat "$outdir/docker-compose.yml")
+    local env_template_content
+    env_template_content=$(cat "$REPO_ROOT/.env.template")
+
+    assert_contains "$compose_content" 'DiscoveryAuth__SharedKey=${DISCOVERY_SHARED_API_KEY:-}' "API should receive the discovery shared key"
+    assert_contains "$compose_content" 'Discovery__SharedKey=${DISCOVERY_SHARED_API_KEY:-}' "Discovery service should receive the same shared key"
+    assert_contains "$env_template_content" "DISCOVERY_SHARED_API_KEY=" "Environment template should declare the discovery shared key"
+
+    pass_test
+}
+
 # Test microservices architecture generation
 
 # Test OrcaSlicer worker configuration
@@ -1673,6 +1694,8 @@ run_all_tests() {
     test_help_output
     test_standard_generation
     test_microservices_generation
+    test_discovery_network_consistency
+    test_discovery_shared_key_wiring
     test_generated_compose_file_is_valid_yaml
     test_database_initialization_order
     test_database_volume_mount_correctness

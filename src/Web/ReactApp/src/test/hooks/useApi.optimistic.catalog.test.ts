@@ -151,12 +151,19 @@ describe('optimistic job cancel/delete', () => {
   it('queue job rollback on error', async () => {
     const client = createClient();
     const wrapper = wrapperFactory(client);
-    vi.spyOn(apiClient, 'queuePrintJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('queue fail'); });
+    let rejectRequest!: (reason: Error) => void;
+    const pendingRequest = new Promise<never>((_resolve, reject) => {
+      rejectRequest = reject;
+    });
+    vi.spyOn(apiClient, 'queuePrintJob').mockReturnValue(pendingRequest);
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
     await act(async () => { result.current.mutate({ printerId: 'p-err', gcodeFileId: 'f1' }); });
     const key = queryKeys.jobQueue('p-err');
     const temp = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(key);
     expect(temp?.some(j => j.job.id.startsWith('temp-'))).toBe(true);
+    await act(async () => {
+      rejectRequest(new Error('queue fail'));
+    });
     await waitFor(() => {
       const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(key);
       expect(after?.some(j => j.job.id.startsWith('temp-'))).toBe(false);

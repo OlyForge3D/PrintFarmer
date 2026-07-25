@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Hubs;
+﻿using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
@@ -56,19 +57,14 @@ public class SignalRSlicerProgressNotifier(
                 UserId = job.UserId,
                 Status = job.Status,
                 Success = result.Success,
-                ResultFileUrl = result.ResultFileUrl,
+                ArtifactsRoute = $"/api/artifacts/job/{job.Id}",
                 ProcessingTimeSeconds = result.ProcessingTimeSeconds,
                 EstimatedPrintTimeSeconds = result.EstimatedPrintTimeSeconds,
                 EstimatedFilamentUsageGrams = result.EstimatedFilamentUsageGrams,
                 LayerCount = result.LayerCount,
-                ErrorMessage = result.Error,
+                ErrorMessage = string.IsNullOrWhiteSpace(result.Error) ? null : "Slicing failed.",
                 CompletedAt = job.CompletedAt ?? DateTime.UtcNow
             };
-
-            foreach (KeyValuePair<string, object> kv in job.Metadata)
-            {
-                completionNotification.Metadata[kv.Key] = kv.Value;
-            }
 
             // Get subscribers for this job
             List<string> connectionIds = GetJobSubscribers(job.Id);
@@ -81,10 +77,12 @@ public class SignalRSlicerProgressNotifier(
             }
 
             // Send to user's personal group
-            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("slicingcompleted", completionNotification, cancellationToken);
+            await _hubContext.Clients.Group(AuthorizedHubGroups.User(job.UserId))
+                .SendAsync("slicingcompleted", completionNotification, cancellationToken);
 
             // Send to monitoring group
-            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicingcompleted", completionNotification, cancellationToken);
+            await _hubContext.Clients.Group(AuthorizedHubGroups.SlicingMonitors)
+                .SendAsync("slicingcompleted", completionNotification, cancellationToken);
 
             // Clean up subscriptions for completed job
             RemoveJobSubscriptions(job.Id);
@@ -106,16 +104,11 @@ public class SignalRSlicerProgressNotifier(
                 JobId = job.Id,
                 UserId = job.UserId,
                 Status = job.Status,
-                ErrorMessage = errorMessage,
+                ErrorMessage = "Slicing failed.",
                 FailedAt = job.CompletedAt ?? DateTime.UtcNow,
                 RetryCount = job.RetryCount,
                 CanRetry = job.RetryCount < 3
             };
-
-            foreach (KeyValuePair<string, object> kv in job.Metadata)
-            {
-                failureNotification.Metadata[kv.Key] = kv.Value;
-            }
 
             // Get subscribers for this job
             List<string> connectionIds = GetJobSubscribers(job.Id);
@@ -128,10 +121,12 @@ public class SignalRSlicerProgressNotifier(
             }
 
             // Send to user's personal group
-            await _hubContext.Clients.Group($"User-{job.UserId}").SendAsync("slicingfailed", failureNotification, cancellationToken);
+            await _hubContext.Clients.Group(AuthorizedHubGroups.User(job.UserId))
+                .SendAsync("slicingfailed", failureNotification, cancellationToken);
 
             // Send to monitoring group
-            await _hubContext.Clients.Group("SlicingMonitors").SendAsync("slicingfailed", failureNotification, cancellationToken);
+            await _hubContext.Clients.Group(AuthorizedHubGroups.SlicingMonitors)
+                .SendAsync("slicingfailed", failureNotification, cancellationToken);
 
             // Clean up subscriptions for failed job (unless it can be retried)
             if (!failureNotification.CanRetry)
