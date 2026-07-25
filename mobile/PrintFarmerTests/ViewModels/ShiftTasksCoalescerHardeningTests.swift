@@ -1068,6 +1068,278 @@ final class ShiftTasksCoalescerHardeningTests: XCTestCase {
         XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
     }
 
+    // MARK: - Post-decision remediation 2: cancellation linearization at storage
+
+    /// The exact race the final trio flagged at the state level: cancellation lands
+    /// AFTER the early `Task.isCancelled` check but AT/BEFORE the waiter is stored.
+    /// `preAddAwaiterHook` fires SYNCHRONOUSLY in that window and cancels the
+    /// caller's own task, so cancellation is first visible at the sticky
+    /// post-`addAwaiter` re-check. Correct linearization cleans up INLINE (no yield),
+    /// which provably beats the already-enqueued owner: the caller resolves `false`
+    /// WITHOUT parking, so by the time `caller.value` returns the owner has not run
+    /// and NO load / publication ever occurs. A broken impl that relied on a
+    /// separately-queued cancel handler would let the enqueued owner load first
+    /// against this non-gated service (loadCount 1) — the substantive base failure.
+    func testCancellationAtWaiterStorageResolvesInlineWithZeroLoad() async {
+        let viewModel = ShiftTasksViewModel()
+        let counter = CompletionCounter()
+
+        // Non-gated default-snapshot service: any owner that runs WILL load + publish.
+        let service = ScriptedShiftTaskService(
+            defaultSnapshot: makeShiftTaskSnapshot(title: "Must not load")
+        )
+        viewModel.configure(
+            taskService: service,
+            signalRService: MockSignalRService(),
+            shiftPlanEnabled: true
+        )
+
+        // Cancel exactly at the linearization point: after the early check, before
+        // `addAwaiter`. The hook is synchronous, so no other MainActor work (the
+        // enqueued owner) can interleave before the sticky re-check cleans up inline.
+        viewModel.preAddAwaiterHook = {
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        _ = await caller.value
+
+        let counts = await counter.snapshot()
+        XCTAssertEqual(counts.total, 1)
+        XCTAssertEqual(counts.falseCount, 1)     // resolved exactly once, false
+
+        // Structural inline-no-yield proof: the caller resolved before the owner ran.
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 0)                  // ZERO load
+        XCTAssertNil(viewModel.snapshot)          // ZERO publication
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.scheduledPassCountForTesting, 0)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+    }
+
+    // MARK: - Post-decision remediation 2: mailbox demand authority on abandon
+
+    /// A supported invalidation deposited into the ingress mailbox but NOT yet
+    /// drained is live PEER demand even though the MainActor waiter / coalesced
+    /// collections are momentarily empty. Cancelling the SOLE explicit registrant
+    /// must therefore NOT abandon the owner: the deposited invalidation still relies
+    /// on it. Discriminator vs base `519a901b` (which only inspects the empty
+    /// MainActor collections and abandons here): the owner stays active after the
+    /// cancel, and the invalidation is then covered by EXACTLY ONE load + publication.
+    func testCancellationPreservesUndrainedMailboxDemandAndCoversItOnce() async {
+        let queue = ShiftTaskCallbackQueue()
+        let barrier = RefreshWaiterRegistrationBarrier()
+        let viewModel = ShiftTasksViewModel(callbackEnqueuer: queue.enqueuer)
+        viewModel.refreshWaiterRegistrationObserver = barrier.signal
+        let counter = CompletionCounter()
+
+        let beginGate = ShiftTaskResultGate<Void>()
+        viewModel.ownerPassWillBeginHook = { _ = try? await beginGate.wait() }
+
+        let loadGate = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(loadSteps: [.gated(loadGate)])
+        let signalR = MockSignalRService()
+        viewModel.configure(
+            taskService: service,
+            signalRService: signalR,
+            shiftPlanEnabled: true
+        )
+
+        // Explicit caller starts the owner (gen 1) and registers; owner held pre-begin.
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        await barrier.waitForCount(1)
+        let ownerTask = viewModel.refreshOwnerTaskForTesting
+        XCTAssertNotNil(ownerTask)
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 1)
+
+        // Deposit one supported invalidation but do NOT drain it (drain sits queued).
+        signalR.simulateTaskInvalidation(target: "taskupdated")
+        XCTAssertEqual(viewModel.invalidationMailboxDepositCountForTesting, 1)
+        XCTAssertEqual(queue.count, 1)
+        XCTAssertTrue(viewModel.invalidationMailboxHasLiveDemandForTesting)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0) // not ingested yet
+
+        // Cancel the SOLE explicit registrant. Its waiter is removed and it resolves
+        // false, but the owner MUST survive because the mailbox still holds undrained
+        // peer demand.
+        caller.cancel()
+        _ = await caller.value
+        let afterCancel = await counter.snapshot()
+        XCTAssertEqual(afterCancel.total, 1)
+        XCTAssertEqual(afterCancel.falseCount, 1)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting) // DISCRIMINATOR vs base
+        let loadsAtCancel = await service.loadCallCount
+        XCTAssertEqual(loadsAtCancel, 0)
+
+        // Drain while the owner is still pre-begin: the invalidation coalesces onto
+        // the SAME owner (gen 1) as fire-and-forget demand — one covering pass.
+        let drain = Task { await queue.runNext() }
+        await drain.value
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 1)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+
+        // Release the pass: EXACTLY ONE covering load + publication, clean final state.
+        await beginGate.succeed(())
+        await service.waitForLoadCount(1)
+        await loadGate.succeed(makeShiftTaskSnapshot(title: "Covering pass"))
+        await ownerTask?.value
+
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 1)
+        XCTAssertNotNil(viewModel.snapshot)
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+    }
+
+    /// A same-generation coalesced invalidation with NO parked waiter of its own
+    /// must survive the cancellation cleanup of the explicit registrant that shares
+    /// its generation, and still complete with exactly one covering load. (The
+    /// coalesced-demand guard already protected this on base; this locks it in as a
+    /// regression proof alongside the new undrained-mailbox path.)
+    func testSameGenerationCoalescedDemandSurvivesRegistrantCancellation() async {
+        let queue = ShiftTaskCallbackQueue()
+        let barrier = RefreshWaiterRegistrationBarrier()
+        let viewModel = ShiftTasksViewModel(callbackEnqueuer: queue.enqueuer)
+        viewModel.refreshWaiterRegistrationObserver = barrier.signal
+        let counter = CompletionCounter()
+
+        let beginGate = ShiftTaskResultGate<Void>()
+        viewModel.ownerPassWillBeginHook = { _ = try? await beginGate.wait() }
+
+        let loadGate = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(loadSteps: [.gated(loadGate)])
+        let signalR = MockSignalRService()
+        viewModel.configure(
+            taskService: service,
+            signalRService: signalR,
+            shiftPlanEnabled: true
+        )
+
+        // Explicit caller starts + registers on gen 1 (pre-begin).
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        await barrier.waitForCount(1)
+        let ownerTask = viewModel.refreshOwnerTaskForTesting
+
+        // Deposit AND drain: the invalidation coalesces onto gen 1 as fire-and-forget
+        // demand with NO waiter of its own; the mailbox is fully drained.
+        signalR.simulateTaskInvalidation(target: "taskupdated")
+        let drain = Task { await queue.runNext() }
+        await drain.value
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 1)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 1) // only caller
+
+        // Cancel the explicit registrant: its gen-1 waiter is removed, but the
+        // coalesced gen-1 demand keeps the owner alive.
+        caller.cancel()
+        _ = await caller.value
+        let afterCancel = await counter.snapshot()
+        XCTAssertEqual(afterCancel.total, 1)
+        XCTAssertEqual(afterCancel.falseCount, 1)
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 1)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        let loadsAtCancel = await service.loadCallCount
+        XCTAssertEqual(loadsAtCancel, 0)
+
+        // Release the pass: one covering load for the surviving coalesced demand.
+        await beginGate.succeed(())
+        await service.waitForLoadCount(1)
+        await loadGate.succeed(makeShiftTaskSnapshot(title: "Coalesced covering pass"))
+        await ownerTask?.value
+
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 1)
+        XCTAssertNotNil(viewModel.snapshot)
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+    }
+
+    /// Pending / other-generation mailbox demand must also survive cancellation
+    /// cleanup. Here the owner has ALREADY BEGUN its gen-1 load (in-flight, gated)
+    /// when a supported invalidation is deposited-but-undrained; that demand maps to
+    /// a NEW pending generation. Cancelling the gen-1 registrant must not abandon the
+    /// in-flight owner (base would, cancelling a live load), and the deposit is then
+    /// covered by a bounded second pass — exactly two ordered loads total.
+    func testPendingGenerationMailboxDemandSurvivesRegistrantCancellation() async {
+        let queue = ShiftTaskCallbackQueue()
+        let barrier = RefreshWaiterRegistrationBarrier()
+        let viewModel = ShiftTasksViewModel(callbackEnqueuer: queue.enqueuer)
+        viewModel.refreshWaiterRegistrationObserver = barrier.signal
+        let counter = CompletionCounter()
+
+        let beginGate = ShiftTaskResultGate<Void>()
+        viewModel.ownerPassWillBeginHook = { _ = try? await beginGate.wait() }
+
+        let loadGate1 = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let loadGate2 = ShiftTaskResultGate<ShiftTaskSnapshot>()
+        let service = ScriptedShiftTaskService(
+            loadSteps: [.gated(loadGate1), .gated(loadGate2)]
+        )
+        let signalR = MockSignalRService()
+        viewModel.configure(
+            taskService: service,
+            signalRService: signalR,
+            shiftPlanEnabled: true
+        )
+
+        // Explicit caller starts + registers on gen 1, then the owner BEGINS its load.
+        let caller = Task { await counter.record(await viewModel.refresh()) }
+        await barrier.waitForCount(1)
+        let ownerTask = viewModel.refreshOwnerTaskForTesting
+        await beginGate.succeed(())
+        await service.waitForLoadCount(1)
+        XCTAssertEqual(viewModel.runningGenerationSequenceForTesting, 1)
+
+        // Deposit a supported invalidation but do NOT drain it: because the running
+        // pass has begun, this demand is destined for a NEW pending generation.
+        signalR.simulateTaskInvalidation(target: "taskupdated")
+        XCTAssertEqual(queue.count, 1)
+        XCTAssertTrue(viewModel.invalidationMailboxHasLiveDemandForTesting)
+
+        // Cancel the gen-1 registrant (cancellation AFTER registration). The in-flight
+        // owner must survive because undrained mailbox demand is live.
+        caller.cancel()
+        _ = await caller.value
+        let afterCancel = await counter.snapshot()
+        XCTAssertEqual(afterCancel.total, 1)
+        XCTAssertEqual(afterCancel.falseCount, 1)
+        XCTAssertTrue(viewModel.isRefreshOwnerActiveForTesting) // DISCRIMINATOR vs base
+        let loadsAtCancel = await service.loadCallCount
+        XCTAssertEqual(loadsAtCancel, 1) // gen-1 load NOT cancelled
+
+        // Drain: the invalidation maps to a bounded second (pending) generation.
+        let drain = Task { await queue.runNext() }
+        await drain.value
+        XCTAssertEqual(viewModel.pendingGenerationSequenceForTesting, 2)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 1)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+
+        // Complete gen 1, then the promoted gen 2 runs exactly one more load.
+        await loadGate1.succeed(makeShiftTaskSnapshot(title: "Gen 1"))
+        await service.waitForLoadCount(2)
+        await loadGate2.succeed(makeShiftTaskSnapshot(title: "Gen 2"))
+        await ownerTask?.value
+
+        let loads = await service.loadCallCount
+        XCTAssertEqual(loads, 2) // exactly two ordered covering loads, N-independent
+        XCTAssertNotNil(viewModel.snapshot)
+        XCTAssertFalse(viewModel.isRefreshOwnerActiveForTesting)
+        XCTAssertEqual(viewModel.coalescedDemandCountForTesting, 0)
+        XCTAssertEqual(viewModel.pendingRefreshWaiterCountForTesting, 0)
+        XCTAssertEqual(viewModel.liveGenerationCompletionCountForTesting, 0)
+        XCTAssertFalse(viewModel.invalidationMailboxHasLiveDemandForTesting)
+    }
+
     // MARK: - Blocker 4: real deallocation after a gated refresh (no retain cycle)
 
     /// A gated in-flight service call must not retain the ViewModel forever after

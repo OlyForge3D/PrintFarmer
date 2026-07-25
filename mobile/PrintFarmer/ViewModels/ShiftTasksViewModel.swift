@@ -132,6 +132,17 @@ final class ShiftTasksViewModel {
     /// #814 authoritative pre-cancellation contract).
     @ObservationIgnored
     var preRegistrationHook: (@MainActor @Sendable () async -> Void)?
+
+    /// Deterministic test seam fired SYNCHRONOUSLY on the MainActor in the window
+    /// AFTER an explicit caller's early cancellation check but BEFORE it stores its
+    /// waiter (`completion.addAwaiter`). Because it must not suspend, a test can
+    /// cancel the caller's own task here so cancellation becomes visible EXACTLY at
+    /// the waiter-storage linearization point — proving the sticky post-`addAwaiter`
+    /// recheck resolves the caller inline (no queued cleanup that could lose
+    /// executor order to the already-enqueued owner). Production never assigns it (a
+    /// single `?.` nil check).
+    @ObservationIgnored
+    var preAddAwaiterHook: (@MainActor @Sendable () -> Void)?
     #endif
 
     /// Overflow-safe, totally-ordered refresh generation. Ordering is lexicographic
@@ -613,12 +624,33 @@ final class ShiftTasksViewModel {
                     continuation.resume(returning: lastCompletedResult)
                     return
                 }
+                #if DEBUG
+                preAddAwaiterHook?()
+                #endif
                 let completion = generationCompletions[generation] ?? {
                     let created = GenerationCompletion()
                     generationCompletions[generation] = created
                     return created
                 }()
                 completion.addAwaiter(waiterID, continuation)
+                // LINEARIZATION POINT: waiter storage. A sticky re-check of
+                // cancellation in the SAME synchronous MainActor continuation body
+                // closes the race where cancellation lands after the early check but
+                // at/before `addAwaiter`: the queued `onCancel` handler could lose
+                // executor order to the already-enqueued owner and permit one load.
+                // Cleaning up inline here (no yield) provably beats the owner, so a
+                // pre-registration cancellation performs zero load and zero
+                // publication. The `onCancel` handler stays correct/idempotent for
+                // cancellation AFTER registration (below).
+                if Task.isCancelled {
+                    finalizeInlineCancellation(
+                        waiterID: waiterID,
+                        generation: generation,
+                        didStartOwner: didStartOwner,
+                        epoch: epoch
+                    )
+                    return
+                }
                 #if DEBUG
                 refreshWaiterRegistrationObserver?()
                 #endif
@@ -628,6 +660,35 @@ final class ShiftTasksViewModel {
                 self?.cancelRefreshWaiter(id: waiterID, epoch: epoch)
             }
         }
+    }
+
+    /// Inline (no-yield) cleanup for a caller cancelled exactly at the
+    /// waiter-storage linearization point. Removes and resolves ONLY this caller's
+    /// waiter to `false` exactly once, drops the now-empty completion it may have
+    /// created, then retires any demandless reservation this caller alone owns —
+    /// all synchronously, before the continuation body yields, so no enqueued owner
+    /// can interleave a load. Idempotent with the queued `onCancel` handler: if this
+    /// ran first, `cancelRefreshWaiter` finds no waiter and no-ops (exactly-once
+    /// holds either order). Peer awaiter / coalesced / live-mailbox demand is left
+    /// untouched (issue #814 authoritative pre-cancellation contract).
+    private func finalizeInlineCancellation(
+        waiterID: UUID,
+        generation: RefreshGeneration,
+        didStartOwner: Bool,
+        epoch: UInt64
+    ) {
+        guard let completion = generationCompletions[generation],
+              completion.cancelAwaiter(waiterID) else {
+            return
+        }
+        if completion.awaiterCount == 0, !completion.isResolved {
+            generationCompletions.removeValue(forKey: generation)
+        }
+        unwindDemandlessReservation(
+            generation,
+            didStartOwner: didStartOwner,
+            epoch: epoch
+        )
     }
 
     /// Retires a reservation whose sole owner cancelled in the reserve→registration
@@ -656,6 +717,18 @@ final class ShiftTasksViewModel {
            completion.awaiterCount == 0,
            !completion.isResolved {
             generationCompletions.removeValue(forKey: generation)
+        }
+
+        // Live but not-yet-drained ingress-mailbox demand is peer demand too: an
+        // off-MainActor supported invalidation may be deposited (pendingDemand) or a
+        // drain may be mid-flight (draining) while these MainActor collections are
+        // momentarily empty. A pending drain relies on the CURRENT owner/pending
+        // state to cover that deposit, so retire nothing here — otherwise cancellation
+        // would abandon/steal peer invalidation demand (issue #814). The mailbox lock
+        // serializes this read against `deposit()`, so no deposit is lost: one landing
+        // after this read schedules its own drain (covered, not duplicated).
+        if invalidationMailbox?.hasLiveDemand == true {
+            return
         }
 
         // A demandless queued pending pass: cancel just that reservation.
@@ -856,9 +929,14 @@ final class ShiftTasksViewModel {
         guard didCancel else { return }
 
         // Only abandon the owner once there is genuinely no outstanding demand:
-        // no parked continuation and no coalesced invalidation still awaiting a
-        // covering pass.
-        if generationCompletions.isEmpty, coalescedDemand.isEmpty {
+        // no parked continuation, no coalesced invalidation still awaiting a
+        // covering pass, and no live-but-undrained ingress-mailbox demand (an
+        // off-MainActor deposit / in-flight drain that the running owner still
+        // covers). Excluding the mailbox predicate would let caller cancellation
+        // abandon an owner a supported invalidation still relies on (issue #814).
+        if generationCompletions.isEmpty,
+           coalescedDemand.isEmpty,
+           invalidationMailbox?.hasLiveDemand != true {
             abandonRefreshOwner()
         }
     }
@@ -1144,6 +1222,14 @@ final class ShiftTasksViewModel {
         invalidationMailbox?.depositCountForTesting ?? 0
     }
 
+    /// Whether the ingress mailbox currently holds live (undrained) demand or an
+    /// active drain cycle. Lets a proof assert a caller-cancellation cleanup did NOT
+    /// abandon an owner a deposited-but-undrained supported invalidation relies on
+    /// (issue #814).
+    var invalidationMailboxHasLiveDemandForTesting: Bool {
+        invalidationMailbox?.hasLiveDemand ?? false
+    }
+
     var isRefreshOwnerActiveForTesting: Bool { refreshOwnerToken != nil }
 
     /// The live refresh-owner task handle, so a race proof can deterministically
@@ -1261,6 +1347,16 @@ private final class ShiftTaskInvalidationMailbox: @unchecked Sendable {
         scheduleCount += 1
         #endif
         return true
+    }
+
+    /// Read-only snapshot: `true` while unconsumed demand exists OR a drain cycle is
+    /// active (deposit → scheduled-drain → ingest window). A caller-cancellation
+    /// cleanup on the MainActor consults this before abandoning an owner so it never
+    /// discards work a supported invalidation still relies on. Taken under the same
+    /// lock as `deposit`/`takePending`, so it never observes a torn deposit and a
+    /// deposit racing just after the read still schedules its own drain.
+    var hasLiveDemand: Bool {
+        lock.withLock { pendingDemand || draining }
     }
 
     /// Consumes pending demand for one drain iteration. Returns `true` if there was
