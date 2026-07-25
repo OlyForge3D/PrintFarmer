@@ -11,6 +11,13 @@
 ## Learnings
 
 _(append new learnings below this line)_
+### 2026-07-25 — Issue #941 final epic gate review
+
+- **Verdict:** ❌ REQUEST_CHANGES for admin-console-redesign before PR to development.
+- **Critical security/correctness issue:** the new per-group settings UI uses `POST /api/settings/{keyName}` as the canonical save path, but that endpoint is only class-level `[Authorize]`, unlike bulk `POST /api/settings` which is `[Authorize(Roles = "farm_admin")]`. Any authenticated non-admin can POST arbitrary non-blocklisted app settings by key.
+- **Critical validation issue:** the same per-key save path deserializes and calls `ISettingsService.Save<T>` without running `IValidatableSetting.Validate()`. Bulk save validates; per-group save bypasses invariants on SlicerSettings, NetworkDiscoverySettings, GcodeUploadSettings, etc.
+- **Warning:** the Slicer per-engine custom renderer reads/writes `PerEngine` while metadata/value JSON uses `perEngine`, so the intended editor is absent and editing the fallback field can corrupt/fail the save.
+- **Reviewer lesson:** green frontend/backend tests did not exercise raw API role authorization or backend custom validators on the new per-section save path. For metadata-driven admin forms, test the exact production endpoint, not only frontend-required/min/max validation.
 
 ### 2025-11-24: Round 19 — PR #14 APPROVE + PR #318 REQUEST_CHANGES
 
