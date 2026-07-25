@@ -54,7 +54,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
         string? envOverride = _configuration[$"NetworkMapping:{uri.Host}:{uri.Port}"];
         if (!string.IsNullOrEmpty(envOverride))
         {
-            _logger.LogDebug("Using configured environment network override");
+            _logger.LogDebug("Using environment override for {UriHost}:{UriPort} -> {EnvOverride}", uri.Host, uri.Port, envOverride);
             return ReplaceHostPort(uri, envOverride).ToString();
         }
 
@@ -79,7 +79,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
             if (IsDockerDesktop())
             {
                 Uri hostDockerInternalUrl = ReplaceHostPort(uri, $"host.docker.internal:{uri.Port}");
-                _logger.LogDebug("Docker Desktop detected; applying the configured host rewrite");
+                _logger.LogDebug("Docker Desktop detected, rewriting to host.docker.internal: {HostDockerInternalUrl}", hostDockerInternalUrl);
                 return hostDockerInternalUrl.ToString();
             }
 
@@ -88,7 +88,7 @@ public class NetworkUrlRewriteService(ILogger<NetworkUrlRewriteService> logger, 
             if (!string.IsNullOrEmpty(gatewayOverride))
             {
                 Uri gatewayUrl = ReplaceHostPort(uri, $"{gatewayOverride}:{uri.Port}");
-                _logger.LogDebug("Using the configured Docker host gateway");
+                _logger.LogDebug("Using Docker host gateway: {GatewayUrl}", gatewayUrl);
                 return gatewayUrl.ToString();
             }
         }

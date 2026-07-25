@@ -48,7 +48,7 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAdminClientAsync();
+        _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public Task DisposeAsync()

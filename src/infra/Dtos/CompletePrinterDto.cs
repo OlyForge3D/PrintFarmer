@@ -21,9 +21,7 @@ public record CompletePrinterDto(
     string? ModelName,
     MotionType? MotionType,
     PrinterBackend Backend,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? ApiKey,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? OriginalServerUrl,
     int BackendPort,
     int? FrontendPort,
@@ -36,9 +34,7 @@ public record CompletePrinterDto(
     double? Progress,
     string? JobName,
     string? FileName,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? ThumbnailUrl,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? CameraStreamUrl,
     double? X,
     double? Y,
@@ -49,9 +45,7 @@ public record CompletePrinterDto(
     double? BedTarget,
     string? HomedAxes,
     PrinterSpoolInfoDto? SpoolInfo,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? BackendUrl = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,

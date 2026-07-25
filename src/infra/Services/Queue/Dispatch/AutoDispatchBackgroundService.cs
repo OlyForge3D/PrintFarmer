@@ -1,7 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -278,7 +277,7 @@ public sealed class AutoDispatchBackgroundService(
                 "[AutoDispatch] No compatible jobs above threshold ({Threshold}) for printer {PrinterId}",
                 settings.MinimumScoreThreshold, printerId);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchfailed", new DispatchFailedEvent
+            await hub.Clients.All.SendAsync("dispatchfailed", new DispatchFailedEvent
             {
                 PrinterId = printerId,
                 PrinterName = printer.Name ?? printerId.ToString(),
@@ -309,7 +308,7 @@ public sealed class AutoDispatchBackgroundService(
             });
             await db.SaveChangesAsync(ct);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
+            await hub.Clients.All.SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
             {
                 JobId = bestJob.Id,
                 JobName = bestJob.Name ?? "Unknown",
@@ -356,7 +355,7 @@ public sealed class AutoDispatchBackgroundService(
                 "[AutoDispatch] Dispatched job {JobId} ({JobName}) → printer {PrinterName} (score: {Score:F1})",
                 bestJob.Id, bestJob.Name, printer.Name, bestMatch.TotalScore);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
+            await hub.Clients.All.SendAsync("jobautodispatched", new JobAutoDispatchedEvent
             {
                 JobId = bestJob.Id,
                 JobName = bestJob.Name ?? "Unknown",
@@ -394,7 +393,7 @@ public sealed class AutoDispatchBackgroundService(
                 logger.LogWarning(saveEx, "[AutoDispatch] Failed to save dispatch failure log");
             }
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchfailed", new DispatchFailedEvent
+            await hub.Clients.All.SendAsync("dispatchfailed", new DispatchFailedEvent
             {
                 JobId = bestJob.Id,
                 PrinterId = printerId,

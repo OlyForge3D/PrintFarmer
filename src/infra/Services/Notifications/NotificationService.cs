@@ -3,7 +3,6 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
@@ -250,7 +249,7 @@ public class NotificationService(
             // Broadcast real-time event via SignalR so connected clients update immediately
             if (hubContext != null)
             {
-                await hubContext.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
+                await hubContext.Clients.All.SendAsync(
                     "notificationreceived",
                     new { type = type.ToString(), subject, body, jobId = parsedJobId },
                     cancellationToken);

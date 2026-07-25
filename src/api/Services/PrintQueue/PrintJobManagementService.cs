@@ -33,15 +33,6 @@ public class PrintJobManagementService(
     IPrinterStatusRefreshService? printerStatusRefreshService = null,
     IJobCostCalculationService? jobCostCalculationService = null) : IPrintJobManagementService
 {
-    private const string DispatchArtifactUnavailable =
-        "The G-code artifact is unavailable for dispatch.";
-
-    private const string DispatchPrinterFailure =
-        "The printer could not start the dispatched job.";
-
-    private const string DispatchUnexpectedFailure =
-        "The job could not be dispatched.";
-
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
@@ -566,11 +557,6 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException("Cannot dispatch job without an assigned printer. Please assign a printer first.");
             }
 
-            if (!job.AssignedPrinter.IsEnabled)
-            {
-                throw new InvalidOperationException("Cannot dispatch a job to a disabled printer.");
-            }
-
             // Validate G-code file exists
             if (job.GcodeFile == null)
             {
@@ -592,8 +578,8 @@ public class PrintJobManagementService(
             string localFilePath = Path.Combine(gcodeStorageRoot, job.GcodeFile.FilePath.TrimStart('/'), job.GcodeFile.FileName);
 
             _logger.LogInformation(
-                "Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName}",
-                jobId, job.AssignedPrinterId, printerFileName);
+                "Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName} from {LocalPath}",
+                jobId, job.AssignedPrinterId, printerFileName, localFilePath);
 
             try
             {
@@ -601,11 +587,8 @@ public class PrintJobManagementService(
                 if (!System.IO.File.Exists(localFilePath))
                 {
                     job.Status = PrintJobStatus.Assigned;
-                    job.ActualStartTime = null;
-                    job.FailureReason = DispatchArtifactUnavailable;
-                    _logger.LogError(
-                        "G-code artifact is unavailable for print job {JobId}",
-                        jobId);
+                    job.FailureReason = $"G-code file not found on disk: {localFilePath}";
+                    _logger.LogError("G-code file not found on disk for job {JobId}: {LocalPath}", jobId, localFilePath);
                 }
                 else
                 {
@@ -668,7 +651,7 @@ public class PrintJobManagementService(
                         };
 
                         // Broadcast to all clients (queue dashboard listeners)
-                        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+                        await _hubContext.Clients.All.SendAsync(
                             "dispatchuploadprogress",
                             dto,
                             cancellationToken);
@@ -709,16 +692,15 @@ public class PrintJobManagementService(
                     else
                     {
                         job.Status = PrintJobStatus.Assigned;
-                        job.ActualStartTime = null;
-                        job.FailureReason = DispatchPrinterFailure;
+                        job.FailureReason = result.ErrorMessage ?? $"Failed at stage: {result.FailedStage}";
                         _logger.LogWarning(
-                            "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}",
-                            jobId, job.AssignedPrinterId, result.FailedStage);
+                            "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}: {Error}",
+                            jobId, job.AssignedPrinterId, result.FailedStage, result.ErrorMessage);
 
                         // Best-effort: notify completion state so UI can stop showing upload progress.
                         if (totalBytes > 0)
                         {
-                            await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+                            await _hubContext.Clients.All.SendAsync(
                                 "dispatchuploadprogress",
                                 new DispatchUploadProgressDto
                                 {
@@ -730,7 +712,7 @@ public class PrintJobManagementService(
                                     IsCompleted = true,
                                     IsFailed = true,
                                     Stage = result.FailedStage.ToString(),
-                                    ErrorMessage = DispatchPrinterFailure,
+                                    ErrorMessage = result.ErrorMessage,
                                 },
                                 cancellationToken);
                         }
@@ -741,13 +723,8 @@ public class PrintJobManagementService(
             {
                 // Revert to Assigned status on exception
                 job.Status = PrintJobStatus.Assigned;
-                job.ActualStartTime = null;
-                job.FailureReason = DispatchUnexpectedFailure;
-                _logger.LogError(
-                    "Error dispatching print job {JobId} to printer {PrinterId}; exception type {ExceptionType}",
-                    jobId,
-                    job.AssignedPrinterId,
-                    printEx.GetType().Name);
+                job.FailureReason = $"Error starting print: {printEx.Message}";
+                _logger.LogError(printEx, "Error dispatching print job {JobId} to printer {PrinterId}", jobId, job.AssignedPrinterId);
             }
 
             job.UpdatedAt = DateTime.UtcNow;
@@ -771,10 +748,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(
-                "Error dispatching print job {JobId}; exception type {ExceptionType}",
-                jobId,
-                ex.GetType().Name);
+            _logger.LogError(ex, "Error dispatching print job {JobId}", jobId);
             throw;
         }
     }

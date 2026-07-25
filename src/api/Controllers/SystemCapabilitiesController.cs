@@ -1,9 +1,6 @@
-﻿using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Services.Capabilities;
-using Microsoft.AspNetCore.Authorization;
+﻿using System.Runtime.InteropServices;
+using Farm.Infrastructure.Dtos;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Net.Http.Headers;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -13,11 +10,10 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/system")]
-[AllowAnonymous]
 public class SystemCapabilitiesController(
-    ICalibrationCapabilityService capabilityService) : ControllerBase
+    IConfiguration configuration) : ControllerBase
 {
-    private readonly ICalibrationCapabilityService _capabilityService = capabilityService;
+    private readonly IConfiguration _configuration = configuration;
 
     /// <summary>
     /// Returns the current platform capabilities, auto-detecting ARM64 to disable
@@ -26,25 +22,30 @@ public class SystemCapabilitiesController(
     /// <returns>Platform capabilities for the running host.</returns>
     [HttpGet("capabilities")]
     [ProducesResponseType(typeof(PlatformCapabilitiesDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status426UpgradeRequired)]
-    public async Task<ActionResult<PlatformCapabilitiesDto>> GetCapabilitiesAsync(
-        CancellationToken cancellationToken)
+    public ActionResult<PlatformCapabilitiesDto> GetCapabilities()
     {
-        ApiContractNegotiation.AddResponseHeaders(Response);
-        ObjectResult? negotiationFailure = ApiContractNegotiation.Negotiate(Request);
-        if (negotiationFailure is not null)
-        {
-            return negotiationFailure;
-        }
+        var arch = RuntimeInformation.ProcessArchitecture;
+        bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 
-        Response.GetTypedHeaders().CacheControl = new CacheControlHeaderValue
+        // Read resolved values — Program.cs writes these after applying ARM + DEPLOYMENT_MODE logic
+        bool modelFilesEnabled = _configuration.GetValue("Platform:ModelFilesEnabled", true);
+        bool slicerEnabled = _configuration.GetValue("Slicer:Enabled", true);
+        bool thumbnailEnabled = _configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+        string? platformNote = isArm && (!modelFilesEnabled || !slicerEnabled || !thumbnailEnabled)
+            ? "Running on ARM64 — 3D model and slicing features are disabled"
+            : null;
+
+        var dto = new PlatformCapabilitiesDto
         {
-            Public = true,
-            MaxAge = TimeSpan.FromSeconds(30),
+            Architecture = arch.ToString(),
+            SlicingEnabled = slicerEnabled,
+            ModelFilesEnabled = modelFilesEnabled,
+            ThumbnailGenerationEnabled = thumbnailEnabled,
+            GcodeUploadEnabled = true,
+            PlatformNote = platformNote,
         };
 
-        PlatformCapabilitiesDto capabilities =
-            await _capabilityService.GetCapabilitiesAsync(user: null, cancellationToken);
-        return Ok(capabilities);
+        return Ok(dto);
     }
 }

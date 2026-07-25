@@ -22,15 +22,6 @@ ARG ASPNET_TAG=10.0-noble
 ARG NODE_TAG=24-alpine
 ARG NGINX_TAG=alpine
 ARG UBUNTU_TAG=24.04
-ARG BUILD_VERSION=development
-ARG VCS_REF=unknown
-ARG SOURCE_REPOSITORY=""
-ARG SOURCE_ARCHIVE_URL=""
-ARG SBOM_URL=""
-
-FROM scratch AS legal-assets
-COPY LICENSE /LICENSE
-COPY THIRD-PARTY-NOTICES.md /THIRD-PARTY-NOTICES.md
 
 ############################################################
 # Shared Build Stage - Build all .NET projects once
@@ -112,22 +103,8 @@ RUN echo "Checking published artifacts..." && \
 # API Runtime Container
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
-ARG BUILD_VERSION
-ARG VCS_REF
-ARG SOURCE_REPOSITORY
-ARG SOURCE_ARCHIVE_URL
-ARG SBOM_URL
 WORKDIR /app
 EXPOSE 5000
-
-LABEL org.opencontainers.image.title="PrintFarmer API" \
-      org.opencontainers.image.description="PrintFarmer API server" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${BUILD_VERSION}" \
-      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-      org.printfarmer.sbom="${SBOM_URL}"
 
 # Install runtime tools that are present in the upgraded image
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -144,8 +121,6 @@ RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models && \
 
 # Copy API binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
-COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
-COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Download and extract Lib3MF library for 3MF file support
 # Lib3MF native library is already copied to output by csproj during build
@@ -175,11 +150,6 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV GCODE_STORAGE_PATH=/app/gcode
 ENV MODEL_UPLOAD_PATH=/app/models
 ENV SLICER_PROFILES_PATH=/app/profiles
-ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
-ENV PFARM__SourceInfo__Revision=${VCS_REF}
-ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
-ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
-ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
 
 # Keep as root so entrypoint can fix permissions
 # USER appuser
@@ -198,22 +168,8 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 # NOTE: amd64-only — depends on OrcaSlicer binaries
 ############################################################
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
-ARG BUILD_VERSION
-ARG VCS_REF
-ARG SOURCE_REPOSITORY
-ARG SOURCE_ARCHIVE_URL
-ARG SBOM_URL
 WORKDIR /app
 EXPOSE 5246
-
-LABEL org.opencontainers.image.title="PrintFarmer Slicer Host" \
-      org.opencontainers.image.description="PrintFarmer distributed slicer host" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${BUILD_VERSION}" \
-      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-      org.printfarmer.sbom="${SBOM_URL}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
@@ -224,8 +180,6 @@ RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuse
 RUN mkdir -p /app/artifacts /data && chown -R appuser:appuser /app /data
 
 COPY --chown=appuser:appuser --from=shared-build /app/publish/slicer-host .
-COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
-COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 ENV ASPNETCORE_URLS=http://+:5246
 ENV ASPNETCORE_ENVIRONMENT=Production
@@ -408,22 +362,10 @@ RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 FROM slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB
-ARG BUILD_VERSION
-ARG VCS_REF
-ARG SOURCE_REPOSITORY
-ARG SOURCE_ARCHIVE_URL
-ARG SBOM_URL
 
-LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
-      org.opencontainers.image.description="PrintFarmer dedicated OrcaSlicer worker" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${BUILD_VERSION}" \
-      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-      org.printfarmer.sbom="${SBOM_URL}" \
-      component="orcaslicer-worker" \
+LABEL component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
+      description="Dedicated OrcaSlicer worker container" \
       security.sandbox="true"
 
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
@@ -432,8 +374,6 @@ COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orc
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
-COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
-COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Verify binary installation and set up permissions
 RUN set -e; \
@@ -519,9 +459,6 @@ RUN set -eux; \
 
 # Copy source code and build with environment variables
 COPY src/Web/ReactApp/ ./
-COPY scripts/compliance /scripts/compliance
-COPY compliance/dependency-license-policy.json /compliance/dependency-license-policy.json
-COPY compliance/licenses /compliance/licenses
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
@@ -543,11 +480,6 @@ RUN set -eux; \
         exit $build_status; \
     fi; \
     \
-    node /scripts/compliance/create-npm-notices.mjs \
-        --repo / \
-        --package-root app \
-        --output app/dist/THIRD-PARTY-LICENSES.npm.txt; \
-    \
     if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
         echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
         ls -la; \
@@ -561,29 +493,13 @@ RUN set -eux; \
 # React Frontend Runtime Container
 ############################################################
 FROM nginx:${NGINX_TAG} AS frontend-runtime
-ARG BUILD_VERSION
-ARG VCS_REF
-ARG SOURCE_REPOSITORY
-ARG SOURCE_ARCHIVE_URL
-ARG SBOM_URL
 WORKDIR /usr/share/nginx/html
-
-LABEL org.opencontainers.image.title="PrintFarmer Frontend" \
-      org.opencontainers.image.description="PrintFarmer React web client" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${BUILD_VERSION}" \
-      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-      org.printfarmer.sbom="${SBOM_URL}"
 
 # Ensure curl present for health checks
 RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
 
 # Copy built React app (from /app/dist since source was copied flat)
 COPY --from=frontend-build /app/dist .
-COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
-COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Copy nginx configuration
 COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
@@ -606,12 +522,8 @@ CMD ["nginx", "-g", "daemon off;"]
 ############################################################
 FROM api-runtime AS monolith-runtime
 
-LABEL org.opencontainers.image.title="PrintFarmer Monolith" \
-      org.opencontainers.image.description="PrintFarmer API and web client monolith"
-
 # Copy React frontend build into wwwroot for static file serving
 COPY --from=frontend-build /app/dist ./wwwroot/
-COPY --from=frontend-build /app/dist/THIRD-PARTY-LICENSES.npm.txt ./THIRD-PARTY-LICENSES.npm.txt
 
 # Set monolith deployment mode
 ENV DEPLOYMENT_MODE=monolith
@@ -626,21 +538,7 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=8 \
 # Printer Discovery Service Runtime Container
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
-ARG BUILD_VERSION
-ARG VCS_REF
-ARG SOURCE_REPOSITORY
-ARG SOURCE_ARCHIVE_URL
-ARG SBOM_URL
 WORKDIR /app
-
-LABEL org.opencontainers.image.title="PrintFarmer Printer Discovery" \
-      org.opencontainers.image.description="PrintFarmer network printer discovery service" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
-      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-      org.opencontainers.image.revision="${VCS_REF}" \
-      org.opencontainers.image.version="${BUILD_VERSION}" \
-      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-      org.printfarmer.sbom="${SBOM_URL}"
 
 # Install curl for health checks (standard base images don't have it)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -651,8 +549,6 @@ RUN groupadd -r discovery && useradd -r -g discovery discovery && \
 
 # Copy published printer discovery service (as discovery user)
 COPY --chown=discovery:discovery --from=shared-build /app/publish/printer-discovery .
-COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
-COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Run as non-root user
 USER discovery

@@ -65,7 +65,7 @@ public sealed class OctoPrintWebSocketAdapter(
     {
         try
         {
-            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Attempting connection", _printerId);
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Attempting connection to {ServerUrl}", _printerId, _printer.ServerUrl);
             _socketState = "connecting";
 
             // Get session token first via HTTP
@@ -262,8 +262,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-                .SendAsync("printerupdated", signalRUpdate, ct);
+            await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
         }
         catch (Exception ex)
         {

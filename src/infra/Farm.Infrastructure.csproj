@@ -20,12 +20,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.3" />
     <PackageReference Include="QuestPDF" Version="2026.2.3" />
   <PackageReference Include="Refit.HttpClientFactory" Version="10.0.1" />
-  <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.16.0" />
     <PackageReference Include="Lucene.Net" Version="4.8.0-beta00018" />
     <PackageReference Include="Lucene.Net.QueryParser" Version="4.8.0-beta00018" />
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
     <PackageReference Include="YamlDotNet" Version="16.2.1" />
     <!-- Note: Newtonsoft.Json, WebSocket packages, and Refit are globally overridden in Directory.Build.props -->
   </ItemGroup>

@@ -286,7 +286,7 @@ public class MaintenanceAlertEngine(
     {
         try
         {
-            await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+            await _hubContext.Clients.All.SendAsync(
                 MaintenanceHubEvents.AlertCreated,
                 new
                 {
@@ -403,7 +403,7 @@ public class MaintenanceAlertEngine(
 
         try
         {
-            await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
+            await _hubContext.Clients.All.SendAsync(
                 MaintenanceHubEvents.AlertStatusChanged,
                 new
                 {

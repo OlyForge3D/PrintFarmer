@@ -33,6 +33,7 @@ public abstract class HttpJobPollerService(
     private readonly ILogger<HttpJobPollerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+    private readonly Guid _workerId = Guid.NewGuid();
 
     /// <summary>
     /// Derived classes implement this to execute the slicing pipeline.
@@ -61,32 +62,21 @@ public abstract class HttpJobPollerService(
         int pollIntervalSeconds = int.Parse(_configuration["Worker:PollIntervalSeconds"] ?? "5");
         int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300"); // 5 minutes default
 
-        _logger.LogInformation("HTTP job poller starting. API={ApiBaseUrl} PollInterval={PollIntervalSeconds}s Lease={LeaseDurationSeconds}s", apiBaseUrl, pollIntervalSeconds, leaseDurationSeconds);
+        _logger.LogInformation("Worker {WorkerId} HTTP job poller starting. API={ApiBaseUrl} PollInterval={PollIntervalSeconds}s Lease={LeaseDurationSeconds}s", _workerId, apiBaseUrl, pollIntervalSeconds, leaseDurationSeconds);
         _logger.LogInformation("Worker capabilities: {Value0}", string.Join(", ", GetWorkerCapabilities()));
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                WorkerState currentWorkerState = _workerState.GetWorkerState();
-                Guid? registeredServiceId = currentWorkerState.RegisteredServiceId;
-                if (registeredServiceId is null ||
-                    string.IsNullOrWhiteSpace(currentWorkerState.RegisteredServiceApiKey))
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), stoppingToken);
-                    continue;
-                }
-
                 using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
-                httpClient.DefaultRequestHeaders.Add("X-Worker-Key", currentWorkerState.RegisteredServiceApiKey);
-                httpClient.DefaultRequestHeaders.Add("X-Worker-Id", registeredServiceId.Value.ToString());
 
                 // Attempt to claim a job
                 ClaimJobRequest claimRequest = new ClaimJobRequest
                 {
-                    WorkerId = registeredServiceId.Value,
+                    WorkerId = _workerId,
                     Capabilities = GetWorkerCapabilities(),
                     LeaseDurationSeconds = leaseDurationSeconds
                 };
@@ -107,8 +97,7 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                WorkerSliceJobResponse? jobStatus =
-                    await claimResponse.Content.ReadFromJsonAsync<WorkerSliceJobResponse>(stoppingToken);
+                SliceJobStatusResponse? jobStatus = await claimResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>(stoppingToken);
                 if (jobStatus == null)
                 {
                     _logger.LogWarning("Claimed job but received null response");
@@ -116,14 +105,14 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                // Convert the worker-only claim contract to the pipeline model.
+                // Convert SliceJobStatusResponse to DistributedSlicingJob for pipeline
                 // Map claimed job to DistributedSlicingJob (feed actual metadata to pipeline)
                 SlicerEngineType engineEnum = (SlicerEngineType)jobStatus.SlicerEngine;
                 DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
-                    WorkerId = registeredServiceId.Value.ToString(),
-                    ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
+                    WorkerId = _workerId.ToString(),
+                    ModelFileUrl = Uri.TryCreate(jobStatus.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? tmp) ? tmp : new Uri("about:blank", UriKind.RelativeOrAbsolute),
                     ModelFileName = jobStatus.ModelFileName,
                     EngineType = engineEnum,
                     SlicerEngine = engineEnum.ToString(),
@@ -151,14 +140,13 @@ public abstract class HttpJobPollerService(
             }
         }
 
-        _logger.LogInformation("HTTP job poller stopped");
+        _logger.LogInformation("Worker {WorkerId} HTTP job poller stopped", _workerId);
     }
 
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
     {
         DateTime start = DateTime.UtcNow;
         CancellationTokenSource? localLinkedCts = null;
-        SlicingResult? result = null;
         try
         {
             using IServiceScope scope = _serviceProvider.CreateScope();
@@ -178,7 +166,7 @@ public abstract class HttpJobPollerService(
                         try
                         {
                             RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
-                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew-lease", renewReq, localLinkedCts.Token);
+                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {
                                 _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
@@ -205,7 +193,7 @@ public abstract class HttpJobPollerService(
             }
 
             // Execute the slicing pipeline (downloads STL, runs slicer, generates G-code)
-            result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
+            SlicingResult result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
             if (!result.Success)
             {
                 throw new InvalidOperationException("Slicing pipeline reported failure");
@@ -250,23 +238,7 @@ public abstract class HttpJobPollerService(
         {
             _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
-            try
-            {
-                FailSliceJobRequest failure = new("Slicing worker could not complete the job.");
-                HttpResponseMessage response =
-                    await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/fail", failure, ct);
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning(
-                        "Failed to report job {JobId} failure: {StatusCode}",
-                        job.Id,
-                        response.StatusCode);
-                }
-            }
-            catch (Exception reportException)
-            {
-                _logger.LogWarning(reportException, "Failed to report job {JobId} failure", job.Id);
-            }
+            // Job will timeout and be reassigned by the API's error recovery system
         }
         finally
         {
@@ -283,7 +255,6 @@ public abstract class HttpJobPollerService(
             {
             }
 
-            TryCleanupLocalResult(job.Id, result);
             _workerState.DecrementActiveJobs();
         }
     }
@@ -342,11 +313,14 @@ public abstract class HttpJobPollerService(
 
         // Upload the primary G-code file
         using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
+        gcodeContent.Add(new StringContent(job.Id.ToString()), "jobId");
+        gcodeContent.Add(new StringContent("gcode"), "kind");
+        gcodeContent.Add(new StringContent(_workerId.ToString()), "workerId");
+
         byte[] gcodeBytes = await File.ReadAllBytesAsync(gcodeFilePath, ct);
         gcodeContent.Add(new ByteArrayContent(gcodeBytes), "file", Path.GetFileName(gcodeFilePath));
 
-        HttpResponseMessage uploadResponse =
-            await httpClient.PostAsync($"/api/slice/{job.Id}/artifacts", gcodeContent, ct);
+        HttpResponseMessage uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {
@@ -367,32 +341,5 @@ public abstract class HttpJobPollerService(
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
-    }
-
-    private void TryCleanupLocalResult(Guid jobId, SlicingResult? result)
-    {
-        if (result?.ResultFileUrl is not { IsAbsoluteUri: true, IsFile: true } resultUri)
-        {
-            return;
-        }
-
-        try
-        {
-            string filePath = resultUri.LocalPath;
-            string? directory = Path.GetDirectoryName(filePath);
-            if (directory is not null &&
-                string.Equals(Path.GetFileName(directory), jobId.ToString(), StringComparison.Ordinal))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
-            else if (File.Exists(filePath))
-            {
-                File.Delete(filePath);
-            }
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
-        }
     }
 }

@@ -12,11 +12,7 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public const string SlicerVersion = "2.3.1";
-    public const string UpstreamDistributionCapability = "orcaslicer-upstream";
-
-    public static readonly string[] Capabilities =
-        ["orcaslicer", UpstreamDistributionCapability, "stl-processing", "gcode-generation"];
+    public static readonly string[] Capabilities = ["orcaslicer", "stl-processing", "gcode-generation"];
 }
 
 public static class Program
@@ -122,7 +118,7 @@ public static class Program
         _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
         {
             service = "orcaslicer-worker",
-            version = WorkerConstants.SlicerVersion,
+            version = "1.0.0",
             status = "running",
             realBinary = detector.IsRealBinaryPresent(),
             capabilities = WorkerConstants.Capabilities
@@ -134,7 +130,7 @@ public static class Program
             return Results.Ok(new
             {
                 orcaslicerVersion = orcaVersion,
-                workerVersion = WorkerConstants.SlicerVersion,
+                workerVersion = "1.0.0",
                 timestamp = DateTime.UtcNow
             });
         });

@@ -30,7 +30,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAdminClientAsync();
+        _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -270,7 +270,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
     public async Task Claim_Succeeds_With_Valid_Key()
     {
         // Register a valid worker in the database
-        Guid serviceId = await _factory.RegisterWorkerAsync("test-worker-key", "Test Worker");
+        await _factory.RegisterWorkerAsync("test-worker-key", "Test Worker");
 
         // Arrange - create a queued job
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
@@ -290,7 +290,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
 
         ClaimJobRequest request = new ClaimJobRequest
         {
-            WorkerId = serviceId,
+            WorkerId = Guid.NewGuid(),
             Capabilities = new[] { "orcaslicer" }
         };
 
@@ -301,7 +301,6 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "test-worker-key");
-        requestMessage.Headers.Add("X-Worker-Id", serviceId.ToString());
         // Manually add auth header since SendAsync bypasses default headers
         AuthenticationHeaderValue? authHeader = _client.DefaultRequestHeaders.Authorization;
         if (authHeader != null)

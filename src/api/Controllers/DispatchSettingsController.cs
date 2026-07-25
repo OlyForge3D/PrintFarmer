@@ -1,8 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue.Dispatch;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +13,6 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/dispatch-settings")]
 [Authorize]
-[RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
 public class DispatchSettingsController(
     AppDbContext db,
     ILogger<DispatchSettingsController> logger) : ControllerBase

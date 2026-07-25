@@ -22,8 +22,8 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
 {
     private readonly CustomWebApplicationFactory _factory = factory;
 
-    [Fact(DisplayName = "Completion endpoint does not persist untrusted inline worker logs")]
-    public async Task Completion_Does_Not_Persist_Untrusted_Inline_Worker_Logs()
+    [Fact(DisplayName = "Completion endpoint persists log text as artifact when provided")]
+    public async Task Completion_Persists_Log_Text_As_Artifact()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
@@ -38,24 +38,8 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         SliceJobMetrics metrics = new SliceJobMetrics();
         IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
-        Guid serviceId = Guid.NewGuid();
-        var worker = new Worker
-        {
-            Id = Guid.NewGuid(),
-            ServiceId = serviceId.ToString(),
-            Name = "Test Worker",
-            EndpointUrl = "http://localhost:8080",
-            CapabilitiesJson = "[\"orcaslicer\",\"orcaslicer-upstream\"]",
-            Status = WorkerStatus.Online,
-            ApiKey = "test-worker-key",
-            TotalSlots = 1,
-            LastHeartbeat = DateTime.UtcNow
-        };
-        await workerRepository.AddAsync(worker);
-        await workerRepository.SaveChangesAsync();
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
-        httpContext.Request.Headers["X-Worker-Id"] = serviceId.ToString();
         SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
@@ -71,8 +55,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
-            ModelFileUrl = "http://example/model.stl",
-            WorkerId = worker.Id
+            ModelFileUrl = "http://example/model.stl"
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -80,7 +63,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         // Upload primary gcode artifact
         byte[] bytes = Encoding.UTF8.GetBytes("; gcode content");
         TestFormFile formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
-        Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, worker.Id, "gcode", default);
+        Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, null, "gcode", default);
 
         // Complete with log text
         CompleteSliceJobRequest request = new CompleteSliceJobRequest
@@ -96,12 +79,13 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         CompleteSliceJobResponse? response = ok!.Value as CompleteSliceJobResponse;
         _ = response.Should().NotBeNull();
         _ = response!.ArtifactIds.Should().Contain(primary.Id);
-        _ = response.LogArtifactId.Should().BeNull();
+        _ = response.LogArtifactId.Should().NotBeNull();
+        _ = response.ArtifactIds.Should().Contain(response.LogArtifactId!.Value);
 
-        // Only the explicitly uploaded artifact is retained.
+        // Verify artifact persisted
         IReadOnlyList<Artifact> artifacts = await artifactsService.ListByJobAsync(job.Id, default);
-        _ = artifacts.Should().ContainSingle();
-        _ = artifacts.Should().NotContain(a => a.Kind == "log");
+        _ = artifacts.Should().HaveCount(2);
+        _ = artifacts.Should().Contain(a => a.Kind == "log" && a.Id == response.LogArtifactId);
     }
 
     private sealed class TestFormFile(byte[] data, string fileName, string contentType) : IFormFile

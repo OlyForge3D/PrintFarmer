@@ -2,7 +2,6 @@
 using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Farm.Web.Api.Startup;
@@ -24,9 +23,14 @@ public static class AuthenticationStartup
         services.AddAuthentication("Bearer")
             .AddJwtBearer("Bearer", options =>
             {
-                // Avoid building a temporary service provider here. The event handlers resolve
-                // request-scoped services when needed and also support SignalR access tokens.
-                options.Events = ProgramHelpers.CreateJwtEvents(null, null);
+                // Enable extra diagnostics in Development and Testing
+                if (environment.IsDevelopment() || environment.EnvironmentName == "Testing")
+                {
+                    // Avoid building a temporary service provider here (BuildServiceProvider creates a second provider and may duplicate singletons).
+                    // We intentionally pass nulls here; the ProgramHelpers events will fall back to resolving per-request if needed.
+                    // The concrete startup logging references will be populated after the application is built.
+                    options.Events = ProgramHelpers.CreateJwtEvents(null, null);
+                }
 
                 // Allow HTTP in test runs and relax validation for test environment
                 if (environment.EnvironmentName == "Testing")
@@ -91,7 +95,6 @@ public static class AuthenticationStartup
         // Register authorization handlers
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
-        services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationProblemDetailsResultHandler>();
 
         return services;
     }

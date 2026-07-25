@@ -1,5 +1,4 @@
-﻿using System.Text.Json.Serialization;
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -50,9 +49,9 @@ public record PrinterDto(
     double? Progress = null,
     string? JobName = null,
     string? FileName = null,
-    [property: JsonIgnore] string? ThumbnailUrl = null,
-    [property: JsonIgnore] string? CameraStreamUrl = null,
-    [property: JsonIgnore] string? CameraSnapshotUrl = null,
+    string? ThumbnailUrl = null,
+    string? CameraStreamUrl = null,
+    string? CameraSnapshotUrl = null,
     double? X = null,
     double? Y = null,
     double? Z = null,
@@ -61,15 +60,15 @@ public record PrinterDto(
     double? HotendTarget = null,
     double? BedTarget = null,
     PrinterBackend Backend = PrinterBackend.Moonraker,
-    [property: JsonIgnore] string? ApiKey = null,
-    [property: JsonIgnore] string? Username = null,
-    [property: JsonIgnore] string? Password = null,
-    [property: JsonIgnore] string? OriginalServerUrl = null,
-    [property: JsonIgnore] int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
-    [property: JsonIgnore] int? FrontendPort = null,
+    string? ApiKey = null,
+    string? Username = null,
+    string? Password = null,
+    string? OriginalServerUrl = null,
+    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
+    int? FrontendPort = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    [property: JsonIgnore] string? BackendUrl = null,
-    [property: JsonIgnore] string? FrontendUrl = null,
+    string? BackendUrl = null,
+    string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
     bool HasCatalogUpdate = false);

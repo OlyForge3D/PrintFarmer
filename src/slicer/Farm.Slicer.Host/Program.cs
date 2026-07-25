@@ -1,14 +1,13 @@
-﻿using System.Text;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Farm.Infrastructure.Data;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.EntityFrameworkCore;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
@@ -43,49 +42,16 @@ builder.Services.AddUnimplementedSlicerServiceStubs();
 // ── Infrastructure services shared with the main API ──────────────────────────
 // ILogger<T> is automatically provided by the DI container
 
-// ── Authentication ─────────────────────────────────────────────────────────────
-string jwtKey = builder.Configuration["Jwt:Key"]
-    ?? throw new InvalidOperationException(
-        "JWT Key not configured. Provide Jwt__Key using the same secret as the main PrintFarmer API.");
+// ── Authentication (transitional — allow all for standalone mode) ──────────────
+// When the host is deployed behind an API gateway, this will be replaced with
+// proper JWT/API-key authentication forwarded from the gateway.
 builder.Services
-    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.RequireHttpsMetadata = !builder.Environment.IsEnvironment("Testing");
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer",
-            ValidateAudience = true,
-            ValidAudience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer",
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.Zero,
-        };
-        options.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = context =>
-            {
-                if (context.Request.Path.StartsWithSegments("/hubs") &&
-                    context.Request.Query.TryGetValue(
-                        "access_token",
-                        out Microsoft.Extensions.Primitives.StringValues accessToken))
-                {
-                    context.Token = accessToken;
-                }
-
-                return Task.CompletedTask;
-            },
-        };
-    });
+    .AddAuthentication("StandaloneScheme")
+    .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
+        "StandaloneScheme", null);
 builder.Services.AddAuthorization(opts =>
 {
-    opts.AddPolicy("farm_admin", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
+    opts.AddPolicy("farm_admin", policy => policy.RequireAssertion(_ => true));
 });
 
 // ── JSON serialisation ────────────────────────────────────────────────────────
@@ -107,7 +73,6 @@ builder.Services.AddSignalR()
 
 // ── Health checks ─────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<AppDbContext>("core-db")
     .AddDbContextCheck<SlicerDbContext>("slicer-db");
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -124,6 +89,23 @@ WebApplication app = builder.Build();
 
 // Configure artifact storage metrics thresholds and alert subscriptions.
 app.ConfigureSlicerMetrics();
+
+// Ensure slicer database schema exists on startup
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+    string providerName = db.Database.ProviderName ?? string.Empty;
+    bool isSqlite = providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+
+    if (isSqlite)
+    {
+        await db.Database.EnsureCreatedAsync();
+    }
+    else
+    {
+        await db.Database.MigrateAsync();
+    }
+}
 
 app.UseCors();
 app.UseAuthentication();

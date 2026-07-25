@@ -86,15 +86,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
             services.AddDbContext<SlicerDbContext>(options =>
             {
-                options.UseSqlite(
-                    _connectionString,
-                    sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+                options.UseSqlite(_connectionString);
             });
 
             DbContextOptionsBuilder<SlicerDbContext> optionsBuilder = new DbContextOptionsBuilder<SlicerDbContext>();
-            optionsBuilder.UseSqlite(
-                _connectionString,
-                sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
+            optionsBuilder.UseSqlite(_connectionString);
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<SlicerDbContext>();
 
@@ -125,15 +121,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
             services.AddDbContext<AppDbContext>(options =>
             {
-                options.UseSqlite(
-                    _connectionString,
-                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+                options.UseSqlite(_connectionString);
             });
 
             DbContextOptionsBuilder<AppDbContext> appOptionsBuilder = new();
-            appOptionsBuilder.UseSqlite(
-                _connectionString,
-                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+            appOptionsBuilder.UseSqlite(_connectionString);
             services.AddSingleton(appOptionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>();
 
@@ -377,25 +369,23 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// Creates an authenticated HTTP client with a valid worker API key.
     /// </summary>
     public async Task<HttpClient> CreateWorkerClientAsync(
-        string? workerKey = null,
+        string workerKey = "test-worker-key",
         string workerName = "Test Worker",
         string username = "test-worker-user",
         string email = "worker@example.com",
         string password = "WorkerPassword123!")
     {
-        string serviceKey = workerKey ?? $"test-worker-{Guid.NewGuid():N}";
-        Guid serviceId = await RegisterWorkerAsync(serviceKey, workerName);
+        await RegisterWorkerAsync(workerKey, workerName);
 
-        HttpClient client = await CreateAdminClientAsync(username, email, password);
-        client.DefaultRequestHeaders.Add("X-Worker-Key", serviceKey);
-        client.DefaultRequestHeaders.Add("X-Worker-Id", serviceId.ToString());
+        HttpClient client = await CreateAuthenticatedClientAsync(username, email, password);
+        client.DefaultRequestHeaders.Add("X-Worker-Key", workerKey);
         return client;
     }
 
     /// <summary>
     /// Registers a worker in the database with the given API key.
     /// </summary>
-    public async Task<Guid> RegisterWorkerAsync(
+    public async Task RegisterWorkerAsync(
         string workerKey = "test-worker-key",
         string workerName = "Test Worker")
     {
@@ -403,29 +393,25 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         {
             SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
-            Worker? existingWorker = await context.Set<Worker>().FirstOrDefaultAsync(w => w.Name == workerName);
-            if (existingWorker is not null)
+            Worker? existingWorker = await context.Set<Worker>().FirstOrDefaultAsync(w => w.ApiKey == workerKey);
+            if (existingWorker == null)
             {
-                return Guid.Parse(existingWorker.ServiceId);
+                var worker = new Worker
+                {
+                    Id = Guid.NewGuid(),
+                    ServiceId = $"worker-{Guid.NewGuid():N}",
+                    Name = workerName,
+                    EndpointUrl = "http://localhost:8080",
+                    CapabilitiesJson = "[\"orcaslicer\"]",
+                    Status = "online",
+                    ApiKey = workerKey,
+                    TotalSlots = 4,
+                    ActiveJobs = 0,
+                    LastHeartbeat = DateTime.UtcNow
+                };
+                context.Set<Worker>().Add(worker);
+                await context.SaveChangesAsync();
             }
-
-            Guid serviceId = Guid.NewGuid();
-            var worker = new Worker
-            {
-                Id = Guid.NewGuid(),
-                ServiceId = serviceId.ToString(),
-                Name = workerName,
-                EndpointUrl = "http://localhost:8080",
-                CapabilitiesJson = "[\"orcaslicer\",\"orcaslicer-upstream\"]",
-                Status = WorkerStatus.Online,
-                ApiKey = workerKey,
-                TotalSlots = 4,
-                ActiveJobs = 0,
-                LastHeartbeat = DateTime.UtcNow
-            };
-            context.Set<Worker>().Add(worker);
-            await context.SaveChangesAsync();
-            return serviceId;
         }
     }
 

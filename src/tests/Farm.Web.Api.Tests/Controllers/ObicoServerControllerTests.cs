@@ -41,7 +41,7 @@ public class ObicoServerControllerTests
         CreatedAtActionResult createdResult = Assert.IsType<CreatedAtActionResult>(result.Result);
         ObicoServerDto createdServer = Assert.IsType<ObicoServerDto>(createdResult.Value);
         createdServer.Name.Should().Be("Local Obico");
-        createdServer.HasEndpoint.Should().BeTrue();
+        createdServer.Url.Should().Be("http://obico.local:3333");
 
         dbContext.ObicoServers.Should().ContainSingle(server => server.Name == "Local Obico");
         requests.Should().ContainSingle();

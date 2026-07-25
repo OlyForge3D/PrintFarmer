@@ -259,7 +259,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 return false;
             }
 
-            _logger.LogInformation("FlashForge: Uploaded {FileName} ({FileBytesLength} bytes)", fileName, fileBytes.Length);
+            _logger.LogInformation("FlashForge: Uploaded {FileName} ({FileBytesLength} bytes) to {Host}:{Port}", fileName, fileBytes.Length, host, port);
             return true;
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or IOException)
@@ -288,7 +288,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
 
             if (response.Contains("ok", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogInformation("FlashForge: Started print {RemotePath}", remotePath);
+                _logger.LogInformation("FlashForge: Started print {RemotePath} on {Host}:{Port}", remotePath, host, port);
                 return true;
             }
 

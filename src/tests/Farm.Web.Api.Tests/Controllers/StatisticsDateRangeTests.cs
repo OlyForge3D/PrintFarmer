@@ -39,7 +39,7 @@ public class StatisticsDateRangeTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAdminClientAsync();
+        _client = _factory.CreateClient();
     }
 
     public Task DisposeAsync()

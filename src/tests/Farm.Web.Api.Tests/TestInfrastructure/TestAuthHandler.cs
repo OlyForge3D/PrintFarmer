@@ -29,11 +29,6 @@ public class TestAuthHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        if (Request.Headers.ContainsKey("X-Test-Anonymous"))
-        {
-            return Task.FromResult(AuthenticateResult.NoResult());
-        }
-
         // Deterministic test identity. Allow tests to override roles via
         // the X-Test-Roles request header (comma-separated). This lets tests
         // simulate non-admin users while still using the Test auth scheme.
@@ -50,23 +45,14 @@ public class TestAuthHandler(
             roles.Add("farm_admin");
         }
 
-        string userId = Request.Headers["X-Test-User-Id"].FirstOrDefault()
-            ?? "00000000-0000-0000-0000-000000000001";
         List<Claim> claims = new List<Claim>
         {
-            new Claim(ClaimTypes.NameIdentifier, userId),
+            new Claim(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-000000000001"),
             new Claim(ClaimTypes.Name, "testuser")
         };
         foreach (string r in roles)
         {
             claims.Add(new Claim(ClaimTypes.Role, r));
-        }
-
-        foreach (string permission in Request.Headers["X-Test-Permissions"]
-                     .ToString()
-                     .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            claims.Add(new Claim("permission", permission));
         }
 
         ClaimsIdentity identity = new ClaimsIdentity(claims, SchemeName);

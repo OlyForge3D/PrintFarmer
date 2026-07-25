@@ -40,6 +40,4 @@ The app connects to a PrintFarmer backend API. By default it targets `http://loc
 
 ## License
 
-The in-repository mobile client is licensed under the
-[GNU Affero General Public License v3.0 only](../LICENSE)
-(`AGPL-3.0-only`) beginning with PrintFarmer v0.2.3.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

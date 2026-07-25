@@ -1,5 +1,4 @@
-﻿using System.Text.Json.Serialization;
-using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Discovery;
 
@@ -14,15 +13,12 @@ public class DiscoveryPrinterInfoDto
     public string Name { get; set; } = string.Empty;
 
     /// <summary>Normalized server URL (e.g., http://hostname:7125)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string ServerUrl { get; set; } = string.Empty;
 
     /// <summary>Original user-supplied URL before normalization (if different)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? OriginalServerUrl { get; set; }
 
     /// <summary>IP address of the printer on the network (discovery-specific, not stored on Printer entity)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string IpAddress { get; set; } = string.Empty;
 
     /// <summary>Backend type (moonraker, prusalink, octoprint, sdcp)</summary>
@@ -35,11 +31,9 @@ public class DiscoveryPrinterInfoDto
     public int? FrontendPort { get; set; }
 
     /// <summary>Camera stream URL discovered from printer API (optional)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? CameraStreamUrl { get; set; }
 
     /// <summary>Camera snapshot URL discovered from printer API (optional)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? CameraSnapshotUrl { get; set; }
 
     /// <summary>Printer manufacturer name (from discovery or catalog match)</summary>
@@ -52,21 +46,18 @@ public class DiscoveryPrinterInfoDto
     public string? Notes { get; set; }
 
     /// <summary>API key for backend authentication (if required)</summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ApiKey { get; set; }
 
     /// <summary>
     /// Username for HTTP Digest authentication (primarily for PrusaLink).
     /// Defaults to "maker" for PrusaLink printers if not specified.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for HTTP Digest authentication (primarily for PrusaLink).
     /// User must obtain this from the printer's web interface under Settings → Network → Credentials.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Password { get; set; }
 
     /// <summary>Timestamp when printer was discovered</summary>

@@ -265,8 +265,7 @@ public sealed class FlashForgePollingService(
 
                     _statusCacheWriter.UpdateStatus(update);
 
-                    await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-                        .SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -300,8 +299,7 @@ public sealed class FlashForgePollingService(
 
                         _statusCacheWriter.UpdateStatus(offlineUpdate);
 
-                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
-                            .SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
                     }
                 }
 

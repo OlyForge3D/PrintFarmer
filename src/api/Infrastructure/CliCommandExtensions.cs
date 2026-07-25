@@ -1,11 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
-using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Infrastructure;
 
@@ -46,10 +44,7 @@ public static class CliCommandExtensions
         try
         {
             AppDbContext cliDb = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            _ = await ProviderAwareMigrationRunner.MigrateAsync(
-                cliDb,
-                DatabaseMigrationTarget.Core,
-                logger ?? NullLogger.Instance);
+            _ = await cliDb.Database.EnsureCreatedAsync();
 
             Farm.Infrastructure.Services.Interfaces.IDatabaseInitializer? dbInitializer = scope.ServiceProvider.GetService<Farm.Infrastructure.Services.Interfaces.IDatabaseInitializer>();
             if (dbInitializer != null)
@@ -68,35 +63,15 @@ public static class CliCommandExtensions
                 }
             }
         }
-        catch (DatabaseMigrationContractException ex)
-        {
-            if (logger != null)
-            {
-                logger.LogError(
-                    "[CLI] Database migration failed ({Code}): {RecoveryGuidance}",
-                    ex.Code,
-                    ex.Message);
-            }
-            else
-            {
-                await Console.Error.WriteLineAsync(
-                    $"[CLI] Database migration failed ({ex.Code}): {ex.Message}");
-            }
-
-            Environment.Exit(1);
-        }
         catch (Exception ex)
         {
             if (logger != null)
             {
-                logger.LogError(
-                    "[CLI] Database initialization failed ({ExceptionType})",
-                    ex.GetType().Name);
+                logger.LogError(ex, "[CLI] Database initialization failed: {Message}", ex.Message);
             }
             else
             {
-                await Console.Error.WriteLineAsync(
-                    $"[CLI] Database initialization failed ({ex.GetType().Name}).");
+                await Console.Error.WriteLineAsync($"[CLI] Database initialization failed: {ex.Message}");
             }
 
             Environment.Exit(1);
