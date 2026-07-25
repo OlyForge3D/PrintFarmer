@@ -50,12 +50,8 @@ export interface LegacyRedirect {
  */
 export const LEGACY_REDIRECTS: readonly LegacyRedirect[] = [
   // ── /admin/* legacy paths ─────────────────────────────────────────────
-  {
-    from: '/admin',
-    to: '/admin/settings',
-    description: 'Historic Admin landing page.',
-    notes: 'This is a temporary target — #936 replaces it with the Control Center hub, at which point /admin itself becomes the destination (not a redirect).',
-  },
+  // Note: `/admin` itself is no longer a redirect — since #936 it renders the
+  // Admin Control Center hub. See `App.tsx` and `AdminControlCenterPage.tsx`.
   {
     from: '/admin/printers',
     to: '/printers',
