@@ -81,12 +81,14 @@ jobs:
         run: |
           SIMULATOR_ID="$(
            xcrun simctl list devices available |
-             awk -F '[()]' '/iPhone/ { print $2; exit }'
+             awk -F '[()]' '/iPhone/ { simulator_id=$2 } END { print simulator_id }'
           )"
           if [ -z "$SIMULATOR_ID" ]; then
            echo "::error::No available iPhone simulator was found"
            exit 1
           fi
+          xcrun simctl boot "$SIMULATOR_ID" 2>/dev/null || true
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
           echo "SIMULATOR_ID=$SIMULATOR_ID" >> "$GITHUB_ENV"
 
       - name: Run unit tests
