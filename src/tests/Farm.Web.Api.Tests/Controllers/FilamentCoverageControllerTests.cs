@@ -233,32 +233,58 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
     }
 
     // ------------------------------------------------------------------
-    // Performance envelope — a moderately large fleet stays snappy
+    // Large-fleet pipeline — every printer the service produces is returned
     // ------------------------------------------------------------------
 
     [Fact]
-    public async Task GetFleet_LargeFleet_CompletesWithinReasonableBudget()
+    public async Task GetFleet_LargeFleet_ReturnsEveryPrinterFromService()
     {
-        // Seed a fleet larger than the default parallelism (8) so the
-        // semaphore fan-out is exercised. This is a smoke check, not a
-        // benchmark — the budget is generous to avoid CI flakiness.
+        // Deterministic: the coverage service is mocked to return a large fleet instantly, so the
+        // test proves the controller pipeline (routing, serialization) surfaces every printer the
+        // service produced without any wall-clock/load sensitivity. The service's own bounded
+        // parallel fan-out over many printers is covered deterministically by
+        // FilamentCoverageServiceTests.FleetEndpoint_BatchesSpoolAndJobQueries_ForManyPrinters.
         const int printerCount = 24;
-        for (int i = 0; i < printerCount; i++)
-        {
-            _ = await SeedPrinterWithToolheadAsync($"perf-{i:D2}");
-        }
+        DateTime evaluatedAt = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var printers = Enumerable.Range(0, printerCount)
+            .Select(i => new PrinterFilamentCoverageDto(
+                Guid.NewGuid(),
+                $"perf-{i:D2}",
+                FilamentCoverageStatus.Covers,
+                Array.Empty<ToolheadCoverageDto>(),
+                ActiveJobId: null,
+                ActiveJobName: null,
+                ActiveJobProgress: null,
+                EarliestPredictedRunoutAt: null,
+                AssignedQueuedJobCount: 0,
+                EvaluatedAtUtc: evaluatedAt))
+            .ToList();
+        FleetFilamentCoverageDto fleetResult = new(printers, evaluatedAt);
 
-        System.Diagnostics.Stopwatch sw = System.Diagnostics.Stopwatch.StartNew();
-        HttpResponseMessage response = await _client!.GetAsync(FleetRoute);
-        sw.Stop();
+        Mock<IFilamentCoverageService> coverage = new(MockBehavior.Strict);
+        _ = coverage
+            .Setup(s => s.GetForFleetAsync(It.IsAny<System.Threading.CancellationToken>()))
+            .ReturnsAsync(fleetResult);
+
+        await using WebApplicationFactory<Program> host = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IFilamentCoverageService>();
+                services.AddSingleton(coverage.Object);
+            });
+        });
+        using HttpClient client = host.CreateClient();
+
+        HttpResponseMessage response = await client.GetAsync(FleetRoute);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         FleetFilamentCoverageDto? fleet = await response.Content.ReadFromJsonAsync<FleetFilamentCoverageDto>();
         fleet.Should().NotBeNull();
-        fleet!.Printers.Should().HaveCountGreaterThanOrEqualTo(printerCount);
-
-        sw.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(15),
-            "fleet endpoint must batch spool + job queries and fan out with bounded parallelism");
+        fleet!.Printers.Should().HaveCount(printerCount);
+        fleet.Printers.Select(p => p.PrinterName)
+            .Should().BeEquivalentTo(printers.Select(p => p.PrinterName));
+        coverage.Verify(s => s.GetForFleetAsync(It.IsAny<System.Threading.CancellationToken>()), Times.Once);
     }
 
     // ------------------------------------------------------------------
