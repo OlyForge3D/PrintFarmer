@@ -130,10 +130,16 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<int>("PrintSpeed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SlicerType")
@@ -279,10 +285,16 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SlicerType")
@@ -512,6 +524,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Quality")
                         .HasColumnType("INTEGER");
 
@@ -519,6 +534,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
                         .HasColumnType("TEXT");
 
                     b.Property<int>("SlicerType")

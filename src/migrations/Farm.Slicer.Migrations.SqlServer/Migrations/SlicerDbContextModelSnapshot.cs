@@ -136,11 +136,17 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<int>("PrintSpeed")
                         .HasColumnType("int");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");
@@ -287,11 +293,17 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");
@@ -522,6 +534,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("Quality")
                         .HasColumnType("int");
 
@@ -530,6 +545,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");

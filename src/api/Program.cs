@@ -239,6 +239,9 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
 builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
+    Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
@@ -417,6 +420,7 @@ app.UseCors("Default");
 // When DEPLOYMENT_MODE=monolith, the API serves the React frontend directly from wwwroot
 // When DEPLOYMENT_MODE=microservices (or unset), frontend is served by separate nginx-proxy container
 string? deploymentMode = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+    ?? builder.Configuration.GetValue<string>("Deployment:Mode")
     ?? Environment.GetEnvironmentVariable("DEPLOYMENT_MODE");
 bool isMonolithMode = string.Equals(deploymentMode, "monolith", StringComparison.OrdinalIgnoreCase);
 

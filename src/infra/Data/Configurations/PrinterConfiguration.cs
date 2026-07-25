@@ -21,6 +21,26 @@ public class PrinterConfiguration : IEntityTypeConfiguration<Printer>
         builder.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
         builder.Property(p => p.OriginalServerUrl).HasMaxLength(256);
         builder.Property(p => p.Backend).HasDefaultValue(0);
+        builder.Property(p => p.ConfigurationRevision).HasDefaultValue(1L);
+        builder.Property(p => p.FirmwareFamily)
+            .HasConversion<int>()
+            .HasDefaultValue(PrinterFirmwareFamily.Unknown);
+        builder.Property(p => p.GcodeDialect)
+            .HasConversion<int>()
+            .HasDefaultValue(PrinterGcodeDialect.Unknown);
+        builder.Property(p => p.FirmwareDetectionSource)
+            .HasConversion<int>()
+            .HasDefaultValue(FirmwareDetectionSource.Unknown);
+        builder.Property(p => p.FirmwareVersion).HasMaxLength(128);
+        builder.Property(p => p.FirmwareDetectionVersion).HasMaxLength(64);
+        builder.Property(p => p.FirmwareDetectionConfidence).HasPrecision(5, 4);
+        builder.Property(p => p.BackendVersion).HasMaxLength(128);
+        builder.Property(p => p.BackendApiVersion).HasMaxLength(128);
+        builder.Property(p => p.CalibrationMotionType).HasConversion<int?>();
+        builder.Property(p => p.CalibrationSlicerEngine).HasMaxLength(64);
+        builder.Property(p => p.CalibrationSlicerDistribution).HasMaxLength(64);
+        builder.Property(p => p.CalibrationSlicerVersion).HasMaxLength(64);
+        builder.Property(p => p.CalibrationProfileFormat).HasMaxLength(64);
         builder.Property(p => p.ApiKey);
         builder.Property(p => p.DateAcquired);
 

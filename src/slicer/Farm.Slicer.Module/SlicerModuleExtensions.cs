@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.HostedServices;
@@ -46,11 +47,14 @@ public static class SlicerModuleExtensions
 
         _ = services.AddSingleton<SlicerModuleMarker>();
 
-        // In microservices mode, the main API does not load the slicer module inline —
+        // In split deployments, the main API does not load the slicer module inline —
         // it runs in a separate slicer-host process. The user-facing SlicerSettings.Enabled
         // is a separate concern, set dynamically when a worker registers.
-        string? deploymentMode = configuration.GetValue<string>("DEPLOYMENT_MODE");
-        if (string.Equals(deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase))
+        string? deploymentMode =
+            configuration.GetValue<string>("DEPLOYMENT_MODE") ??
+            configuration.GetValue<string>("Deployment:Mode");
+        if (string.Equals(deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(deploymentMode, "split", StringComparison.OrdinalIgnoreCase))
         {
             return services;
         }
@@ -140,6 +144,7 @@ public static class SlicerModuleExtensions
     /// </summary>
     private static void AddSlicerServices(IServiceCollection services)
     {
+        _ = services.AddScoped<ICalibrationProfileResolver, CalibrationProfileResolver>();
         _ = services.AddScoped<ISlicerJobQueue, DbSlicerJobQueue>();
         _ = services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         _ = services.AddScoped<IOrcaBundleParsingService, OrcaBundleParsingService>();
