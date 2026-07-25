@@ -91,8 +91,11 @@ jobs:
       - name: Resolve pinned iOS simulator destination
         run: ../scripts/ci/resolve-ios-simulator.sh
 
-      - name: Boot iOS simulator
-        run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
+      - name: Reset and boot iOS simulator
+        run: |
+          xcrun simctl shutdown "$SIMULATOR_UDID" || true
+          xcrun simctl erase "$SIMULATOR_UDID"
+          ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
 
       - name: Build unit tests for testing
         timeout-minutes: 20
@@ -121,12 +124,12 @@ jobs:
             -destination-timeout 90 \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
             CODE_SIGN_IDENTITY="-" \
             CODE_SIGNING_REQUIRED=NO \
             test-without-building \
             -only-testing:PrintFarmerTests \
-            -retry-tests-on-failure \
-            -test-iterations 2 \
             -resultBundlePath build/TestResults.xcresult
 
       - name: Upload test results
