@@ -250,6 +250,57 @@ describe('Identity transition cache isolation (#762)', () => {
     expect(tokenWrites.map(({ call }) => call[1])).toEqual(['token-a', 'token-b']);
   });
 
+  it('resets hubs and sensitive state when another tab replaces or removes the token', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+
+    signalRSessionTestState.reset.mockClear();
+    vi.mocked(apiClient.getCurrentUser).mockClear();
+    let resolveUserB: (user: UserDto) => void = () => {};
+    vi.mocked(apiClient.getCurrentUser).mockImplementation(
+      () => new Promise(resolve => { resolveUserB = resolve; }),
+    );
+    queryClient.setQueryData(['notifications', 'preferences'], prefsFor('user-a'));
+
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: 'token-a',
+        newValue: 'token-b',
+      }));
+    });
+
+    await waitFor(() => expect(signalRSessionTestState.reset).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined());
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-b'));
+    await act(async () => {
+      resolveUserB(USER_B);
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+    expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(apiClient.getCurrentUser).mock.invocationCallOrder[0]);
+
+    await act(async () => {
+      localStorage.removeItem('auth-token');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: 'token-b',
+        newValue: null,
+      }));
+    });
+
+    await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
+    await waitFor(() => expect(signalRSessionTestState.reset).toHaveBeenCalledTimes(2));
+    expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
+  });
+
   it('discards a stale in-flight fetch for the previous identity instead of letting it repopulate the cache', async () => {
     vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
 

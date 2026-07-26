@@ -54,6 +54,54 @@ export function AuthProvider({ children }: AuthProviderProps) {
     initializeAuth();
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    const handleAuthTokenChange = (event: StorageEvent) => {
+      if (event.key !== 'auth-token' ||
+          event.oldValue === event.newValue ||
+          (event.storageArea && event.storageArea !== localStorage)) {
+        return;
+      }
+
+      const expectedToken = event.newValue;
+      const isCurrentTransition = () =>
+        !disposed && localStorage.getItem('auth-token') === expectedToken;
+      setIsLoading(true);
+      setUser(null);
+      setError(null);
+
+      void (async () => {
+        try {
+          await resetAuthenticatedSignalRSession();
+          await clearSensitiveUserQueries(queryClient);
+          if (!expectedToken || !isCurrentTransition()) {
+            return;
+          }
+
+          const userData = await apiClient.getCurrentUser();
+          if (isCurrentTransition()) {
+            setUser(userData);
+          }
+        } catch (err) {
+          console.error('Failed to synchronize authentication state:', err);
+          if (isCurrentTransition() && expectedToken) {
+            localStorage.removeItem('auth-token');
+          }
+        } finally {
+          if (isCurrentTransition()) {
+            setIsLoading(false);
+          }
+        }
+      })();
+    };
+
+    window.addEventListener('storage', handleAuthTokenChange);
+    return () => {
+      disposed = true;
+      window.removeEventListener('storage', handleAuthTokenChange);
+    };
+  }, []);
+
   const login = async (credentials: LoginRequest): Promise<boolean> => {
     setIsLoading(true);
     setError(null);
