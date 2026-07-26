@@ -13,11 +13,13 @@ describe('authenticated SignalR session reset', () => {
       slicer: vi.fn().mockResolvedValue(undefined),
       maintenance: vi.fn().mockResolvedValue(undefined),
     };
+    const unregister: Array<() => void> = [];
     for (const [name, reset] of Object.entries(resets)) {
-      registerAuthenticatedSignalRTransport(name, reset);
+      unregister.push(registerAuthenticatedSignalRTransport(name, reset));
     }
 
     await resetAuthenticatedSignalRSession();
+    unregister.forEach(remove => remove());
 
     for (const reset of Object.values(resets)) {
       expect(reset).toHaveBeenCalledOnce();
@@ -29,14 +31,25 @@ describe('authenticated SignalR session reset', () => {
     const reset = vi.fn(() => new Promise<void>(resolve => {
       releaseReset = resolve;
     }));
-    registerAuthenticatedSignalRTransport('coalesced-transition', reset);
+    const unregister = registerAuthenticatedSignalRTransport('coalesced-transition', reset);
 
     const first = resetAuthenticatedSignalRSession();
     const second = resetAuthenticatedSignalRSession();
     await vi.waitFor(() => expect(reset).toHaveBeenCalledOnce());
     releaseReset?.();
     await Promise.all([first, second]);
+    unregister();
 
     expect(reset).toHaveBeenCalledOnce();
+  });
+
+  it('does not reset a component-scoped transport after it unregisters', async () => {
+    const reset = vi.fn().mockResolvedValue(undefined);
+    const unregister = registerAuthenticatedSignalRTransport('component-transport', reset);
+
+    unregister();
+    await resetAuthenticatedSignalRSession();
+
+    expect(reset).not.toHaveBeenCalled();
   });
 });

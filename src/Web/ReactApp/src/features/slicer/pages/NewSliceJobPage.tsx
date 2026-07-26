@@ -14,8 +14,8 @@ import {
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { assetService } from '@/services/assetService';
 import { apiClient } from '@/services/api';
-import * as signalR from '@microsoft/signalr';
-import { getHubUrl, getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
+import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConnection';
 import { CloneProfilesModal } from '@/features/slicer/components/CloneProfilesModal';
 import { ProfileEditorModal, type ProfileType } from '@/features/slicer/components/ProfileEditorModal';
 import { ProcessProfileEditorModal } from '@/features/slicer/components/ProcessProfileEditorModal';
@@ -1417,19 +1417,8 @@ export const NewSliceJobPage: React.FC = () => {
   // Connect to SlicerHub for real-time updates
   useEffect(() => {
     try {
-      if (!signalR || typeof signalR.HubConnectionBuilder !== 'function') {
-        return;
-      }
-
-      const builder = new signalR.HubConnectionBuilder();
-      if (!builder || typeof builder.withUrl !== 'function') {
-        return;
-      }
-
-      const hubConnection = builder
-        .withUrl(getHubUrl('/hubs/slicer-registry'))
-        .withAutomaticReconnect()
-        .build();
+      const { connection: hubConnection, dispose } =
+        createSlicerRegistryConnection('slicer-registry-new-job-page');
 
       hubConnection.on('SlicerRegistered', () => {
         qc.invalidateQueries({ queryKey: ['workers-available'] });
@@ -1450,7 +1439,7 @@ export const NewSliceJobPage: React.FC = () => {
         });
 
       return () => {
-        hubConnection.stop();
+        void dispose();
       };
     } catch {
       return;

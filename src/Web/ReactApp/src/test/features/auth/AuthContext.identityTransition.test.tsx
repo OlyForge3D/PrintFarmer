@@ -303,6 +303,33 @@ describe('Identity transition cache isolation (#762)', () => {
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
   });
 
+  it('does not let initial token validation overwrite a newer cross-tab identity', async () => {
+    let resolveInitialUser: (user: UserDto) => void = () => {};
+    vi.mocked(apiClient.getCurrentUser)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveInitialUser = resolve; }))
+      .mockResolvedValueOnce(USER_B);
+    localStorage.setItem('auth-token', 'token-a');
+    renderHarness();
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: 'token-a',
+        newValue: 'token-b',
+      }));
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+
+    await act(async () => {
+      resolveInitialUser(USER_A);
+    });
+
+    expect(screen.getByTestId('current-user')).toHaveTextContent('user-b');
+    expect(localStorage.getItem('auth-token')).toBe('token-b');
+  });
+
   it('finishes loading and clears the rejected token when cross-tab identity validation fails', async () => {
     vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
     renderHarness();

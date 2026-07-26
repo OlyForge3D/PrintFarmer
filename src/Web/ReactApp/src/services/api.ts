@@ -189,6 +189,10 @@ export interface PfRequestConfig extends AxiosRequestConfig {
   skipAuthRedirect?: boolean;
 }
 
+interface PfInternalRequestConfig extends PfRequestConfig {
+  authTokenAtRequest?: string | null;
+}
+
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
 
 interface PrintablesModelSummaryApiDto {
@@ -483,6 +487,7 @@ export class ApiClient {
     // Request interceptor for authentication and correlationId
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem("auth-token");
+      (config as PfInternalRequestConfig).authTokenAtRequest = token;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -502,16 +507,26 @@ export class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
+        const requestConfig = error.config as PfInternalRequestConfig | undefined;
         // Handle 401 Unauthorized — clear token and redirect to login unless
         // the caller set skipAuthRedirect:true on the request config to handle
         // the 401 inline (e.g. passkey assertion, which the backend signals
         // with 401 for failed credentials rather than as a session expiry).
-        if (error.response?.status === 401 && !(error.config as PfRequestConfig)?.skipAuthRedirect) {
+        if (
+          error.response?.status === 401 &&
+          !requestConfig?.skipAuthRedirect &&
+          requestConfig?.authTokenAtRequest === localStorage.getItem("auth-token")
+        ) {
+          let invalidatedCurrentSession = false;
           await resetAuthenticatedSignalRSession();
-          localStorage.removeItem("auth-token");
-          notifyAuthenticationExpired();
+          if (requestConfig.authTokenAtRequest === localStorage.getItem("auth-token")) {
+            localStorage.removeItem("auth-token");
+            notifyAuthenticationExpired();
+            invalidatedCurrentSession = true;
+          }
           // Only redirect if not already on auth pages
           if (
+            invalidatedCurrentSession &&
             window.location.pathname !== "/login" &&
             window.location.pathname !== "/register"
           ) {

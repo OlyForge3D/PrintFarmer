@@ -6,8 +6,13 @@ let activeReset: Promise<void> | null = null;
 export function registerAuthenticatedSignalRTransport(
   name: string,
   reset: AuthenticatedSignalRReset,
-): void {
+): () => void {
   authenticatedTransports.set(name, reset);
+  return () => {
+    if (authenticatedTransports.get(name) === reset) {
+      authenticatedTransports.delete(name);
+    }
+  };
 }
 
 export async function resetAuthenticatedSignalRSession(): Promise<void> {

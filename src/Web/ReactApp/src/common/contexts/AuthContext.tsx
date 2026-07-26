@@ -30,26 +30,43 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const initializeAuth = async () => {
       const token = localStorage.getItem('auth-token');
+      const transitionGeneration = authTransitionGeneration.current;
+      const ownsTransition = () =>
+        authTransitionGeneration.current === transitionGeneration;
+      const isCurrentToken = () =>
+        ownsTransition() && localStorage.getItem('auth-token') === token;
       
       if (!token) {
-        setIsLoading(false);
+        if (ownsTransition()) {
+          setIsLoading(false);
+        }
         return;
       }
 
       try {
         // Try to get current user from API
         const userData = await apiClient.getCurrentUser();
-        setUser(userData);
-        setError(null);
+        if (isCurrentToken()) {
+          setUser(userData);
+          setError(null);
+        }
       } catch (err) {
         console.error('Failed to get current user:', err);
+        if (!isCurrentToken()) {
+          return;
+        }
+
         // Remove invalid token
         await resetAuthenticatedSignalRSession();
-        localStorage.removeItem('auth-token');
-        setUser(null);
-        setError(null);
+        if (isCurrentToken()) {
+          localStorage.removeItem('auth-token');
+          setUser(null);
+          setError(null);
+        }
       } finally {
-        setIsLoading(false);
+        if (ownsTransition()) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -118,6 +135,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = async (credentials: LoginRequest): Promise<boolean> => {
+    authTransitionGeneration.current++;
     setIsLoading(true);
     setError(null);
 
@@ -152,6 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const loginWithPasskey = async (username: string): Promise<boolean> => {
+    authTransitionGeneration.current++;
     setIsLoading(true);
     setError(null);
 
@@ -181,6 +200,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const register = async (userData: RegisterRequest): Promise<boolean | 'pending'> => {
+    authTransitionGeneration.current++;
     setIsLoading(true);
     setError(null);
 
@@ -213,6 +233,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const logout = async (): Promise<void> => {
+    authTransitionGeneration.current++;
     setIsLoading(true);
 
     try {

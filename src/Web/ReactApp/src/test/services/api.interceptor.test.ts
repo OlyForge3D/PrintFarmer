@@ -32,8 +32,9 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
 }));
 
 /** Returns an adapter that always rejects with a 401 AxiosError. */
-function make401Adapter() {
+function make401Adapter(beforeReject?: () => void) {
   return (config: InternalAxiosRequestConfig) => {
+    beforeReject?.();
     const err = new AxiosError(
       'Request failed with status code 401',
       'ERR_BAD_REQUEST',
@@ -118,6 +119,21 @@ describe('ApiClient — 401 response interceptor', () => {
     expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
       .toBeLessThan(removeItemSpy.mock.invocationCallOrder[0]);
     expect(authenticationExpirationTestState.notify).toHaveBeenCalledOnce();
+    expect(window.location.href).toBe('http://localhost/');
+  });
+
+  it('does not let a delayed 401 for token A invalidate newer token B', async () => {
+    localStorage.setItem('auth-token', 'token-a');
+    axiosInstance.defaults.adapter = make401Adapter(() => {
+      localStorage.setItem('auth-token', 'token-b');
+    });
+
+    const config: PfRequestConfig = { method: 'GET', url: '/test' };
+    await expect(client.request(config)).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(localStorage.getItem('auth-token')).toBe('token-b');
+    expect(signalRSessionTestState.reset).not.toHaveBeenCalled();
+    expect(authenticationExpirationTestState.notify).not.toHaveBeenCalled();
     expect(window.location.href).toBe('http://localhost/');
   });
 });
