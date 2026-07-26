@@ -312,6 +312,7 @@ public sealed class CalibrationUploadedModelGenerationTests : IAsyncLifetime
     private static async Task<byte[]> DownloadModelAsync(HttpClient worker, WorkerSliceJobResponse claimed)
     {
         using HttpRequestMessage message = new(HttpMethod.Get, $"/api/slice/{claimed.Id}/model");
+        message.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
         message.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
         message.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,

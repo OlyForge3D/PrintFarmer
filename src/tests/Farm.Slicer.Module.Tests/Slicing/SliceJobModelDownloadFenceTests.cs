@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Api.Controllers.Slicing;
+﻿using System.Globalization;
+using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -19,12 +20,20 @@ public class SliceJobModelDownloadFenceTests
         Guid workerId = Guid.NewGuid();
         Guid jobId = Guid.NewGuid();
         Guid claimToken = Guid.NewGuid();
-        var worker = new Worker { Id = workerId };
+        Guid leaseToken = Guid.NewGuid();
+        const long leaseFence = 1;
+        var worker = new Worker
+        {
+            Id = workerId,
+            CapabilitiesJson = """["orcaslicer"]""",
+        };
         var job = new SliceJob
         {
             Id = jobId,
             WorkerId = workerId,
             ClaimToken = claimToken,
+            LeaseToken = leaseToken,
+            LeaseFence = leaseFence,
             Status = SliceJobStatus.Processing,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             ModelFileUrl = "file:///model.stl",
@@ -54,6 +63,11 @@ public class SliceJobModelDownloadFenceTests
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(modelStream);
 
+        DefaultHttpContext httpContext = new();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseToken] = leaseToken.ToString();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseFence] =
+            leaseFence.ToString(CultureInfo.InvariantCulture);
+
         SliceJobController controller = new(
             jobs.Object,
             new Mock<ISliceJobEventService>().Object,
@@ -68,7 +82,7 @@ public class SliceJobModelDownloadFenceTests
         {
             ControllerContext = new ControllerContext
             {
-                HttpContext = new DefaultHttpContext(),
+                HttpContext = httpContext,
             },
         };
 

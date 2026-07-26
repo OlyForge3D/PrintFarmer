@@ -172,6 +172,7 @@ public sealed class CalibrationGenerationIntegrationTests : IAsyncLifetime
 
     private static void AddLease(HttpRequestMessage message, WorkerSliceJobResponse claimed)
     {
+        message.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
         message.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
         message.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,
