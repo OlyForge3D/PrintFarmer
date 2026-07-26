@@ -263,6 +263,19 @@
       }
     },
     {
+      "id": "calibration-generation-fixture",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationFixture.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test fixture implementation supporting issue #899 calibration generation test coverage; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-generation-gcode-annotator",
       "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGcodeAnnotator.cs",
       "referenceUrls": [
@@ -350,6 +363,19 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-kestrel-api-host",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/KestrelCalibrationApiHost.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation hosting a Kestrel server for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
         "decision": "approved"
       }
     },
@@ -562,6 +588,58 @@
       }
     },
     {
+      "id": "calibration-generation-pinned-orca-profile-catalog",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaProfileCatalog.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation cataloging pinned OrcaSlicer profiles for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-profile-catalog-tests",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaProfileCatalogTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 pinned OrcaSlicer profile catalog for calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-publication",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/PinnedOrcaPublication.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation publishing pinned OrcaSlicer calibration artifacts for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-publication-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/PinnedOrcaPublicationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 pinned OrcaSlicer calibration publication workflow; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-generation-pinned-orca-smoke-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationPinnedOrcaSmokeTests.cs",
       "referenceUrls": [
@@ -571,6 +649,32 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-worker-container",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaWorkerContainer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation managing a pinned OrcaSlicer worker container for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-worker-smoke-tests",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/CalibrationPinnedWorkerSmokeTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation smoke-testing the pinned OrcaSlicer worker container for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
         "decision": "approved"
       }
     },
@@ -818,6 +922,19 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-uploaded-model-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationUploadedModelGenerationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering issue #899 calibration generation from uploaded models; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
         "decision": "approved"
       }
     },
