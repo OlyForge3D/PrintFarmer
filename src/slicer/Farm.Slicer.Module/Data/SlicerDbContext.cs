@@ -1,5 +1,7 @@
-﻿using Farm.Slicer.Module.Domain;
+﻿using Farm.Slicer.Module.Data.Configurations;
+using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Farm.Slicer.Module.Data;
 
@@ -64,5 +66,42 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
 
         // Discover all IEntityTypeConfiguration<T> implementations in this assembly.
         _ = modelBuilder.ApplyConfigurationsFromAssembly(typeof(SlicerDbContext).Assembly);
+
+        ApplyProviderSpecificIdempotencyFilters(modelBuilder);
+    }
+
+    /// <summary>
+    /// SQL Server treats <see langword="null"/> as a duplicate inside a unique index, so the
+    /// owner/project-scoped slice-job idempotency indexes must exclude rows without a
+    /// correlation/checksum. PostgreSQL and SQLite already treat nulls as distinct, which keeps
+    /// every pre-existing non-calibration job valid without a filter.
+    /// </summary>
+    private void ApplyProviderSpecificIdempotencyFilters(ModelBuilder modelBuilder)
+    {
+        if (!Database.IsSqlServer())
+        {
+            return;
+        }
+
+        IMutableEntityType? sliceJob = modelBuilder.Model.FindEntityType(typeof(SliceJob));
+        if (sliceJob is null)
+        {
+            return;
+        }
+
+        foreach (IMutableIndex index in sliceJob.GetIndexes())
+        {
+            switch (index.GetDatabaseName())
+            {
+                case SliceJobConfiguration.CorrelationUniqueIndexName:
+                    index.SetFilter($"[{nameof(SliceJob.CorrelationId)}] IS NOT NULL");
+                    break;
+                case SliceJobConfiguration.ChecksumUniqueIndexName:
+                    index.SetFilter($"[{nameof(SliceJob.Checksum)}] IS NOT NULL");
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 }

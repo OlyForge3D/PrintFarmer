@@ -145,6 +145,7 @@ public static class SlicerModuleExtensions
     private static void AddSlicerServices(IServiceCollection services)
     {
         _ = services.AddScoped<ICalibrationProfileResolver, CalibrationProfileResolver>();
+        _ = services.AddScoped<IModelStorageResolver, Model3DStorageResolver>();
         _ = services.AddScoped<ISlicerJobQueue, DbSlicerJobQueue>();
         _ = services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         _ = services.AddScoped<IOrcaBundleParsingService, OrcaBundleParsingService>();

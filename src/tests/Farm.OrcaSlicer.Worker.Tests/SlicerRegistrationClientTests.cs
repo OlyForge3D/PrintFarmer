@@ -44,6 +44,7 @@ public sealed class SlicerRegistrationClientTests
         SlicerRegistrationClient client = new SlicerRegistrationClient(
             httpClient,
             configuration,
+            new StubBinaryDetector(),
             NullLogger<SlicerRegistrationClient>.Instance);
 
         (Guid serviceId, string apiKey) = await client.RegisterAsync();
@@ -66,5 +67,16 @@ public sealed class SlicerRegistrationClientTests
         {
             return Task.FromResult(responder(request));
         }
+    }
+
+    /// <summary>
+    /// Reports no installed binary, so registration resolves an unverified identity and these
+    /// tests stay focused on API-key fallback rather than binary attestation.
+    /// </summary>
+    private sealed class StubBinaryDetector : IOrcaBinaryDetector
+    {
+        public bool IsRealBinaryPresent() => false;
+
+        public Task<string?> GetVersionAsync() => Task.FromResult<string?>(null);
     }
 }

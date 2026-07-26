@@ -80,6 +80,17 @@ public class ArtifactCleanupService(
         // Deduplicate candidates
         candidatesForDeletion = candidatesForDeletion.Distinct().ToList();
 
+        // A promotion that has not produced a durable result yet owns its source bytes: deleting them
+        // would strand an unknown outcome that nothing could reconcile.
+        int pinnedCount = candidatesForDeletion.Count(artifact => !artifact.IsCleanupEligible());
+        if (pinnedCount > 0)
+        {
+            candidatesForDeletion = candidatesForDeletion.Where(artifact => artifact.IsCleanupEligible()).ToList();
+            _logger.LogInformation(
+                "Skipped {Count} artifacts pinned by an unresolved promotion",
+                pinnedCount);
+        }
+
         if (candidatesForDeletion.Count == 0)
         {
             _logger.LogInformation("No artifacts eligible for cleanup");

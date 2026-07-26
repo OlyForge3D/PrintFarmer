@@ -1,4 +1,5 @@
 ﻿using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Slicer.Module.Data.Repositories;
@@ -8,6 +9,15 @@ namespace Farm.Slicer.Module.Data.Repositories;
 /// </summary>
 public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 {
+    /// <summary>Maximum number of claimable rows inspected per claim attempt.</summary>
+    private const int ClaimCandidateWindow = 50;
+
+    /// <summary>Lower bound applied to a requested lease so a worker cannot request a zero lease.</summary>
+    private const int MinimumLeaseSeconds = 30;
+
+    /// <summary>Upper bound applied to a requested lease so a worker cannot pin a job indefinitely.</summary>
+    private const int MaximumLeaseSeconds = 3600;
+
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
     /// <inheritdoc/>
@@ -221,47 +231,88 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
         DateTime now = DateTime.UtcNow;
-        DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+        DateTime leaseExpiration = now.AddSeconds(Math.Clamp(leaseDurationSeconds, MinimumLeaseSeconds, MaximumLeaseSeconds));
 
-        // Base query: queued or expired lease
-        IQueryable<SliceJob> baseQuery = _db.SliceJobs
+        // Candidate set: queued jobs plus jobs whose lease has lapsed, highest priority first.
+        List<SliceJob> candidates = await _db.SliceJobs
+            .AsNoTracking()
             .Where(j => j.Status == SliceJobStatus.Queued ||
                        (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuedAt);
+            .OrderByDescending(j => j.Priority)
+            .ThenBy(j => j.QueuedAt)
+            .Take(ClaimCandidateWindow)
+            .ToListAsync(ct);
 
-        SliceJob? job;
-        if (capabilities != null && capabilities.Length > 0)
+        foreach (SliceJob candidate in candidates)
         {
-            // Materialize a small candidate set then perform capability matching client-side
-            List<SliceJob> candidates = await baseQuery.Take(50).ToListAsync(ct);
-            job = candidates.FirstOrDefault(j =>
-                string.IsNullOrEmpty(j.RequiredCapabilitiesJson) || j.RequiredCapabilitiesJson == "[]" ||
-                capabilities.Any(cap => j.RequiredCapabilitiesJson.Contains($"\"{cap}\"", StringComparison.OrdinalIgnoreCase)));
-            if (job == null)
+            if (!MatchesCapabilities(candidate, capabilities))
             {
-                return null;
+                continue;
             }
+
+            Guid leaseToken = Guid.NewGuid();
+
+            // Conditional UPDATE: the WHERE clause re-asserts claimability, so concurrent claimers
+            // race in the database and exactly one of them observes a single affected row.
+            int affected = await _db.SliceJobs
+                .Where(j => j.Id == candidate.Id &&
+                            (j.Status == SliceJobStatus.Queued ||
+                             (j.Status == SliceJobStatus.Processing &&
+                              j.LeaseExpiresAt != null &&
+                              j.LeaseExpiresAt < now)))
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(j => j.Status, SliceJobStatus.Processing)
+                        .SetProperty(j => j.WorkerId, workerId)
+                        .SetProperty(j => j.ClaimedAt, now)
+                        .SetProperty(j => j.LeaseExpiresAt, leaseExpiration)
+                        .SetProperty(j => j.LeaseToken, leaseToken)
+                        .SetProperty(j => j.LeaseFence, j => j.LeaseFence + 1)
+                        .SetProperty(j => j.StartedAt, j => j.StartedAt ?? now)
+                        .SetProperty(j => j.UpdatedAt, now),
+                    ct);
+
+            if (affected == 0)
+            {
+                continue;
+            }
+
+            _db.ChangeTracker.Clear();
+            return await _db.SliceJobs.AsNoTracking().FirstOrDefaultAsync(j => j.Id == candidate.Id, ct);
         }
-        else
+
+        return null;
+    }
+
+    /// <summary>
+    /// Determines whether a claiming worker can run the job.
+    /// </summary>
+    /// <param name="job">The candidate job.</param>
+    /// <param name="capabilities">Capability tags advertised by the claiming worker.</param>
+    /// <returns>
+    /// <see langword="true"/> when the worker advertises the job's engine and any explicitly
+    /// required capability. A worker that does not advertise capabilities is only offered jobs that
+    /// require none, so it can never claim work it is unable to mutate afterwards.
+    /// </returns>
+    private static bool MatchesCapabilities(SliceJob job, string[]? capabilities)
+    {
+        bool declaresRequirements =
+            !string.IsNullOrEmpty(job.RequiredCapabilitiesJson) && job.RequiredCapabilitiesJson != "[]";
+
+        if (capabilities is not { Length: > 0 })
         {
-            job = await baseQuery.FirstOrDefaultAsync(ct);
-            if (job == null)
-            {
-                return null;
-            }
+            return !declaresRequirements;
         }
 
-        // Atomically claim the job
-        job.Status = SliceJobStatus.Processing;
-        job.WorkerId = workerId;
-        job.ClaimedAt = now;
-        job.LeaseExpiresAt = leaseExpiration;
-        job.StartedAt ??= now;
-        job.UpdatedAt = now;
+        string engineTag = SlicerEngineNames.ToCapabilityTag(SlicerEngineNames.Resolve(job));
+        if (!capabilities.Contains(engineTag, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
 
-        await SaveChangesAsync(ct);
-        return job;
+        return !declaresRequirements ||
+               capabilities.Any(capability =>
+                   job.RequiredCapabilitiesJson!.Contains($"\"{capability}\"", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <inheritdoc/>
@@ -313,6 +364,41 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
+    public async Task<bool> TryRenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid leaseToken,
+        long leaseFence,
+        int leaseDurationSeconds,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        DateTime leaseExpiration = now.AddSeconds(Math.Clamp(leaseDurationSeconds, MinimumLeaseSeconds, MaximumLeaseSeconds));
+
+        // Renewal is only valid while the lease is still active; an expired lease must be re-claimed.
+        int affected = await _db.SliceJobs
+            .Where(j => j.Id == jobId &&
+                        j.WorkerId == workerId &&
+                        j.Status == SliceJobStatus.Processing &&
+                        j.LeaseToken == leaseToken &&
+                        j.LeaseFence == leaseFence &&
+                        j.LeaseExpiresAt != null &&
+                        j.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(j => j.LeaseExpiresAt, leaseExpiration)
+                    .SetProperty(j => j.UpdatedAt, now),
+                ct);
+
+        if (affected > 0)
+        {
+            _db.ChangeTracker.Clear();
+        }
+
+        return affected > 0;
+    }
+
+    /// <inheritdoc/>
     public async Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
     {
         SliceJob? job = await GetByIdAsync(jobId, ct);
@@ -325,6 +411,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.WorkerId = null;
         job.ClaimedAt = null;
         job.LeaseExpiresAt = null;
+        job.LeaseToken = null;
         job.UpdatedAt = DateTime.UtcNow;
 
         if (job.RetryCount > maxRetries)

@@ -20,6 +20,7 @@ x-orcaslicer-build: &orcaslicer-build
     SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
     SBOM_URL: ${SBOM_URL:-}
     ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.1}
+    ORCASLICER_SHA256: ${ORCASLICER_SHA256}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
     _SKIP_ORCA_BINARY_BUILD: ${_SKIP_ORCA_BINARY_BUILD:-0}
@@ -66,6 +67,9 @@ services:
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__SharedKey=${WORKER_SHARED_API_KEY:-}
+      # Inject the immutable image digest after build/pull. It cannot be embedded while
+      # constructing the image because doing so would change the digest itself.
+      - Worker__ContainerDigest=${ORCASLICER_CONTAINER_DIGEST:-}
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
       - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}

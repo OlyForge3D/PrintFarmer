@@ -7,6 +7,7 @@
 
 # Global build arguments
 ARG ORCASLICER_VERSION=2.4.1
+ARG ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402
 ARG BUILD_VERBOSITY=quiet
 # Short git SHA of the source commit; embedded into each service's version endpoint
 ARG GIT_SHA=unknown
@@ -256,7 +257,11 @@ FROM --platform=linux/amd64 ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCA_ASSET_PATH=""
 ARG ORCASLICER_URL=https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage
-ARG ALLOW_STUB=true
+# SHA-256 of the pinned upstream AppImage. Required whenever a real binary is built.
+# Supply it explicitly at build time; the build fails rather than accepting an unverified download.
+ARG ORCASLICER_SHA256
+# Production default: never silently substitute a stub for the pinned upstream binary.
+ARG ALLOW_STUB=false
 ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
 WORKDIR /tmp
@@ -266,7 +271,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Download and extract OrcaSlicer binaries with robust error handling
+# Download and extract OrcaSlicer binaries from the pinned release URL only.
+# There is no release discovery: the URL and its checksum are the reproducibility contract.
 RUN set -e; \
     echo "[orcaslicer-binaries] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
     mkdir -p /orcaslicer-dist/opt; \
@@ -275,15 +281,39 @@ RUN set -e; \
     if [ "${_SKIP_ORCA_BINARY_BUILD}" = "1" ]; then \
         echo "[orcaslicer-binaries] Skipping binary build (using prebuilt image via additional_contexts)"; \
         mkdir -p /orcaslicer-dist/opt/orcaslicer && \
+        printf '' > /orcaslicer-dist/orcaslicer.sha256 && \
         echo "[orcaslicer-binaries] Setup complete (waiting for additional_contexts to populate /opt/orcaslicer)"; \
         exit 0; \
     fi; \
     \
     if [ "$ALLOW_STUB" = "true" ]; then \
-        echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=true (non-production build): a stub may replace the real binary"; \
     else \
-        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download real binary"; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download and verify the pinned binary"; \
+        if [ -z "${ORCASLICER_SHA256}" ]; then \
+            echo "[orcaslicer-binaries] ERROR: ORCASLICER_SHA256 is required when ALLOW_STUB=false."; \
+            echo "[orcaslicer-binaries] Pass --build-arg ORCASLICER_SHA256=<sha256 of ${ORCASLICER_URL}>"; \
+            exit 1; \
+        fi; \
     fi; \
+    \
+    # Verifies a candidate AppImage against the pinned checksum. \
+    verify_checksum() { \
+        if [ -z "${ORCASLICER_SHA256}" ]; then \
+            echo "[orcaslicer-binaries] WARNING: no ORCASLICER_SHA256 supplied; skipping verification (stub build only)"; \
+            return 0; \
+        fi; \
+        echo "${ORCASLICER_SHA256}  orcaslicer.AppImage" > orcaslicer.AppImage.sha256; \
+        if sha256sum -c orcaslicer.AppImage.sha256; then \
+            echo "[orcaslicer-binaries] Checksum verified"; \
+            checksum_verified=1; \
+            return 0; \
+        fi; \
+        echo "[orcaslicer-binaries] ERROR: checksum verification failed"; \
+        rm -f orcaslicer.AppImage; \
+        return 1; \
+    }; \
+    checksum_verified=0; \
     \
     # Check if AppImage is available from ORCA_ASSET_PATH (for offline builds) \
     cached_appimage=""; \
@@ -302,8 +332,10 @@ RUN set -e; \
     case "$target_arch" in aarch64|arm64) arch_is_arm=1;; *) arch_is_arm=0;; esac; \
     echo "[orcaslicer-binaries] Target arch=${target_arch} (arm=${arch_is_arm})"; \
     \
-    # Try to find the correct download URL dynamically (only if not using cached AppImage) \
-    if [ ! -f orcaslicer.AppImage ]; then \
+    # Release discovery exists only for unpinned development builds. Once ORCASLICER_SHA256 is \
+    # supplied, the pinned URL and its checksum are the reproducibility contract and no other \
+    # asset may be substituted for them. \
+    if [ -z "${ORCASLICER_SHA256}" ] && [ ! -f orcaslicer.AppImage ]; then \
         all_appimages=$(curl -H "Accept: application/vnd.github+json" \
                           -H "User-Agent: OrcaSlicerWorker/1.0" \
                           -fsSL "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases" | \
@@ -322,7 +354,7 @@ RUN set -e; \
         fi; \
     fi; \
     \
-    # Download function with validation \
+    # Download function with size validation \
     try_download() { \
         url="$1"; \
         echo "[orcaslicer-binaries] Attempting download: $url"; \
@@ -340,9 +372,13 @@ RUN set -e; \
         return 1; \
     }; \
     \
-    # Try multiple URL patterns (only if not using cached AppImage) \
+    # Pinned builds resolve exactly one URL; unpinned development builds may fall back per-arch. \
     if [ ! -f orcaslicer.AppImage ]; then \
-        if [ "$arch_is_arm" = "1" ]; then \
+        if [ -n "${ORCASLICER_SHA256}" ]; then \
+            # Exactly one pinned URL; a failure here is a build failure, not a fallback. \
+            try_download "${ORCASLICER_URL}" \
+            || echo "[orcaslicer-binaries] WARNING: pinned download failed"; \
+        elif [ "$arch_is_arm" = "1" ]; then \
             # Try the aarch64 asset first: ORCASLICER_URL defaults to the x86_64 AppImage, \
             # so if dynamic discovery failed we must NOT fall through to it on ARM. \
             try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCASLICER_VERSION}.AppImage" \
@@ -355,6 +391,14 @@ RUN set -e; \
             || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
             || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
         fi; \
+    fi; \
+    \
+    if [ -f orcaslicer.AppImage ]; then \
+        verify_checksum || { \
+            if [ "${ALLOW_STUB}" != "true" ]; then \
+                exit 1; \
+            fi; \
+        }; \
     fi; \
     \
     # Extract AppImage if available \
@@ -390,12 +434,25 @@ RUN set -e; \
         rm -f orcaslicer.AppImage; \
     fi; \
     \
+    # Record the identity of what was actually installed, not what the build argument asked for. \
+    # The digest is only attested when the pinned AppImage was downloaded AND verified AND extracted; \
+    # anything else (including the stub fallback below) leaves the attestation empty, which makes the \
+    # worker register as unverified instead of claiming a pin it cannot prove. \
+    if [ -f /orcaslicer-dist/orcaslicer ] && [ "${checksum_verified}" = "1" ]; then \
+        printf '%s' "${ORCASLICER_SHA256}" > /orcaslicer-dist/orcaslicer.sha256; \
+        echo "[orcaslicer-binaries] Attested installed binary digest"; \
+    else \
+        printf '' > /orcaslicer-dist/orcaslicer.sha256; \
+        echo "[orcaslicer-binaries] No verified binary installed; attestation left empty"; \
+    fi; \
+    \
     # Create stub if binary extraction failed but ALLOW_STUB is true \
     if [ ! -f /orcaslicer-dist/orcaslicer ]; then \
         if [ "${ALLOW_STUB}" = "true" ]; then \
             echo "[orcaslicer-binaries] Creating stub binary"; \
             printf '#!/bin/sh\n>&2 echo "[WARN] OrcaSlicer binary not present (version %s)"\nexit 2\n' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer; \
             chmod +x /orcaslicer-dist/orcaslicer; \
+            printf '' > /orcaslicer-dist/orcaslicer.sha256; \
         else \
             echo "[orcaslicer-binaries] ERROR: Binary missing and ALLOW_STUB=false"; \
             exit 1; \
@@ -440,7 +497,8 @@ RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 ############################################################
 FROM slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
-ARG ALLOW_STUB
+ARG ALLOW_STUB=false
+ARG ORCASLICER_SHA256
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -457,11 +515,16 @@ LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
       org.printfarmer.sbom="${SBOM_URL}" \
       component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
+      orcaslicer.distribution="upstream" \
+      orcaslicer.sha256="${ORCASLICER_SHA256}" \
+      orcaslicer.allow_stub="${ALLOW_STUB}" \
       security.sandbox="true"
 
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
+# Attestation of what the build actually installed. Empty means "no verified binary" (stub build).
+COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
@@ -501,6 +564,11 @@ ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
 ENV Worker__WorkingDirectory=/app/temp
 # Inject actual OrcaSlicer version for registration (overrides appsettings default)
 ENV SlicerRegistry__Version=${ORCASLICER_VERSION}
+# Reproducible build identity reported at worker registration. The worker reads the attestation the
+# build wrote for the binary it actually installed; the declared build argument is not exported,
+# because the ALLOW_STUB fallback does not honour it. An empty attestation means "unverified", which
+# keeps calibration capabilities false rather than asserting an unproven pin.
+ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \

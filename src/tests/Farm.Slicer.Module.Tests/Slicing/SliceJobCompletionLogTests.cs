@@ -57,12 +57,15 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
         httpContext.Request.Headers["X-Worker-Id"] = serviceId.ToString();
+        Guid leaseToken = Guid.NewGuid();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseToken] = leaseToken.ToString();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseFence] = "1";
         SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
 
-        // Create job in Processing state
+        // Create job in Processing state under an active, fenced lease
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
@@ -73,7 +76,11 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimedAt = DateTime.UtcNow.AddMinutes(-2),
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = leaseToken,
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();

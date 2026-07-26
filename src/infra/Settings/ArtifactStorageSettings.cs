@@ -19,9 +19,10 @@ public sealed class ArtifactStorageSettings
     public long MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024;
 
     /// <summary>
-    /// Comma-separated list of allowed kinds (e.g. "gcode,thumbnail,preview,log").
+    /// Comma-separated list of allowed artifact kinds. The default covers the slicing kinds plus the
+    /// calibration geometry, manifest, effective-profile and profile-patch kinds.
     /// </summary>
-    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log";
+    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log,geometry,geometry-manifest,calibration-manifest,machine-profile,process-profile,filament-profile,profile-patch";
 
     /// <summary>
     /// Enable static file serving for artifacts at /artifacts/* URLs.

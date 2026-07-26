@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure.Authorization;
 
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class RequirePermissionAttribute
     : AuthorizeAttribute, IAuthorizationRequirement, IAuthorizationRequirementData
 {

@@ -7,6 +7,7 @@ using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -133,7 +134,7 @@ public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileUrl = "file:///private/models/input.stl",
             ModelFileName = "input.stl",
-            SlicerEngine = (int)SlicerType.OrcaSlicer,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfileJson = "{\"private\":true}",
         };
 
@@ -161,7 +162,7 @@ public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime
             PrinterId = printerId,
             ModelFileUrl = "file:///models/input.stl",
             ModelFileName = "input.stl",
-            SlicerEngine = (int)SlicerType.OrcaSlicer,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
         };
 
         HttpResponseMessage response = await client.PostAsJsonAsync("/api/slice", request);
@@ -233,7 +234,8 @@ public sealed class SlicerResourceAuthorizationTests : IAsyncLifetime
             UserId = userId,
             ModelFileUrl = "file:///private/models/model.stl",
             ModelFileName = "model.stl",
-            SlicerEngine = (int)SlicerType.OrcaSlicer,
+            SlicerEngine = (int)SlicerEngineType.OrcaSlicer,
+            SlicerEngineName = SlicerEngineType.OrcaSlicer.ToString(),
             SlicerProfileJson = "{\"secret\":\"profile\"}",
             Status = SliceJobStatus.Failed,
             QueuedAt = DateTime.UtcNow,

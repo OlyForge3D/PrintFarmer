@@ -787,8 +787,23 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<Guid?>("FinalArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("GcodeSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GenerationRequestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GeneratorVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("LastErrorCode")
                         .HasMaxLength(128)
@@ -796,6 +811,17 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("LastErrorJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("ManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("Model3DId")
                         .HasColumnType("uniqueidentifier");
@@ -808,11 +834,19 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<string>("PlanManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("PrintJobId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("ProjectId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PromotionOperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<int>("RetryCount")
                         .HasColumnType("int");
@@ -824,19 +858,39 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("SliceJobId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("SlicerBinarySha256")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
                     b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SpecificationSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("StepStartedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("WorkerId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AttemptId")
                         .IsUnique();
+
+                    b.HasIndex("LeaseExpiresAtUtc");
 
                     b.HasIndex("ProjectId");
 
@@ -1729,6 +1783,26 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("BottomSolidLayers")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CalibrationManifestJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("CalibrationManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -1762,6 +1836,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("FilamentPerExtruderWeightG")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("FilamentProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("FileHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1780,11 +1858,27 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("FirmwareFamily")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<double?>("FirstLayerHeight")
                         .HasColumnType("float");
 
                     b.Property<Guid>("FolderId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("GcodeDialect")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GeneratorName")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("GeneratorVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("HealthStatus")
                         .ValueGeneratedOnAdd()
@@ -1797,6 +1891,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool?>("IroningEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsImmutable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime?>("LastHealthCheckDate")
                         .HasColumnType("datetime2");
 
@@ -1808,6 +1907,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<double?>("LayerHeight")
                         .HasColumnType("float");
+
+                    b.Property<string>("MachineProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<double?>("MaxVolumetricSpeed")
                         .HasColumnType("float");
@@ -1834,6 +1937,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("Perimeters")
                         .HasColumnType("int");
 
+                    b.Property<string>("PinnedSlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("PrintSettingsId")
                         .HasColumnType("nvarchar(max)");
 
@@ -1848,6 +1955,24 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProcessProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("PromotedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PromotionCorrelationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PromotionOperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("PromotionOperationKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("RequiredMaterial")
                         .HasMaxLength(64)
@@ -1867,6 +1992,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<string>("SlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SlicerEngineName")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<string>("SlicerName")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
@@ -1878,8 +2015,25 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int>("Source")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("SourceArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceModelSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("SourcePrinterId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SourceSliceJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SourceWorkerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SpecificationSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<bool?>("SupportEnabled")
                         .HasColumnType("bit");
@@ -1905,6 +2059,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CalibrationAttemptId");
+
+                    b.HasIndex("CalibrationOrchestrationId");
+
                     b.HasIndex("FileHash")
                         .IsUnique();
 
@@ -1918,6 +2076,12 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrinterModelId");
 
+                    b.HasIndex("PromotionOperationId");
+
+                    b.HasIndex("PromotionOperationKey")
+                        .IsUnique()
+                        .HasFilter("[PromotionOperationKey] IS NOT NULL");
+
                     b.HasIndex("RequiredMaterial");
 
                     b.HasIndex("RequiredNozzleDiameter");
@@ -1925,6 +2089,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("SourcePrinterId");
 
                     b.HasIndex("UploadedAt");
+
+                    b.HasIndex("SourceArtifactId", "ContentSha256")
+                        .IsUnique()
+                        .HasFilter("[SourceArtifactId] IS NOT NULL AND [ContentSha256] IS NOT NULL");
 
                     b.ToTable("GcodeFiles");
                 });
@@ -2090,6 +2258,101 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasIndex("Status", "Priority", "QueuedAt");
 
                     b.ToTable("GcodeHarvestQueueItems");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.GcodePromotionCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("GcodeFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("OperationScope")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ReconcileAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RequestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
+                    b.Property<DateTime?>("SourceAcknowledgedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("SourceArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<long>("SourceSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SourceSliceJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SourceWorkerId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("State")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GcodeFileId")
+                        .IsUnique();
+
+                    b.HasIndex("OperationScope", "OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("SourceArtifactId", "SourceContentSha256")
+                        .IsUnique();
+
+                    b.HasIndex("State", "UpdatedAtUtc");
+
+                    b.ToTable("GcodePromotionCheckpoints");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevision", b =>

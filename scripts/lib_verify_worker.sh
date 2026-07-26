@@ -8,6 +8,7 @@
 #   DEFAULT_CONTAINER  Default container name
 #   DEFAULT_MODE       Default mode (allow-stub | require-real)
 #   BINARY_PATH        Path to binary inside container
+#   BINARY_PAYLOAD_PATH Optional real payload path when BINARY_PATH is a small launcher
 #   HEALTH_KEY         Health check key present in readiness JSON (.checks.HEALTH_KEY.status)
 #   LOG_PREFIX         Short lowercase identifier for log prefix (prusa | orca)
 #   SIZE_THRESHOLD     Minimum size (bytes) that indicates a real binary (e.g. 2048)
@@ -28,6 +29,8 @@
 #   10 <health_key> not healthy
 #   11 readiness is relaxed while require-real requested
 #   12 jq required for strict JSON parsing but not available (reserved / not currently triggered)
+#   13 require-real requested but the image attests no verified binary identity
+#   14 a stub binary is installed while the image attests a pinned binary identity
 
 vw_log() { printf "[verify-%s] %s\n" "${LOG_PREFIX}" "$*"; }
 vw_err() { vw_log "ERROR: $*" >&2; }
@@ -96,11 +99,12 @@ vw_wait_liveness() {
 }
 
 vw_assess_binary() {
-  vw_log "Assessing binary at ${BINARY_PATH}..."
-  if ! docker exec "${CONTAINER_NAME}" test -f "${BINARY_PATH}"; then
-    vw_err "Binary ${BINARY_PATH} missing"; exit 5
+  local assessment_path="${BINARY_PAYLOAD_PATH:-${BINARY_PATH}}"
+  vw_log "Assessing binary payload at ${assessment_path}..."
+  if ! docker exec "${CONTAINER_NAME}" test -f "${assessment_path}"; then
+    vw_err "Binary payload ${assessment_path} missing"; exit 5
   fi
-  BINSIZE=$(docker exec "${CONTAINER_NAME}" stat -c %s "${BINARY_PATH}" 2>/dev/null || echo 0)
+  BINSIZE=$(docker exec "${CONTAINER_NAME}" stat -c %s "${assessment_path}" 2>/dev/null || echo 0)
   if [ "${BINSIZE}" -le "${SIZE_THRESHOLD}" ]; then
     vw_log "Binary size (${BINSIZE}) suggests stub or invalid binary (<${SIZE_THRESHOLD}+1)"
     if [ "${MODE}" = "require-real" ]; then vw_err "Stub binary not permitted in require-real mode"; exit 6; fi
@@ -109,9 +113,34 @@ vw_assess_binary() {
   fi
 }
 
+# Asserts that the binary identity the image attests matches the binary it actually installed.
+# Requires ATTESTATION_PATH to be set by the calling script; skipped otherwise.
+# Must run after vw_assess_binary, which sets BINSIZE.
+vw_check_binary_attestation() {
+  if [ -z "${ATTESTATION_PATH-}" ]; then
+    return 0
+  fi
+
+  local attested
+  attested=$(docker exec "${CONTAINER_NAME}" sh -c "cat '${ATTESTATION_PATH}' 2>/dev/null || true" | tr -d '[:space:]')
+  local is_digest="false"
+  if printf '%s' "${attested}" | grep -Eq '^[0-9a-fA-F]{64}$'; then is_digest="true"; fi
+  vw_log "Binary attestation at ${ATTESTATION_PATH}: verified=${is_digest}"
+
+  if [ "${MODE}" = "require-real" ] && [ "${is_digest}" != "true" ]; then
+    vw_err "require-real demands an attested binary identity, but the image attests none"; exit 13
+  fi
+
+  # A stub must never carry a pinned identity: registration would advertise a binary that is not there.
+  if [ "${BINSIZE:-0}" -le "${SIZE_THRESHOLD}" ] && [ "${is_digest}" = "true" ]; then
+    vw_err "A stub binary is installed but the image attests a pinned identity"; exit 14
+  fi
+}
+
 vw_invoke_help() {
+  local invocation_path="${BINARY_PAYLOAD_PATH:-${BINARY_PATH}}"
   # Always attempt help; in stub mode it may fail (only enforced in require-real)
-  if /usr/bin/env bash -c "docker exec '${CONTAINER_NAME}' '${BINARY_PATH}' --help >/dev/null 2>&1"; then
+  if /usr/bin/env bash -c "docker exec '${CONTAINER_NAME}' '${invocation_path}' --help >/dev/null 2>&1"; then
     vw_log "Help invocation succeeded"
   else
     vw_log "Help invocation failed"
@@ -121,14 +150,18 @@ vw_invoke_help() {
 
 vw_check_readiness() {
   vw_log "Checking readiness (/health/ready) including ${HEALTH_KEY}..."
-  STATUS=$(docker exec "${CONTAINER_NAME}" sh -c 'wget -q -S -O - http://localhost:8080/health/ready' 2>&1 | awk '/HTTP\//{code=$2} END{print code}') || true
+  local readiness_body="/tmp/printfarmer-readiness.json"
+  STATUS=$(docker exec "${CONTAINER_NAME}" curl -sS \
+    -o "${readiness_body}" \
+    -w '%{http_code}' \
+    http://localhost:8080/health/ready) || true
   if [ "${STATUS}" != "200" ]; then
     vw_err "Readiness endpoint returned ${STATUS:-?}. Dumping logs + body (if any):"
     docker logs --tail=80 "${CONTAINER_NAME}" 2>&1 | sed "s/^/[verify-${LOG_PREFIX}][log] /"
-    docker exec "${CONTAINER_NAME}" wget -q -O - http://localhost:8080/health/ready 2>/dev/null | sed "s/^/[verify-${LOG_PREFIX}][body] /" || true
+    docker exec "${CONTAINER_NAME}" cat "${readiness_body}" 2>/dev/null | sed "s/^/[verify-${LOG_PREFIX}][body] /" || true
     exit 8
   fi
-  BODY=$(docker exec "${CONTAINER_NAME}" wget -q -O - http://localhost:8080/health/ready || true)
+  BODY=$(docker exec "${CONTAINER_NAME}" cat "${readiness_body}" || true)
 
   # Detect relaxed readiness
   local RELAXED

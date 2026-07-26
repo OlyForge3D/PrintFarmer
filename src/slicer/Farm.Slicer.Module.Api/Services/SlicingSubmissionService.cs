@@ -3,6 +3,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -77,7 +78,7 @@ public class SlicingSubmissionService(
                 {
                     SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase)
                         ? "PrusaSlicer 2.7.0"
-                        : "OrcaSlicer 1.8.0",
+                        : $"OrcaSlicer {CalibrationContractConstants.SlicerVersion}",
                     ProfileUsed = (profile?.ProcessProfile?.Quality ?? "Unknown") + " - " + (profile?.FilamentProfile?.Material ?? "Unknown"),
                     EstimatedCost = 0
                 }
@@ -175,7 +176,7 @@ public class SlicingSubmissionService(
                 {
                     SlicerVersion = string.Equals(slicerEngine, "prusaslicer", StringComparison.OrdinalIgnoreCase)
                         ? "PrusaSlicer 2.7.0"
-                        : "OrcaSlicer 1.8.0",
+                        : $"OrcaSlicer {CalibrationContractConstants.SlicerVersion}",
                     ProfileUsed = (profile?.ProcessProfile?.Quality ?? "Unknown") + " - " + (profile?.FilamentProfile?.Material ?? "Unknown"),
                     EstimatedCost = 0
                 }

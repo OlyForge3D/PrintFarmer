@@ -710,6 +710,221 @@ public class GcodeFilesService(
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<GcodeStreamIngestResult> IngestStreamAsync(GcodeStreamIngestRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // A replayed ingest must never write a second copy: the caller-assigned identity is the
+        // convergence point after a crash between writing bytes and committing the record.
+        GcodeFile? existingById = await _gcodeRepo.GetByIdWithIncludesAsync(request.FileId, ct);
+        if (existingById is not null)
+        {
+            return new GcodeStreamIngestResult(existingById, AlreadyExisted: true);
+        }
+
+        string extension = Path.GetExtension(request.FileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".gcode";
+        }
+
+        (string _, string targetDirectory, string virtualDirectory) = ResolveVirtualPath(
+            request.VirtualDirectory,
+            _storagePathService.GetGcodeStorageDirectory());
+        _ = Directory.CreateDirectory(targetDirectory);
+
+        string stagingPath = Path.Combine(targetDirectory, $"{request.FileId}-{Guid.NewGuid():N}.ingest");
+        string finalPath = Path.Combine(targetDirectory, $"{request.FileId}{extension}");
+        string computedHash;
+        long copiedBytes;
+        try
+        {
+            (computedHash, copiedBytes) = await CopyAndHashAsync(request.Content, stagingPath, ct);
+            if (copiedBytes != request.ExpectedSizeBytes)
+            {
+                throw new GcodeStreamIngestException(
+                    GcodeStreamIngestException.SizeMismatch,
+                    "The ingested G-code byte count does not match the verified source artifact.");
+            }
+
+            if (!string.Equals(computedHash, NormalizeHex(request.ExpectedSha256), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GcodeStreamIngestException(
+                    GcodeStreamIngestException.HashMismatch,
+                    "The ingested G-code digest does not match the verified source artifact.");
+            }
+        }
+        catch
+        {
+            TryDeleteFile(stagingPath, "failed gcode ingest");
+            throw;
+        }
+
+        // Identical bytes already in the library keep their original record: the library hash index is
+        // unique, and a promoted record is immutable once stamped.
+        GcodeFile? existingByHash = await _gcodeRepo.FindByHashAsync(computedHash, ct);
+        if (existingByHash is not null)
+        {
+            TryDeleteFile(stagingPath, "duplicate promoted content");
+            if (!existingByHash.IsImmutable && existingByHash.SourceArtifactId is null)
+            {
+                ApplyPromotionLineage(existingByHash, request, computedHash);
+                await _gcodeRepo.SaveChangesAsync(ct);
+            }
+
+            return new GcodeStreamIngestResult(existingByHash, AlreadyExisted: true);
+        }
+
+        MovePromotedBytesIntoPlace(stagingPath, finalPath);
+
+        GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(finalPath, ct);
+        string? thumbnailPath = await ExtractThumbnailAsync(finalPath, ct);
+        if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
+        {
+            string finalThumbnailPath = Path.Combine(targetDirectory, $"{request.FileId}_thumb.png");
+            if (!string.Equals(thumbnailPath, finalThumbnailPath, StringComparison.Ordinal))
+            {
+                File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
+                thumbnailPath = finalThumbnailPath;
+            }
+        }
+
+        FolderNode targetFolder = await _folderService.GetOrCreateFolderAsync(
+            NormalizeVirtualPath(virtualDirectory),
+            "gcode",
+            ct);
+        Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
+        GcodeFile file = BuildGcodeFileEntityFromMetadata(
+            request.FileId,
+            Path.GetFileName(request.FileName),
+            computedHash,
+            copiedBytes,
+            targetFolder.Id,
+            metadata,
+            thumbnailPath,
+            request.Source,
+            extension,
+            resolvedPrinterModelId: printerModelId);
+        ApplyPromotionLineage(file, request, computedHash);
+
+        try
+        {
+            await _gcodeRepo.AddAsync(file, ct);
+            await _gcodeRepo.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent ingest of the same content committed first. Detach the rejected insert so it
+            // cannot poison a later save on this shared context, then adopt the winning record.
+            await _gcodeRepo.RemoveAsync(file, ct);
+            GcodeFile? winner = await _gcodeRepo.FindByHashAsync(computedHash, ct);
+            if (winner is null)
+            {
+                _ = TryDeleteFile(finalPath, "cleanup after failed ingest");
+                throw;
+            }
+
+            if (!string.Equals(winner.FileName, file.FileName, StringComparison.OrdinalIgnoreCase))
+            {
+                // The winner published under a different identity, so these bytes are an orphan copy.
+                _ = TryDeleteFile(finalPath, "cleanup after concurrent ingest");
+            }
+
+            return new GcodeStreamIngestResult(winner, AlreadyExisted: true);
+        }
+
+        _telemetry.RecordFileOperation("promote", extension.TrimStart('.'), copiedBytes);
+        return new GcodeStreamIngestResult(file, AlreadyExisted: false);
+    }
+
+    private static void ApplyPromotionLineage(GcodeFile file, GcodeStreamIngestRequest request, string contentSha256)
+    {
+        GcodePromotionLineage lineage = request.Lineage;
+        file.SourceArtifactId = lineage.SourceArtifactId;
+        file.SourceSliceJobId = lineage.SourceSliceJobId;
+        file.SourceWorkerId = lineage.SourceWorkerId;
+        file.CalibrationProjectId = lineage.CalibrationProjectId;
+        file.CalibrationAttemptId = lineage.CalibrationAttemptId;
+        file.CalibrationOrchestrationId = lineage.CalibrationOrchestrationId;
+        file.PromotionOperationId = lineage.PromotionOperationId;
+        file.PromotionOperationKey = lineage.PromotionOperationKey;
+        file.PromotionCorrelationId = lineage.PromotionCorrelationId;
+        file.ContentSha256 = contentSha256;
+        file.SpecificationSha256 = lineage.SpecificationSha256;
+        file.SourceModelSha256 = lineage.SourceModelSha256;
+        file.MachineProfileSha256 = lineage.MachineProfileSha256;
+        file.ProcessProfileSha256 = lineage.ProcessProfileSha256;
+        file.FilamentProfileSha256 = lineage.FilamentProfileSha256;
+        file.SlicerEngineName = lineage.SlicerEngineName;
+        file.SlicerDistribution = lineage.SlicerDistribution;
+        file.PinnedSlicerVersion = lineage.PinnedSlicerVersion;
+        file.SlicerContainerDigest = lineage.SlicerContainerDigest;
+        file.FirmwareFamily = lineage.FirmwareFamily;
+        file.GcodeDialect = lineage.GcodeDialect;
+        file.GeneratorName = lineage.GeneratorName;
+        file.GeneratorVersion = lineage.GeneratorVersion;
+        file.CalibrationManifestJson = lineage.CalibrationManifestJson;
+        file.CalibrationManifestSha256 = lineage.CalibrationManifestSha256;
+        file.IsImmutable = true;
+        file.PromotedAtUtc = DateTime.UtcNow;
+    }
+
+    private static string NormalizeHex(string value) =>
+        value.Trim().Replace("-", string.Empty, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Publishes verified staged bytes under the final identity, tolerating a concurrent ingest that
+    /// already published byte-identical content.
+    /// </summary>
+    /// <param name="stagingPath">The verified staging file.</param>
+    /// <param name="finalPath">The final storage path for the file identity.</param>
+    private void MovePromotedBytesIntoPlace(string stagingPath, string finalPath)
+    {
+        try
+        {
+            File.Move(stagingPath, finalPath, overwrite: true);
+        }
+        catch (IOException) when (File.Exists(finalPath))
+        {
+            // Both copies passed the same digest check, so the published file is already correct.
+            _ = TryDeleteFile(stagingPath, "concurrent gcode ingest");
+        }
+        catch (UnauthorizedAccessException) when (File.Exists(finalPath))
+        {
+            // A concurrent ingest holds the destination open while publishing identical bytes.
+            _ = TryDeleteFile(stagingPath, "concurrent gcode ingest");
+        }
+    }
+
+    private static async Task<(string Sha256, long Length)> CopyAndHashAsync(
+        Stream source,
+        string destinationPath,
+        CancellationToken ct)
+    {
+        byte[] buffer = new byte[81920];
+        long total = 0;
+        await using FileStream destination = new(
+            destinationPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            buffer.Length,
+            useAsync: true);
+        using SHA256 hasher = SHA256.Create();
+        int read;
+        while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+            _ = hasher.TransformBlock(buffer, 0, read, null, 0);
+            total += read;
+        }
+
+        _ = hasher.TransformFinalBlock([], 0, 0);
+        await destination.FlushAsync(ct);
+        return (Convert.ToHexString(hasher.Hash!), total);
+    }
+
     /// <summary>
     /// Creates a new virtual folder in the G-code library for organizational purposes.
     /// </summary>

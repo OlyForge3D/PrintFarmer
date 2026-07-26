@@ -11,15 +11,28 @@ using Microsoft.AspNetCore.Mvc;
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
 /// <summary>
-/// Endpoints for submitting slicing jobs via the new submission service.
+/// Endpoints for submitting slicing jobs via the legacy submission service.
 /// </summary>
+/// <remarks>
+/// Superseded by <c>POST /api/slice</c>, which is the canonical production contract. These routes
+/// remain available for existing non-calibration callers and advertise their replacement, but they
+/// must not be used for calibration work: they do not carry model identity, resolved profile
+/// snapshots or lease fencing.
+/// </remarks>
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Submission")]
+[DeprecatedSliceRoute(CanonicalSliceRoute, CanonicalSliceRouteSunset)]
 public class SlicingSubmissionController(
     ISlicingSubmissionService submissionService,
     IPrinterAccessValidator? printerAccess = null) : ControllerBase
 {
+    /// <summary>The canonical replacement route advertised to callers.</summary>
+    internal const string CanonicalSliceRoute = "/api/slice";
+
+    /// <summary>Advertised sunset date for the superseded submission routes.</summary>
+    internal const string CanonicalSliceRouteSunset = "Wed, 01 Jul 2026 00:00:00 GMT";
+
     private readonly ISlicingSubmissionService _submissionService = submissionService;
     private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
 

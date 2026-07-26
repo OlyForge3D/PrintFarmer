@@ -36,10 +36,25 @@ public class SliceJob
     public string ModelFileName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Slicer engine to use (OrcaSlicer, PrusaSlicer, etc.).
-    /// Maps to SlicerEngineType enum.
+    /// Legacy numeric slicer engine discriminator retained for rows created before the
+    /// canonical string contract. New jobs also populate <see cref="SlicerEngineName"/>,
+    /// which is authoritative whenever it is present.
     /// </summary>
     public int SlicerEngine { get; set; }
+
+    /// <summary>
+    /// Canonical validated engine name (for example <c>OrcaSlicer</c>). Authoritative when set;
+    /// <see langword="null"/> only for jobs persisted before the canonical contract existed.
+    /// </summary>
+    [MaxLength(32)]
+    public string? SlicerEngineName { get; set; }
+
+    /// <summary>Stored model identity the worker must resolve bytes through (no caller URL dereference).</summary>
+    public Guid? Model3DId { get; set; }
+
+    /// <summary>SHA-256 (hex) of the stored model bytes captured at submission for provenance.</summary>
+    [MaxLength(64)]
+    public string? ModelSha256 { get; set; }
 
     /// <summary>
     /// Serialized slicer profile/settings (JSON).
@@ -151,6 +166,88 @@ public class SliceJob
     /// When the job lease expires (pull model with timeout).
     /// </summary>
     public DateTime? LeaseExpiresAt { get; set; }
+
+    /// <summary>
+    /// Opaque lease token issued on a successful atomic claim. Workers must echo it on every
+    /// mutation; a mismatch means the lease was lost and the mutation is rejected.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? LeaseToken { get; set; }
+
+    /// <summary>
+    /// Monotonic fencing counter incremented on every successful claim. Guards against a
+    /// resumed worker mutating a job that has since been re-claimed by another worker.
+    /// </summary>
+    public long LeaseFence { get; set; }
+
+    /// <summary>Soft reference to the calibration project that owns this job (no FK constraint).</summary>
+    public Guid? CalibrationProjectId { get; set; }
+
+    /// <summary>
+    /// Non-null owner-scoped idempotency partition. Equals <see cref="CalibrationProjectId"/> when a
+    /// project owns the job and <see cref="Guid.Empty"/> otherwise.
+    /// </summary>
+    /// <remarks>
+    /// SQLite and PostgreSQL treat <see langword="null"/> as distinct inside a unique index, so a
+    /// nullable project column would silently void the correlation/checksum constraint for every
+    /// non-calibration job. This column keeps the scope non-null so the constraint always applies.
+    /// </remarks>
+    [JsonIgnore]
+    public Guid IdempotencyScopeId { get; set; }
+
+    /// <summary>Soft reference to the calibration attempt that produced this job.</summary>
+    public Guid? CalibrationAttemptId { get; set; }
+
+    /// <summary>Soft reference to the durable calibration orchestration saga row.</summary>
+    public Guid? CalibrationOrchestrationId { get; set; }
+
+    /// <summary>Idempotency operation identifier supplied by the submitting caller.</summary>
+    public Guid? OperationId { get; set; }
+
+    /// <summary>Exact native upstream-Orca machine profile JSON delivered to the worker.</summary>
+    [JsonIgnore]
+    public string? MachineProfileJson { get; set; }
+
+    /// <summary>Exact native upstream-Orca process profile JSON delivered to the worker.</summary>
+    [JsonIgnore]
+    public string? ProcessProfileJson { get; set; }
+
+    /// <summary>Exact native upstream-Orca filament profile JSON delivered to the worker.</summary>
+    [JsonIgnore]
+    public string? FilamentProfileJson { get; set; }
+
+    /// <summary>SHA-256 (hex) of <see cref="MachineProfileJson"/>.</summary>
+    [MaxLength(64)]
+    public string? MachineProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of <see cref="ProcessProfileJson"/>.</summary>
+    [MaxLength(64)]
+    public string? ProcessProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of <see cref="FilamentProfileJson"/>.</summary>
+    [MaxLength(64)]
+    public string? FilamentProfileSha256 { get; set; }
+
+    /// <summary>Resolved machine profile identity.</summary>
+    public Guid? MachineProfileId { get; set; }
+
+    /// <summary>Resolved process profile identity.</summary>
+    public Guid? ProcessProfileId { get; set; }
+
+    /// <summary>Resolved filament profile identity.</summary>
+    public Guid? FilamentProfileId { get; set; }
+
+    /// <summary>Slicer distribution the job was pinned to (for example <c>upstream</c>).</summary>
+    [MaxLength(64)]
+    public string? SlicerDistribution { get; set; }
+
+    /// <summary>Pinned slicer version the job requires (for example <c>2.3.1</c>).</summary>
+    [MaxLength(64)]
+    public string? SlicerVersion { get; set; }
+
+    /// <summary>Pinned slicer container digest the job requires, when the deployment supplies one.</summary>
+    [MaxLength(128)]
+    public string? SlicerContainerDigest { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

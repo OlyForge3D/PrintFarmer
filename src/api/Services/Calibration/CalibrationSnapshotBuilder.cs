@@ -16,19 +16,31 @@ internal static class CalibrationSnapshotBuilder
 
     public static string ComputeSha256(object effectiveConfiguration)
     {
-        ArgumentNullException.ThrowIfNull(effectiveConfiguration);
+        byte[] hash = SHA256.HashData(CanonicalizeToUtf8Bytes(effectiveConfiguration));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
 
-        JsonElement element = JsonSerializer.SerializeToElement(
-            effectiveConfiguration,
-            SerializerOptions);
+    /// <summary>
+    /// Serializes a value to the canonical UTF-8 JSON form used for every calibration digest.
+    /// </summary>
+    /// <param name="value">The value to canonicalize.</param>
+    /// <returns>The canonical UTF-8 JSON bytes.</returns>
+    /// <remarks>
+    /// Object members are ordered ordinally, so two structurally equal documents always produce the
+    /// same bytes and therefore the same SHA-256, regardless of member declaration order.
+    /// </remarks>
+    public static byte[] CanonicalizeToUtf8Bytes(object value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+
+        JsonElement element = JsonSerializer.SerializeToElement(value, SerializerOptions);
         using MemoryStream stream = new();
         using (Utf8JsonWriter writer = new(stream))
         {
             WriteCanonical(writer, element);
         }
 
-        byte[] hash = SHA256.HashData(stream.ToArray());
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return stream.ToArray();
     }
 
     private static void WriteCanonical(Utf8JsonWriter writer, JsonElement element)

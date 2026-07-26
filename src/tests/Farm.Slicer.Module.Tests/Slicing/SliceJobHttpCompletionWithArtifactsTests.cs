@@ -61,7 +61,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "test-model.stl",
             ModelFileUrl = "http://example/test-model.stl",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimedAt = DateTime.UtcNow,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = Guid.NewGuid(),
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -92,6 +96,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
+        AddLeaseHeaders(completeRequestMessage, job);
+
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -154,7 +160,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "minimal.stl",
             ModelFileUrl = "http://example/minimal.stl",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimedAt = DateTime.UtcNow,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = Guid.NewGuid(),
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -174,6 +184,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
+        AddLeaseHeaders(completeRequestMessage, job);
+
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -217,7 +229,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "auth-test.stl",
             ModelFileUrl = "http://example/auth-test.stl",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimedAt = DateTime.UtcNow,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = Guid.NewGuid(),
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -267,7 +283,11 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileName = "complex-model.3mf",
             ModelFileUrl = "http://example/complex-model.3mf",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimedAt = DateTime.UtcNow,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = Guid.NewGuid(),
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -311,6 +331,8 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         {
             Content = JsonContent.Create(completeRequest)
         };
+        AddLeaseHeaders(completeRequestMessage, job);
+
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -333,6 +355,19 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         SliceJob? updatedJob = await verifyDb.Set<SliceJob>().AsNoTracking().FirstOrDefaultAsync(j => j.Id == job.Id);
         _ = updatedJob!.ArtifactsCount.Should().Be(3);
         _ = updatedJob.ArtifactsTotalBytes.Should().BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// Presents the lease the job was claimed under so the fenced worker contract accepts the call.
+    /// </summary>
+    /// <param name="request">The outgoing worker request.</param>
+    /// <param name="job">The claimed job.</param>
+    private static void AddLeaseHeaders(HttpRequestMessage request, SliceJob job)
+    {
+        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken!.Value.ToString());
+        request.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private sealed class TestFormFile(byte[] data, string fileName, string contentType) : IFormFile

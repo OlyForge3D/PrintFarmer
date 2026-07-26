@@ -124,6 +124,7 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             return null!;
         }
 
+        SlicerEngineType engine = SlicerEngineNames.Resolve(sj);
         DistributedSlicingJob dsj = new DistributedSlicingJob
         {
             Id = sj.Id,
@@ -133,12 +134,22 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             Status = Enum.TryParse(sj.Status, true, out SlicingJobStatus st) ? st : SlicingJobStatus.Queued,
             ModelFileUrl = Uri.TryCreate(sj.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? u) ? u : new Uri("about:blank", UriKind.RelativeOrAbsolute),
             ModelFileName = sj.ModelFileName,
-            EngineType = (SlicerEngineType)sj.SlicerEngine,
-            SlicerEngine = ((SlicerEngineType)sj.SlicerEngine).ToString(),
+            EngineType = engine,
+            SlicerEngine = engine.ToString(),
             WorkerId = sj.WorkerId?.ToString(),
             StartedAt = sj.StartedAt,
             CompletedAt = sj.CompletedAt,
-            RetryCount = sj.RetryCount
+            RetryCount = sj.RetryCount,
+
+            // The exact resolved profiles must survive the queue hop; dropping them here is what
+            // previously starved the worker of any usable slicer configuration.
+            NativeProfiles = NativeSlicerProfiles.FromJob(
+                sj.MachineProfileJson,
+                sj.ProcessProfileJson,
+                sj.FilamentProfileJson,
+                sj.MachineProfileSha256,
+                sj.ProcessProfileSha256,
+                sj.FilamentProfileSha256),
         };
 
         return dsj;
@@ -155,7 +166,16 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             Status = SliceJobStatus.Queued,
             ModelFileUrl = dj.ModelFileUrl?.ToString() ?? string.Empty,
             ModelFileName = dj.ModelFileName,
-            SlicerEngine = (int)dj.EngineType
+            SlicerEngine = (int)dj.EngineType,
+            SlicerEngineName = dj.EngineType.ToString(),
+            CorrelationId = dj.CorrelationId == Guid.Empty ? null : dj.CorrelationId,
+            Checksum = string.IsNullOrWhiteSpace(dj.Checksum) ? null : dj.Checksum,
+            MachineProfileJson = dj.NativeProfiles?.MachineJson,
+            ProcessProfileJson = dj.NativeProfiles?.ProcessJson,
+            FilamentProfileJson = dj.NativeProfiles?.FilamentJson,
+            MachineProfileSha256 = dj.NativeProfiles?.MachineSha256,
+            ProcessProfileSha256 = dj.NativeProfiles?.ProcessSha256,
+            FilamentProfileSha256 = dj.NativeProfiles?.FilamentSha256,
         };
     }
 }

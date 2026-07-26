@@ -129,4 +129,100 @@ public class GcodeFile : StoredFile
 
     // Navigation property to harvest file mappings
     public ICollection<HarvestFileGcodeFileMapping> HarvestFileMappings { get; set; } = new List<HarvestFileGcodeFileMapping>();
+
+    // --- Promotion lineage: written once when a slicer artifact is promoted into the library ---
+
+    /// <summary>Slicer artifact whose bytes were streamed into this file (soft ref — no FK constraint).</summary>
+    public Guid? SourceArtifactId { get; set; }
+
+    /// <summary>Slice job that produced <see cref="SourceArtifactId"/> (soft ref — no FK constraint).</summary>
+    public Guid? SourceSliceJobId { get; set; }
+
+    /// <summary>Worker that produced the source artifact (soft ref — no FK constraint).</summary>
+    public Guid? SourceWorkerId { get; set; }
+
+    /// <summary>Calibration project the promoted output belongs to.</summary>
+    public Guid? CalibrationProjectId { get; set; }
+
+    /// <summary>Calibration attempt the promoted output belongs to.</summary>
+    public Guid? CalibrationAttemptId { get; set; }
+
+    /// <summary>Durable calibration orchestration that requested the promotion.</summary>
+    public Guid? CalibrationOrchestrationId { get; set; }
+
+    /// <summary>Idempotency operation key of the promotion that created this file.</summary>
+    /// <remarks>
+    /// Caller-supplied and therefore only unique inside the owner's scope; it is kept for diagnostics
+    /// and never used as the persisted identity.
+    /// </remarks>
+    public string? PromotionOperationId { get; set; }
+
+    /// <summary>
+    /// Owner-scoped identity of the promotion that created this file. Uniqueness is enforced on this
+    /// column so two owners may reuse the same raw idempotency key without colliding.
+    /// </summary>
+    public string? PromotionOperationKey { get; set; }
+
+    /// <summary>Correlation identifier carried from the canonical slice submission.</summary>
+    public Guid? PromotionCorrelationId { get; set; }
+
+    /// <summary>SHA-256 (hex) of the promoted bytes as verified against the source artifact.</summary>
+    public string? ContentSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of the canonical calibration specification behind the slice.</summary>
+    public string? SpecificationSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of the stored model bytes the slice consumed.</summary>
+    public string? SourceModelSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of the effective native machine profile delivered to the worker.</summary>
+    public string? MachineProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of the effective native process profile delivered to the worker.</summary>
+    public string? ProcessProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 (hex) of the effective native filament profile delivered to the worker.</summary>
+    public string? FilamentProfileSha256 { get; set; }
+
+    /// <summary>Canonical slicer engine name recorded at promotion (for example <c>OrcaSlicer</c>).</summary>
+    public string? SlicerEngineName { get; set; }
+
+    /// <summary>Slicer distribution recorded at promotion (for example <c>upstream</c>).</summary>
+    public string? SlicerDistribution { get; set; }
+
+    /// <summary>Pinned slicer version the producing job required.</summary>
+    public string? PinnedSlicerVersion { get; set; }
+
+    /// <summary>Pinned slicer container digest the producing job required, when the deployment supplies one.</summary>
+    public string? SlicerContainerDigest { get; set; }
+
+    /// <summary>Firmware family the promoted G-code targets (for example <c>Klipper</c>).</summary>
+    public string? FirmwareFamily { get; set; }
+
+    /// <summary>G-code dialect the promoted output was generated for (for example <c>Klipper</c>).</summary>
+    public string? GcodeDialect { get; set; }
+
+    /// <summary>Name of the generator that produced the promoted output.</summary>
+    public string? GeneratorName { get; set; }
+
+    /// <summary>Version of the generator that produced the promoted output.</summary>
+    public string? GeneratorVersion { get; set; }
+
+    /// <summary>
+    /// Server-built calibration manifest describing the promoted output. Contains identifiers, hashes
+    /// and versions only — never paths, private URLs or credentials.
+    /// </summary>
+    public string? CalibrationManifestJson { get; set; }
+
+    /// <summary>SHA-256 (hex) of the sibling calibration-manifest artifact, when the job produced one.</summary>
+    public string? CalibrationManifestSha256 { get; set; }
+
+    /// <summary>
+    /// Marks content and lineage as immutable. Promoted files are never re-stamped, so a replayed or
+    /// deduplicated promotion returns the original record rather than rewriting it.
+    /// </summary>
+    public bool IsImmutable { get; set; }
+
+    /// <summary>UTC timestamp when the promotion completed.</summary>
+    public DateTime? PromotedAtUtc { get; set; }
 }

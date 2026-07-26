@@ -4123,6 +4123,10 @@ DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_SHA256=${ORCASLICER_SHA256:-}
+# Set only after resolving or pushing an immutable worker image. Leaving this empty keeps
+# calibration generation unavailable while ordinary slicing can continue.
+ORCASLICER_CONTAINER_DIGEST=${ORCASLICER_CONTAINER_DIGEST:-}
 
 # Docker Base Image Tags - Use values from container-versions.conf (single source of truth)
 # If not set by config file, these defaults are used
@@ -4674,10 +4678,15 @@ EOF
         fi
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             ORCA_VERSION="${ORCASLICER_VERSION:-2.4.0}"
+            if [ -z "${ORCASLICER_SHA256:-}" ]; then
+                print_error "No authoritative OrcaSlicer checksum is configured for version ${ORCA_VERSION}."
+                print_error "Set ORCASLICER_SHA256 to the official upstream AppImage SHA-256."
+                exit 1
+            fi
             print_info "Building orcaslicer-binaries:${ORCA_VERSION} layer (optimized caching via Dockerfile.multistage)..."
             
             # Build binary layer with automatic download and extraction
-            BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ALLOW_STUB=false"
+            BUILD_ARGS="--build-arg ORCASLICER_VERSION=${ORCA_VERSION} --build-arg ORCASLICER_SHA256=${ORCASLICER_SHA256} --build-arg ALLOW_STUB=false"
 
             # Add GitHub token if available (to avoid rate limits)
             if [ -n "${GITHUB_TOKEN:-}" ]; then

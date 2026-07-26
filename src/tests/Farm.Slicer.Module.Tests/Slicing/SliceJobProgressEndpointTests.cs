@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -44,7 +45,7 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileUrl = "http://example.com/model.stl",
             ModelFileName = "model.stl",
-            SlicerEngine = 0,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfileJson = "{}"
         };
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submitReq);
@@ -61,14 +62,26 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         };
         HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
+        WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        _ = claimed.Should().NotBeNull();
+        _ = claimed!.LeaseToken.Should().NotBe(Guid.Empty);
+        _ = claimed.LeaseFence.Should().BeGreaterThan(0);
 
-        // Progress update
+        // Progress update presenting the claim-issued lease
         SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest
         {
             ProgressPercent = 42,
             ProgressMessage = "Layer slicing"
         };
-        HttpResponseMessage progressResp = await _client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
+        using HttpRequestMessage progressMessage = new(HttpMethod.Post, $"/api/slice/{submitted!.JobId}/progress")
+        {
+            Content = JsonContent.Create(progressReq),
+        };
+        progressMessage.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
+        progressMessage.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            claimed.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        HttpResponseMessage progressResp = await _client.SendAsync(progressMessage);
         _ = progressResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Fetch status
