@@ -294,6 +294,14 @@ Nothing is inferred from manufacturer, printer model, backend kind, aliases or a
 Moonraker response, and a missing digest is returned as an explicit dependency
 error rather than synthesized.
 
+Worker images verify the upstream AppImage against `ORCASLICER_SHA256` at build
+time. Deployments inject the resolved immutable image digest as
+`ORCASLICER_CONTAINER_DIGEST`, which becomes `Worker__ContainerDigest` at
+runtime. A container cannot embed its own final digest during its build because
+that would change the digest itself. A general slicing worker on a newer
+OrcaSlicer release does not satisfy calibration generation until it attests the
+exact supported `2.3.1` binary and container identities.
+
 Supported methods: `temperature`, `flow_ratio_coarse`, `flow_ratio_fine`,
 `flow_ratio_high_range`, `pressure_advance_tower`, `pressure_advance_line`,
 `pressure_advance_pattern`, `flow_verification`, `retraction`,

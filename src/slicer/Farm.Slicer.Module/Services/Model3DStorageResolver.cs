@@ -178,8 +178,10 @@ public sealed class Model3DStorageResolver(
         return Convert.ToHexString(hash);
     }
 
+    // Fail closed: a model with no recorded uploader is not "owned by everyone". Only an exact
+    // match on the recorded uploader grants access, matching Model3DFileService's ownership check.
     private static bool IsOwnedBy(Model3D model, Guid ownerUserId) =>
-        model.UploadedByUserId is null || model.UploadedByUserId == ownerUserId;
+        model.UploadedByUserId == ownerUserId;
 
     private static string? Normalize(string? hash) =>
         string.IsNullOrWhiteSpace(hash) ? null : hash.Trim().Replace("-", string.Empty, StringComparison.Ordinal);

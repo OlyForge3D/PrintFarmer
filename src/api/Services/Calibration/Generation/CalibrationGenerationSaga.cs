@@ -908,17 +908,22 @@ public sealed class CalibrationGenerationSaga(
         string upperDigest = contentSha256.ToUpperInvariant();
         if (orchestration.Model3DId is { } existingId)
         {
+            // Fail closed: only reuse the orchestration's previously stored model if it still
+            // belongs to this project's owner. An unattributed or foreign-owned row is never
+            // adopted, matching Model3DFileService's ownership check.
             Model3D? existing = await _models!.GetByIdAsync(existingId, cancellationToken);
-            if (existing is not null)
+            if (existing is not null && existing.UploadedByUserId == project.OwnerUserId)
             {
                 return existing.Id;
             }
         }
 
         // Content addressed reuse: an interrupted run that already wrote the body finds it again
-        // instead of storing a second identical model.
+        // instead of storing a second identical model. Fail closed: an unattributed or
+        // foreign-owned hash match is never adopted, only a model already owned by this
+        // project's owner is reused.
         Model3D? byHash = await _models!.GetByHashAsync(upperDigest, cancellationToken);
-        if (byHash is not null && (byHash.UploadedByUserId is null || byHash.UploadedByUserId == project.OwnerUserId))
+        if (byHash is not null && byHash.UploadedByUserId == project.OwnerUserId)
         {
             return byHash.Id;
         }
@@ -940,7 +945,14 @@ public sealed class CalibrationGenerationSaga(
             FileName = storedFileName,
             FilePath = string.Empty,
             FileSizeBytes = geometry.Content.Length,
-            FileHash = upperDigest,
+
+            // FileHash carries a global unique index, so a hash already recorded against a
+            // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
+            // this new row even though the bytes match: doing so would violate the unique
+            // constraint. A per-model synthetic value keeps the insert unique. Worker delivery
+            // still verifies the bytes against SliceJob.ModelSha256, which records the real
+            // content digest and takes precedence over this legacy database key.
+            FileHash = byHash is null ? upperDigest : modelId.ToString("N"),
             FileFormat = ModelFileFormat.STL,
             UploadedByUserId = project.OwnerUserId,
             UploadedAt = nowUtc,

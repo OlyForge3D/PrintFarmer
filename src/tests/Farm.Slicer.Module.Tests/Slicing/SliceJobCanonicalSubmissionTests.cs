@@ -143,6 +143,25 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = (await ReadCodeAsync(response)).Should().Be("model_not_found");
     }
 
+    [Fact(DisplayName = "A stored model with no recorded uploader is not resolvable by any caller")]
+    public async Task Submit_WithUnattributedStoredModel_ReturnsBadRequest()
+    {
+        // Fails closed: a NULL UploadedByUserId is not "owned by everyone". Legacy or corrupted
+        // rows without a recorded uploader must never be adoptable by an arbitrary caller.
+        (Guid modelId, _) = await AddStoredModelAsync(ownerId: null);
+
+        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = await GetAuthenticatedUserIdAsync(),
+            Model3DId = modelId,
+            ModelFileName = "calibration.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = (await ReadCodeAsync(response)).Should().Be("model_not_found");
+    }
+
     [Fact(DisplayName = "A claimed job delivers the exact native profile JSON and its digests")]
     public async Task Claim_DeliversExactNativeProfilesAndHashes()
     {
@@ -285,7 +304,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         return user.Id;
     }
 
-    private async Task<(Guid ModelId, string Sha256)> AddStoredModelAsync(Guid ownerId)
+    private async Task<(Guid ModelId, string Sha256)> AddStoredModelAsync(Guid? ownerId)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IStoragePathService storagePaths = scope.ServiceProvider.GetRequiredService<IStoragePathService>();

@@ -336,6 +336,43 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = job.ModelFileUrl.Should().NotContain(_harness.ModelRoot);
     }
 
+    [Fact(DisplayName = "An unattributed hash-matched model is not adopted; a new owned model is stored instead")]
+    public async Task ResumeAsync_WithUnattributedHashMatch_StoresNewOwnedModelInstead()
+    {
+        Guid owner = Guid.NewGuid();
+        _ = await _harness.AddAttestedWorkerAsync();
+
+        // First run stores the deterministic generated body, owned by the project owner.
+        CalibrationGenerationFixture first = await _harness.SeedAttemptAsync(ownerId: owner);
+        await AcceptAsync(first, "generate-hash-first");
+        _ = await _harness.CreateSaga().ResumeAsync(first.OrchestrationId, CancellationToken.None);
+        SliceJob firstJob = (await _harness.FindSliceJobAsync(first.OrchestrationId))!;
+        Guid unattributedModelId = firstJob.Model3DId!.Value;
+
+        // Simulate a pre-existing row whose uploader was never recorded (e.g. legacy data).
+        await using (Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext())
+        {
+            Model3D unattributed = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+                .SingleAsync(slicer.Models3D, model => model.Id == unattributedModelId);
+            unattributed.UploadedByUserId = null;
+            _ = await slicer.SaveChangesAsync();
+        }
+
+        // Second run uses the same method/options, so it recomputes the identical content hash.
+        CalibrationGenerationFixture second = await _harness.SeedAttemptAsync(ownerId: owner);
+        await AcceptAsync(second, "generate-hash-second");
+        _ = await _harness.CreateSaga().ResumeAsync(second.OrchestrationId, CancellationToken.None);
+        SliceJob secondJob = (await _harness.FindSliceJobAsync(second.OrchestrationId))!;
+
+        _ = secondJob.Model3DId.Should().NotBeNull();
+        _ = secondJob.Model3DId.Should().NotBe(unattributedModelId);
+
+        await using Farm.Slicer.Module.Data.SlicerDbContext verify = _harness.CreateSlicerContext();
+        Model3D stored = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
+            .SingleAsync(verify.Models3D, model => model.Id == secondJob.Model3DId!.Value);
+        _ = stored.UploadedByUserId.Should().Be(owner);
+    }
+
     [Fact(DisplayName = "A run reaches completion and promotes a verified, annotated artifact")]
     public async Task ResumeAsync_CompletesAndPromotesVerifiedArtifact()
     {

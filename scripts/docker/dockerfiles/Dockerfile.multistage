@@ -7,6 +7,7 @@
 
 # Global build arguments
 ARG ORCASLICER_VERSION=2.4.1
+ARG ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402
 ARG BUILD_VERBOSITY=quiet
 # Short git SHA of the source commit; embedded into each service's version endpoint
 ARG GIT_SHA=unknown
@@ -258,7 +259,7 @@ ARG ORCA_ASSET_PATH=""
 ARG ORCASLICER_URL=https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage
 # SHA-256 of the pinned upstream AppImage. Required whenever a real binary is built.
 # Supply it explicitly at build time; the build fails rather than accepting an unverified download.
-ARG ORCASLICER_SHA256=""
+ARG ORCASLICER_SHA256
 # Production default: never silently substitute a stub for the pinned upstream binary.
 ARG ALLOW_STUB=false
 ARG GITHUB_TOKEN
@@ -497,8 +498,7 @@ RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 FROM slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
 ARG ALLOW_STUB=false
-ARG ORCASLICER_SHA256=""
-ARG ORCASLICER_CONTAINER_DIGEST=""
+ARG ORCASLICER_SHA256
 ARG BUILD_VERSION
 ARG VCS_REF
 ARG SOURCE_REPOSITORY
@@ -569,7 +569,6 @@ ENV SlicerRegistry__Version=${ORCASLICER_VERSION}
 # because the ALLOW_STUB fallback does not honour it. An empty attestation means "unverified", which
 # keeps calibration capabilities false rather than asserting an unproven pin.
 ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
-ENV Worker__ContainerDigest=${ORCASLICER_CONTAINER_DIGEST}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
