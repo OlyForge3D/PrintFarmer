@@ -31,8 +31,16 @@ const signalRSessionTestState = vi.hoisted(() => ({
   reset: vi.fn().mockResolvedValue(undefined),
 }));
 
+const passkeyTestState = vi.hoisted(() => ({
+  login: vi.fn(),
+}));
+
 vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
   resetAuthenticatedSignalRSession: signalRSessionTestState.reset,
+}));
+
+vi.mock('@/services/passkeyService', () => ({
+  loginWithPasskey: passkeyTestState.login,
 }));
 
 vi.mock('@/services/api', () => ({
@@ -123,11 +131,17 @@ function SettingsConsumer() {
 }
 
 function Harness() {
-  const { isAuthenticated, isLoading, user, login, logout } = useAuth();
+  const { isAuthenticated, isLoading, user, login, loginWithPasskey, register, logout } = useAuth();
   return (
     <div>
       <button onClick={() => login({ username: 'alice', password: 'x' })}>login-a</button>
       <button onClick={() => login({ username: 'bob', password: 'x' })}>login-b</button>
+      <button onClick={() => loginWithPasskey('alice')}>passkey-a</button>
+      <button onClick={() => register({
+        username: 'alice',
+        email: 'alice@example.com',
+        password: 'x',
+      })}>register-a</button>
       <button onClick={() => logout()}>logout</button>
       {isLoading && <span data-testid="auth-loading">loading</span>}
       {isAuthenticated && <span data-testid="current-user">{user?.id}</span>}
@@ -155,6 +169,16 @@ describe('Identity transition cache isolation (#762)', () => {
     signalRSessionTestState.reset.mockResolvedValue(undefined);
     vi.mocked(apiClient.getCurrentUser).mockRejectedValue(new Error('no session'));
     vi.mocked(apiClient.logout).mockResolvedValue(undefined);
+    vi.mocked(apiClient.register).mockResolvedValue({
+      success: true,
+      token: 'token-a',
+      user: USER_A,
+    });
+    passkeyTestState.login.mockResolvedValue({
+      success: true,
+      token: 'token-a',
+      user: USER_A,
+    });
     vi.mocked(apiClient.login).mockImplementation(async (credentials): Promise<AuthenticationResult> => {
       if (credentials.username === 'alice') {
         return { success: true, token: 'token-a', user: USER_A };
@@ -328,6 +352,118 @@ describe('Identity transition cache isolation (#762)', () => {
 
     expect(screen.getByTestId('current-user')).toHaveTextContent('user-b');
     expect(localStorage.getItem('auth-token')).toBe('token-b');
+  });
+
+  it('does not let a delayed explicit login overwrite or finish a newer cross-tab transition', async () => {
+    let resolveLoginA: (result: AuthenticationResult) => void = () => {};
+    let resolveUserB: (user: UserDto) => void = () => {};
+    vi.mocked(apiClient.login).mockImplementationOnce(
+      () => new Promise(resolve => { resolveLoginA = resolve; }),
+    );
+    vi.mocked(apiClient.getCurrentUser).mockImplementationOnce(
+      () => new Promise(resolve => { resolveUserB = resolve; }),
+    );
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('auth-loading')).toBeInTheDocument());
+
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: null,
+        newValue: 'token-b',
+      }));
+    });
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      resolveLoginA({ success: true, token: 'token-a', user: USER_A });
+    });
+
+    expect(localStorage.getItem('auth-token')).toBe('token-b');
+    expect(screen.getByTestId('auth-loading')).toBeInTheDocument();
+    expect(screen.queryByTestId('current-user')).toBeNull();
+
+    await act(async () => {
+      resolveUserB(USER_B);
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+    expect(screen.queryByTestId('auth-loading')).toBeNull();
+  });
+
+  it('does not let delayed login, passkey, or registration completion restore a removed identity', async () => {
+    let resolveLogin: (result: AuthenticationResult) => void = () => {};
+    let resolvePasskey: (result: AuthenticationResult) => void = () => {};
+    let resolveRegistration: (result: AuthenticationResult) => void = () => {};
+    vi.mocked(apiClient.login).mockImplementationOnce(
+      () => new Promise(resolve => { resolveLogin = resolve; }),
+    );
+    passkeyTestState.login.mockImplementationOnce(
+      () => new Promise(resolve => { resolvePasskey = resolve; }),
+    );
+    vi.mocked(apiClient.register).mockImplementationOnce(
+      () => new Promise(resolve => { resolveRegistration = resolve; }),
+    );
+    renderHarness();
+
+    const successfulResult: AuthenticationResult = {
+      success: true,
+      token: 'token-a',
+      user: USER_A,
+    };
+    for (const [buttonName, complete] of [
+      ['login-a', () => resolveLogin(successfulResult)],
+      ['passkey-a', () => resolvePasskey(successfulResult)],
+      ['register-a', () => resolveRegistration(successfulResult)],
+    ] as const) {
+      await act(async () => {
+        screen.getByRole('button', { name: buttonName }).click();
+      });
+      await act(async () => {
+        notifyAuthenticationExpired();
+      });
+      await act(async () => {
+        complete();
+      });
+
+      expect(localStorage.getItem('auth-token')).toBeNull();
+      expect(screen.queryByTestId('current-user')).toBeNull();
+      expect(screen.queryByTestId('auth-loading')).toBeNull();
+    }
+  });
+
+  it('does not let a delayed logout remove a newer explicit login', async () => {
+    let resolveLogout: () => void = () => {};
+    vi.mocked(apiClient.logout).mockImplementationOnce(
+      () => new Promise<void>(resolve => { resolveLogout = resolve; }),
+    );
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'logout' }).click();
+    });
+    await waitFor(() => expect(apiClient.logout).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-b' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+
+    await act(async () => {
+      resolveLogout();
+    });
+
+    expect(localStorage.getItem('auth-token')).toBe('token-b');
+    expect(screen.getByTestId('current-user')).toHaveTextContent('user-b');
+    expect(screen.queryByTestId('auth-loading')).toBeNull();
   });
 
   it('finishes loading and clears the rejected token when cross-tab identity validation fails', async () => {

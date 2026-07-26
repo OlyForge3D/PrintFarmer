@@ -135,12 +135,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = async (credentials: LoginRequest): Promise<boolean> => {
-    authTransitionGeneration.current++;
+    const generation = ++authTransitionGeneration.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await apiClient.login(credentials);
+      if (generation !== authTransitionGeneration.current) {
+        return false;
+      }
 
       // If user is inactive (not approved), show a special error and do not store token
       if (result.success && result.user && result.user.isActive === false) {
@@ -150,10 +153,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.success && result.token && result.user) {
         await resetAuthenticatedSignalRSession();
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         setUser(result.user);
         return true;
       } else {
@@ -162,20 +173,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Login failed';
-      setError(errorMessage);
+      if (generation === authTransitionGeneration.current) {
+        setError(errorMessage);
+      }
       return false;
     } finally {
-      setIsLoading(false);
+      if (generation === authTransitionGeneration.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const loginWithPasskey = async (username: string): Promise<boolean> => {
-    authTransitionGeneration.current++;
+    const generation = ++authTransitionGeneration.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await passkeyLogin(username);
+      if (generation !== authTransitionGeneration.current) {
+        return false;
+      }
 
       if (result.success && result.user && result.user.isActive === false) {
         setError('Your account is pending admin approval. You cannot log in until approved.');
@@ -184,10 +202,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
       if (result.success && result.token && result.user) {
         await resetAuthenticatedSignalRSession();
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         setUser(result.user);
         return true;
       } else {
@@ -195,17 +221,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return false;
       }
     } finally {
-      setIsLoading(false);
+      if (generation === authTransitionGeneration.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const register = async (userData: RegisterRequest): Promise<boolean | 'pending'> => {
-    authTransitionGeneration.current++;
+    const generation = ++authTransitionGeneration.current;
     setIsLoading(true);
     setError(null);
 
     try {
       const result = await apiClient.register(userData);
+      if (generation !== authTransitionGeneration.current) {
+        return false;
+      }
+
       // If registration is successful but user is inactive, redirect to pending page
       if (result.success && result.user && result.user.isActive === false) {
         // Do not store token or set user
@@ -213,10 +245,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       if (result.success && result.token && result.user) {
         await resetAuthenticatedSignalRSession();
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
         await clearSensitiveUserQueries(queryClient);
+        if (generation !== authTransitionGeneration.current) {
+          return false;
+        }
+
         setUser(result.user);
         return true;
       } else {
@@ -225,32 +265,51 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : 'Registration failed';
-      setError(errorMessage);
+      if (generation === authTransitionGeneration.current) {
+        setError(errorMessage);
+      }
       return false;
     } finally {
-      setIsLoading(false);
+      if (generation === authTransitionGeneration.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const logout = async (): Promise<void> => {
-    authTransitionGeneration.current++;
+    const generation = ++authTransitionGeneration.current;
+    const tokenAtStart = localStorage.getItem('auth-token');
     setIsLoading(true);
 
     try {
       await resetAuthenticatedSignalRSession();
+      if (generation !== authTransitionGeneration.current) {
+        return;
+      }
+
       await apiClient.logout();
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
-      localStorage.removeItem('auth-token');
-      setUser(null);
-      setError(null);
-      // Purge sensitive cache immediately on logout so it cannot leak into
-      // the next identity, even if that identity never calls login() (e.g.
-      // another tab, or a future flow that swaps identity without this
-      // AuthContext's login path) (#762).
-      await clearSensitiveUserQueries(queryClient);
-      setIsLoading(false);
+      if (
+        generation === authTransitionGeneration.current
+        && localStorage.getItem('auth-token') === tokenAtStart
+      ) {
+        localStorage.removeItem('auth-token');
+        setUser(null);
+        setError(null);
+        try {
+          // Purge sensitive cache immediately on logout so it cannot leak into
+          // the next identity, even if that identity never calls login() (e.g.
+          // another tab, or a future flow that swaps identity without this
+          // AuthContext's login path) (#762).
+          await clearSensitiveUserQueries(queryClient);
+        } finally {
+          if (generation === authTransitionGeneration.current) {
+            setIsLoading(false);
+          }
+        }
+      }
     }
   };
 
