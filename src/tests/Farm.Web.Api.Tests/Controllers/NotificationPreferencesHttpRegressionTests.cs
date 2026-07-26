@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,6 +16,7 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Controllers;
 
+[Collection(IntegrationTestCollection.Name)]
 public sealed class NotificationPreferencesHttpRegressionTests
 {
     private static readonly PropertyInfo[] AttentionProperties = typeof(NotificationPreferences)
