@@ -20,9 +20,13 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// Official upstream profiles legitimately carry command and notes fields such as
 /// <c>machine_start_gcode</c> or <c>printer_notes</c>. Nothing here filters those out or strips them:
 /// neutralizing them is the production plan compiler's job, and this catalogue deliberately hands it
-/// unmodified upstream documents so the smoke exercises that path. Selection is therefore purely
-/// functional — a machine that declares a nozzle diameter, a process that declares a layer height and
-/// a filament that declares a filament type.
+/// unmodified upstream documents so the smoke exercises that path. Selection therefore has two layers:
+/// a machine that declares a nozzle diameter closest to 0.4mm, and then a process and a filament that
+/// are explicitly compatible with that exact machine's published name — never an arbitrary first match
+/// and never a "universal" (empty <c>compatible_printers</c>) profile that merely happens to declare
+/// the field the caller is looking for. Real OrcaSlicer rejects a slice whose process/filament wasn't
+/// authored for the selected machine with "process not compatible with printer", so compatibility is a
+/// hard requirement here, not a preference.
 /// </para>
 /// </remarks>
 internal static class PinnedOrcaProfileCatalog
@@ -34,7 +38,8 @@ internal static class PinnedOrcaProfileCatalog
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The selected exact documents.</returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the container publishes no usable machine, process or filament document.
+    /// Thrown when the container publishes no usable machine, process or filament document, or no
+    /// process/filament is explicitly compatible with the selected machine.
     /// </exception>
     public static async Task<PinnedOrcaProfileSelection> SelectAsync(
         string workerBaseAddress,
@@ -60,35 +65,84 @@ internal static class PinnedOrcaProfileCatalog
         await using Stream content = await response.Content.ReadAsStreamAsync(cancellationToken);
         using JsonDocument document = await JsonDocument.ParseAsync(content, cancellationToken: cancellationToken);
 
-        IReadOnlyList<JsonObject> machines = ReadSettings(document.RootElement, "machineProfiles");
-        IReadOnlyList<JsonObject> processes = ReadSettings(document.RootElement, "processProfiles");
-        IReadOnlyList<JsonObject> filaments = ReadSettings(document.RootElement, "filamentProfiles");
+        return Select(document.RootElement);
+    }
 
-        JsonObject machine = machines
-            .Where(candidate => TryReadNozzleDiameter(candidate, out _))
-            .OrderBy(candidate => NozzleDistanceFromPreferred(candidate))
+    /// <summary>
+    /// Pure selection over an already-parsed <c>/api/profiles</c> document. Extracted from
+    /// <see cref="SelectAsync"/> so the exact-compatibility selection rules can be exercised directly
+    /// against JSON fixtures without a running worker.
+    /// </summary>
+    /// <param name="root">Root element of the worker's <c>/api/profiles</c> response.</param>
+    /// <returns>The selected exact documents.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the document publishes no usable machine, process or filament candidate, or no
+    /// process/filament is explicitly compatible with the selected machine.
+    /// </exception>
+    internal static PinnedOrcaProfileSelection Select(JsonElement root)
+    {
+        IReadOnlyList<ProfileCandidate> machines = ReadCandidates(root, "machineProfiles");
+        IReadOnlyList<ProfileCandidate> processes = ReadCandidates(root, "processProfiles");
+        IReadOnlyList<ProfileCandidate> filaments = ReadCandidates(root, "filamentProfiles");
+
+        ProfileCandidate machine = machines
+            .Where(candidate => TryReadNozzleDiameter(candidate.Settings, out _))
+            .OrderBy(NozzleDistanceFromPreferred)
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
                 "The pinned worker publishes no machine profile that declares a nozzle diameter.");
-        _ = TryReadNozzleDiameter(machine, out double nozzleDiameter);
+        _ = TryReadNozzleDiameter(machine.Settings, out double nozzleDiameter);
 
-        JsonObject process = processes.FirstOrDefault(
-            candidate => candidate.ContainsKey("layer_height"))
+        ProfileCandidate process = SelectCompatible(processes, machine, "layer_height")
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no process profile that declares a layer height.");
-        JsonObject filament = filaments.FirstOrDefault(
-            candidate => candidate.ContainsKey("filament_type"))
+                $"The pinned worker publishes no process profile explicitly compatible with machine '{machine.Name}' " +
+                "(its compatible_printers metadata does not include that machine).");
+
+        ProfileCandidate filament = SelectCompatible(filaments, machine, "filament_type")
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no filament profile that declares a filament type.");
+                $"The pinned worker publishes no filament profile explicitly compatible with machine '{machine.Name}' " +
+                "(its compatible_printers metadata does not include that machine).");
 
         return new PinnedOrcaProfileSelection(
-            Canonicalize(machine),
-            Canonicalize(process),
-            Canonicalize(filament),
+            Canonicalize(machine.Settings),
+            Canonicalize(process.Settings),
+            Canonicalize(filament.Settings),
             nozzleDiameter);
     }
 
-    private static IReadOnlyList<JsonObject> ReadSettings(JsonElement root, string groupName)
+    /// <summary>
+    /// Selects the best process/filament candidate that both declares the given functional settings
+    /// key and is explicitly compatible with <paramref name="machine"/>'s exact published name. Among
+    /// equally compatible candidates, one published under the same manufacturer hierarchy as the
+    /// machine is preferred; ties are then broken deterministically by name.
+    /// </summary>
+    private static ProfileCandidate? SelectCompatible(
+        IReadOnlyList<ProfileCandidate> candidates,
+        ProfileCandidate machine,
+        string requiredSettingsKey) =>
+        candidates
+            .Where(candidate => candidate.Settings.ContainsKey(requiredSettingsKey))
+            .Where(candidate => IsExplicitlyCompatible(candidate, machine.Name))
+            .OrderByDescending(candidate => SharesManufacturerHierarchy(candidate, machine))
+            .ThenBy(candidate => candidate.Name, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// True only when the candidate's own metadata explicitly names the machine — never true for a
+    /// "universal" candidate with an empty/missing <c>compatible_printers</c> list, which is precisely
+    /// the ambiguity that let an incompatible tuple through before.
+    /// </summary>
+    private static bool IsExplicitlyCompatible(ProfileCandidate candidate, string machineName) =>
+        !string.IsNullOrEmpty(machineName) &&
+        candidate.CompatiblePrinters.Any(
+            compatibleName => string.Equals(compatibleName, machineName, StringComparison.Ordinal));
+
+    private static bool SharesManufacturerHierarchy(ProfileCandidate candidate, ProfileCandidate machine) =>
+        !string.IsNullOrEmpty(candidate.Manufacturer) &&
+        !string.IsNullOrEmpty(machine.Manufacturer) &&
+        string.Equals(candidate.Manufacturer, machine.Manufacturer, StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<ProfileCandidate> ReadCandidates(JsonElement root, string groupName)
     {
         if (!root.TryGetProperty(groupName, out JsonElement group) ||
             group.ValueKind != JsonValueKind.Object)
@@ -96,32 +150,74 @@ internal static class PinnedOrcaProfileCatalog
             return [];
         }
 
-        List<JsonObject> documents = [];
-        foreach (JsonProperty manufacturer in group.EnumerateObject())
+        List<ProfileCandidate> candidates = [];
+        foreach (JsonProperty manufacturerGroup in group.EnumerateObject())
         {
-            if (manufacturer.Value.ValueKind != JsonValueKind.Array)
+            if (manufacturerGroup.Value.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
 
-            foreach (JsonElement profile in manufacturer.Value.EnumerateArray())
+            foreach (JsonElement profile in manufacturerGroup.Value.EnumerateArray())
             {
                 if (profile.ValueKind != JsonValueKind.Object ||
-                    !profile.TryGetProperty("settings", out JsonElement settings) ||
-                    settings.ValueKind != JsonValueKind.Object)
+                    !profile.TryGetProperty("settings", out JsonElement settingsElement) ||
+                    settingsElement.ValueKind != JsonValueKind.Object)
                 {
                     continue;
                 }
 
-                if (JsonNode.Parse(settings.GetRawText()) is JsonObject parsed && parsed.Count > 0)
+                if (JsonNode.Parse(settingsElement.GetRawText()) is not JsonObject settings || settings.Count == 0)
                 {
-                    documents.Add(parsed);
+                    continue;
                 }
+
+                string name = profile.TryGetProperty("name", out JsonElement nameElement) &&
+                    nameElement.ValueKind == JsonValueKind.String
+                    ? nameElement.GetString() ?? string.Empty
+                    : string.Empty;
+
+                string? manufacturer = profile.TryGetProperty("manufacturer", out JsonElement manufacturerElement) &&
+                    manufacturerElement.ValueKind == JsonValueKind.String
+                    ? manufacturerElement.GetString()
+                    : null;
+
+                candidates.Add(new ProfileCandidate(name, manufacturer, ReadCompatiblePrinters(profile), settings));
             }
         }
 
-        return documents;
+        return candidates;
     }
+
+    /// <summary>
+    /// Reads the candidate's declared compatibility list. Production DTOs serialize this as the
+    /// snake_case <c>compatible_printers</c>, but the camelCase <c>compatiblePrinters</c> spelling is
+    /// accepted too so an upstream naming-policy change can't silently make every profile look
+    /// "universal" and reintroduce the incompatible-tuple bug this catalogue exists to prevent.
+    /// </summary>
+    private static IReadOnlyList<string> ReadCompatiblePrinters(JsonElement profile)
+    {
+        if (!TryGetCompatiblePrintersElement(profile, out JsonElement element) ||
+            element.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        List<string> names = [];
+        foreach (JsonElement entry in element.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.String && entry.GetString() is string value)
+            {
+                names.Add(value);
+            }
+        }
+
+        return names;
+    }
+
+    private static bool TryGetCompatiblePrintersElement(JsonElement profile, out JsonElement element) =>
+        profile.TryGetProperty("compatible_printers", out element) ||
+        profile.TryGetProperty("compatiblePrinters", out element);
 
     /// <summary>
     /// Removes the resolved inheritance marker and renders the document with a stable key order.
@@ -141,8 +237,8 @@ internal static class PinnedOrcaProfileCatalog
         return ordered.ToJsonString();
     }
 
-    private static double NozzleDistanceFromPreferred(JsonObject machine) =>
-        TryReadNozzleDiameter(machine, out double diameter) ? Math.Abs(diameter - 0.4) : double.MaxValue;
+    private static double NozzleDistanceFromPreferred(ProfileCandidate machine) =>
+        TryReadNozzleDiameter(machine.Settings, out double diameter) ? Math.Abs(diameter - 0.4) : double.MaxValue;
 
     private static bool TryReadNozzleDiameter(JsonObject machine, out double diameter)
     {
@@ -162,6 +258,17 @@ internal static class PinnedOrcaProfileCatalog
             double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out diameter) &&
             diameter > 0;
     }
+
+    /// <summary>
+    /// One candidate profile parsed out of a manufacturer-grouped array in the worker's response: its
+    /// exact published name, optional manufacturer, declared compatibility list and native settings
+    /// bag (the part that is hashed, stored and eventually sliced).
+    /// </summary>
+    private sealed record ProfileCandidate(
+        string Name,
+        string? Manufacturer,
+        IReadOnlyList<string> CompatiblePrinters,
+        JsonObject Settings);
 }
 
 /// <summary>The exact native documents the pinned worker publishes for one sliceable combination.</summary>
