@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Contracts;
+﻿namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// Header names used to bind worker requests to one specific job claim.

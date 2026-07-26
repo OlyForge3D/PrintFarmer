@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Api.Controllers.Slicing;
+﻿using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Contracts.Libraries;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
