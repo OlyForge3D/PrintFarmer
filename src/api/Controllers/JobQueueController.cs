@@ -102,9 +102,22 @@ public class JobQueueController(
                 return NotFound($"G-code file with ID {request.GcodeFileId} not found or no available printer");
             }
 
-            // Return 201 Created with location header
+            if (!string.IsNullOrWhiteSpace(added.RowVersion))
+            {
+                Response.Headers.ETag = $"\"{added.RowVersion}\"";
+            }
+
+            if (added.IsIdempotentReplay)
+            {
+                return Ok(added);
+            }
+
             string location = $"/api/job-queue/{added.Id}";
             return Created(location, added);
+        }
+        catch (QueueJobIdempotencyConflictException ex)
+        {
+            return Conflict(new { error = "idempotency_payload_mismatch", detail = ex.Message });
         }
         catch (QueueGroupAccessDeniedException)
         {

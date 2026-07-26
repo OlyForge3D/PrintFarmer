@@ -755,6 +755,9 @@ public static class ServiceCollectionExtensions
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
 
+            // Durable queue outbox publisher for calibration queue-dispatch events.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();
+
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
 

@@ -176,6 +176,93 @@ public class JobQueueControllerTests
     }
 
     [Fact]
+    public async Task QueueJobAsync_WithRowVersion_SetsETagHeader()
+    {
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = Guid.NewGuid(),
+            AssignedPrinterId = Guid.NewGuid(),
+            Priority = PrintJobPriority.Normal,
+        };
+
+        var jobDto = new JobQueuePrintJobDto
+        {
+            Id = Guid.NewGuid(),
+            GcodeFileId = request.GcodeFileId,
+            GcodeFileName = "test.gcode",
+            AssignedPrinterId = request.AssignedPrinterId,
+            Status = PrintJobStatus.Queued,
+            Priority = 0,
+            QueuePosition = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            RowVersion = Convert.ToBase64String([0x01, 0x02, 0x03]),
+        };
+
+        _queueServiceMock
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobDto);
+
+        _ = await _controller.QueueJobAsync(request);
+
+        Assert.Equal($"\"{jobDto.RowVersion}\"", _controller.Response.Headers.ETag.ToString());
+    }
+
+    [Fact]
+    public async Task QueueJobAsync_WithIdempotentReplay_ReturnsOk()
+    {
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = Guid.NewGuid(),
+            AssignedPrinterId = Guid.NewGuid(),
+            Priority = PrintJobPriority.Normal,
+        };
+
+        var jobDto = new JobQueuePrintJobDto
+        {
+            Id = Guid.NewGuid(),
+            GcodeFileId = request.GcodeFileId,
+            GcodeFileName = "test.gcode",
+            AssignedPrinterId = request.AssignedPrinterId,
+            Status = PrintJobStatus.Queued,
+            Priority = 0,
+            QueuePosition = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            IsIdempotentReplay = true,
+        };
+
+        _queueServiceMock
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(jobDto);
+
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(jobDto, ok.Value);
+    }
+
+    [Fact]
+    public async Task QueueJobAsync_WithIdempotencyConflict_ReturnsConflict()
+    {
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = Guid.NewGuid(),
+            AssignedPrinterId = Guid.NewGuid(),
+            Priority = PrintJobPriority.Normal,
+        };
+
+        _queueServiceMock
+            .Setup(s => s.AddJobToQueueAsync(request, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueueJobIdempotencyConflictException("conflict"));
+
+        ActionResult<JobQueuePrintJobDto> result = await _controller.QueueJobAsync(request);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Contains("idempotency_payload_mismatch", conflict.Value?.ToString());
+    }
+
+    [Fact]
     public async Task QueueJobAsync_WithNonExistentFile_ReturnsNotFound()
     {
         // Arrange

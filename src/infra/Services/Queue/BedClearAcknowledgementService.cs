@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -13,7 +14,8 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class BedClearAcknowledgementService(
     AppDbContext db,
-    ILogger<BedClearAcknowledgementService> logger) : IBedClearAcknowledgementService
+    ILogger<BedClearAcknowledgementService> logger,
+    IDispatchClaimService? dispatchClaimService = null) : IBedClearAcknowledgementService
 {
     /// <summary>
     /// Default acknowledgement validity window.
@@ -24,6 +26,8 @@ public sealed class BedClearAcknowledgementService(
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private readonly IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
 
     /// <inheritdoc />
     public async Task<AcknowledgeBedClearResult> AcknowledgeAsync(
@@ -159,6 +163,31 @@ public sealed class BedClearAcknowledgementService(
         try
         {
             await _db.SaveChangesAsync(ct);
+
+            if (_dispatchClaimService is not null &&
+                job.AssignedPrinterId.HasValue &&
+                job.JobKind == JobKind.FilamentCalibration)
+            {
+                DispatchClaimResult dispatchResult = await _dispatchClaimService.AcquireClaimAsync(
+                    new DispatchClaimRequest(
+                        request.JobId,
+                        job.AssignedPrinterId.Value,
+                        request.ActorSubject,
+                        "BedClear",
+                        request.IdempotencyKey,
+                        null,
+                        null),
+                    ct);
+
+                if (!dispatchResult.Success)
+                {
+                    _logger.LogWarning(
+                        "Bed-clear acknowledgement persisted but dispatch claim failed for Job={JobId}: {Code} {Detail}",
+                        request.JobId,
+                        dispatchResult.ErrorCode,
+                        dispatchResult.ErrorDetail);
+                }
+            }
 
             _logger.LogInformation(
                 "Bed-clear acknowledged: Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Expires={Expires:u}",

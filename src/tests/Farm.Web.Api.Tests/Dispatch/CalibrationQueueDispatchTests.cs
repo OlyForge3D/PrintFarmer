@@ -1,14 +1,24 @@
-﻿using System.Security.Claims;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Security.Claims;
+using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.FileManagement;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
+using Farm.Web.Api.Tests.Builders;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -434,6 +444,226 @@ public class CalibrationQueueDispatchTests
         Assert.Equal(BedClearAckOutcome.PreconditionRequired, result.Outcome);
     }
 
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddJobToQueueAsync_CalibrationWithoutIdempotencyKey_ThrowsValidationException()
+    {
+        AppDbContext db = CreateDbContext();
+        Mock<IQueueDataService> dataService = new();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "calibration.gcode", FileName = "calibration.gcode" };
+        Guid printerId = Guid.NewGuid();
+
+        dataService
+            .Setup(s => s.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+
+        JobQueueService sut = new(
+            Mock.Of<IQueueRepository>(),
+            dataService.Object,
+            Mock.Of<ILogger<JobQueueService>>(),
+            db: db);
+
+        QueuePrintJobDto request = CreateCalibrationQueueRequest(gcode.Id, printerId);
+        request.IdempotencyKey = null;
+
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        ValidationException ex = await Assert.ThrowsAsync<ValidationException>(act);
+        Assert.Contains("idempotency key", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task AddJobToQueueAsync_CalibrationWithoutAssignedPrinter_ThrowsValidationException()
+    {
+        AppDbContext db = CreateDbContext();
+        Mock<IQueueDataService> dataService = new();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "calibration.gcode", FileName = "calibration.gcode" };
+
+        dataService
+            .Setup(s => s.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+
+        JobQueueService sut = new(
+            Mock.Of<IQueueRepository>(),
+            dataService.Object,
+            Mock.Of<ILogger<JobQueueService>>(),
+            db: db);
+
+        QueuePrintJobDto request = CreateCalibrationQueueRequest(gcode.Id, null);
+
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        ValidationException ex = await Assert.ThrowsAsync<ValidationException>(act);
+        Assert.Contains("assigned printer", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task DispatchClaimService_AcquireClaimAsync_ForCalibrationWithoutAcknowledgementKey_Fails()
+    {
+        AppDbContext db = CreateDbContext();
+        Guid printerId = Guid.NewGuid();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "dispatch.gcode", FileName = "dispatch.gcode" };
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Calibration Dispatch",
+            GcodeFileId = gcode.Id,
+            GcodeFile = gcode,
+            AssignedPrinterId = printerId,
+            JobKind = JobKind.FilamentCalibration,
+            Status = PrintJobStatus.Assigned,
+            Priority = (int)PrintJobPriority.Normal,
+            Copies = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+
+        db.GcodeFiles.Add(gcode);
+        db.PrintJobs.Add(job);
+        db.Printers.Add(new PrinterBuilder().WithId(printerId).WithName("Claim Printer").AsOnlineAndReady().Build());
+        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
+        await db.SaveChangesAsync();
+
+        DispatchClaimService sut = new(db, Mock.Of<ILogger<DispatchClaimService>>());
+
+        DispatchClaimResult result = await sut.AcquireClaimAsync(
+            new DispatchClaimRequest(job.Id, printerId, "user-1", "Manual", null, null, null),
+            CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("acknowledgement_required", result.ErrorCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task BedClearAcknowledgement_AcknowledgeAsync_PersistsAcknowledgement()
+    {
+        AppDbContext db = CreateDbContext();
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Calibration Ack",
+            AssignedPrinterId = printerId,
+            JobKind = JobKind.FilamentCalibration,
+            Status = PrintJobStatus.Assigned,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+
+        db.PrintJobs.Add(job);
+        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
+        await db.SaveChangesAsync();
+
+        BedClearAcknowledgementService sut = new(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        AcknowledgeBedClearRequest request = new(
+            job.Id,
+            printerId,
+            "operator-1",
+            "ack-key-1",
+            [],
+            null);
+
+        AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
+
+        Assert.Equal(BedClearAckOutcome.Accepted, result.Outcome);
+
+        PrinterDispatchState persisted = await db.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
+        Assert.Equal(job.Id, persisted.AcknowledgedJobId);
+        Assert.Equal("operator-1", persisted.AcknowledgedBySubject);
+        Assert.Equal("ack-key-1", persisted.AcknowledgementIdempotencyKey);
+        Assert.NotNull(persisted.AcknowledgedAtUtc);
+        Assert.NotNull(persisted.AcknowledgementExpiresAtUtc);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
+    public async Task PrintJobManagementService_RerunCalibrationJob_DoesNotCopyCalibrationFields()
+    {
+        Mock<IPrintJobManagementRepository> repository = new();
+        PrintJob? capturedJob = null;
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "rerun.gcode", FileName = "rerun.gcode" };
+        PrintJob originalJob = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Original Calibration",
+            GcodeFileId = gcode.Id,
+            AssignedPrinterId = Guid.NewGuid(),
+            JobKind = JobKind.FilamentCalibration,
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            SourceArtifactId = Guid.NewGuid(),
+            IdempotencyKey = "old-key",
+            IdempotencyScope = "old-scope",
+            IdempotencyRequestSha256 = new string('a', 64),
+            RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
+            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
+            RequiredSlicerEngine = "OrcaSlicer",
+            RequiredSlicerDistribution = "upstream",
+            RequiredSlicerVersion = "2.0.0",
+            RequiredSlicerContainerDigest = "sha256:abc",
+            SpecificationSha256 = new string('b', 64),
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
+            PrinterConfigSnapshotSha256 = new string('f', 64),
+            PinnedPrinterConfigRevision = 12,
+            Status = PrintJobStatus.Completed,
+            Priority = (int)PrintJobPriority.High,
+            CreatedAt = DateTime.UtcNow.AddHours(-1),
+            UpdatedAt = DateTime.UtcNow.AddHours(-1),
+            QueuedAt = DateTime.UtcNow.AddHours(-1),
+        };
+
+        repository.Setup(r => r.GetByIdAsync(originalJob.Id, It.IsAny<CancellationToken>())).ReturnsAsync(originalJob);
+        repository.Setup(r => r.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>())).ReturnsAsync(gcode);
+        repository.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(4);
+        repository
+            .Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((job, _) => capturedJob = job)
+            .ReturnsAsync((PrintJob job, CancellationToken _) => job);
+
+        PrintJobManagementService sut = new(
+            repository.Object,
+            Mock.Of<ILogger<PrintJobManagementService>>(),
+            Mock.Of<IPrintersService>(),
+            Mock.Of<IStoragePathService>(),
+            Mock.Of<IHubContext<PrinterHub>>(),
+            Mock.Of<IStoredFileOperationsService>(),
+            Mock.Of<IPrinterStatusCacheReader>());
+
+        await sut.RerunJobAsync(originalJob.Id.ToString(), "user-1", CancellationToken.None);
+
+        Assert.NotNull(capturedJob);
+        Assert.Equal(JobKind.Standard, capturedJob!.JobKind);
+        Assert.Null(capturedJob.CalibrationProjectId);
+        Assert.Null(capturedJob.CalibrationAttemptId);
+        Assert.Null(capturedJob.CalibrationConfigSnapshotId);
+        Assert.Null(capturedJob.CalibrationOrchestrationId);
+        Assert.Null(capturedJob.SourceArtifactId);
+        Assert.Null(capturedJob.IdempotencyKey);
+        Assert.Null(capturedJob.IdempotencyScope);
+        Assert.Null(capturedJob.IdempotencyRequestSha256);
+        Assert.Null(capturedJob.RequiredFirmwareFamily);
+        Assert.Null(capturedJob.RequiredGcodeDialect);
+        Assert.Null(capturedJob.RequiredSlicerEngine);
+        Assert.Null(capturedJob.RequiredSlicerDistribution);
+        Assert.Null(capturedJob.RequiredSlicerVersion);
+        Assert.Null(capturedJob.RequiredSlicerContainerDigest);
+        Assert.Null(capturedJob.SpecificationSha256);
+        Assert.Null(capturedJob.MachineProfileSha256);
+        Assert.Null(capturedJob.ProcessProfileSha256);
+        Assert.Null(capturedJob.FilamentProfileSha256);
+        Assert.Null(capturedJob.PrinterConfigSnapshotSha256);
+        Assert.Null(capturedJob.PinnedPrinterConfigRevision);
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================
@@ -466,10 +696,45 @@ public class CalibrationQueueDispatchTests
     /// <summary>Creates a BedClearAcknowledgementService backed by an in-memory context.</summary>
     private static BedClearAcknowledgementService CreateBedClearService()
     {
+        AppDbContext db = CreateDbContext();
+        return new BedClearAcknowledgementService(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+    }
+
+    private static AppDbContext CreateDbContext()
+    {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
-        var db = new AppDbContext(options);
-        return new BedClearAcknowledgementService(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        return new AppDbContext(options);
     }
+
+    private static QueuePrintJobDto CreateCalibrationQueueRequest(Guid gcodeFileId, Guid? printerId) =>
+        new()
+        {
+            GcodeFileId = gcodeFileId,
+            AssignedPrinterId = printerId,
+            JobKind = JobKind.FilamentCalibration,
+            IdempotencyKey = "calibration-key-1",
+            IdempotencyScope = "scope-1",
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            SourceArtifactId = Guid.NewGuid(),
+            GcodeContentSha256 = new string('1', 64),
+            RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
+            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
+            RequiredSlicerEngine = "OrcaSlicer",
+            RequiredSlicerDistribution = "upstream",
+            RequiredSlicerVersion = "2.3.0",
+            RequiredSlicerContainerDigest = "sha256:test",
+            SpecificationSha256 = new string('2', 64),
+            MachineProfileSha256 = new string('3', 64),
+            ProcessProfileSha256 = new string('4', 64),
+            FilamentProfileSha256 = new string('5', 64),
+            PrinterConfigSnapshotSha256 = new string('6', 64),
+            PinnedPrinterConfigRevision = 7,
+            Copies = 1,
+            Priority = PrintJobPriority.Normal,
+        };
 }

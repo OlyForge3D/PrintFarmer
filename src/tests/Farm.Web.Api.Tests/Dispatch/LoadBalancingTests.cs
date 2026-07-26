@@ -164,6 +164,11 @@ public class LoadBalancingTests : IAsyncLifetime
         printer.IsEnabled = isEnabled;
         printer.IsAvailable = true;
         db.Printers.Add(printer);
+        db.PrinterDispatchStates.Add(new PrinterDispatchState
+        {
+            PrinterId = printerId,
+            RowVersion = [],
+        });
         await db.SaveChangesAsync();
 
         return printerId;

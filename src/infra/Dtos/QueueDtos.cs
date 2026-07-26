@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure;
 
 // Queue Management DTOs
 /// <summary>
@@ -73,6 +75,48 @@ public class QueuePrintJobDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
     public Guid GcodeFileId { get; set; }
+
+    public JobKind? JobKind { get; set; }
+
+    public string? IdempotencyKey { get; set; }
+
+    public string? IdempotencyScope { get; set; }
+
+    public Guid? CalibrationProjectId { get; set; }
+
+    public Guid? CalibrationAttemptId { get; set; }
+
+    public Guid? CalibrationConfigSnapshotId { get; set; }
+
+    public Guid? CalibrationOrchestrationId { get; set; }
+
+    public Guid? SourceArtifactId { get; set; }
+
+    public string? GcodeContentSha256 { get; set; }
+
+    public PrinterFirmwareFamily? RequiredFirmwareFamily { get; set; }
+
+    public PrinterGcodeDialect? RequiredGcodeDialect { get; set; }
+
+    public string? RequiredSlicerEngine { get; set; }
+
+    public string? RequiredSlicerDistribution { get; set; }
+
+    public string? RequiredSlicerVersion { get; set; }
+
+    public string? RequiredSlicerContainerDigest { get; set; }
+
+    public string? SpecificationSha256 { get; set; }
+
+    public string? MachineProfileSha256 { get; set; }
+
+    public string? ProcessProfileSha256 { get; set; }
+
+    public string? FilamentProfileSha256 { get; set; }
+
+    public string? PrinterConfigSnapshotSha256 { get; set; }
+
+    public long? PinnedPrinterConfigRevision { get; set; }
 
     public Guid? AssignedPrinterId { get; set; } // If null, auto-assign to best available printer
 
@@ -210,6 +254,10 @@ public class JobQueuePrintJobDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
     public Guid Id { get; set; }
+
+    public string? RowVersion { get; set; }
+
+    public bool IsIdempotentReplay { get; set; }
 
     /// <summary>
     /// G-code file ID. Nullable for history-seeded jobs where the original

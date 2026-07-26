@@ -95,6 +95,12 @@ public partial class AddCalibrationQueueDispatch : Migration
             type: "int",
             nullable: true);
 
+        migrationBuilder.Sql("""
+            UPDATE [PrintJobs]
+            SET [JobKind] = 0
+            WHERE [JobKind] IS NULL;
+            """);
+
         migrationBuilder.AddColumn<string>(
             name: "MachineProfileSha256",
             table: "PrintJobs",

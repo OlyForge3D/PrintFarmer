@@ -36,6 +36,14 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail("job_not_found", $"Print job {request.JobId} not found.");
         }
 
+        Printer? printer = await _db.Printers
+            .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
+
+        if (printer is null)
+        {
+            return DispatchClaimResult.Fail("printer_not_found", $"Printer {request.PrinterId} not found.");
+        }
+
         PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == request.PrinterId, ct);
 
@@ -45,6 +53,19 @@ public sealed class DispatchClaimService(
         }
 
         // --- Pre-claim validations ---
+        if (!printer.IsEnabled)
+        {
+            return DispatchClaimResult.Fail(
+                "printer_disabled",
+                $"Printer {request.PrinterId} is disabled.");
+        }
+
+        if (printer.InMaintenance)
+        {
+            return DispatchClaimResult.Fail(
+                "printer_in_maintenance",
+                $"Printer {request.PrinterId} is in maintenance.");
+        }
 
         // Job must be in a Queued or Assigned state (not already Starting/Printing/terminal).
         if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
@@ -62,15 +83,30 @@ public sealed class DispatchClaimService(
                 $"Job {request.JobId} is assigned to printer {job.AssignedPrinterId}, not {request.PrinterId}.");
         }
 
+        if (job.GcodeFile is null)
+        {
+            return DispatchClaimResult.Fail(
+                "gcode_missing",
+                $"Job {request.JobId} is missing its G-code artifact.");
+        }
+
         // Verify no other active job is already claiming this printer.
         if (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != request.JobId)
         {
             return DispatchClaimResult.Fail(
-                "printer_busy",
+                "printer_busy_active",
                 $"Printer {request.PrinterId} already has an active job {dispatchState.ActiveJobId}.");
         }
 
         // For calibration jobs, validate the acknowledgement idempotency key when required.
+        if (job.JobKind == JobKind.FilamentCalibration &&
+            string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
+        {
+            return DispatchClaimResult.Fail(
+                "acknowledgement_required",
+                "Calibration jobs require a valid bed-clear acknowledgement.");
+        }
+
         if (job.JobKind == JobKind.FilamentCalibration &&
             request.AcknowledgementIdempotencyKey is not null)
         {

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Dtos.PrintQueue;
 
@@ -225,6 +226,8 @@ public class EnqueueQueueJobRequest
     public string GcodeFileId { get; set; } = null!;
 
     public int Priority { get; set; } = 1;
+
+    public JobKind? JobKind { get; set; }
 
     public string? AssignedPrinterId { get; set; }
 

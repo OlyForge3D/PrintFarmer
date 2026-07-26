@@ -237,7 +237,7 @@ public sealed class AutoDispatchBackgroundService(
             .AsNoTracking()
             .Where(j => j.Status == PrintJobStatus.Queued
                         && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId))
-            .OrderBy(j => j.Priority)
+            .OrderByDescending(j => j.Priority)
             .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .Take(20) // reasonable batch to score

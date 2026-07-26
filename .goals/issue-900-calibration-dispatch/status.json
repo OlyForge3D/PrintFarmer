@@ -1,7 +1,7 @@
 {
   "goal_id": "issue-900-calibration-dispatch",
-  "status": "passed",
-  "iteration": 1,
+  "status": "building",
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "ee453fd301240fc35a9b86c13e2888d5b30c32b3",
@@ -9,8 +9,9 @@
   "history": [
     {
       "iteration": 1,
-      "verdict": "PASS",
-      "timestamp": "2026-07-26T06:34:48.164-07:00"
+      "verdict": "FAIL",
+      "summary": "Coordinator acceptance review found 12 blocking production-path gaps; inspector PASS overridden.",
+      "timestamp": "2026-07-26T06:48:01.270-07:00"
     }
   ]
 }

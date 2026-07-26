@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
@@ -40,7 +41,8 @@ public class PrintJobManagementService(
     IJobCostCalculationService? jobCostCalculationService = null,
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
-    ISettingsService? settingsService = null) : IPrintJobManagementService
+    ISettingsService? settingsService = null,
+    IDispatchClaimService? dispatchClaimService = null) : IPrintJobManagementService
 {
     private const string DispatchArtifactUnavailable =
         "The G-code artifact is unavailable for dispatch.";
@@ -65,6 +67,7 @@ public class PrintJobManagementService(
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly ISettingsService? _settingsService = settingsService;
+    private readonly IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
     private const int MinimumRemainingPrintMinutes = 5;
@@ -780,12 +783,35 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException($"G-code file not found for job {jobId}");
             }
 
-            // Update status to Starting
-            job.Status = PrintJobStatus.Starting;
-            job.FailureReason = null;
-            job.ActualStartTime = DateTime.UtcNow;
-            job.UpdatedAt = DateTime.UtcNow;
-            await _repository.SaveChangesAsync(cancellationToken);
+            Guid? dispatchAttemptId = null;
+            if (_dispatchClaimService is not null)
+            {
+                DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
+                    new DispatchClaimRequest(
+                        Guid.Parse(jobId),
+                        job.AssignedPrinterId.Value,
+                        userId,
+                        "Manual",
+                        null,
+                        null,
+                        null),
+                    cancellationToken);
+
+                if (!claimResult.Success || claimResult.Attempt is null)
+                {
+                    throw new InvalidOperationException($"{claimResult.ErrorCode} {claimResult.ErrorDetail}".Trim());
+                }
+
+                dispatchAttemptId = claimResult.Attempt.Id;
+            }
+            else
+            {
+                job.Status = PrintJobStatus.Starting;
+                job.FailureReason = null;
+                job.ActualStartTime = DateTime.UtcNow;
+                job.UpdatedAt = DateTime.UtcNow;
+                await _repository.SaveChangesAsync(cancellationToken);
+            }
 
             // Use original filename for the printer (not the GUID-based storage filename)
             string printerFileName = job.GcodeFile.Name;
@@ -803,9 +829,21 @@ public class PrintJobManagementService(
                 // Validate the local file exists
                 if (!System.IO.File.Exists(localFilePath))
                 {
-                    job.Status = PrintJobStatus.Assigned;
-                    job.ActualStartTime = null;
                     job.FailureReason = DispatchArtifactUnavailable;
+                    if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
+                    {
+                        await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                            dispatchAttemptId.Value,
+                            "backend_rejected",
+                            DispatchArtifactUnavailable,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        job.Status = PrintJobStatus.Assigned;
+                        job.ActualStartTime = null;
+                    }
+
                     _logger.LogError(
                         "G-code artifact is unavailable for print job {JobId}",
                         jobId);
@@ -901,8 +939,18 @@ public class PrintJobManagementService(
                             await ReportProgressAsync(totalBytes, force: true);
                         }
 
-                        job.Status = PrintJobStatus.Printing;
-                        job.ActualStartTime = DateTime.UtcNow;
+                        if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
+                        {
+                            await _dispatchClaimService.RecordBackendAcceptedAsync(
+                                dispatchAttemptId.Value,
+                                null,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            job.Status = PrintJobStatus.Printing;
+                            job.ActualStartTime = DateTime.UtcNow;
+                        }
 
                         // Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
                         await SnapshotSlicerEstimatesAsync(job, cancellationToken);
@@ -911,9 +959,22 @@ public class PrintJobManagementService(
                     }
                     else
                     {
-                        job.Status = PrintJobStatus.Assigned;
-                        job.ActualStartTime = null;
                         job.FailureReason = DispatchPrinterFailure;
+                        string failureDetail = result.ErrorMessage ?? DispatchPrinterFailure;
+                        if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
+                        {
+                            await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                                dispatchAttemptId.Value,
+                                "backend_rejected",
+                                failureDetail,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            job.Status = PrintJobStatus.Assigned;
+                            job.ActualStartTime = null;
+                        }
+
                         _logger.LogWarning(
                             "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}",
                             jobId, job.AssignedPrinterId, result.FailedStage);
@@ -943,9 +1004,20 @@ public class PrintJobManagementService(
             catch (Exception printEx)
             {
                 // Revert to Assigned status on exception
-                job.Status = PrintJobStatus.Assigned;
-                job.ActualStartTime = null;
                 job.FailureReason = DispatchUnexpectedFailure;
+                if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
+                {
+                    await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                        dispatchAttemptId.Value,
+                        printEx.Message,
+                        cancellationToken);
+                }
+                else
+                {
+                    job.Status = PrintJobStatus.Assigned;
+                    job.ActualStartTime = null;
+                }
+
                 _logger.LogError(
                     "Error dispatching print job {JobId} to printer {PrinterId}; exception type {ExceptionType}",
                     jobId,
@@ -1269,13 +1341,15 @@ public class PrintJobManagementService(
                 }
             }
 
-            // Create new print job with same properties as original
+            // Calibration provenance is intentionally not copied on rerun.
+            // A rerun produces a normal print job; calibration jobs must be recreated by a new calibration workflow.
             var newJob = new PrintJob
             {
                 Id = Guid.NewGuid(),
                 Name = newJobName,
                 GcodeFileId = originalJob.GcodeFileId,
                 AssignedPrinterId = originalJob.AssignedPrinterId,
+                JobKind = JobKind.Standard,
                 Status = PrintJobStatus.Queued,
                 Priority = originalJob.Priority,
                 RequiredNozzleDiameter = originalJob.RequiredNozzleDiameter,

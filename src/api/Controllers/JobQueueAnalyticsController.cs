@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
@@ -239,6 +240,15 @@ public class JobQueueAnalyticsController(
             if (request == null)
             {
                 return BadRequest(new { error = "Request body is required" });
+            }
+
+            if (request.JobKind == JobKind.FilamentCalibration)
+            {
+                return UnprocessableEntity(new
+                {
+                    error = "calibration_via_analytics_rejected",
+                    detail = "Calibration jobs must be created through the calibration workflow."
+                });
             }
 
             if (string.IsNullOrEmpty(request.GcodeFileId))
