@@ -195,13 +195,15 @@ public sealed class Model3DStorageResolver(
         }
 
         string root = Path.GetFullPath(_storagePaths.GetModelUploadDirectory());
-        string directory = string.IsNullOrWhiteSpace(model.FilePath)
-            ? root
-            : Path.GetFullPath(Path.Combine(root, model.FilePath));
 
+        // Model3D.FilePath records the virtual library location ("/" for every uploaded model), not
+        // a filesystem directory: the storage owner writes and reads the bytes as
+        // Path.Combine(modelUploadRoot, FileName). Joining FilePath here rooted the candidate at the
+        // filesystem root, so every model uploaded through the production route resolved outside the
+        // storage root and was reported as having no readable bytes.
         // Only the file component of the stored name is honoured, and the final path must remain
         // inside the configured model root even if stored metadata was tampered with.
-        string candidate = Path.GetFullPath(Path.Combine(directory, Path.GetFileName(model.FileName)));
+        string candidate = Path.GetFullPath(Path.Combine(root, Path.GetFileName(model.FileName)));
         string rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
             ? root
             : root + Path.DirectorySeparatorChar;
