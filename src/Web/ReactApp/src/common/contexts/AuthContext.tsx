@@ -5,6 +5,7 @@ import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
 import { queryClient } from '@/services/queryClient';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
+import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -41,6 +42,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } catch (err) {
         console.error('Failed to get current user:', err);
         // Remove invalid token
+        await resetAuthenticatedSignalRSession();
         localStorage.removeItem('auth-token');
         setUser(null);
         setError(null);
@@ -66,6 +68,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (result.success && result.token && result.user) {
+        await resetAuthenticatedSignalRSession();
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
@@ -98,6 +101,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (result.success && result.token && result.user) {
+        await resetAuthenticatedSignalRSession();
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
@@ -125,6 +129,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return 'pending';
       }
       if (result.success && result.token && result.user) {
+        await resetAuthenticatedSignalRSession();
         localStorage.setItem('auth-token', result.token);
         // Purge any previous identity's sensitive cache before the
         // authenticated UI renders for this user (#762).
@@ -146,8 +151,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = async (): Promise<void> => {
     setIsLoading(true);
-    
+
     try {
+      await resetAuthenticatedSignalRSession();
       await apiClient.logout();
     } catch (err) {
       console.error('Logout error:', err);

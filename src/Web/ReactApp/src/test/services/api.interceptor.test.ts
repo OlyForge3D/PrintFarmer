@@ -11,6 +11,14 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import { ApiClient } from '@/services/api';
 import type { PfRequestConfig } from '@/services/api';
 
+const signalRSessionTestState = vi.hoisted(() => ({
+  reset: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
+  resetAuthenticatedSignalRSession: signalRSessionTestState.reset,
+}));
+
 // Do NOT mock axios — real interceptors must run.
 // Mock only the URL helper so the constructor doesn't fail in jsdom.
 vi.mock('@/common/utils/apiUrlHelpers', () => ({
@@ -44,6 +52,7 @@ describe('ApiClient — 401 response interceptor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    signalRSessionTestState.reset.mockResolvedValue(undefined);
 
     // Replace window.location with a plain writable object so we can observe
     // href assignments without jsdom attempting an actual navigation.
@@ -70,6 +79,7 @@ describe('ApiClient — 401 response interceptor', () => {
     await expect(client.request(config)).rejects.toMatchObject({ statusCode: 401 });
 
     expect(removeItemSpy).not.toHaveBeenCalledWith('auth-token');
+    expect(signalRSessionTestState.reset).not.toHaveBeenCalled();
     expect(window.location.href).toBe('http://localhost/');
   });
 
@@ -81,6 +91,23 @@ describe('ApiClient — 401 response interceptor', () => {
     await expect(client.request(config)).rejects.toMatchObject({ statusCode: 401 });
 
     expect(removeItemSpy).toHaveBeenCalledWith('auth-token');
+    expect(signalRSessionTestState.reset).toHaveBeenCalledOnce();
+    expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
+      .toBeLessThan(removeItemSpy.mock.invocationCallOrder[0]);
     expect(window.location.href).toBe('/login');
+  });
+
+  it('resets authenticated hubs before clearing a token on an auth page without navigation', async () => {
+    localStorage.setItem('auth-token', 'test-token');
+    window.location.pathname = '/login';
+    const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
+
+    const config: PfRequestConfig = { method: 'GET', url: '/test' };
+    await expect(client.request(config)).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(signalRSessionTestState.reset).toHaveBeenCalledOnce();
+    expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
+      .toBeLessThan(removeItemSpy.mock.invocationCallOrder[0]);
+    expect(window.location.href).toBe('http://localhost/');
   });
 });

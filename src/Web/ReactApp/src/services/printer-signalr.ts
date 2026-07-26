@@ -19,6 +19,7 @@ import {
   getHubUrl,
   getSignalRAccessToken,
 } from "@/common/utils/apiUrlHelpers";
+import { registerAuthenticatedSignalRTransport } from "@/common/auth/authenticatedSignalRSession";
 import {
   decodeFilamentCoverageChangedEvent,
   type FilamentCoverageChangedEvent,
@@ -339,6 +340,8 @@ export class PrinterSignalRService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
   private signalrSettings: {
     logLevel: string;
     consoleLoggingEnabled: boolean;
@@ -358,8 +361,11 @@ export class PrinterSignalRService {
   private fallbackGroupsUpdatedCallbacks: FallbackGroupsUpdatedCallback[] = [];
 
   constructor() {
+    const generation = this.lifecycleGeneration;
     this.loadSettings().then(() => {
-      this.buildConnection();
+      if (generation === this.lifecycleGeneration && !this.connection) {
+        this.buildConnection();
+      }
     });
   }
 
@@ -456,10 +462,16 @@ export class PrinterSignalRService {
   }
 
   public async connect(): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.connection) this.buildConnection();
-    if (this.connection!.state === HubConnectionState.Connected) return;
-    if (this.connection!.state === HubConnectionState.Connecting) return;
-    if (this.connection!.state !== HubConnectionState.Disconnected) return;
+    const connection = this.connection!;
+    if (connection.state === HubConnectionState.Connected) return;
+    if (connection.state === HubConnectionState.Connecting) return;
+    if (connection.state !== HubConnectionState.Disconnected) return;
     try {
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
@@ -467,7 +479,11 @@ export class PrinterSignalRService {
       ) {
         console.info("[printerSignalR] starting connection");
       }
-      await this.connection!.start();
+      await connection.start();
+      if (generation !== this.lifecycleGeneration) {
+        await connection.stop();
+        return;
+      }
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
           .PrintFarmerDebug?.printerSignalR
@@ -479,13 +495,21 @@ export class PrinterSignalRService {
     } catch {
       console.error("[printerSignalR] connect failed");
       this.notifyConnectionState(false);
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      if (
+        generation === this.lifecycleGeneration &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
         const delay = Math.min(
           this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
           this.maxReconnectDelay
         );
         this.reconnectAttempts++;
-        setTimeout(() => this.connect(), delay);
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          if (generation === this.lifecycleGeneration) {
+            void this.connect();
+          }
+        }, delay);
       }
     }
   }
@@ -589,12 +613,24 @@ export class PrinterSignalRService {
   }
 
   public async disconnect(): Promise<void> {
-    if (
-      this.connection &&
-      this.connection.state === HubConnectionState.Connected
-    ) {
-      await this.connection.stop();
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
+    for (const timer of this.offlineGraceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.offlineGraceTimers.clear();
+    this.lastStatuses.clear();
+    this.reconnectAttempts = 0;
+
+    const connection = this.connection;
+    this.connection = null;
+    if (connection && connection.state !== HubConnectionState.Disconnected) {
+      await connection.stop();
+    }
+    this.notifyConnectionState(false);
   }
 
   onPrinterStatusUpdate(callback: PrinterStatusCallback): () => void {
@@ -712,6 +748,10 @@ export class PrinterSignalRService {
 }
 
 export const printerSignalRService = new PrinterSignalRService();
+registerAuthenticatedSignalRTransport(
+  'printer-status',
+  () => printerSignalRService.disconnect(),
+);
 
 // Debug helper: get a snapshot of last known statuses (populated by the service)
 export function getPrinterSignalRDebug(): {

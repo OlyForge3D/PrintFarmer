@@ -10,6 +10,7 @@ import {
   getHubUrl,
   getSignalRAccessToken,
 } from '@/common/utils/apiUrlHelpers';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -130,6 +131,8 @@ export class SignalRService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 30000; // Max 30 seconds
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
   private signalrSettings: { logLevel: string; consoleLoggingEnabled: boolean } | null = null;
 
   // Event handlers
@@ -149,8 +152,11 @@ export class SignalRService {
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
   constructor() {
+    const generation = this.lifecycleGeneration;
     this.loadSettings().then(() => {
-      this.buildConnection();
+      if (generation === this.lifecycleGeneration && !this.connection) {
+        this.buildConnection();
+      }
     });
   }
 
@@ -526,6 +532,11 @@ export class SignalRService {
   }
 
   async connect(): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.connection) {
       this.buildConnection();
     }
@@ -535,6 +546,10 @@ export class SignalRService {
       if (this.connection.state === HubConnectionState.Disconnected) {
         try {
           await this.connection.start();
+          if (generation !== this.lifecycleGeneration) {
+            await this.connection.stop();
+            return;
+          }
           try {
             const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
             if (win.PrintFarmerDebug?.harvestSignalR) {
@@ -559,7 +574,12 @@ export class SignalRService {
                 try { console.info(`Retrying SignalR (harvest) connection in ${delay}ms (attempt ${this.reconnectAttempts})`); } catch { /* ignore */ }
               }
             } catch { /* ignore guard errors */ }
-            setTimeout(() => this.connect(), delay);
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              if (generation === this.lifecycleGeneration) {
+                void this.connect();
+              }
+            }, delay);
           } else {
             console.error('Max reconnection attempts reached');
           }
@@ -585,16 +605,24 @@ export class SignalRService {
   }
 
   async disconnect(): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.stop();
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    const connection = this.connection;
+    this.connection = null;
+    if (connection && connection.state !== HubConnectionState.Disconnected) {
+      await connection.stop();
       try {
         const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
         if (win.PrintFarmerDebug?.harvestSignalR) {
           try { console.info('SignalR disconnected'); } catch { /* ignore */ }
         }
       } catch { /* ignore guard errors */ }
-      this.notifyConnectionState(false);
     }
+    this.notifyConnectionState(false);
   }
 
   // ============ Event Subscription Methods ============
@@ -752,3 +780,7 @@ export class SignalRService {
 
 // Export singleton instance
 export const signalRService = new SignalRService();
+registerAuthenticatedSignalRTransport(
+  'harvest',
+  () => signalRService.disconnect(),
+);

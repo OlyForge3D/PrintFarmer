@@ -163,6 +163,7 @@ import type {
 } from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
+import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
 import type {
   ModelCollection,
   ModelCollectionMembership,
@@ -499,12 +500,13 @@ export class ApiClient {
     // Response interceptor for error handling
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
         // Handle 401 Unauthorized — clear token and redirect to login unless
         // the caller set skipAuthRedirect:true on the request config to handle
         // the 401 inline (e.g. passkey assertion, which the backend signals
         // with 401 for failed credentials rather than as a session expiry).
         if (error.response?.status === 401 && !(error.config as PfRequestConfig)?.skipAuthRedirect) {
+          await resetAuthenticatedSignalRSession();
           localStorage.removeItem("auth-token");
           // Only redirect if not already on auth pages
           if (

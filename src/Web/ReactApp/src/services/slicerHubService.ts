@@ -1,5 +1,6 @@
 /* eslint-disable local/pf-no-unguarded-console */
 import * as signalR from '@microsoft/signalr';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 
 /**
@@ -69,6 +70,8 @@ export class SlicerHubService {
   private reconnectDelay = 5000;
   private connectionPromise: Promise<void> | null = null;
   private reconnectCallbacks = new Set<() => Promise<void>>();
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
 
   /**
    * Register a callback to re-establish subscriptions after reconnect.
@@ -80,6 +83,11 @@ export class SlicerHubService {
   }
 
   async start(baseUrl: string = ''): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.connection) {
       console.warn('SlicerHub connection already exists');
       return;
@@ -108,8 +116,12 @@ export class SlicerHubService {
     this.connection.onclose((error) => {
       console.debug('SlicerHub connection closed', error);
       this.connectionPromise = null;
-      if (error && this.reconnectAttempts < this.maxReconnectAttempts) {
-        setTimeout(() => this.reconnect(), this.reconnectDelay);
+      if (
+        error &&
+        generation === this.lifecycleGeneration &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
+        this.scheduleReconnect(generation);
       }
     });
 
@@ -126,15 +138,21 @@ export class SlicerHubService {
     });
 
     this.connectionPromise = this.connection.start().then(() => {
+      if (generation !== this.lifecycleGeneration) {
+        return this.connection?.stop();
+      }
       console.debug('SlicerHub connected successfully');
       this.reconnectAttempts = 0;
     }).catch((error) => {
       console.error('Failed to connect to SlicerHub:', error);
       this.connection = null;
       this.connectionPromise = null;
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      if (
+        generation === this.lifecycleGeneration &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
         this.reconnectAttempts++;
-        setTimeout(() => this.reconnect(), this.reconnectDelay);
+        this.scheduleReconnect(generation);
       }
     });
 
@@ -142,26 +160,46 @@ export class SlicerHubService {
   }
 
   async stop(): Promise<void> {
-    if (this.connection) {
-      await this.connection.stop();
-      this.connection = null;
-      this.connectionPromise = null;
-      this.reconnectAttempts = 0;
-      this.reconnectCallbacks.clear();
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connectionPromise = null;
+    this.reconnectAttempts = 0;
+    const connection = this.connection;
+    this.connection = null;
+    if (connection) {
+      await connection.stop();
     }
   }
 
-  private async reconnect(): Promise<void> {
-    if (this.connection) {
+  private scheduleReconnect(generation: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (generation === this.lifecycleGeneration) {
+        void this.reconnect(generation);
+      }
+    }, this.reconnectDelay);
+  }
+
+  private async reconnect(generation: number): Promise<void> {
+    if (generation === this.lifecycleGeneration && this.connection) {
       try {
         await this.connection.start();
         console.debug('SlicerHub reconnected successfully');
         this.reconnectAttempts = 0;
       } catch (error) {
         console.error('Failed to reconnect to SlicerHub:', error);
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        if (
+          generation === this.lifecycleGeneration &&
+          this.reconnectAttempts < this.maxReconnectAttempts
+        ) {
           this.reconnectAttempts++;
-          setTimeout(() => this.reconnect(), this.reconnectDelay);
+          this.scheduleReconnect(generation);
         }
       }
     }
@@ -260,3 +298,7 @@ export class SlicerHubService {
 
 // Singleton instance
 export const slicerHubService = new SlicerHubService();
+registerAuthenticatedSignalRTransport(
+  'slicer',
+  () => slicerHubService.stop(),
+);

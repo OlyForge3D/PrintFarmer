@@ -1,4 +1,5 @@
 import * as signalR from "@microsoft/signalr";
+import { registerAuthenticatedSignalRTransport } from "@/common/auth/authenticatedSignalRSession";
 import { getSignalRAccessToken } from "@/common/utils/apiUrlHelpers";
 
 /**
@@ -21,11 +22,18 @@ export class PrinterHubService {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 5000; // 5 seconds
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
 
   /**
    * Start the SignalR connection to the PrinterHub
    */
   async start(baseUrl: string = ""): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.connection) {
       console.warn("PrinterHub connection already exists");
       return;
@@ -59,8 +67,12 @@ export class PrinterHubService {
 
     this.connection.onclose((error) => {
       if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connection closed", error); }
-      if (error && this.reconnectAttempts < this.maxReconnectAttempts) {
-        setTimeout(() => this.reconnect(), this.reconnectDelay);
+      if (
+        error &&
+        generation === this.lifecycleGeneration &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
+        this.scheduleReconnect(generation);
       }
     });
 
@@ -75,13 +87,20 @@ export class PrinterHubService {
 
     try {
       await this.connection.start();
+      if (generation !== this.lifecycleGeneration) {
+        await this.connection.stop();
+        return;
+      }
       if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connected successfully"); }
       this.reconnectAttempts = 0;
     } catch (error) {
       console.error("Failed to connect to PrinterHub:", error);
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      if (
+        generation === this.lifecycleGeneration &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
         this.reconnectAttempts++;
-        setTimeout(() => this.reconnect(), this.reconnectDelay);
+        this.scheduleReconnect(generation);
       }
     }
   }
@@ -90,10 +109,17 @@ export class PrinterHubService {
    * Stop the SignalR connection
    */
   async stop(): Promise<void> {
-    if (this.connection) {
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    const connection = this.connection;
+    this.connection = null;
+    if (connection) {
       try {
-        await this.connection.stop();
-        this.connection = null;
+        await connection.stop();
         if (window.PrintFarmerDebug?.printerSignalR) { console.log("PrinterHub connection stopped"); }
       } catch (error) {
         console.error("Error stopping PrinterHub connection:", error);
@@ -104,8 +130,21 @@ export class PrinterHubService {
   /**
    * Attempt to reconnect
    */
-  private async reconnect(): Promise<void> {
+  private scheduleReconnect(generation: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (generation === this.lifecycleGeneration) {
+        void this.reconnect(generation);
+      }
+    }, this.reconnectDelay);
+  }
+
+  private async reconnect(generation: number): Promise<void> {
     if (
+      generation === this.lifecycleGeneration &&
       this.connection &&
       this.connection.state === signalR.HubConnectionState.Disconnected
     ) {
@@ -115,9 +154,12 @@ export class PrinterHubService {
         this.reconnectAttempts = 0;
       } catch (error) {
         console.error("Reconnection failed:", error);
-        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+        if (
+          generation === this.lifecycleGeneration &&
+          this.reconnectAttempts < this.maxReconnectAttempts
+        ) {
           this.reconnectAttempts++;
-          setTimeout(() => this.reconnect(), this.reconnectDelay);
+          this.scheduleReconnect(generation);
         }
       }
     }
@@ -155,3 +197,7 @@ export class PrinterHubService {
 
 // Create a singleton instance
 export const printerHubService = new PrinterHubService();
+registerAuthenticatedSignalRTransport(
+  'printer-import',
+  () => printerHubService.stop(),
+);

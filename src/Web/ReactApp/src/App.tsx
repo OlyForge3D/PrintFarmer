@@ -237,6 +237,51 @@ function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+  const { logger } = useUnifiedLogging({
+    component: 'AuthenticatedAppRoutes',
+    logLifecycle: false,
+  });
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    Promise.all([
+      printerSignalRService.connect(),
+      harvestSignalRService.connect(),
+    ]).catch(err => {
+      logger.warn('Failed to establish authenticated SignalR connections', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    const unsubscribe = printerSignalRService.onFailureDetected((event) => {
+      const confidencePercent = Math.round(event.confidence * 100);
+      const action = event.snapshotUrl
+        ? {
+            label: 'View',
+            onClick: () => window.open(event.snapshotUrl, '_blank', 'noopener,noreferrer'),
+          }
+        : undefined;
+
+      if (event.autoPaused) {
+        toast.error(
+          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
+          { duration: 10_000, action },
+        );
+        return;
+      }
+
+      toast.warning(
+        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
+        { duration: 10_000, action },
+      );
+    });
+
+    return unsubscribe;
+  }, [isAuthenticated, logger, user?.id]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -357,48 +402,6 @@ function App() {
         error: err instanceof Error ? err.message : String(err)
       });
     });
-  }, [logger]);
-
-  // Eagerly establish SignalR connections on app startup for faster realtime updates
-  useEffect(() => {
-    // Connect both SignalR services in the background
-    // These will establish connections and start receiving updates immediately
-    Promise.all([
-      printerSignalRService.connect(),
-      harvestSignalRService.connect()
-    ]).catch(err => {
-      logger.warn('Failed to establish SignalR connections', {
-        error: err instanceof Error ? err.message : String(err)
-      });
-    });
-
-    // Listen for Obico ML failure detection events
-    const unsubscribe = printerSignalRService.onFailureDetected((event) => {
-      const confidencePercent = Math.round(event.confidence * 100);
-      const action = event.snapshotUrl
-        ? {
-            label: 'View',
-            onClick: () => window.open(event.snapshotUrl, '_blank', 'noopener,noreferrer'),
-          }
-        : undefined;
-
-      if (event.autoPaused) {
-        toast.error(
-          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
-          { duration: 10_000, action }
-        );
-        return;
-      }
-
-      toast.warning(
-        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
-        { duration: 10_000, action }
-      );
-    });
-
-    return () => {
-      unsubscribe();
-    };
   }, [logger]);
 
   useEffect(() => {

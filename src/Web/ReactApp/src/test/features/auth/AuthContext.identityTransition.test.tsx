@@ -26,6 +26,14 @@ import { NotificationFrequency } from '@/types/api';
 import type { AuthenticationResult, NotificationPreferencesDto, UserDto } from '@/types/api';
 import type { UserSettingsResponse } from '@/features/settings/types';
 
+const signalRSessionTestState = vi.hoisted(() => ({
+  reset: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
+  resetAuthenticatedSignalRSession: signalRSessionTestState.reset,
+}));
+
 vi.mock('@/services/api', () => ({
   apiClient: {
     getCurrentUser: vi.fn().mockRejectedValue(new Error('no session')),
@@ -142,6 +150,7 @@ describe('Identity transition cache isolation (#762)', () => {
     vi.clearAllMocks();
     localStorage.clear();
     queryClient.clear();
+    signalRSessionTestState.reset.mockResolvedValue(undefined);
     vi.mocked(apiClient.getCurrentUser).mockRejectedValue(new Error('no session'));
     vi.mocked(apiClient.logout).mockResolvedValue(undefined);
     vi.mocked(apiClient.login).mockImplementation(async (credentials): Promise<AuthenticationResult> => {
@@ -168,6 +177,7 @@ describe('Identity transition cache isolation (#762)', () => {
     await act(async () => {
       screen.getByRole('button', { name: 'login-a' }).click();
     });
+
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
     await waitFor(() => expect(screen.getByTestId('prefs-owner')).toHaveTextContent('user-a'));
 
@@ -202,6 +212,42 @@ describe('Identity transition cache isolation (#762)', () => {
       resolveBPrefs(prefsFor('user-b'));
     });
     await waitFor(() => expect(screen.getByTestId('prefs-owner')).toHaveTextContent('user-b'));
+  });
+
+  it('resets authenticated hubs before replacing or removing an identity token', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    const setItem = vi.spyOn(localStorage, 'setItem');
+    const removeItem = vi.spyOn(localStorage, 'removeItem');
+
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'logout' }).click();
+    });
+    await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
+
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-b'));
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-b' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+
+    expect(signalRSessionTestState.reset).toHaveBeenCalledTimes(3);
+    const resetOrders = signalRSessionTestState.reset.mock.invocationCallOrder;
+    const tokenWrites = setItem.mock.calls
+      .map((call, index) => ({ call, order: setItem.mock.invocationCallOrder[index] }))
+      .filter(({ call }) => call[0] === 'auth-token');
+    const tokenRemovalIndex = removeItem.mock.calls.findIndex(call => call[0] === 'auth-token');
+
+    expect(resetOrders[0]).toBeLessThan(tokenWrites[0].order);
+    expect(resetOrders[1]).toBeLessThan(removeItem.mock.invocationCallOrder[tokenRemovalIndex]);
+    expect(resetOrders[2]).toBeLessThan(tokenWrites[1].order);
+    expect(tokenWrites.map(({ call }) => call[1])).toEqual(['token-a', 'token-b']);
   });
 
   it('discards a stale in-flight fetch for the previous identity instead of letting it repopulate the cache', async () => {
