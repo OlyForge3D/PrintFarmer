@@ -161,6 +161,31 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithMissingCheckConstraintWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "Bins_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Bins" PRIMARY KEY,
+                "Code" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "Location" TEXT NULL,
+                "Notes" TEXT NULL,
+                "IsActive" INTEGER NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            DROP TABLE "Bins";
+            ALTER TABLE "Bins_replacement" RENAME TO "Bins";
+            CREATE UNIQUE INDEX "IX_Bins_Code" ON "Bins" ("Code");
+            CREATE INDEX "IX_Bins_IsActive" ON "Bins" ("IsActive");
+            PRAGMA foreign_keys = ON;
+            """,
+            """Bins (check constraint: "Code" = UPPER("Code"))""");
+    }
+
+    [Fact]
     public async Task SlicerMigration_UsesIndependentSqliteMigrationSet()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();

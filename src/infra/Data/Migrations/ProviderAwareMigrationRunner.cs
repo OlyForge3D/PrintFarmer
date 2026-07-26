@@ -281,7 +281,12 @@ public static class ProviderAwareMigrationRunner
                     NormalizeIdentifiers(foreignKey.PrincipalColumns.Select(column => column.Name)),
                     NormalizeReferentialAction(foreignKey.OnDeleteAction))),
             ];
-            tables.Add(table, new TableContract(columns, indexes, foreignKeys));
+            HashSet<CheckConstraintContract> checkConstraints =
+            [
+                .. relationalTable.CheckConstraints.Select(checkConstraint =>
+                    new CheckConstraintContract(NormalizeSql(checkConstraint.Sql) ?? string.Empty)),
+            ];
+            tables.Add(table, new TableContract(columns, indexes, foreignKeys, checkConstraints));
         }
 
         return new SchemaContract(tables);
@@ -493,7 +498,9 @@ public static class ProviderAwareMigrationRunner
             connection,
             table,
             cancellationToken);
-        return new SqliteTableContract(columns, indexes, foreignKeys);
+        HashSet<CheckConstraintContract> checkConstraints =
+            await ReadSqliteCheckConstraintsAsync(connection, table, cancellationToken);
+        return new SqliteTableContract(columns, indexes, foreignKeys, checkConstraints);
     }
 
     private static async Task<HashSet<IndexContract>> ReadSqliteIndexesAsync(
@@ -594,6 +601,129 @@ public static class ProviderAwareMigrationRunner
         ];
     }
 
+    private static async Task<HashSet<CheckConstraintContract>> ReadSqliteCheckConstraintsAsync(
+        DbConnection connection,
+        TableIdentifier table,
+        CancellationToken cancellationToken)
+    {
+        await using DbCommand command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = @tableName";
+        AddParameter(command, "@tableName", table.Name);
+        object? sqlValue = await command.ExecuteScalarAsync(cancellationToken);
+        return sqlValue is string createTableSql
+            ? ExtractSqliteCheckConstraints(createTableSql)
+            : [];
+    }
+
+    private static HashSet<CheckConstraintContract> ExtractSqliteCheckConstraints(
+        string createTableSql)
+    {
+        var constraints = new HashSet<CheckConstraintContract>();
+        int index = 0;
+        while (index <= createTableSql.Length - 5)
+        {
+            if (!createTableSql.AsSpan(index, 5).Equals("CHECK", StringComparison.OrdinalIgnoreCase) ||
+                (index > 0 && IsSqlIdentifierCharacter(createTableSql[index - 1])) ||
+                (index + 5 < createTableSql.Length &&
+                 IsSqlIdentifierCharacter(createTableSql[index + 5])))
+            {
+                index++;
+                continue;
+            }
+
+            int openingParenthesis = index + 5;
+            while (openingParenthesis < createTableSql.Length &&
+                   char.IsWhiteSpace(createTableSql[openingParenthesis]))
+            {
+                openingParenthesis++;
+            }
+
+            if (openingParenthesis >= createTableSql.Length ||
+                createTableSql[openingParenthesis] != '(')
+            {
+                index++;
+                continue;
+            }
+
+            int closingParenthesis = FindSqlClosingParenthesis(
+                createTableSql,
+                openingParenthesis);
+            if (closingParenthesis < 0)
+            {
+                index++;
+                continue;
+            }
+
+            string expression = createTableSql[
+                (openingParenthesis + 1)..closingParenthesis];
+            _ = constraints.Add(
+                new CheckConstraintContract(NormalizeSql(expression) ?? string.Empty));
+            index = closingParenthesis + 1;
+        }
+
+        return constraints;
+    }
+
+    private static int FindSqlClosingParenthesis(string sql, int openingParenthesis)
+    {
+        int depth = 0;
+        char closingQuote = '\0';
+        int index = openingParenthesis;
+        while (index < sql.Length)
+        {
+            char character = sql[index];
+            if (closingQuote != '\0')
+            {
+                if (character != closingQuote)
+                {
+                    index++;
+                    continue;
+                }
+
+                if (index + 1 < sql.Length && sql[index + 1] == closingQuote)
+                {
+                    index += 2;
+                    continue;
+                }
+
+                closingQuote = '\0';
+                index++;
+                continue;
+            }
+
+            closingQuote = character switch
+            {
+                '\'' => '\'',
+                '"' => '"',
+                '`' => '`',
+                '[' => ']',
+                _ => '\0',
+            };
+            if (closingQuote != '\0')
+            {
+                index++;
+                continue;
+            }
+
+            if (character == '(')
+            {
+                depth++;
+            }
+            else if (character == ')' && --depth == 0)
+            {
+                return index;
+            }
+
+            index++;
+        }
+
+        return -1;
+    }
+
+    private static bool IsSqlIdentifierCharacter(char character) =>
+        char.IsLetterOrDigit(character) || character == '_';
+
     private static void ValidateSqliteTable(
         TableIdentifier table,
         TableContract expected,
@@ -667,6 +797,16 @@ public static class ProviderAwareMigrationRunner
                 .Select(foreignKey =>
                     $"{table.DisplayName} (unexpected foreign key: {foreignKey.Columns} -> " +
                     $"{foreignKey.PrincipalTable}.{foreignKey.PrincipalColumns})"));
+        mismatches.AddRange(
+            expected.CheckConstraints
+                .Where(checkConstraint => !actual.CheckConstraints.Contains(checkConstraint))
+                .Select(checkConstraint =>
+                    $"{table.DisplayName} (check constraint: {checkConstraint.Sql})"));
+        mismatches.AddRange(
+            actual.CheckConstraints
+                .Where(checkConstraint => !expected.CheckConstraints.Contains(checkConstraint))
+                .Select(checkConstraint =>
+                    $"{table.DisplayName} (unexpected check constraint: {checkConstraint.Sql})"));
     }
 
     private static string? GetDefaultSql(IColumn column)
@@ -807,15 +947,19 @@ public static class ProviderAwareMigrationRunner
         string PrincipalColumns,
         string OnDeleteAction);
 
+    private sealed record CheckConstraintContract(string Sql);
+
     private sealed record TableContract(
         IReadOnlyDictionary<string, ColumnContract> Columns,
         IReadOnlySet<IndexContract> Indexes,
-        IReadOnlySet<ForeignKeyContract> ForeignKeys);
+        IReadOnlySet<ForeignKeyContract> ForeignKeys,
+        IReadOnlySet<CheckConstraintContract> CheckConstraints);
 
     private sealed record SqliteTableContract(
         IReadOnlyDictionary<string, ColumnContract> Columns,
         IReadOnlySet<IndexContract> Indexes,
-        IReadOnlySet<ForeignKeyContract> ForeignKeys);
+        IReadOnlySet<ForeignKeyContract> ForeignKeys,
+        IReadOnlySet<CheckConstraintContract> CheckConstraints);
 
     private sealed class SqliteForeignKeyBuilder(string principalTable, string onDeleteAction)
     {
