@@ -1821,7 +1821,7 @@ public class ShiftPlanCompilerTests
             {
                 Authority = new ShiftPlanSourceAuthority(
                 [
-                    .. ownedKinds.Select(kind => new ShiftPlanKindAuthority(
+                    .. OwnedKinds.Select(kind => new ShiftPlanKindAuthority(
                         kind,
                         IsAuthoritativeComplete: true,
                         PreservedSourceIds: new HashSet<string>(StringComparer.Ordinal),

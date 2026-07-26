@@ -93,7 +93,7 @@ public sealed class HarvestAttentionSource(
             .ToListAsync(cancellationToken);
     }
 
-    private static IReadOnlyList<AttentionItemDto> MapItems(IEnumerable<PrintJob> jobs)
+    private static List<AttentionItemDto> MapItems(IEnumerable<PrintJob> jobs)
         => jobs
             .Where(job => job.AssignedPrinter is not null)
             .Select(job => new AttentionItemDto(
