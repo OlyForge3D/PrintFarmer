@@ -370,22 +370,23 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
         string progressMessage = GetPublicProgressMessage(request.ProgressPercent);
-        await _jobRepository.UpdateProgressAsync(id, request.ProgressPercent, progressMessage, ct);
-        job.ProgressPercent = request.ProgressPercent;
-        job.ProgressMessage = progressMessage;
-        await _eventService.NotifyJobProgressAsync(job, ct);
+        bool updated = await _jobRepository.TryUpdateProgressForActiveLeaseAsync(
+            id,
+            worker.Id,
+            request.ProgressPercent,
+            progressMessage,
+            ct);
+        if (!updated)
+        {
+            return await GetLeaseFenceFailureAsync(id, ct);
+        }
+
+        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        if (job is not null)
+        {
+            await _eventService.NotifyJobProgressAsync(job, ct);
+        }
 
         return NoContent();
     }
@@ -406,15 +407,10 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
         if (job is null)
         {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
+            return await GetLeaseFenceFailureAsync(id, ct);
         }
 
         var artifactIds = new List<Guid> { request.PrimaryArtifactId };
@@ -442,8 +438,18 @@ public partial class SliceJobController(
 
         string resultFileUrl = $"/api/artifacts/{request.PrimaryArtifactId}";
 
-        await _jobRepository.MarkCompletedWithArtifactsAsync(
-            id, resultFileUrl, artifactIds, request.EstimatedPrintTimeSeconds, request.FilamentUsedGrams, ct);
+        bool completed = await _jobRepository.TryCompleteForActiveLeaseAsync(
+            id,
+            worker.Id,
+            resultFileUrl,
+            artifactIds,
+            request.EstimatedPrintTimeSeconds,
+            request.FilamentUsedGrams,
+            ct);
+        if (!completed)
+        {
+            return await GetLeaseFenceFailureAsync(id, ct);
+        }
 
         // Re-fetch updated job for event notification
         job = await _jobRepository.GetByIdAsync(id, ct);
@@ -491,20 +497,17 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
+        bool failed = await _jobRepository.TryFailForActiveLeaseAsync(
+            id,
+            worker.Id,
+            "Slicing worker reported a failure.",
+            ct);
+        if (!failed)
+        {
+            return await GetLeaseFenceFailureAsync(id, ct);
+        }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is null)
-        {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
-        await _jobRepository.MarkFailedAsync(id, "Slicing worker reported a failure.", ct);
-
-        job = await _jobRepository.GetByIdAsync(id, ct);
         if (job is not null)
         {
             await _eventService.NotifyJobFailedAsync(job, ct);
@@ -580,15 +583,10 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
         if (job is null)
         {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
+            return await GetLeaseFenceFailureAsync(id, ct);
         }
 
         if (_fileStorage is null)
@@ -641,20 +639,25 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
         if (job is null)
         {
-            return NotFound();
-        }
-
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
+            return await GetLeaseFenceFailureAsync(id, ct);
         }
 
         try
         {
-            Artifact artifact = await _artifactsService.UploadAsync(file, id, worker.Id, "gcode", ct);
+            Artifact? artifact = await _artifactsService.UploadForActiveLeaseAsync(
+                file,
+                id,
+                worker.Id,
+                "gcode",
+                ct);
+            if (artifact is null)
+            {
+                return await GetLeaseFenceFailureAsync(id, ct);
+            }
+
             return Created($"/api/artifacts/{artifact.Id}", new
             {
                 id = artifact.Id,
@@ -888,9 +891,13 @@ public partial class SliceJobController(
         return await _workerAuth.AuthenticateAsync(HttpContext);
     }
 
-    private static bool CanWorkerAccess(SliceJob job, Worker worker) =>
-        job.WorkerId == worker.Id &&
-        job.Status == SliceJobStatus.Processing;
+    private async Task<IActionResult> GetLeaseFenceFailureAsync(Guid jobId, CancellationToken ct)
+    {
+        SliceJob? job = await _jobRepository.GetByIdAsync(jobId, ct);
+        return job is null
+            ? NotFound()
+            : SlicerApiProblems.ResourceForbidden(this);
+    }
 
     private static string GetPublicProgressMessage(int progressPercent) =>
         $"Slicing in progress ({Math.Clamp(progressPercent, 0, 100)}%).";

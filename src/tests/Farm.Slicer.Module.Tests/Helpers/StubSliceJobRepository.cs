@@ -45,6 +45,63 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default) => Task.CompletedTask;
     public Task MarkFailedAsync(Guid id, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
     public Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default) => Task.CompletedTask;
+    public Task<SliceJob?> GetByActiveWorkerLeaseAsync(Guid jobId, Guid workerId, CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        return Task.FromResult(Jobs.Find(job =>
+            job.Id == jobId &&
+            job.WorkerId == workerId &&
+            job.Status == SliceJobStatus.Processing &&
+            job.LeaseExpiresAt > now));
+    }
+    public Task<bool> TryUpdateProgressForActiveLeaseAsync(Guid jobId, Guid workerId, int progressPercent, string progressMessage, CancellationToken ct = default)
+    {
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        if (job is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        job.ProgressPercent = progressPercent;
+        job.ProgressMessage = progressMessage;
+        job.UpdatedAt = DateTime.UtcNow;
+        return Task.FromResult(true);
+    }
+    public Task<bool> TryCompleteForActiveLeaseAsync(Guid jobId, Guid workerId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
+    {
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        if (job is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        Guid[] ids = artifactIds.Distinct().ToArray();
+        job.Status = SliceJobStatus.Completed;
+        job.CompletedAt = DateTime.UtcNow;
+        job.ResultFileUrl = resultFileUrl;
+        job.ProgressPercent = 100;
+        job.ProgressMessage = "Completed successfully";
+        job.EstimatedPrintTimeSeconds = estimatedPrintTimeSeconds;
+        job.FilamentUsedGrams = filamentUsedGrams;
+        job.ArtifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
+        job.ArtifactsCount = ids.Length;
+        job.UpdatedAt = DateTime.UtcNow;
+        return Task.FromResult(true);
+    }
+    public Task<bool> TryFailForActiveLeaseAsync(Guid jobId, Guid workerId, string errorMessage, CancellationToken ct = default)
+    {
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        if (job is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        job.Status = SliceJobStatus.Failed;
+        job.CompletedAt = DateTime.UtcNow;
+        job.ErrorMessage = errorMessage;
+        job.UpdatedAt = DateTime.UtcNow;
+        return Task.FromResult(true);
+    }
     public Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
         SliceJob? job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
@@ -100,6 +157,16 @@ public class StubSliceJobRepository : ISliceJobRepository
         return Task.CompletedTask;
     }
     public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
+
+    private SliceJob? GetActiveLeaseJob(Guid jobId, Guid workerId)
+    {
+        DateTime now = DateTime.UtcNow;
+        return Jobs.Find(job =>
+            job.Id == jobId &&
+            job.WorkerId == workerId &&
+            job.Status == SliceJobStatus.Processing &&
+            job.LeaseExpiresAt > now);
+    }
     public Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default)
     {
         SliceJob? existing = Jobs.Find(j => j.CorrelationId == correlationId && string.Equals(j.Checksum, checksum, StringComparison.OrdinalIgnoreCase));

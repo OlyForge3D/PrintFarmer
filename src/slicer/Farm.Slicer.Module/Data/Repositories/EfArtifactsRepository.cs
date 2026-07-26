@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Slicer.Module.Data.Repositories;
 
@@ -18,6 +19,37 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         _ = db.Set<Artifact>().Add(artifact);
         _ = await db.SaveChangesAsync(ct);
         return artifact;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryAddForActiveLeaseAsync(
+        Artifact artifact,
+        Guid workerId,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        int fenced = await db.SliceJobs
+            .Where(job =>
+                job.Id == artifact.JobId &&
+                job.WorkerId == workerId &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(job => job.UpdatedAt, now),
+                ct);
+        if (fenced != 1)
+        {
+            await transaction.RollbackAsync(ct);
+            return false;
+        }
+
+        _ = db.Artifacts.Add(artifact);
+        _ = await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return true;
     }
 
     /// <inheritdoc/>

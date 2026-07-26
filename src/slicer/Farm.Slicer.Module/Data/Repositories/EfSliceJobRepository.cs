@@ -218,6 +218,117 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
+    public async Task<SliceJob?> GetByActiveWorkerLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        return await _db.SliceJobs
+            .AsNoTracking()
+            .SingleOrDefaultAsync(
+                job =>
+                    job.Id == jobId &&
+                    job.WorkerId == workerId &&
+                    job.Status == SliceJobStatus.Processing &&
+                    job.LeaseExpiresAt != null &&
+                    job.LeaseExpiresAt > now,
+                ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryUpdateProgressForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        int progressPercent,
+        string progressMessage,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        int updated = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId &&
+                job.WorkerId == workerId &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.ProgressPercent, progressPercent)
+                    .SetProperty(job => job.ProgressMessage, progressMessage)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryCompleteForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        string resultFileUrl,
+        IEnumerable<Guid> artifactIds,
+        int? estimatedPrintTimeSeconds = null,
+        decimal? filamentUsedGrams = null,
+        CancellationToken ct = default)
+    {
+        Guid[] ids = artifactIds?.Distinct().ToArray() ?? [];
+        long totalBytes = ids.Length == 0
+            ? 0
+            : await _db.Artifacts
+                .Where(artifact => ids.Contains(artifact.Id))
+                .SumAsync(artifact => artifact.SizeBytes, ct);
+        string? artifactIdsCsv = ids.Length > 0 ? string.Join(',', ids) : null;
+        DateTime now = DateTime.UtcNow;
+        int updated = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId &&
+                job.WorkerId == workerId &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.Status, SliceJobStatus.Completed)
+                    .SetProperty(job => job.CompletedAt, now)
+                    .SetProperty(job => job.ResultFileUrl, resultFileUrl)
+                    .SetProperty(job => job.ProgressPercent, 100)
+                    .SetProperty(job => job.ProgressMessage, "Completed successfully")
+                    .SetProperty(job => job.EstimatedPrintTimeSeconds, estimatedPrintTimeSeconds)
+                    .SetProperty(job => job.FilamentUsedGrams, filamentUsedGrams)
+                    .SetProperty(job => job.ArtifactIdsCsv, artifactIdsCsv)
+                    .SetProperty(job => job.ArtifactsTotalBytes, totalBytes)
+                    .SetProperty(job => job.ArtifactsCount, ids.Length)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryFailForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        string errorMessage,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        int updated = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId &&
+                job.WorkerId == workerId &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.Status, SliceJobStatus.Failed)
+                    .SetProperty(job => job.CompletedAt, now)
+                    .SetProperty(job => job.ErrorMessage, errorMessage)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
     public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
         ValidateLeaseDuration(leaseDurationSeconds);

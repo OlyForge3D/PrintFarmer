@@ -43,6 +43,34 @@ public interface ISliceJobRepository
     /// <summary>Updates job progress percentage and message.</summary>
     Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default);
 
+    /// <summary>Gets a processing job while its unexpired lease is owned by the worker.</summary>
+    Task<SliceJob?> GetByActiveWorkerLeaseAsync(Guid jobId, Guid workerId, CancellationToken ct = default);
+
+    /// <summary>Updates progress only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryUpdateProgressForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        int progressPercent,
+        string progressMessage,
+        CancellationToken ct = default);
+
+    /// <summary>Completes a job only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryCompleteForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        string resultFileUrl,
+        IEnumerable<Guid> artifactIds,
+        int? estimatedPrintTimeSeconds = null,
+        decimal? filamentUsedGrams = null,
+        CancellationToken ct = default);
+
+    /// <summary>Fails a job only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryFailForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        string errorMessage,
+        CancellationToken ct = default);
+
     /// <summary>Atomically claims the next queued job matching capabilities (worker pull model).</summary>
     Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
 

@@ -13,6 +13,14 @@ public interface IArtifactsRepository
     /// <param name="ct">Cancellation token.</param>
     Task<Artifact> AddAsync(Artifact artifact, CancellationToken ct = default);
 
+    /// <summary>
+    /// Adds a worker artifact only after acquiring the job through its active lease fence.
+    /// </summary>
+    Task<bool> TryAddForActiveLeaseAsync(
+        Artifact artifact,
+        Guid workerId,
+        CancellationToken ct = default);
+
     /// <summary>Gets an artifact by its unique identifier.</summary>
     /// <param name="id">The artifact identifier.</param>
     /// <param name="ct">Cancellation token.</param>

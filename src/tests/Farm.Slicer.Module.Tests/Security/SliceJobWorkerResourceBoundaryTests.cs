@@ -185,6 +185,79 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task WorkerEndpoints_ExpiredLeaseRejectsEveryReadAndMutation()
+    {
+        Worker firstWorker = await GetWorkerAsync(_firstWorkerClient);
+        SliceJob job = await AddProcessingJobAsync(firstWorker);
+        Artifact artifact = await AddArtifactAsync(job, firstWorker);
+        await SetLeaseExpirationAsync(job.Id, DateTime.UtcNow.AddMinutes(-1));
+
+        HttpResponseMessage progress = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/progress",
+            new SliceJobProgressUpdateRequest { ProgressPercent = 75, ProgressMessage = "stale" });
+        HttpResponseMessage complete = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/complete",
+            new CompleteSliceJobRequest { PrimaryArtifactId = artifact.Id });
+        HttpResponseMessage fail = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/fail",
+            new FailSliceJobRequest("stale"));
+        HttpResponseMessage download = await _firstWorkerClient.GetAsync(
+            $"/api/slice/{job.Id}/model");
+        using MultipartFormDataContent uploadContent = CreateGcodeUpload();
+        HttpResponseMessage upload = await _firstWorkerClient.PostAsync(
+            $"/api/slice/{job.Id}/artifacts",
+            uploadContent);
+
+        foreach (HttpResponseMessage response in new[] { progress, complete, fail, download, upload })
+        {
+            _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob unchanged = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == job.Id);
+        _ = unchanged.Status.Should().Be(SliceJobStatus.Processing);
+        _ = unchanged.ProgressPercent.Should().Be(0);
+        _ = unchanged.ResultFileUrl.Should().BeNull();
+        _ = unchanged.ErrorMessage.Should().BeNull();
+        _ = (await db.Artifacts.CountAsync(value => value.JobId == job.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task WorkerMutations_ReassignedLeaseRejectsThePreviousWorker()
+    {
+        Worker firstWorker = await GetWorkerAsync(_firstWorkerClient);
+        Worker secondWorker = await GetWorkerAsync(_secondWorkerClient);
+        SliceJob job = await AddProcessingJobAsync(firstWorker);
+        Artifact artifact = await AddArtifactAsync(job, firstWorker);
+        await ReassignLeaseAsync(job.Id, secondWorker.Id);
+
+        HttpResponseMessage progress = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/progress",
+            new SliceJobProgressUpdateRequest { ProgressPercent = 75, ProgressMessage = "stale" });
+        HttpResponseMessage complete = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/complete",
+            new CompleteSliceJobRequest { PrimaryArtifactId = artifact.Id });
+        HttpResponseMessage fail = await _firstWorkerClient.PostAsJsonAsync(
+            $"/api/slice/{job.Id}/fail",
+            new FailSliceJobRequest("stale"));
+
+        foreach (HttpResponseMessage response in new[] { progress, complete, fail })
+        {
+            _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        SliceJob unchanged = await db.SliceJobs.AsNoTracking().SingleAsync(value => value.Id == job.Id);
+        _ = unchanged.WorkerId.Should().Be(secondWorker.Id);
+        _ = unchanged.Status.Should().Be(SliceJobStatus.Processing);
+        _ = unchanged.ProgressPercent.Should().Be(0);
+        _ = unchanged.ResultFileUrl.Should().BeNull();
+        _ = unchanged.ErrorMessage.Should().BeNull();
+    }
+
     private async Task<SliceJob> AddProcessingJobAsync(Worker worker, byte[]? modelBytes = null)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -205,12 +278,55 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             SlicerEngine = (int)SlicerType.OrcaSlicer,
             QueuedAt = DateTime.UtcNow.AddMinutes(-1),
             StartedAt = DateTime.UtcNow,
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
         await repository.AddAsync(job);
         await repository.SaveChangesAsync();
         return job;
+    }
+
+    private async Task<Artifact> AddArtifactAsync(SliceJob job, Worker worker)
+    {
+        Artifact artifact = new()
+        {
+            Id = Guid.NewGuid(),
+            JobId = job.Id,
+            WorkerId = worker.Id,
+            Kind = "gcode",
+            FileName = "result.gcode",
+            RelativePath = "private/result.gcode",
+            ContentType = "text/x.gcode",
+            SizeBytes = 10,
+            Sha256 = "not-public",
+            CreatedAt = DateTime.UtcNow,
+        };
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = db.Artifacts.Add(artifact);
+        _ = await db.SaveChangesAsync();
+        return artifact;
+    }
+
+    private async Task SetLeaseExpirationAsync(Guid jobId, DateTime leaseExpiresAt)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = await db.SliceJobs
+            .Where(job => job.Id == jobId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(job => job.LeaseExpiresAt, leaseExpiresAt));
+    }
+
+    private async Task ReassignLeaseAsync(Guid jobId, Guid workerId)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = await db.SliceJobs
+            .Where(job => job.Id == jobId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(job => job.WorkerId, workerId)
+                .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddMinutes(5)));
     }
 
     private async Task<Worker> GetWorkerAsync(HttpClient client)

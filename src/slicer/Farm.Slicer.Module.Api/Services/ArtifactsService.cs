@@ -30,7 +30,30 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
 
     private readonly ArtifactsMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
-    public async Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
+    public async Task<Artifact> UploadAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid? workerId,
+        string kind,
+        CancellationToken ct) =>
+        await UploadCoreAsync(file, jobId, workerId, kind, requireActiveLease: false, ct)
+        ?? throw new InvalidOperationException("The artifact could not be persisted.");
+
+    public Task<Artifact?> UploadForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        string kind,
+        CancellationToken ct) =>
+        UploadCoreAsync(file, jobId, workerId, kind, requireActiveLease: true, ct);
+
+    private async Task<Artifact?> UploadCoreAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid? workerId,
+        string kind,
+        bool requireActiveLease,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(file);
         if (file.Length <= 0)
@@ -80,7 +103,33 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             CreatedAt = now
         };
 
-        _ = await _artifactsRepo.AddAsync(artifact, ct);
+        bool persisted;
+        if (requireActiveLease)
+        {
+            if (workerId is not Guid activeWorkerId)
+            {
+                throw new ArgumentException(
+                    "An active-lease upload requires a worker identifier.",
+                    nameof(workerId));
+            }
+
+            persisted = await _artifactsRepo.TryAddForActiveLeaseAsync(
+                artifact,
+                activeWorkerId,
+                ct);
+        }
+        else
+        {
+            _ = await _artifactsRepo.AddAsync(artifact, ct);
+            persisted = true;
+        }
+
+        if (!persisted)
+        {
+            File.Delete(fullPath);
+            return null;
+        }
+
         _metrics.RecordUpload(file.Length);
 
         // Increment worker artifact counters if available

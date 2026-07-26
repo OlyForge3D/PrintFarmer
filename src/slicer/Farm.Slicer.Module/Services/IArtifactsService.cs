@@ -16,6 +16,16 @@ public interface IArtifactsService
     /// <param name="ct">Cancellation token.</param>
     Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct);
 
+    /// <summary>
+    /// Uploads a worker artifact only while the worker still owns an unexpired job lease.
+    /// </summary>
+    Task<Artifact?> UploadForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        string kind,
+        CancellationToken ct);
+
     /// <summary>Gets an artifact by its ID.</summary>
     /// <param name="id">The artifact ID.</param>
     /// <param name="ct">Cancellation token.</param>
