@@ -45,18 +45,23 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task MarkCompletedWithArtifactsAsync(Guid jobId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default) => Task.CompletedTask;
     public Task MarkFailedAsync(Guid id, string errorMessage, CancellationToken ct = default) => Task.CompletedTask;
     public Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default) => Task.CompletedTask;
-    public Task<SliceJob?> GetByActiveWorkerLeaseAsync(Guid jobId, Guid workerId, CancellationToken ct = default)
+    public Task<SliceJob?> GetByActiveWorkerLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        CancellationToken ct = default)
     {
         DateTime now = DateTime.UtcNow;
         return Task.FromResult(Jobs.Find(job =>
             job.Id == jobId &&
             job.WorkerId == workerId &&
+            job.ClaimToken == claimToken &&
             job.Status == SliceJobStatus.Processing &&
             job.LeaseExpiresAt > now));
     }
-    public Task<bool> TryUpdateProgressForActiveLeaseAsync(Guid jobId, Guid workerId, int progressPercent, string progressMessage, CancellationToken ct = default)
+    public Task<bool> TryUpdateProgressForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, int progressPercent, string progressMessage, CancellationToken ct = default)
     {
-        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
         if (job is null)
         {
             return Task.FromResult(false);
@@ -67,9 +72,9 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
-    public Task<bool> TryCompleteForActiveLeaseAsync(Guid jobId, Guid workerId, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
+    public Task<bool> TryCompleteForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string resultFileUrl, IEnumerable<Guid> artifactIds, int? estimatedPrintTimeSeconds = null, decimal? filamentUsedGrams = null, CancellationToken ct = default)
     {
-        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
         if (job is null)
         {
             return Task.FromResult(false);
@@ -88,9 +93,9 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
-    public Task<bool> TryFailForActiveLeaseAsync(Guid jobId, Guid workerId, string errorMessage, CancellationToken ct = default)
+    public Task<bool> TryFailForActiveLeaseAsync(Guid jobId, Guid workerId, Guid claimToken, string errorMessage, CancellationToken ct = default)
     {
-        SliceJob? job = GetActiveLeaseJob(jobId, workerId);
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
         if (job is null)
         {
             return Task.FromResult(false);
@@ -106,10 +111,10 @@ public class StubSliceJobRepository : ISliceJobRepository
     {
         SliceJob? job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
         if (job != null)
-        { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
+        { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.ClaimToken = Guid.NewGuid(); job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
         return Task.FromResult(job);
     }
-    public Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
+    public Task<IReadOnlyList<SliceJob>> GetExpiredLeaseJobsAsync(int? limit = null, CancellationToken ct = default)
     {
         DateTime now = DateTime.UtcNow;
         List<SliceJob> stuck = Jobs.FindAll(j => j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now);
@@ -120,6 +125,7 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task<bool> RenewLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         int leaseDurationSeconds,
         CancellationToken ct = default)
     {
@@ -127,6 +133,7 @@ public class StubSliceJobRepository : ISliceJobRepository
         DateTime now = DateTime.UtcNow;
         if (j is null ||
             j.WorkerId != workerId ||
+            j.ClaimToken != claimToken ||
             j.Status != SliceJobStatus.Processing ||
             j.LeaseExpiresAt is null ||
             j.LeaseExpiresAt <= now)
@@ -136,6 +143,27 @@ public class StubSliceJobRepository : ISliceJobRepository
 
         j.LeaseExpiresAt = now.AddSeconds(leaseDurationSeconds);
         j.UpdatedAt = now;
+        return Task.FromResult(true);
+    }
+    public Task<bool> TryRecoverExpiredLeaseAsync(Guid jobId, Guid? expectedClaimToken, int maxRetries, CancellationToken ct = default)
+    {
+        SliceJob? job = Jobs.Find(candidate =>
+            candidate.Id == jobId &&
+            candidate.ClaimToken == expectedClaimToken &&
+            candidate.Status == SliceJobStatus.Processing &&
+            candidate.LeaseExpiresAt < DateTime.UtcNow);
+        if (job is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        job.RetryCount++;
+        job.WorkerId = null;
+        job.ClaimedAt = null;
+        job.ClaimToken = null;
+        job.LeaseExpiresAt = null;
+        job.Status = job.RetryCount > maxRetries ? SliceJobStatus.Failed : SliceJobStatus.Queued;
+        job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
     public Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
@@ -158,12 +186,13 @@ public class StubSliceJobRepository : ISliceJobRepository
     }
     public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
 
-    private SliceJob? GetActiveLeaseJob(Guid jobId, Guid workerId)
+    private SliceJob? GetActiveLeaseJob(Guid jobId, Guid workerId, Guid claimToken)
     {
         DateTime now = DateTime.UtcNow;
         return Jobs.Find(job =>
             job.Id == jobId &&
             job.WorkerId == workerId &&
+            job.ClaimToken == claimToken &&
             job.Status == SliceJobStatus.Processing &&
             job.LeaseExpiresAt > now);
     }

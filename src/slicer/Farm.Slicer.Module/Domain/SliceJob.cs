@@ -162,6 +162,12 @@ public class SliceJob
     public DateTime? ClaimedAt { get; set; }
 
     /// <summary>
+    /// Opaque identifier for the current claim incarnation.
+    /// A new value is generated every time a worker claims or reclaims the job.
+    /// </summary>
+    public Guid? ClaimToken { get; set; }
+
+    /// <summary>
     /// When the job lease expires (pull model with timeout).
     /// </summary>
     public DateTime? LeaseExpiresAt { get; set; }

@@ -80,8 +80,12 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
         _ = claimed.Should().NotBeNull();
         _ = claimed!.Id.Should().Be(submitted.JobId);
+        _ = claimed.ClaimToken.Should().NotBe(Guid.Empty);
         _ = claimed.Status.Should().Be("Processing");
         _ = claimed.ModelFileUrl.Should().Be($"/api/slice/{submitted.JobId}/model");
+        _workerClient.DefaultRequestHeaders.Add(
+            WorkerClaimHeaders.ClaimToken,
+            claimed.ClaimToken.ToString());
         _output.WriteLine($"Job claimed with protected model route {claimed.ModelFileUrl}");
 
         // 5. Report progress (50%)
@@ -177,7 +181,13 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
             Capabilities = ["orcaslicer"],
             LeaseDurationSeconds = 300,
         };
-        await _workerClient.PostAsJsonAsync("/api/slice/claim", claimReq);
+        HttpResponseMessage claimResp =
+            await _workerClient.PostAsJsonAsync("/api/slice/claim", claimReq);
+        WorkerSliceJobResponse? claimed =
+            await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        _workerClient.DefaultRequestHeaders.Add(
+            WorkerClaimHeaders.ClaimToken,
+            claimed!.ClaimToken.ToString());
 
         // Fail the job
         var failReq = new { ErrorMessage = "Slicer crashed: out of memory" };

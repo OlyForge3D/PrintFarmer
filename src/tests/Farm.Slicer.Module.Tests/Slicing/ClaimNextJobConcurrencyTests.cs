@@ -92,6 +92,7 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         Guid originalWorker = Guid.NewGuid();
         Guid newWorker = Guid.NewGuid();
         Guid jobId = Guid.NewGuid();
+        Guid claimToken = Guid.NewGuid();
         await using (SlicerDbContext setup = CreateContext(connectionString))
         {
             _ = await setup.Database.EnsureCreatedAsync();
@@ -100,6 +101,7 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
                 Id = jobId,
                 Status = SliceJobStatus.Processing,
                 WorkerId = originalWorker,
+                ClaimToken = claimToken,
                 LeaseExpiresAt = DateTime.UtcNow.AddMinutes(1),
             });
             _ = await setup.SaveChangesAsync();
@@ -118,13 +120,80 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
                     .SetProperty(job => job.LeaseExpiresAt, reassignedLease));
         }
 
-        bool renewed = await staleRepository.RenewLeaseAsync(jobId, originalWorker, 300);
+        bool renewed = await staleRepository.RenewLeaseAsync(
+            jobId,
+            originalWorker,
+            claimToken,
+            300);
 
         renewed.Should().BeFalse();
         await using SlicerDbContext verification = CreateContext(connectionString);
         SliceJob persisted = await verification.SliceJobs.AsNoTracking().SingleAsync();
         persisted.WorkerId.Should().Be(newWorker);
         persisted.LeaseExpiresAt.Should().BeCloseTo(reassignedLease, TimeSpan.FromMilliseconds(1));
+    }
+
+    [Fact]
+    public async Task ClaimNextJobAsync_SameWorkerReclaimsExpiredJob_StaleClaimCannotMutateNewLease()
+    {
+        string connectionString = $"Data Source={_databasePath};Cache=Shared;Default Timeout=10";
+        Guid workerId = Guid.NewGuid();
+        await using SlicerDbContext context = CreateContext(connectionString);
+        _ = await context.Database.EnsureCreatedAsync();
+        _ = context.SliceJobs.Add(CreateQueuedJob());
+        _ = await context.SaveChangesAsync();
+        var repository = new EfSliceJobRepository(context);
+
+        SliceJob firstClaim = (await repository.ClaimNextJobAsync(
+            workerId,
+            ["orcaslicer"],
+            30))!;
+        _ = await context.SliceJobs
+            .Where(job => job.Id == firstClaim.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddSeconds(-1)));
+        SliceJob secondClaim = (await repository.ClaimNextJobAsync(
+            workerId,
+            ["orcaslicer"],
+            30))!;
+
+        firstClaim.ClaimToken.Should().NotBeNull();
+        secondClaim.ClaimToken.Should().NotBeNull();
+        secondClaim.ClaimToken!.Value.Should().NotBe(firstClaim.ClaimToken!.Value);
+        Guid staleClaimToken = firstClaim.ClaimToken!.Value;
+        (await repository.GetByActiveWorkerLeaseAsync(
+            firstClaim.Id,
+            workerId,
+            staleClaimToken)).Should().BeNull();
+        (await repository.TryUpdateProgressForActiveLeaseAsync(
+            firstClaim.Id,
+            workerId,
+            staleClaimToken,
+            50,
+            "stale")).Should().BeFalse();
+        (await repository.TryCompleteForActiveLeaseAsync(
+            firstClaim.Id,
+            workerId,
+            staleClaimToken,
+            "/api/artifacts/stale",
+            [])).Should().BeFalse();
+        (await repository.TryFailForActiveLeaseAsync(
+            firstClaim.Id,
+            workerId,
+            staleClaimToken,
+            "stale")).Should().BeFalse();
+        (await repository.RenewLeaseAsync(
+            firstClaim.Id,
+            workerId,
+            staleClaimToken,
+            300)).Should().BeFalse();
+
+        await using SlicerDbContext verification = CreateContext(connectionString);
+        SliceJob persisted = await verification.SliceJobs.AsNoTracking().SingleAsync();
+        persisted.Status.Should().Be(SliceJobStatus.Processing);
+        persisted.WorkerId.Should().Be(workerId);
+        persisted.ClaimToken.Should().Be(secondClaim.ClaimToken);
+        persisted.ProgressPercent.Should().Be(0);
     }
 
     [Theory]

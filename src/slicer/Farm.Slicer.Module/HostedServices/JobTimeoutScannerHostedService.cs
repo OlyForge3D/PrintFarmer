@@ -103,8 +103,6 @@ public class JobTimeoutScannerHostedService : BackgroundService
         ISliceJobRepository repo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IWorkerRepository workerRepo = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
 
-        int longRunningSeconds = 60 * 15; // 15 minutes
-
         // Retry on transient DB/DNS errors with exponential backoff
         const int maxDbRetries = 4;
         int attempt = 0;
@@ -113,7 +111,7 @@ public class JobTimeoutScannerHostedService : BackgroundService
         {
             try
             {
-                stuck = await repo.GetStuckJobsAsync(longRunningSeconds, limit: 100, ct: ct);
+                stuck = await repo.GetExpiredLeaseJobsAsync(limit: 100, ct: ct);
                 break;
             }
             catch (Exception ex)
@@ -150,14 +148,24 @@ public class JobTimeoutScannerHostedService : BackgroundService
         {
             try
             {
-                // Record failure in circuit breaker if worker is known
+                bool recovered = await repo.TryRecoverExpiredLeaseAsync(
+                    job.Id,
+                    job.ClaimToken,
+                    _retrySettings.MaxAttempts,
+                    ct);
+                if (!recovered)
+                {
+                    _logger.LogDebug(
+                        "Skipped timeout recovery for job {JobId} because its claim changed or lease was renewed",
+                        job.Id);
+                    continue;
+                }
+
                 if (job.WorkerId.HasValue && job.WorkerId.Value != Guid.Empty && _circuitBreaker != null)
                 {
                     await _circuitBreaker.RecordJobFailureAsync(job.WorkerId.Value, workerRepo, ct);
                 }
 
-                // If lease expired, increment retry and requeue or fail depending on retry count
-                await repo.IncrementRetryAndRequeueAsync(job.Id, _retrySettings.MaxAttempts, ct);
                 SliceJobMetrics? metrics = scope.ServiceProvider.GetService<SliceJobMetrics>();
                 metrics?.RecordJobRetry();
                 metrics?.RecordJobTimedOut();

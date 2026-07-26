@@ -19,6 +19,7 @@ public interface IArtifactsRepository
     Task<bool> TryAddForActiveLeaseAsync(
         Artifact artifact,
         Guid workerId,
+        Guid claimToken,
         CancellationToken ct = default);
 
     /// <summary>Gets an artifact by its unique identifier.</summary>

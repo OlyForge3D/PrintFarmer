@@ -17,6 +17,10 @@ public class Artifact
     /// <summary>Worker producing this artifact (optional if legacy job or unknown source).</summary>
     public Guid? WorkerId { get; set; }
 
+    /// <summary>Claim incarnation that authorized this worker artifact.</summary>
+    [JsonIgnore]
+    public Guid? ClaimToken { get; set; }
+
     /// <summary>Canonical kind of artifact: gcode | thumbnail | preview | log.</summary>
     public string Kind { get; set; } = string.Empty;
 

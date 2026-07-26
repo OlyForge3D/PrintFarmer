@@ -126,6 +126,11 @@ public sealed class WorkerSliceJobResponse
 {
     public Guid Id { get; set; }
 
+    /// <summary>
+    /// Opaque claim incarnation that must accompany every operation for this job.
+    /// </summary>
+    public Guid ClaimToken { get; set; }
+
     public Guid UserId { get; set; }
 
     public Guid? PrinterId { get; set; }

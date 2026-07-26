@@ -23,6 +23,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -591,6 +594,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.Property<string>("Checksum")
                         .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ClaimToken")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("ClaimedAt")

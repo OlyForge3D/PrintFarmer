@@ -122,6 +122,7 @@ public abstract class HttpJobPollerService(
                 DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
+                    ClaimToken = jobStatus.ClaimToken,
                     WorkerId = registeredServiceId.Value.ToString(),
                     ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
                     ModelFileName = jobStatus.ModelFileName,
@@ -141,7 +142,13 @@ public abstract class HttpJobPollerService(
                 _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
 
                 // Emit initial progress (0%)
-                await TrySendProgressAsync(httpClient, job.Id, 0, "Starting slicing", stoppingToken);
+                await TrySendProgressAsync(
+                    httpClient,
+                    job.Id,
+                    job.ClaimToken,
+                    0,
+                    "Starting slicing",
+                    stoppingToken);
 
                 await HandleJobAsync(job, httpClient, stoppingToken);
             }
@@ -184,7 +191,14 @@ public abstract class HttpJobPollerService(
                         try
                         {
                             RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
-                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew-lease", renewReq, localLinkedCts.Token);
+                            using HttpRequestMessage renewRequest = CreateClaimRequest(
+                                HttpMethod.Post,
+                                $"/api/slice/{job.Id}/renew-lease",
+                                job.ClaimToken,
+                                JsonContent.Create(renewReq));
+                            HttpResponseMessage resp = await httpClient.SendAsync(
+                                renewRequest,
+                                localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {
                                 _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
@@ -219,7 +233,13 @@ public abstract class HttpJobPollerService(
 
             // Mid-progress update (pipeline finished but artifacts pending)
             // Use heuristic progress since SlicingResult doesn't expose granular percentage yet.
-            await TrySendProgressAsync(httpClient, job.Id, 85, "Slicing complete, uploading artifacts", ct);
+            await TrySendProgressAsync(
+                httpClient,
+                job.Id,
+                job.ClaimToken,
+                85,
+                "Slicing complete, uploading artifacts",
+                ct);
 
             _logger.LogInformation("Job {JobId} slicing completed in {TotalSeconds:F1}s", job.Id, (DateTime.UtcNow - start).TotalSeconds);
 
@@ -236,7 +256,12 @@ public abstract class HttpJobPollerService(
                 LogText = result.Metadata.TryGetValue("SlicerLog", out string? logObj) ? logObj?.ToString() : null
             };
 
-            HttpResponseMessage completeResponse = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest, ct);
+            using HttpRequestMessage completeMessage = CreateClaimRequest(
+                HttpMethod.Post,
+                $"/api/slice/{job.Id}/complete",
+                job.ClaimToken,
+                JsonContent.Create(completeRequest));
+            HttpResponseMessage completeResponse = await httpClient.SendAsync(completeMessage, ct);
 
             if (!completeResponse.IsSuccessStatusCode)
             {
@@ -257,7 +282,7 @@ public abstract class HttpJobPollerService(
             _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
             // Report failure to the API so the job doesn't sit in Processing until lease expires
-            await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
+            await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
         }
         finally
         {
@@ -279,7 +304,13 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private async Task TrySendProgressAsync(HttpClient client, Guid jobId, int percent, string message, CancellationToken ct)
+    private async Task TrySendProgressAsync(
+        HttpClient client,
+        Guid jobId,
+        Guid claimToken,
+        int percent,
+        string message,
+        CancellationToken ct)
     {
         try
         {
@@ -288,7 +319,12 @@ public abstract class HttpJobPollerService(
                 ProgressPercent = percent,
                 ProgressMessage = message
             };
-            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/progress", progressReq, ct);
+            using HttpRequestMessage request = CreateClaimRequest(
+                HttpMethod.Post,
+                $"/api/slice/{jobId}/progress",
+                claimToken,
+                JsonContent.Create(progressReq));
+            HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Progress update for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
@@ -300,14 +336,23 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private async Task TryReportFailureAsync(HttpClient client, Guid jobId, string errorMessage, CancellationToken ct)
+    private async Task TryReportFailureAsync(
+        HttpClient client,
+        Guid jobId,
+        Guid claimToken,
+        string errorMessage,
+        CancellationToken ct)
     {
         try
         {
             string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
-            var failReq = new { errorMessage = truncated };
-
-            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/fail", failReq, ct);
+            var failReq = new FailSliceJobRequest(truncated);
+            using HttpRequestMessage request = CreateClaimRequest(
+                HttpMethod.Post,
+                $"/api/slice/{jobId}/fail",
+                claimToken,
+                JsonContent.Create(failReq));
+            HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Fail report for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
@@ -357,8 +402,13 @@ public abstract class HttpJobPollerService(
         gcodeFileContent.Headers.ContentLength = gcodeStream.Length;
         gcodeContent.Add(gcodeFileContent, "file", Path.GetFileName(gcodeFilePath));
 
+        using HttpRequestMessage uploadRequest = CreateClaimRequest(
+            HttpMethod.Post,
+            $"/api/slice/{job.Id}/artifacts",
+            job.ClaimToken,
+            gcodeContent);
         using HttpResponseMessage uploadResponse =
-            await httpClient.PostAsync($"/api/slice/{job.Id}/artifacts", gcodeContent, ct);
+            await httpClient.SendAsync(uploadRequest, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {
@@ -379,6 +429,20 @@ public abstract class HttpJobPollerService(
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
+    }
+
+    private static HttpRequestMessage CreateClaimRequest(
+        HttpMethod method,
+        string requestUri,
+        Guid claimToken,
+        HttpContent? content = null)
+    {
+        var request = new HttpRequestMessage(method, requestUri)
+        {
+            Content = content,
+        };
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+        return request;
     }
 
     /// <summary>

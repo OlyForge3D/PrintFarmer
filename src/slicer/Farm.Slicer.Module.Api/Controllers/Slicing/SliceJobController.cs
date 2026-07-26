@@ -359,10 +359,15 @@ public partial class SliceJobController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="request">Progress update.</param>
+    /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/progress")]
     [WorkerApiKeySecurity]
-    public async Task<IActionResult> ReportProgressAsync(Guid id, [FromBody] SliceJobProgressUpdateRequest request, CancellationToken ct)
+    public async Task<IActionResult> ReportProgressAsync(
+        Guid id,
+        [FromBody] SliceJobProgressUpdateRequest request,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
         if (worker is null)
@@ -374,6 +379,7 @@ public partial class SliceJobController(
         bool updated = await _jobRepository.TryUpdateProgressForActiveLeaseAsync(
             id,
             worker.Id,
+            claimToken,
             request.ProgressPercent,
             progressMessage,
             ct);
@@ -396,10 +402,15 @@ public partial class SliceJobController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="request">Completion details.</param>
+    /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/complete")]
     [WorkerApiKeySecurity]
-    public async Task<IActionResult> CompleteAsync(Guid id, [FromBody] CompleteSliceJobRequest request, CancellationToken ct)
+    public async Task<IActionResult> CompleteAsync(
+        Guid id,
+        [FromBody] CompleteSliceJobRequest request,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
         if (worker is null)
@@ -407,7 +418,11 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(
+            id,
+            worker.Id,
+            claimToken,
+            ct);
         if (job is null)
         {
             return await GetLeaseFenceFailureAsync(id, ct);
@@ -428,7 +443,10 @@ public partial class SliceJobController(
         foreach (Guid artifactId in artifactIds)
         {
             Artifact? artifact = await _artifactsService.GetAsync(artifactId, ct);
-            if (artifact is null || artifact.JobId != id || artifact.WorkerId != worker.Id)
+            if (artifact is null ||
+                artifact.JobId != id ||
+                artifact.WorkerId != worker.Id ||
+                artifact.ClaimToken != claimToken)
             {
                 return BadRequest(new { error = "One or more artifacts are invalid for this job." });
             }
@@ -441,6 +459,7 @@ public partial class SliceJobController(
         bool completed = await _jobRepository.TryCompleteForActiveLeaseAsync(
             id,
             worker.Id,
+            claimToken,
             resultFileUrl,
             artifactIds,
             request.EstimatedPrintTimeSeconds,
@@ -485,10 +504,15 @@ public partial class SliceJobController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="request">Failure details.</param>
+    /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/fail")]
     [WorkerApiKeySecurity]
-    public async Task<IActionResult> FailAsync(Guid id, [FromBody] FailSliceJobRequest request, CancellationToken ct)
+    public async Task<IActionResult> FailAsync(
+        Guid id,
+        [FromBody] FailSliceJobRequest request,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct)
     {
         _ = request;
         Worker? worker = await GetAuthorizedWorkerAsync();
@@ -500,6 +524,7 @@ public partial class SliceJobController(
         bool failed = await _jobRepository.TryFailForActiveLeaseAsync(
             id,
             worker.Id,
+            claimToken,
             "Slicing worker reported a failure.",
             ct);
         if (!failed)
@@ -530,10 +555,15 @@ public partial class SliceJobController(
     /// </summary>
     /// <param name="id">The job ID.</param>
     /// <param name="request">Lease renewal request.</param>
+    /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/renew-lease")]
     [WorkerApiKeySecurity]
-    public async Task<IActionResult> RenewLeaseAsync(Guid id, [FromBody] RenewLeaseRequest request, CancellationToken ct)
+    public async Task<IActionResult> RenewLeaseAsync(
+        Guid id,
+        [FromBody] RenewLeaseRequest request,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
         if (worker is null)
@@ -544,6 +574,7 @@ public partial class SliceJobController(
         bool renewed = await _jobRepository.RenewLeaseAsync(
             id,
             worker.Id,
+            claimToken,
             request.LeaseDurationSeconds,
             ct);
         if (renewed)
@@ -563,18 +594,26 @@ public partial class SliceJobController(
     /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>
     [HttpGet("{id}/model")]
     [WorkerApiKeySecurity]
-    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, CancellationToken ct) =>
-        DownloadWorkerModelAsync(id, modelIndex: null, ct);
+    public Task<IActionResult> DownloadWorkerModelAsync(
+        Guid id,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: null, claimToken, ct);
 
     /// <summary>Downloads one model from a multi-model job assigned to the authenticated worker.</summary>
     [HttpGet("{id}/models/{modelIndex:int}")]
     [WorkerApiKeySecurity]
-    public Task<IActionResult> DownloadWorkerModelAsync(Guid id, int modelIndex, CancellationToken ct) =>
-        DownloadWorkerModelAsync(id, modelIndex: (int?)modelIndex, ct);
+    public Task<IActionResult> DownloadWorkerModelAsync(
+        Guid id,
+        int modelIndex,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
+        CancellationToken ct) =>
+        DownloadWorkerModelAsync(id, modelIndex: (int?)modelIndex, claimToken, ct);
 
     private async Task<IActionResult> DownloadWorkerModelAsync(
         Guid id,
         int? modelIndex,
+        Guid claimToken,
         CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
@@ -583,7 +622,11 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(
+            id,
+            worker.Id,
+            claimToken,
+            ct);
         if (job is null)
         {
             return await GetLeaseFenceFailureAsync(id, ct);
@@ -613,6 +656,17 @@ public partial class SliceJobController(
         try
         {
             Stream model = await _fileStorage.DownloadFileAsync(modelUrl, ct);
+            SliceJob? authorizedAfterOpen = await _jobRepository.GetByActiveWorkerLeaseAsync(
+                id,
+                worker.Id,
+                claimToken,
+                ct);
+            if (authorizedAfterOpen is null)
+            {
+                await model.DisposeAsync();
+                return await GetLeaseFenceFailureAsync(id, ct);
+            }
+
             return File(model, "application/octet-stream", SanitizeFileName(modelFileName, "model.stl"));
         }
         catch (FileNotFoundException)
@@ -631,6 +685,7 @@ public partial class SliceJobController(
     public async Task<IActionResult> UploadWorkerArtifactAsync(
         Guid id,
         IFormFile file,
+        [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
         CancellationToken ct)
     {
         Worker? worker = await GetAuthorizedWorkerAsync();
@@ -639,7 +694,11 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
-        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(id, worker.Id, ct);
+        SliceJob? job = await _jobRepository.GetByActiveWorkerLeaseAsync(
+            id,
+            worker.Id,
+            claimToken,
+            ct);
         if (job is null)
         {
             return await GetLeaseFenceFailureAsync(id, ct);
@@ -651,6 +710,7 @@ public partial class SliceJobController(
                 file,
                 id,
                 worker.Id,
+                claimToken,
                 "gcode",
                 ct);
             if (artifact is null)
@@ -852,6 +912,8 @@ public partial class SliceJobController(
         return new WorkerSliceJobResponse
         {
             Id = job.Id,
+            ClaimToken = job.ClaimToken
+                ?? throw new InvalidOperationException("A claimed worker job must have a claim token."),
             UserId = job.UserId,
             PrinterId = job.PrinterId,
             Status = job.Status,

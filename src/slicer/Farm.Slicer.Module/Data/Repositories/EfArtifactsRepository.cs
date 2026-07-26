@@ -25,6 +25,7 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     public async Task<bool> TryAddForActiveLeaseAsync(
         Artifact artifact,
         Guid workerId,
+        Guid claimToken,
         CancellationToken ct = default)
     {
         await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
@@ -34,6 +35,7 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
             .Where(job =>
                 job.Id == artifact.JobId &&
                 job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
                 job.Status == SliceJobStatus.Processing &&
                 job.LeaseExpiresAt != null &&
                 job.LeaseExpiresAt > now)
@@ -46,6 +48,7 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
             return false;
         }
 
+        artifact.ClaimToken = claimToken;
         _ = db.Artifacts.Add(artifact);
         _ = await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);

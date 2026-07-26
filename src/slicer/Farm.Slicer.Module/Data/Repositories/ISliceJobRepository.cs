@@ -44,12 +44,17 @@ public interface ISliceJobRepository
     Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default);
 
     /// <summary>Gets a processing job while its unexpired lease is owned by the worker.</summary>
-    Task<SliceJob?> GetByActiveWorkerLeaseAsync(Guid jobId, Guid workerId, CancellationToken ct = default);
+    Task<SliceJob?> GetByActiveWorkerLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        CancellationToken ct = default);
 
     /// <summary>Updates progress only while the worker still owns an unexpired processing lease.</summary>
     Task<bool> TryUpdateProgressForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         int progressPercent,
         string progressMessage,
         CancellationToken ct = default);
@@ -58,6 +63,7 @@ public interface ISliceJobRepository
     Task<bool> TryCompleteForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string resultFileUrl,
         IEnumerable<Guid> artifactIds,
         int? estimatedPrintTimeSeconds = null,
@@ -68,6 +74,7 @@ public interface ISliceJobRepository
     Task<bool> TryFailForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string errorMessage,
         CancellationToken ct = default);
 
@@ -80,8 +87,8 @@ public interface ISliceJobRepository
     /// <summary>Checks whether a job exists with the given correlation ID and checksum.</summary>
     Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default);
 
-    /// <summary>Finds jobs that are stuck (processing but lease expired or long-running).</summary>
-    Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default);
+    /// <summary>Finds processing jobs whose current lease has expired.</summary>
+    Task<IReadOnlyList<SliceJob>> GetExpiredLeaseJobsAsync(int? limit = null, CancellationToken ct = default);
 
     /// <summary>
     /// Renews an active, unexpired lease when it is still owned by the specified worker.
@@ -89,7 +96,17 @@ public interface ISliceJobRepository
     Task<bool> RenewLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         int leaseDurationSeconds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically requeues or fails a job only if the selected claim remains expired.
+    /// </summary>
+    Task<bool> TryRecoverExpiredLeaseAsync(
+        Guid jobId,
+        Guid? expectedClaimToken,
+        int maxRetries,
         CancellationToken ct = default);
 
     /// <summary>Increments retry count and requeues or fails the job.</summary>

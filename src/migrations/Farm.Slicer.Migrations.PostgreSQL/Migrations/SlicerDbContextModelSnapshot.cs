@@ -18,7 +18,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -27,6 +27,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ClaimToken")
                         .HasColumnType("uuid");
 
                     b.Property<string>("ContentType")
@@ -598,6 +601,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Checksum")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("ClaimedAt")
                         .HasColumnType("timestamp with time zone");

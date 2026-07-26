@@ -36,21 +36,23 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         Guid? workerId,
         string kind,
         CancellationToken ct) =>
-        await UploadCoreAsync(file, jobId, workerId, kind, requireActiveLease: false, ct)
+        await UploadCoreAsync(file, jobId, workerId, claimToken: null, kind, requireActiveLease: false, ct)
         ?? throw new InvalidOperationException("The artifact could not be persisted.");
 
     public Task<Artifact?> UploadForActiveLeaseAsync(
         IFormFile file,
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string kind,
         CancellationToken ct) =>
-        UploadCoreAsync(file, jobId, workerId, kind, requireActiveLease: true, ct);
+        UploadCoreAsync(file, jobId, workerId, claimToken, kind, requireActiveLease: true, ct);
 
     private async Task<Artifact?> UploadCoreAsync(
         IFormFile file,
         Guid jobId,
         Guid? workerId,
+        Guid? claimToken,
         string kind,
         bool requireActiveLease,
         CancellationToken ct)
@@ -94,6 +96,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             Id = artifactId,
             JobId = jobId,
             WorkerId = workerId,
+            ClaimToken = claimToken,
             Kind = kind,
             FileName = sanitized,
             RelativePath = relativePath,
@@ -116,6 +119,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             persisted = await _artifactsRepo.TryAddForActiveLeaseAsync(
                 artifact,
                 activeWorkerId,
+                claimToken ?? Guid.Empty,
                 ct);
         }
         else

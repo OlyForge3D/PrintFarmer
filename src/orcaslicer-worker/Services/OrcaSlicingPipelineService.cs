@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
@@ -50,29 +51,29 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             List<string> modelFilePaths;
             if (job.ModelFileUrls is { Count: > 0 })
             {
-                await _progressReporter.ReportProgressAsync(job.Id, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
-                modelFilePaths = await FetchMultipleModelsAsync(job.ModelFileUrls, jobWorkDir, cancellationToken);
+                await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
+                modelFilePaths = await FetchMultipleModelsAsync(job.ModelFileUrls, job.ClaimToken, jobWorkDir, cancellationToken);
                 job.InputFileSizeBytes = modelFilePaths.Sum(p => new FileInfo(p).Length);
                 _logger.LogInformation("Downloaded {Count} model files for job {JobId}", modelFilePaths.Count, job.Id);
             }
             else
             {
-                await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
+                await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 10, "Downloading STL file", cancellationToken);
                 string singlePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
                 modelFilePaths = [singlePath];
             }
 
-            await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 30, "Running OrcaSlicer", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 20, "Preparing slicer configuration", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 30, "Running OrcaSlicer", cancellationToken);
             string gcodeFilePath = await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
 
             // Rename gcode to descriptive filename: {model}_{printer}_{material}_{time}.gcode
             gcodeFilePath = RenameGcodeFile(gcodeFilePath, job, metadata);
 
-            await _progressReporter.ReportProgressAsync(job.Id, 90, "Preparing G-code artifact", cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 90, "Preparing G-code artifact", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 100, "Slicing completed", cancellationToken);
             SlicingResult result = new SlicingResult
             {
                 ResultFileUrl = new UriBuilder
@@ -127,6 +128,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         using HttpRequestMessage request = new(HttpMethod.Get, job.ModelFileUrl);
         request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
         request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, job.ClaimToken.ToString());
         HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         _ = response.EnsureSuccessStatusCode();
         string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
@@ -147,7 +149,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return string.IsNullOrWhiteSpace(sanitized) ? "model.stl" : sanitized;
     }
 
-    private async Task<List<string>> FetchMultipleModelsAsync(List<string> modelUrls, string workDir, CancellationToken cancellationToken)
+    private async Task<List<string>> FetchMultipleModelsAsync(
+        List<string> modelUrls,
+        Guid claimToken,
+        string workDir,
+        CancellationToken cancellationToken)
     {
         WorkerState workerState = _workerState.GetWorkerState();
         Guid? serviceId = workerState.RegisteredServiceId;
@@ -191,6 +197,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             using HttpRequestMessage request = new(HttpMethod.Get, url);
             request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
             request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             _ = response.EnsureSuccessStatusCode();
             await using FileStream fileStream = File.Create(destPath);
@@ -389,8 +396,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _ = process.Start();
 #pragma warning disable CA2025 // progressTask references process but completes before disposal (awaited explicitly)
         Task progressTask = pipeCreated
-            ? MonitorSlicingProgressViaPipeAsync(job.Id, pipePath, process, cancellationToken)
-            : MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+            ? MonitorSlicingProgressViaPipeAsync(job.Id, job.ClaimToken, pipePath, process, cancellationToken)
+            : MonitorSlicingProgressAsync(job.Id, job.ClaimToken, process, cancellationToken);
 #pragma warning restore CA2025
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -532,6 +539,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task MonitorSlicingProgressViaPipeAsync(
         Guid jobId,
+        Guid claimToken,
         string pipePath,
         Process process,
         CancellationToken cancellationToken)
@@ -555,13 +563,13 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Pipe open timed out for job {JobId}, falling back to time-based progress", jobId);
-                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
                 return;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to open progress pipe for job {JobId}, falling back to time-based progress", jobId);
-                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
                 return;
             }
 
@@ -599,7 +607,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                             // Map OrcaSlicer's 0-100 to our 30-70 range
                             int mapped = 30 + (int)(totalPercent * 0.4);
                             mapped = Math.Clamp(mapped, 30, 70);
-                            await _progressReporter.ReportProgressAsync(jobId, mapped, message, cancellationToken);
+                            await _progressReporter.ReportProgressAsync(jobId, claimToken, mapped, message, cancellationToken);
                         }
                     }
                     catch (JsonException)
@@ -618,7 +626,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
+    private async Task MonitorSlicingProgressAsync(
+        Guid jobId,
+        Guid claimToken,
+        Process process,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -632,12 +644,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 if (elapsed.TotalSeconds > 10 && currentProgress < 70)
                 {
                     currentProgress = Math.Min(70, 30 + (int)(elapsed.TotalSeconds * 2));
-                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    await _progressReporter.ReportProgressAsync(jobId, claimToken, currentProgress, "Slicing in progress...", cancellationToken);
                     lastProgressReport = DateTime.UtcNow;
                 }
                 else if (DateTime.UtcNow - lastProgressReport > TimeSpan.FromSeconds(10))
                 {
-                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    await _progressReporter.ReportProgressAsync(jobId, claimToken, currentProgress, "Slicing in progress...", cancellationToken);
                     lastProgressReport = DateTime.UtcNow;
                 }
             }

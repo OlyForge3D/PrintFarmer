@@ -23,6 +23,7 @@ public interface IArtifactsService
         IFormFile file,
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string kind,
         CancellationToken ct);
 

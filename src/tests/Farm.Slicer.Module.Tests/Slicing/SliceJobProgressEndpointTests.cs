@@ -61,6 +61,11 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         };
         HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
+        WorkerSliceJobResponse? claimed =
+            await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        _client.DefaultRequestHeaders.Add(
+            WorkerClaimHeaders.ClaimToken,
+            claimed!.ClaimToken.ToString());
 
         // Progress update
         SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest

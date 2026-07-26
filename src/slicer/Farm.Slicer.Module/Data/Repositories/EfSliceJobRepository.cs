@@ -221,6 +221,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<SliceJob?> GetByActiveWorkerLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         CancellationToken ct = default)
     {
         DateTime now = DateTime.UtcNow;
@@ -230,6 +231,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                 job =>
                     job.Id == jobId &&
                     job.WorkerId == workerId &&
+                    job.ClaimToken == claimToken &&
                     job.Status == SliceJobStatus.Processing &&
                     job.LeaseExpiresAt != null &&
                     job.LeaseExpiresAt > now,
@@ -240,6 +242,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<bool> TryUpdateProgressForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         int progressPercent,
         string progressMessage,
         CancellationToken ct = default)
@@ -249,6 +252,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             .Where(job =>
                 job.Id == jobId &&
                 job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
                 job.Status == SliceJobStatus.Processing &&
                 job.LeaseExpiresAt != null &&
                 job.LeaseExpiresAt > now)
@@ -265,6 +269,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<bool> TryCompleteForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string resultFileUrl,
         IEnumerable<Guid> artifactIds,
         int? estimatedPrintTimeSeconds = null,
@@ -272,6 +277,20 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         CancellationToken ct = default)
     {
         Guid[] ids = artifactIds?.Distinct().ToArray() ?? [];
+        int validArtifactCount = ids.Length == 0
+            ? 0
+            : await _db.Artifacts.CountAsync(
+                artifact =>
+                    ids.Contains(artifact.Id) &&
+                    artifact.JobId == jobId &&
+                    artifact.WorkerId == workerId &&
+                    artifact.ClaimToken == claimToken,
+                ct);
+        if (validArtifactCount != ids.Length)
+        {
+            return false;
+        }
+
         long totalBytes = ids.Length == 0
             ? 0
             : await _db.Artifacts
@@ -283,6 +302,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             .Where(job =>
                 job.Id == jobId &&
                 job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
                 job.Status == SliceJobStatus.Processing &&
                 job.LeaseExpiresAt != null &&
                 job.LeaseExpiresAt > now)
@@ -307,6 +327,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<bool> TryFailForActiveLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         string errorMessage,
         CancellationToken ct = default)
     {
@@ -315,6 +336,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             .Where(job =>
                 job.Id == jobId &&
                 job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
                 job.Status == SliceJobStatus.Processing &&
                 job.LeaseExpiresAt != null &&
                 job.LeaseExpiresAt > now)
@@ -336,6 +358,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         {
             DateTime now = DateTime.UtcNow;
             DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+            Guid claimToken = Guid.NewGuid();
             IQueryable<SliceJob> compatible = _db.SliceJobs
                 .AsNoTracking()
                 .Where(j => j.Status == SliceJobStatus.Queued ||
@@ -379,6 +402,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                         .SetProperty(job => job.Status, SliceJobStatus.Processing)
                         .SetProperty(job => job.WorkerId, workerId)
                         .SetProperty(job => job.ClaimedAt, now)
+                        .SetProperty(job => job.ClaimToken, claimToken)
                         .SetProperty(job => job.LeaseExpiresAt, leaseExpiration)
                         .SetProperty(job => job.StartedAt, job => job.StartedAt ?? now)
                         .SetProperty(job => job.UpdatedAt, now),
@@ -411,14 +435,17 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
-    public async Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default)
+    public async Task<IReadOnlyList<SliceJob>> GetExpiredLeaseJobsAsync(
+        int? limit = null,
+        CancellationToken ct = default)
     {
-        DateTime threshold = DateTime.UtcNow.AddSeconds(-maxAgeSeconds);
+        DateTime now = DateTime.UtcNow;
         IQueryable<SliceJob> query = _db.SliceJobs
+            .AsNoTracking()
             .Where(j => j.Status == SliceJobStatus.Processing &&
-                        ((j.LeaseExpiresAt != null && j.LeaseExpiresAt < DateTime.UtcNow) ||
-                         (j.StartedAt != null && j.StartedAt < threshold)))
-            .OrderBy(j => j.StartedAt);
+                        j.LeaseExpiresAt != null &&
+                        j.LeaseExpiresAt < now)
+            .OrderBy(j => j.LeaseExpiresAt);
 
         if (limit.HasValue)
         {
@@ -432,6 +459,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<bool> RenewLeaseAsync(
         Guid jobId,
         Guid workerId,
+        Guid claimToken,
         int leaseDurationSeconds,
         CancellationToken ct = default)
     {
@@ -442,12 +470,56 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             .Where(job =>
                 job.Id == jobId &&
                 job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
                 job.Status == SliceJobStatus.Processing &&
                 job.LeaseExpiresAt != null &&
                 job.LeaseExpiresAt > now)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(job => job.LeaseExpiresAt, leaseExpiresAt)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        return updated == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryRecoverExpiredLeaseAsync(
+        Guid jobId,
+        Guid? expectedClaimToken,
+        int maxRetries,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        int updated = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId &&
+                job.ClaimToken == expectedClaimToken &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt < now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.RetryCount, job => job.RetryCount + 1)
+                    .SetProperty(job => job.WorkerId, (Guid?)null)
+                    .SetProperty(job => job.ClaimedAt, (DateTime?)null)
+                    .SetProperty(job => job.ClaimToken, (Guid?)null)
+                    .SetProperty(job => job.LeaseExpiresAt, (DateTime?)null)
+                    .SetProperty(
+                        job => job.Status,
+                        job => job.RetryCount + 1 > maxRetries
+                            ? SliceJobStatus.Failed
+                            : SliceJobStatus.Queued)
+                    .SetProperty(
+                        job => job.CompletedAt,
+                        job => job.RetryCount + 1 > maxRetries ? now : null)
+                    .SetProperty(
+                        job => job.ErrorMessage,
+                        job => job.RetryCount + 1 > maxRetries
+                            ? $"Job exceeded max retry attempts ({maxRetries}) and was marked Failed."
+                            : null)
+                    .SetProperty(
+                        job => job.QueuedAt,
+                        job => job.RetryCount + 1 > maxRetries ? job.QueuedAt : now)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
         return updated == 1;

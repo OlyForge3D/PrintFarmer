@@ -127,6 +127,7 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         DistributedSlicingJob dsj = new DistributedSlicingJob
         {
             Id = sj.Id,
+            ClaimToken = sj.ClaimToken ?? Guid.Empty,
             UserId = sj.UserId,
             CreatedAt = sj.QueuedAt,
             Priority = (SlicingJobPriority)sj.Priority,

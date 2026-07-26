@@ -75,6 +75,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         };
 
         // Create job in Processing state
+        Guid claimToken = Guid.NewGuid();
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
@@ -86,7 +87,8 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl",
-            WorkerId = worker.Id
+            WorkerId = worker.Id,
+            ClaimToken = claimToken,
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();
@@ -94,7 +96,13 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         // Upload primary gcode artifact
         byte[] bytes = Encoding.UTF8.GetBytes("; gcode content");
         TestFormFile formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
-        Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, worker.Id, "gcode", default);
+        Artifact primary = (await artifactsService.UploadForActiveLeaseAsync(
+            formFile,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "gcode",
+            default))!;
 
         // Complete with log text
         CompleteSliceJobRequest request = new CompleteSliceJobRequest
@@ -102,7 +110,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             PrimaryArtifactId = primary.Id,
             LogText = "Layer 1 OK\nLayer 2 OK"
         };
-        IActionResult result = await controller.CompleteAsync(job.Id, request, default);
+        IActionResult result = await controller.CompleteAsync(job.Id, request, claimToken, default);
 
         // Validate response
         OkObjectResult? ok = result as OkObjectResult;

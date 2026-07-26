@@ -15,6 +15,7 @@ public class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
         _ = builder.HasKey(a => a.Id);
 
         _ = builder.Property(a => a.JobId).IsRequired();
+        _ = builder.Property(a => a.ClaimToken);
         _ = builder.Property(a => a.Kind).IsRequired().HasMaxLength(64);
         _ = builder.Property(a => a.FileName).IsRequired().HasMaxLength(256);
         _ = builder.Property(a => a.RelativePath).IsRequired().HasMaxLength(1024);

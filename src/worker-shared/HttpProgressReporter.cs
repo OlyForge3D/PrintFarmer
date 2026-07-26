@@ -36,7 +36,12 @@ public class HttpProgressReporter : IProgressReporter
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
-    public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
+    public async Task ReportProgressAsync(
+        Guid jobId,
+        Guid claimToken,
+        int progress,
+        string message,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -61,6 +66,7 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
             request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -83,7 +89,11 @@ public class HttpProgressReporter : IProgressReporter
             job.Id);
     }
 
-    public async Task ReportFailureAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default)
+    public async Task ReportFailureAsync(
+        Guid jobId,
+        Guid claimToken,
+        string errorMessage,
+        CancellationToken cancellationToken = default)
     {
         _ = errorMessage;
         try
@@ -104,6 +114,7 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
             request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
