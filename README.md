@@ -138,7 +138,6 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 - **[API Reference](./docs/API.md)** - REST endpoints and SignalR events
 - **[Design System](./docs/DESIGN_SYSTEM.md)** - UI component library, design tokens, theming
 - **[UI Documentation](./docs/UI.md)** - Frontend components and pages
-- **[Database Guide](./docs/DATABASE.md)** - Schema, migrations, multi-provider support
 
 **Operations:**
 - **[Deployment Guide](./docs/DEPLOYMENT.md)** - Docker, environments, configuration
@@ -147,7 +146,6 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 - **[Troubleshooting Guide](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 **Quick reference:**
-- **[Quick Reference](./docs/QUICK_REFERENCE.md)** - Commands, common tasks
 - **[Documentation Index](./docs/INDEX.md)** - Complete documentation catalog
 
 ## 💡 Key Concepts
