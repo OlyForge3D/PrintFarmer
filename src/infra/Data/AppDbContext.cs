@@ -297,6 +297,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     /// </summary>
     public DbSet<OutboxSequenceState> OutboxSequenceStates => Set<OutboxSequenceState>();
 
+    /// <summary>
+    /// Durable actor/resource/operation/outcome audit rows for safety-sensitive queue and
+    /// dispatch operations. Written in the same transaction as the operation they record.
+    /// </summary>
+    public DbSet<QueueOperationAudit> QueueOperationAudits => Set<QueueOperationAudit>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -452,6 +458,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasIndex(o => o.Sequence)
             .IsUnique()
             .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
+        // Audit lookup patterns: by resource, by printer, and chronologically.
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => new { a.ResourceType, a.ResourceId })
+            .HasDatabaseName("IX_QueueOperationAudits_Resource");
+
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => new { a.PrinterId, a.OccurredAtUtc })
+            .HasDatabaseName("IX_QueueOperationAudits_Printer_OccurredAt");
+
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => a.OccurredAtUtc)
+            .HasDatabaseName("IX_QueueOperationAudits_OccurredAt");
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -493,6 +512,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     /// fields on <see cref="PrintJob"/> after creation. These fields are stamped once at
     /// job creation time and must never change; changing them would invalidate the
     /// canonical idempotency hash and break replay semantics.
+    ///
+    /// The guard keys off the ORIGINAL (database) <see cref="PrintJob.JobKind"/>, never the
+    /// current value: flipping a calibration job to <c>Standard</c> in the same save must not
+    /// disarm the guard. <see cref="PrintJob.JobKind"/> itself is rejected for any job whose
+    /// original kind was set, so a Standard job can never be laundered into a calibration job
+    /// (or the reverse) after creation.
     /// </summary>
     private void EnsureCalibrationJobFieldsAreImmutable()
     {
@@ -503,16 +528,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 continue;
             }
 
-            // Only calibration jobs have the immutability constraint.
-            // Standard jobs (JobKind == null or Standard) are not subject to this guard.
-            object? rawKind = entry.CurrentValues[nameof(PrintJob.JobKind)];
-            if (rawKind is not JobKind.FilamentCalibration)
+            // JobKind itself is immutable for every persisted job whose kind is already set.
+            // Rejecting the mutation outright closes the "flip to Standard in the same save"
+            // bypass. Legacy rows with a NULL kind may still be backfilled exactly once.
+            object? originalKind = entry.OriginalValues[nameof(PrintJob.JobKind)];
+            if (originalKind is not null)
+            {
+                CheckImmutableField(entry, nameof(PrintJob.JobKind));
+            }
+
+            // Only jobs that were ORIGINALLY calibration jobs carry the provenance constraint.
+            if (originalKind is not JobKind.FilamentCalibration)
             {
                 continue;
             }
 
             // The following fields are immutable once a calibration PrintJob is created.
-            CheckImmutableField(entry, nameof(PrintJob.JobKind));
             CheckImmutableField(entry, nameof(PrintJob.IdempotencyScope));
             CheckImmutableField(entry, nameof(PrintJob.IdempotencyKey));
             CheckImmutableField(entry, nameof(PrintJob.IdempotencyRequestSha256));
@@ -521,6 +552,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             CheckImmutableField(entry, nameof(PrintJob.CalibrationOrchestrationId));
             CheckImmutableField(entry, nameof(PrintJob.CalibrationConfigSnapshotId));
             CheckImmutableField(entry, nameof(PrintJob.SourceArtifactId));
+            CheckImmutableField(entry, nameof(PrintJob.SliceJobId));
             CheckImmutableField(entry, nameof(PrintJob.CreatorSubject));
             CheckImmutableField(entry, nameof(PrintJob.RequiredFirmwareFamily));
             CheckImmutableField(entry, nameof(PrintJob.RequiredGcodeDialect));

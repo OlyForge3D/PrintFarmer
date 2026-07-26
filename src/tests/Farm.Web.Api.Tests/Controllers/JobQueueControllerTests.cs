@@ -458,7 +458,7 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
@@ -475,7 +475,7 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
 
         // Act
@@ -493,7 +493,7 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test exception"));
 
         // Act

@@ -74,6 +74,26 @@ public sealed class QueueDispatchOutbox
     public long? PrinterConfigRevision { get; set; }
 
     /// <summary>
+    /// Snapshot of <see cref="PrinterDispatchState.RowVersion"/> at write time so consumers can
+    /// detect dispatch-state drift without re-reading the row.
+    /// </summary>
+    public byte[]? DispatchStateRowVersion { get; set; }
+
+    /// <summary>Dispatch attempt this event belongs to, when the event was produced by a claim.</summary>
+    public Guid? AttemptId { get; set; }
+
+    /// <summary>
+    /// Bed-clear acknowledgement state at write time
+    /// (<c>None</c>, <c>Acknowledged</c>, <c>Consumed</c>, <c>Invalidated</c>).
+    /// </summary>
+    [MaxLength(32)]
+    public string? BedClearState { get; set; }
+
+    /// <summary>Typed failure code carried by terminal/failure events (never free-form text).</summary>
+    [MaxLength(128)]
+    public string? FailureCode { get; set; }
+
+    /// <summary>
     /// Fully-qualified event type name (e.g., <c>PrintFarmer.Queue.CalibrationJobQueued.v1</c>).
     /// </summary>
     [MaxLength(256)]
@@ -123,8 +143,8 @@ public sealed class QueueDispatchAttempt
     /// <summary>Unique attempt identity.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>The print job this attempt belongs to.</summary>
-    public Guid PrintJobId { get; set; }
+    /// <summary>The print job this attempt belongs to. Null for ad-hoc (non-queue) starts.</summary>
+    public Guid? PrintJobId { get; set; }
 
     /// <summary>Navigation property back to the print job.</summary>
     public PrintJob? PrintJob { get; set; }
@@ -182,6 +202,21 @@ public sealed class QueueDispatchAttempt
     /// </summary>
     [MaxLength(512)]
     public string? BackendJobId { get; set; }
+
+    /// <summary>
+    /// Stable identity of the command sent to the backend for this attempt.
+    /// Written BEFORE any network I/O so reconciliation can correlate the attempt with
+    /// backend state even when the response was never observed.
+    /// </summary>
+    [MaxLength(128)]
+    public string? BackendCommandId { get; set; }
+
+    /// <summary>
+    /// File name presented to the printer backend for this attempt.
+    /// Written BEFORE the upload so an unmatched printing backend can be recognised.
+    /// </summary>
+    [MaxLength(512)]
+    public string? BackendFileName { get; set; }
 
     /// <summary>PrintJob.RowVersion at the time the claim was committed.</summary>
     public byte[]? JobRowVersionAtClaim { get; set; }

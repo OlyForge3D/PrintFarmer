@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -33,16 +34,31 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     private readonly Mock<IArtifactsService> _artifactsMock = new();
     private readonly Mock<IPrintersService> _printersMock = new();
     private readonly Mock<ILogger<SlicePrintBridgeController>> _loggerMock = new();
+    private readonly Mock<IDispatchClaimService> _dispatchClaimMock = new();
     private readonly SlicePrintBridgeController _controller;
     private readonly string _tempDir;
 
     public SlicePrintBridgeControllerTests()
     {
+        // The slice→print bridge is a START PATH and must acquire the shared dispatch
+        // claim before touching an adapter (issue #900, defect 5). The stub grants the
+        // claim so the test exercises the adapter orchestration that follows it.
+        _dispatchClaimMock
+            .Setup(s => s.AcquireAdHocClaimAsync(
+                It.IsAny<AdHocDispatchClaimRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => DispatchClaimResult.Ok(new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = Guid.NewGuid(),
+                BackendCommandId = "test-command",
+            }));
+
         _controller = new SlicePrintBridgeController(
             _printersMock.Object,
             _loggerMock.Object,
             _jobRepoMock.Object,
-            _artifactsMock.Object);
+            _artifactsMock.Object,
+            dispatchClaimService: _dispatchClaimMock.Object);
 
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, TestUserId.ToString()) };
         var identity = new ClaimsIdentity(claims, "TestAuth");

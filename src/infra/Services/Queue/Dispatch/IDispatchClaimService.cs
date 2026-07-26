@@ -9,19 +9,36 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// <param name="Attempt">The persisted attempt record (populated on success).</param>
 /// <param name="ErrorCode">Typed error code when <see cref="Success"/> is false.</param>
 /// <param name="ErrorDetail">Human-readable description of the failure (no credentials or paths).</param>
+/// <param name="IsPreconditionFailure">
+/// True when the failure was caused by a caller-supplied revision precondition
+/// (<c>If-Match</c>) that no longer matches — maps to HTTP 412 rather than 409.
+/// </param>
 public sealed record DispatchClaimResult(
     bool Success,
     QueueDispatchAttempt? Attempt,
     string? ErrorCode,
-    string? ErrorDetail)
+    string? ErrorDetail,
+    bool IsPreconditionFailure = false)
 {
     /// <summary>Creates a successful claim result.</summary>
+    /// <param name="attempt">The persisted attempt row.</param>
+    /// <returns>A successful result.</returns>
     public static DispatchClaimResult Ok(QueueDispatchAttempt attempt) =>
         new(true, attempt, null, null);
 
     /// <summary>Creates a failed claim result.</summary>
+    /// <param name="errorCode">Typed error code.</param>
+    /// <param name="errorDetail">Human-readable detail.</param>
+    /// <returns>A failed result.</returns>
     public static DispatchClaimResult Fail(string errorCode, string errorDetail) =>
         new(false, null, errorCode, errorDetail);
+
+    /// <summary>Creates a failed claim result caused by a stale caller-supplied revision.</summary>
+    /// <param name="errorCode">Typed error code.</param>
+    /// <param name="errorDetail">Human-readable detail.</param>
+    /// <returns>A failed result flagged as a precondition failure.</returns>
+    public static DispatchClaimResult PreconditionFailed(string errorCode, string errorDetail) =>
+        new(false, null, errorCode, errorDetail, IsPreconditionFailure: true);
 }
 
 /// <summary>
@@ -52,6 +69,21 @@ public sealed record DispatchClaimRequest(
     byte[]? ExpectedDispatchStateRowVersion);
 
 /// <summary>
+/// Parameters for an ad-hoc (non-queue) printer start, such as the slice→print bridge or
+/// the printer file-start endpoint. Ad-hoc starts must still pass the shared printer gates
+/// and be recorded as durable dispatch attempts so a printer can never be started twice.
+/// </summary>
+/// <param name="PrinterId">Printer to claim.</param>
+/// <param name="ActorSubject">Subject of the operator initiating the start.</param>
+/// <param name="StartPathKind">Classification of the start path (e.g., SliceBridge, PrinterFile).</param>
+/// <param name="BackendFileName">File name that will be presented to the backend.</param>
+public sealed record AdHocDispatchClaimRequest(
+    Guid PrinterId,
+    string ActorSubject,
+    string StartPathKind,
+    string BackendFileName);
+
+/// <summary>
 /// Provides the single atomic cross-process dispatch claim used by every start path.
 /// No start path sets <c>Status = Starting</c> or calls an upload/start adapter
 /// without first acquiring a claim through this service.
@@ -61,13 +93,25 @@ public interface IDispatchClaimService
     /// <summary>
     /// Atomically verifies pre-conditions and, on success, writes
     /// <c>PrintJob.Status = Starting</c>, the dispatch attempt row,
-    /// the printer active-job reference, and the outbox event — all
-    /// inside one database transaction that closes before any network I/O.
+    /// the printer active-job reference, the job state-history row, the audit row,
+    /// and the outbox event — all inside one database transaction that closes before
+    /// any network I/O.
     /// </summary>
     /// <param name="request">Claim request parameters.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Claim result indicating success or a typed failure reason.</returns>
     Task<DispatchClaimResult> AcquireClaimAsync(DispatchClaimRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically claims a printer for an ad-hoc start that has no queue job.
+    /// Applies the same printer gates (enabled, available, not in maintenance, no active
+    /// lease, telemetry not printing) and writes a durable attempt plus audit row before
+    /// the caller performs any network I/O.
+    /// </summary>
+    /// <param name="request">Ad-hoc claim request parameters.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Claim result indicating success or a typed failure reason.</returns>
+    Task<DispatchClaimResult> AcquireAdHocClaimAsync(AdHocDispatchClaimRequest request, CancellationToken ct = default);
 
     /// <summary>
     /// Releases an active claim after a known pre-start failure, clearing the

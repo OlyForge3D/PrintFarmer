@@ -35,9 +35,7 @@ public class BatchDispatchService(
         {
             jobs = await db.PrintJobs
                 .Where(j => j.Status == PrintJobStatus.Queued && j.AssignedPrinterId == null)
-                .OrderByDescending(j => j.Priority)
-                .ThenBy(j => j.QueuePosition)
-                .ThenBy(j => j.QueuedAt)
+                .OrderByPriorityDescending()
                 .ToListAsync(ct);
         }
         else if (request.JobIds is { Count: > 0 })
@@ -46,9 +44,7 @@ public class BatchDispatchService(
                 .Where(j => request.JobIds.Contains(j.Id)
                     && j.Status == PrintJobStatus.Queued
                     && j.AssignedPrinterId == null)
-                .OrderByDescending(j => j.Priority)
-                .ThenBy(j => j.QueuePosition)
-                .ThenBy(j => j.QueuedAt)
+                .OrderByPriorityDescending()
                 .ToListAsync(ct);
         }
         else

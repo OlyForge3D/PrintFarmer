@@ -451,7 +451,7 @@ public class CalibrationQueueDispatchTests
     {
         AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = new();
-        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "calibration.gcode", FileName = "calibration.gcode" };
+        GcodeFile gcode = CreatePromotedCalibrationArtifact();
         Guid printerId = Guid.NewGuid();
 
         dataService
@@ -479,7 +479,7 @@ public class CalibrationQueueDispatchTests
     {
         AppDbContext db = CreateDbContext();
         Mock<IQueueDataService> dataService = new();
-        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "calibration.gcode", FileName = "calibration.gcode" };
+        GcodeFile gcode = CreatePromotedCalibrationArtifact();
 
         dataService
             .Setup(s => s.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
@@ -505,7 +505,11 @@ public class CalibrationQueueDispatchTests
     {
         AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
-        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "dispatch.gcode", FileName = "dispatch.gcode", FileHash = new string('a', 64) };
+        GcodeFile gcode = CreatePromotedCalibrationArtifact();
+        gcode.Name = "dispatch.gcode";
+        gcode.FileName = "dispatch.gcode";
+        gcode.FileHash = new string('a', 64);
+        gcode.ContentSha256 = new string('a', 64);
         PrintJob job = new()
         {
             Id = Guid.NewGuid(),
@@ -525,15 +529,17 @@ public class CalibrationQueueDispatchTests
             RequiredSlicerVersion = "2.3.0",
             PinnedPrinterConfigRevision = 1,
             // Lineage and hash fields — required by the authoritative claim policy.
-            CalibrationProjectId = Guid.NewGuid(),
-            CalibrationAttemptId = Guid.NewGuid(),
             CalibrationConfigSnapshotId = Guid.NewGuid(),
-            CalibrationOrchestrationId = Guid.NewGuid(),
-            GcodeContentSha256 = new string('a', 64), // Matches gcode.FileHash
-            SpecificationSha256 = new string('b', 64),
-            MachineProfileSha256 = new string('c', 64),
-            ProcessProfileSha256 = new string('d', 64),
-            FilamentProfileSha256 = new string('e', 64),
+            GcodeContentSha256 = new string('a', 64), // Matches gcode.ContentSha256
+            SpecificationSha256 = gcode.SpecificationSha256,
+            MachineProfileSha256 = gcode.MachineProfileSha256,
+            ProcessProfileSha256 = gcode.ProcessProfileSha256,
+            FilamentProfileSha256 = gcode.FilamentProfileSha256,
+            CalibrationProjectId = gcode.CalibrationProjectId,
+            CalibrationAttemptId = gcode.CalibrationAttemptId,
+            CalibrationOrchestrationId = gcode.CalibrationOrchestrationId,
+            SpoolmanSpoolId = 4242,
+            RequiredMaterialType = "PLA",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,
@@ -559,6 +565,8 @@ public class CalibrationQueueDispatchTests
             ConfigurationRevision = 1,
             ManufacturerId = Guid.NewGuid(),
             ModelId = Guid.NewGuid(),
+            CurrentSpoolId = 4242,
+            CurrentMaterial = "PLA",
         };
         db.Printers.Add(claimPrinter);
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
@@ -596,11 +604,47 @@ public class CalibrationQueueDispatchTests
         Guid printerId = Guid.NewGuid();
         Guid gcodeId = Guid.NewGuid();
 
+        Guid calibrationProjectId = Guid.NewGuid();
+        Guid calibrationAttemptId = Guid.NewGuid();
+        Guid calibrationOrchestrationId = Guid.NewGuid();
+
         db.GcodeFiles.Add(new GcodeFile
         {
             Id = gcodeId,
             Name = "calibration.gcode",
             FileName = "calibration.gcode",
+            FileHash = new string('a', 64),
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('a', 64),
+            CalibrationProjectId = calibrationProjectId,
+            CalibrationAttemptId = calibrationAttemptId,
+            CalibrationOrchestrationId = calibrationOrchestrationId,
+            CalibrationManifestSha256 = new string('9', 64),
+            SpecificationSha256 = new string('b', 64),
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
+        });
+
+        db.Printers.Add(new Printer
+        {
+            Id = printerId,
+            Name = "Ack Printer",
+            ServerUrl = "http://ack-test",
+            IsEnabled = true,
+            IsAvailable = true,
+            InMaintenance = false,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            CalibrationSlicerEngine = "OrcaSlicer",
+            CalibrationSlicerDistribution = "upstream",
+            CalibrationSlicerVersion = "2.3.0",
+            ConfigurationRevision = 1,
+            ManufacturerId = Guid.NewGuid(),
+            ModelId = Guid.NewGuid(),
+            CurrentSpoolId = 4242,
+            CurrentMaterial = "PLA",
         });
 
         PrintJob job = new()
@@ -611,6 +655,23 @@ public class CalibrationQueueDispatchTests
             AssignedPrinterId = printerId,
             JobKind = JobKind.FilamentCalibration,
             Status = PrintJobStatus.Assigned,
+            RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
+            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
+            RequiredSlicerEngine = "OrcaSlicer",
+            RequiredSlicerDistribution = "upstream",
+            RequiredSlicerVersion = "2.3.0",
+            PinnedPrinterConfigRevision = 1,
+            GcodeContentSha256 = new string('a', 64),
+            SpoolmanSpoolId = 4242,
+            RequiredMaterialType = "PLA",
+            CalibrationProjectId = calibrationProjectId,
+            CalibrationAttemptId = calibrationAttemptId,
+            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationOrchestrationId = calibrationOrchestrationId,
+            SpecificationSha256 = new string('b', 64),
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,
@@ -624,14 +685,15 @@ public class CalibrationQueueDispatchTests
         PrinterDispatchState dispatchState = await db.PrinterDispatchStates.AsNoTracking()
             .SingleAsync(s => s.PrinterId == printerId);
 
-        BedClearAcknowledgementService sut = CreateBedClearService(db);
+        BedClearAcknowledgementService sut = CreateBedClearService(
+            db, DispatchTestDoubles.OnlineIdleReader(printerId));
         AcknowledgeBedClearRequest request = new(
             job.Id,
             printerId,
             "operator-1",
             "ack-key-1",
             dispatchState.RowVersion,
-            null);
+            ExpectedPrinterConfigRevision: 1);
 
         AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
 
@@ -739,15 +801,16 @@ public class CalibrationQueueDispatchTests
     }
 
     /// <summary>Creates a BedClearAcknowledgementService backed by an in-memory context.</summary>
-    private static BedClearAcknowledgementService CreateBedClearService(AppDbContext? db = null)
+    private static BedClearAcknowledgementService CreateBedClearService(AppDbContext? db = null, IPrinterStatusSnapshotReader? statusReader = null)
     {
         db ??= CreateDbContext();
+        statusReader ??= DispatchTestDoubles.OnlineIdleReader(Guid.Empty);
         // Use a mock allocator for unit tests that don't need real DB sequence generation.
         Mock<IDbOutboxSequenceAllocator> allocMock = new();
         long seq = 0;
         allocMock.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Interlocked.Increment(ref seq));
-        return new BedClearAcknowledgementService(db, allocMock.Object, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        return new BedClearAcknowledgementService(db, allocMock.Object, statusReader, Mock.Of<ILogger<BedClearAcknowledgementService>>());
     }
 
     private static AppDbContext CreateDbContext()
@@ -757,6 +820,35 @@ public class CalibrationQueueDispatchTests
             .Options;
         return new AppDbContext(options);
     }
+
+    /// <summary>
+    /// Builds a promoted, immutable calibration artifact — the only kind of artifact the
+    /// server will classify as a calibration job (issue #900, defect 3).
+    /// </summary>
+    private static GcodeFile CreatePromotedCalibrationArtifact() =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "calibration.gcode",
+            FileName = "calibration.gcode",
+            FileHash = new string('1', 64),
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('1', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
+            SpecificationSha256 = new string('2', 64),
+            MachineProfileSha256 = new string('3', 64),
+            ProcessProfileSha256 = new string('4', 64),
+            FilamentProfileSha256 = new string('5', 64),
+            SlicerEngineName = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            PinnedSlicerVersion = "2.3.0",
+            FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
+            GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
+        };
 
     private static QueuePrintJobDto CreateCalibrationQueueRequest(Guid gcodeFileId, Guid? printerId) =>
         new()

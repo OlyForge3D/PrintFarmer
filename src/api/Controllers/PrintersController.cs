@@ -15,6 +15,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
@@ -59,9 +60,11 @@ public class PrintersController(
     Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader printerStatusCache,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
-    IPrinterVersionCache printerVersionCache = null!)
+    IPrinterVersionCache printerVersionCache = null!,
+    Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? dispatchClaimService = null)
     : ControllerBase
 {
+    private readonly Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -3105,6 +3108,7 @@ public class PrintersController(
     [HttpPost("{id:guid}/print")]
     [ProducesResponseType(typeof(StartPrintResultDto), 200)]
     [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
     [ProducesResponseType(typeof(CommandResult), 500)]
     public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
@@ -3113,16 +3117,65 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
+        // =====================================================================
+        // Starting a file that already lives on the printer is still a START PATH and
+        // must go through the shared dispatch claim (issue #900, defect 5). Without it,
+        // this endpoint could start a second print on a printer that already holds a
+        // dispatch lease, or on a printer that is disabled/in maintenance.
+        // =====================================================================
+        if (_dispatchClaimService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(false, "Dispatch claim service is not available."));
+        }
+
+        string actorSubject = User?.Identity?.Name ?? "anonymous";
+
+        DispatchClaimResult claim = await _dispatchClaimService.AcquireAdHocClaimAsync(
+            new AdHocDispatchClaimRequest(id, actorSubject, "PrinterFile", request.FileName),
+            ct);
+
+        if (!claim.Success || claim.Attempt is null)
+        {
+            _logger.LogWarning(
+                "Printer file-start denied on printer {PrinterId}: {Code}", id, claim.ErrorCode);
+
+            return Conflict(new CommandResult(
+                false,
+                $"{claim.ErrorCode}: {claim.ErrorDetail}"));
+        }
+
+        Guid attemptId = claim.Attempt.Id;
+
         try
         {
             bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
-            return !success
-                ? Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"))
-                : Ok(new CommandResult(true, "Print started successfully"));
+
+            if (!success)
+            {
+                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                    attemptId,
+                    "backend_rejected",
+                    "The printer refused to start the requested file.",
+                    ct);
+
+                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
+            }
+
+            await _dispatchClaimService.RecordBackendAcceptedAsync(
+                attemptId, claim.Attempt.BackendCommandId ?? request.FileName, ct);
+
+            return Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to start print: {ex.Message}"));
+            // Unknown outcome — keep the lease and let reconciliation decide.
+            await _dispatchClaimService.RecordUnknownOutcomeAsync(attemptId, ex.Message, ct);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new CommandResult(false, "The printer start outcome could not be determined; reconciliation is required."));
         }
     }
 

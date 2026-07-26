@@ -232,14 +232,13 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer
+        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
+        // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(j => j.Status == PrintJobStatus.Queued
                         && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId))
-            .OrderByDescending(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt)
+            .OrderByPriorityDescending()
             .Take(20) // reasonable batch to score
             .ToListAsync(ct);
 

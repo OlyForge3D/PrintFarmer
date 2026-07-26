@@ -109,8 +109,13 @@ public class JobQueueController(
 
             if (added.IsIdempotentReplay)
             {
+                // Explicit replay signal so clients can distinguish "created" from
+                // "your earlier identical request already created this".
+                Response.Headers["Idempotency-Replayed"] = "true";
                 return Ok(added);
             }
+
+            Response.Headers["Idempotency-Replayed"] = "false";
 
             string location = $"/api/job-queue/{added.Id}";
             return Created(location, added);
@@ -150,7 +155,26 @@ public class JobQueueController(
         try
         {
             JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
-            return dto == null ? NotFound($"Print job with ID {id} not found") : Ok(dto);
+
+            if (dto is null)
+            {
+                return NotFound($"Print job with ID {id} not found");
+            }
+
+            // Authoritative GET carries BOTH revision tokens: the job ETag (standard
+            // ETag header) and the dispatch-state ETag (custom header) so clients can
+            // supply If-Match for job mutations and for bed-clear acknowledgements.
+            if (!string.IsNullOrWhiteSpace(dto.RowVersion))
+            {
+                Response.Headers.ETag = $"\"{dto.RowVersion}\"";
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.DispatchStateRowVersion))
+            {
+                Response.Headers["X-Dispatch-State-ETag"] = $"\"{dto.DispatchStateRowVersion}\"";
+            }
+
+            return Ok(dto);
         }
         catch (Exception ex)
         {
@@ -158,6 +182,52 @@ public class JobQueueController(
             return Problem("An error occurred while retrieving the job", statusCode: 500);
         }
     }
+
+    /// <summary>
+    /// Reads and normalizes the <c>If-Match</c> header value (strips weak/quote syntax).
+    /// </summary>
+    private string? ReadIfMatch()
+    {
+        string? raw = Request.Headers.IfMatch.FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        return raw.Trim().TrimStart('W', '/').Trim('"');
+    }
+
+    /// <summary>
+    /// Maps queue revision/precondition exceptions to their correct HTTP status codes:
+    /// 428 when a required precondition header is absent, 412 when a supplied revision is
+    /// stale, and 409 when the request conflicts with the resource's current semantics.
+    /// </summary>
+    private ObjectResult MapRevisionException(Exception ex) => ex switch
+    {
+        QueuePreconditionRequiredException pre => StatusCode(
+            StatusCodes.Status428PreconditionRequired,
+            new { error = "precondition_required", detail = pre.Message }),
+
+        QueueRevisionConflictException rev => StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new { error = "revision_conflict", detail = rev.Message }),
+
+        QueueSemanticConflictException sem => Conflict(
+            new { error = "semantic_conflict", detail = sem.Message }),
+
+        Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException => StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new
+            {
+                error = "revision_conflict",
+                detail = "The resource changed during the update. Re-fetch the ETag and retry.",
+            }),
+
+        ValidationException val => BadRequest(new { error = val.Message }),
+
+        _ => Problem("An unexpected error occurred.", statusCode: 500),
+    };
 
     /// <summary>
     /// Update job status, priority, or assignment
@@ -169,6 +239,9 @@ public class JobQueueController(
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(412)]
+    [ProducesResponseType(428)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<JobQueuePrintJobDto>> UpdateJobAsync(Guid id, [FromBody] UpdatePrintJobStatusDto request)
     {
@@ -176,6 +249,10 @@ public class JobQueueController(
         {
             return BadRequest("Request body is required");
         }
+
+        // If-Match is mandatory on this endpoint: it mutates assignment, priority and
+        // status, all of which invalidate bed-clear acknowledgements.
+        request.IfMatchJobRowVersion = ReadIfMatch() ?? string.Empty;
 
         try
         {
@@ -186,11 +263,20 @@ public class JobQueueController(
                 return NotFound($"Print job with ID {id} not found or invalid printer assignment");
             }
 
+            if (!string.IsNullOrWhiteSpace(updated.RowVersion))
+            {
+                Response.Headers.ETag = $"\"{updated.RowVersion}\"";
+            }
+
             return Ok(updated);
         }
-        catch (ValidationException ex)
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException or
+                                         ValidationException)
         {
-            return BadRequest(new { error = ex.Message });
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -216,9 +302,18 @@ public class JobQueueController(
         try
         {
             string? userId = User.Identity?.Name ?? "anonymous";
-            QueuedPrintJobDto result = await printJobManagementService.DispatchJobAsync(id.ToString(), userId, CancellationToken.None);
+            QueuedPrintJobDto result = await printJobManagementService.DispatchJobAsync(
+                id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
             telemetryService.RecordPrinterOperation("dispatch", result.AssignedPrinterId ?? id.ToString(), true);
             return Ok(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            telemetryService.RecordPrinterOperation("dispatch", id.ToString(), false);
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -250,9 +345,17 @@ public class JobQueueController(
         try
         {
             string? userId = User.Identity?.Name ?? "anonymous";
-            await printJobManagementService.CancelJobAsync(id.ToString(), userId, CancellationToken.None);
+            await printJobManagementService.CancelJobAsync(id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
             telemetryService.RecordPrinterOperation("cancel_job", id.ToString(), true);
             return NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            telemetryService.RecordPrinterOperation("cancel_job", id.ToString(), false);
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -284,9 +387,17 @@ public class JobQueueController(
         try
         {
             string? userId = User.Identity?.Name ?? "anonymous";
-            await printJobManagementService.AbortPrintAsync(id.ToString(), userId, CancellationToken.None);
+            await printJobManagementService.AbortPrintAsync(id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
             telemetryService.RecordPrinterOperation("abort", id.ToString(), true);
             return NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            telemetryService.RecordPrinterOperation("abort", id.ToString(), false);
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -348,8 +459,16 @@ public class JobQueueController(
     {
         try
         {
-            bool ok = await queueService.RemoveJobAsync(id, CancellationToken.None);
+            bool ok = await queueService.RemoveJobAsync(id, ReadIfMatch() ?? string.Empty, CancellationToken.None);
             return !ok ? BadRequest("Cannot delete the job (not found or currently printing)") : NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException or
+                                         ValidationException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {

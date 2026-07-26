@@ -323,6 +323,13 @@ public class PrintJob
     /// <summary>Artifact (slicer output) whose bytes were promoted into <see cref="GcodeFile"/>.</summary>
     public Guid? SourceArtifactId { get; set; }
 
+    /// <summary>
+    /// Slice job that produced the promoted artifact for this print job.
+    /// Part of the immutable provenance chain and a canonical idempotency-hash input:
+    /// re-slicing produces a new slice job, therefore a new canonical hash.
+    /// </summary>
+    public Guid? SliceJobId { get; set; }
+
     /// <summary>SHA-256 (hex) of the promoted G-code content as verified at promotion time.</summary>
     [MaxLength(64)]
     public string? GcodeContentSha256 { get; set; }

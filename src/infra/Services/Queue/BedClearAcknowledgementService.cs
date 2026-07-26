@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +25,7 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BedClearAcknowledgementService(
     AppDbContext db,
     IDbOutboxSequenceAllocator sequenceAllocator,
+    IPrinterStatusSnapshotReader statusReader,
     ILogger<BedClearAcknowledgementService> logger) : IBedClearAcknowledgementService
 {
     /// <summary>
@@ -31,11 +34,15 @@ public sealed class BedClearAcknowledgementService(
     /// </summary>
     private static readonly TimeSpan DefaultAcknowledgementTtl = TimeSpan.FromMinutes(15);
 
+    /// <summary>Maximum age of a telemetry snapshot accepted when issuing an acknowledgement.</summary>
+    private static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
+
     /// <summary>Event type string for the durable backend-start command written to the outbox.</summary>
     internal const string BackendStartCommandEventType = "PrintFarmer.Queue.BackendStartCommand.v1";
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
+    private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -171,20 +178,145 @@ public sealed class BedClearAcknowledgementService(
                 $"Calibration job blocked: {job.BlockedReasonCode}");
         }
 
-        // Verify printer configuration revision has not advanced beyond the pinned value.
-        if (request.ExpectedPrinterConfigRevision.HasValue)
+        // =========================================================================
+        // Printer revision is REQUIRED — an acknowledgement issued without pinning the
+        // configuration the operator actually saw can be consumed after a config change.
+        // =========================================================================
+        if (!request.ExpectedPrinterConfigRevision.HasValue)
         {
-            Printer? printer = await _db.Printers
-                .AsNoTracking()
-                .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PreconditionRequired,
+                job.RowVersion, dispatchState.RowVersion,
+                "expectedPrinterConfigRevision is required for bed-clear acknowledgements.");
+        }
 
-            if (printer is not null &&
-                printer.ConfigurationRevision != request.ExpectedPrinterConfigRevision.Value)
+        Printer? printer = await _db.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
+
+        if (printer is null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterOfflineOrStale,
+                job.RowVersion, dispatchState.RowVersion,
+                $"Printer {request.PrinterId} not found.");
+        }
+
+        if (printer.ConfigurationRevision != request.ExpectedPrinterConfigRevision.Value)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.CalibrationJobIncompatible,
+                job.RowVersion, dispatchState.RowVersion,
+                $"Printer configuration revision {printer.ConfigurationRevision} does not match expected {request.ExpectedPrinterConfigRevision}.");
+        }
+
+        // =========================================================================
+        // Fresh telemetry — an acknowledgement must reflect a bed the operator can
+        // actually see right now, on a printer that is online and not printing.
+        // =========================================================================
+        PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
+        if (snapshot is null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterOfflineOrStale,
+                job.RowVersion, dispatchState.RowVersion,
+                "Fresh telemetry is required to acknowledge bed-clear. No snapshot is available for this printer.");
+        }
+
+        DateTime? observedAtUtc = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
+        if (!observedAtUtc.HasValue || (DateTime.UtcNow - observedAtUtc.Value) > TelemetryFreshnessLimit)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterOfflineOrStale,
+                job.RowVersion, dispatchState.RowVersion,
+                $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes; bed-clear cannot be acknowledged.");
+        }
+
+        if (!snapshot.Status.IsOnline)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterOfflineOrStale,
+                job.RowVersion, dispatchState.RowVersion,
+                "Printer is offline per telemetry; bed-clear cannot be acknowledged.");
+        }
+
+        if (snapshot.Status.State is "printing" or "starting" or "paused")
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterBusy,
+                job.RowVersion, dispatchState.RowVersion,
+                $"Printer is in state '{snapshot.Status.State}' per telemetry; bed-clear cannot be acknowledged.");
+        }
+
+        // =========================================================================
+        // Hard filament / spool gate — evaluated with the SAME shared rules the claim
+        // uses so an acknowledgement can never be issued for a job the claim will reject.
+        // =========================================================================
+        DispatchClaimResult? filamentFailure = DispatchSafetyGates.EvaluateFilament(job, printer);
+        if (filamentFailure is not null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.FilamentCheckFailed,
+                job.RowVersion, dispatchState.RowVersion,
+                filamentFailure.ErrorDetail);
+        }
+
+        // =========================================================================
+        // Complete compatibility tuple, hash and lineage validation for calibration jobs,
+        // plus shared hardware gates for every job kind.
+        // =========================================================================
+        DispatchClaimResult? hardwareFailure = DispatchSafetyGates.EvaluateHardware(job, printer);
+        if (hardwareFailure is not null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.CalibrationJobIncompatible,
+                job.RowVersion, dispatchState.RowVersion,
+                hardwareFailure.ErrorDetail);
+        }
+
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            if (!job.GcodeFile.IsImmutable || job.GcodeFile.PromotedAtUtc is null ||
+                !QueueJobClassifier.IsCalibrationArtifact(job.GcodeFile))
             {
                 return new AcknowledgeBedClearResult(
                     BedClearAckOutcome.CalibrationJobIncompatible,
                     job.RowVersion, dispatchState.RowVersion,
-                    $"Printer configuration revision {printer.ConfigurationRevision} does not match expected {request.ExpectedPrinterConfigRevision}.");
+                    "The calibration job does not reference a promoted immutable calibration artifact.");
+            }
+
+            if (string.IsNullOrWhiteSpace(job.GcodeContentSha256))
+            {
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    job.RowVersion, dispatchState.RowVersion,
+                    "The calibration job has no pinned G-code content hash.");
+            }
+
+            string? authoritativeHash = !string.IsNullOrWhiteSpace(job.GcodeFile.ContentSha256)
+                ? job.GcodeFile.ContentSha256
+                : job.GcodeFile.FileHash;
+
+            if (string.IsNullOrWhiteSpace(authoritativeHash) ||
+                !string.Equals(job.GcodeContentSha256, authoritativeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                const string HashMismatchDetail =
+                    "The calibration artifact's content hash does not match the job's pinned hash. " +
+                    "A new job and idempotency key are required.";
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    job.RowVersion, dispatchState.RowVersion, HashMismatchDetail);
+            }
+
+            DispatchClaimResult? calibrationFailure =
+                DispatchSafetyGates.EvaluateCalibrationCompatibility(job, printer);
+
+            if (calibrationFailure is not null)
+            {
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    job.RowVersion, dispatchState.RowVersion,
+                    calibrationFailure.ErrorDetail);
             }
         }
 
@@ -221,6 +353,8 @@ public sealed class BedClearAcknowledgementService(
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,
+            DispatchStateRowVersion = dispatchState.RowVersion,
+            BedClearState = "Acknowledged",
             PrinterId = request.PrinterId,
             PrinterConfigRevision = job.PinnedPrinterConfigRevision,
             EventType = BackendStartCommandEventType,
@@ -236,7 +370,27 @@ public sealed class BedClearAcknowledgementService(
             CreatedAtUtc = now,
         };
 
-        _db.QueueDispatchOutbox.Add(startCommand);
+        _ = _db.QueueDispatchOutbox.Add(startCommand);
+
+        // Durable audit — committed in the SAME transaction as the acknowledgement.
+        _ = QueueAuditWriter.Add(
+            _db,
+            request.ActorSubject,
+            QueueAuditOperations.BedClearAcknowledge,
+            QueueAuditOutcomes.Success,
+            nameof(PrintJob),
+            resourceId: request.JobId,
+            printerId: request.PrinterId,
+            printJobId: request.JobId,
+            jobRowVersion: job.RowVersion,
+            dispatchStateRowVersion: dispatchState.RowVersion,
+            idempotencyKey: request.IdempotencyKey,
+            detail: new
+            {
+                jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+                expectedPrinterConfigRevision = request.ExpectedPrinterConfigRevision,
+                commandId = startCommand.Id,
+            });
 
         // Bounded retry loop: up to MaxSequenceRetries attempts on sequence-only conflicts.
         // Any other conflict (e.g., the dispatch-state If-Match already caught above) surfaces
@@ -325,13 +479,13 @@ public sealed class BedClearAcknowledgementService(
 
         Guid acknowledgedJobId = dispatchState.AcknowledgedJobId.Value;
 
-        // Verify the acknowledged job is still the front-of-queue for this printer.
+        // Verify the acknowledged job is still the front-of-queue for this printer,
+        // using the SINGLE shared ordering selector (Urgent first).
         PrintJob? frontJob = await _db.PrintJobs
             .Where(j =>
                 j.AssignedPrinterId == printerId &&
                 (j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned))
-            .OrderByDescending(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
+            .OrderByPriorityDescending()
             .FirstOrDefaultAsync(ct);
 
         bool isStale = frontJob is null || frontJob.Id != acknowledgedJobId;

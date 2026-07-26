@@ -331,6 +331,57 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = request.DeadlineAtUtc
         };
 
+        // =====================================================================
+        // SERVER-AUTHORITATIVE CLASSIFICATION (issue #900, defect 3)
+        // The client never decides whether a job is a calibration job, nor what its
+        // provenance is. The server inspects the promoted immutable artifact lineage
+        // and overwrites the classification and every provenance/compatibility field.
+        // =====================================================================
+        QueueJobClassification classification = QueueJobClassifier.Classify(gcode);
+
+        if (classification.JobKind == JobKind.FilamentCalibration &&
+            request.JobKind is not null &&
+            request.JobKind != JobKind.FilamentCalibration)
+        {
+            // Explicit attempt to launder a calibration artifact through the standard path.
+            throw new ValidationException(QueueJobClassifier.CalibrationMisclassificationMessage(request.GcodeFileId));
+        }
+
+        if (classification.JobKind != JobKind.FilamentCalibration &&
+            request.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new ValidationException(
+                $"G-code file {request.GcodeFileId} carries no promoted calibration lineage and cannot be queued " +
+                "as a calibration job. Calibration jobs must reference a promoted immutable calibration artifact.");
+        }
+
+        effectiveRequest.JobKind = classification.JobKind;
+        effectiveRequest.CalibrationProjectId = classification.CalibrationProjectId;
+        effectiveRequest.CalibrationAttemptId = classification.CalibrationAttemptId;
+        effectiveRequest.CalibrationOrchestrationId = classification.CalibrationOrchestrationId;
+        effectiveRequest.SourceArtifactId = classification.SourceArtifactId;
+        effectiveRequest.GcodeContentSha256 = classification.GcodeContentSha256 ?? gcode.FileHash;
+
+        if (classification.JobKind == JobKind.FilamentCalibration)
+        {
+            effectiveRequest.SpecificationSha256 = classification.SpecificationSha256;
+            effectiveRequest.MachineProfileSha256 = classification.MachineProfileSha256;
+            effectiveRequest.ProcessProfileSha256 = classification.ProcessProfileSha256;
+            effectiveRequest.FilamentProfileSha256 = classification.FilamentProfileSha256;
+            effectiveRequest.RequiredFirmwareFamily = classification.RequiredFirmwareFamily;
+            effectiveRequest.RequiredGcodeDialect = classification.RequiredGcodeDialect;
+            effectiveRequest.RequiredSlicerEngine = classification.RequiredSlicerEngine;
+            effectiveRequest.RequiredSlicerDistribution = classification.RequiredSlicerDistribution;
+            effectiveRequest.RequiredSlicerVersion = classification.RequiredSlicerVersion;
+            effectiveRequest.RequiredSlicerContainerDigest = classification.RequiredSlicerContainerDigest;
+        }
+
+        // Undefined priorities are rejected on every create path.
+        if (!QueueOrdering.IsDefinedPriority((int)request.Priority))
+        {
+            throw new ValidationException(QueueOrdering.UndefinedPriorityMessage((int)request.Priority));
+        }
+
         bool isCalibrationJob = effectiveRequest.JobKind == JobKind.FilamentCalibration;
         if (isCalibrationJob)
         {
@@ -377,32 +428,17 @@ public class JobQueueService : IJobQueueService
         string idempotencyScope = effectiveRequest.IdempotencyScope
             ?? BuildDefaultCalibrationIdempotencyScope(effectiveRequest, assignedPrinterId);
         string? requestSha256 = isCalibrationJob
-            ? ComputeCalibrationRequestSha256(effectiveRequest, assignedPrinterId!.Value)
+            ? ComputeCalibrationRequestSha256(effectiveRequest, assignedPrinterId!.Value, classification.SliceJobId)
             : null;
 
         if (isCalibrationJob)
         {
-            PrintJob? existingJob = await _db!.PrintJobs
-                .Include(j => j.GcodeFile)
-                .Include(j => j.AssignedPrinter)
-                .FirstOrDefaultAsync(
-                    j => j.IdempotencyScope == idempotencyScope &&
-                         j.IdempotencyKey == effectiveRequest.IdempotencyKey,
-                    ct);
+            JobQueuePrintJobDto? replay = await TryResolveCalibrationReplayAsync(
+                idempotencyScope, effectiveRequest.IdempotencyKey!, requestSha256, gcode.Name, ct);
 
-            if (existingJob is not null)
+            if (replay is not null)
             {
-                if (!string.Equals(existingJob.IdempotencyRequestSha256, requestSha256, StringComparison.Ordinal))
-                {
-                    throw new QueueJobIdempotencyConflictException(
-                        "The provided idempotency key was already used with a different calibration payload.");
-                }
-
-                return MapToJobQueuePrintJobDto(
-                    existingJob,
-                    existingJob.GcodeFile?.Name ?? gcode.Name,
-                    existingJob.AssignedPrinter?.Name ?? "Unknown",
-                    isIdempotentReplay: true);
+                return replay;
             }
         }
 
@@ -442,6 +478,7 @@ public class JobQueueService : IJobQueueService
             CalibrationConfigSnapshotId = effectiveRequest.CalibrationConfigSnapshotId,
             CalibrationOrchestrationId = effectiveRequest.CalibrationOrchestrationId,
             SourceArtifactId = effectiveRequest.SourceArtifactId,
+            SliceJobId = classification.SliceJobId,
             GcodeContentSha256 = effectiveRequest.GcodeContentSha256,
             RequiredFirmwareFamily = effectiveRequest.RequiredFirmwareFamily,
             RequiredGcodeDialect = effectiveRequest.RequiredGcodeDialect,
@@ -551,6 +588,35 @@ public class JobQueueService : IJobQueueService
                         await _db.Entry(stateLocal).ReloadAsync(ct);
                     }
                 }
+                catch (DbUpdateException ex) when (!ex.Entries.Any(e => e.Entity is OutboxSequenceState))
+                {
+                    // =========================================================
+                    // LOST THE UNIQUE-INDEX RACE (issue #900, defect 2).
+                    //
+                    // Read-then-insert cannot be atomic across processes: a concurrent
+                    // request with the same (scope, key) may have committed between our
+                    // read and our insert. The filtered unique index is the arbiter.
+                    // The loser must NOT surface a 500 — it re-reads the winner and
+                    // returns the same replay/mismatch answer the winner would produce.
+                    // =========================================================
+                    _logger.LogInformation(
+                        ex,
+                        "[Queue] Calibration idempotency race lost for Scope={Scope} Key={Key}; rereading winner",
+                        idempotencyScope, effectiveRequest.IdempotencyKey);
+
+                    DetachPendingCalibrationWrite(job, outboxEvent);
+
+                    JobQueuePrintJobDto? winner = await TryResolveCalibrationReplayAsync(
+                        idempotencyScope, effectiveRequest.IdempotencyKey!, requestSha256, gcode.Name, ct);
+
+                    if (winner is not null)
+                    {
+                        return winner;
+                    }
+
+                    // The constraint violation was NOT our idempotency index — rethrow.
+                    throw;
+                }
             }
 
             if (!saved)
@@ -617,45 +683,63 @@ public class JobQueueService : IJobQueueService
     public async Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
     {
         PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
-        return job == null
-            ? null
-            : new JobQueuePrintJobDto
-            {
-                Id = job.Id,
-                RowVersion = ToBase64RowVersion(job.RowVersion),
-                GcodeFileId = job.GcodeFileId,
-                GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
-                AssignedPrinterId = job.AssignedPrinterId,
-                AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-                Status = (PrintJobStatus?)job.Status,
-                Priority = job.Priority,
-                QueuePosition = job.QueuePosition,
-                RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-                RequiredMaterialType = job.RequiredMaterialType,
-                EstimatedPrintTime = job.EstimatedPrintTime,
-                EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-                ActualStartTime = job.ActualStartTime,
-                ActualEndTime = job.ActualEndTime,
-                ActualPrintTime = job.ActualPrintTime,
-                ActualFilamentUsage = job.ActualFilamentUsage,
-                FailureReason = job.FailureReason,
-                SpoolmanFilamentId = job.SpoolmanFilamentId,
-                FilamentName = job.FilamentName,
-                FilamentVendor = job.FilamentVendor,
-                FilamentColor = job.FilamentColor,
-                EstimatedCost = job.EstimatedCost,
-                ActualCost = job.ActualCost,
-                Copies = job.Copies,
-                CompletedCopies = job.CompletedCopies,
-                RemainingCopies = job.RemainingCopies,
-                ProjectFileId = job.ProjectFileId,
-                PlateIndex = job.PlateIndex,
-                PlateName = job.PlateName,
-                DeadlineAtUtc = job.DeadlineAtUtc,
-                CreatedAt = job.CreatedAt,
-                UpdatedAt = job.UpdatedAt,
-                ToolheadUsages = MapToolheadUsages(job)
-            };
+
+        if (job is null)
+        {
+            return null;
+        }
+
+        // The authoritative GET carries BOTH revision tokens so a client can supply
+        // If-Match for job mutations AND for dispatch-state (bed-clear) mutations.
+        string? dispatchStateEtag = null;
+        if (job.AssignedPrinterId.HasValue && _db is not null)
+        {
+            PrinterDispatchState? ds = await _db.PrinterDispatchStates
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
+
+            dispatchStateEtag = ToBase64RowVersion(ds?.RowVersion);
+        }
+
+        return new JobQueuePrintJobDto
+        {
+            Id = job.Id,
+            RowVersion = ToBase64RowVersion(job.RowVersion),
+            DispatchStateRowVersion = dispatchStateEtag,
+            JobKind = job.JobKind,
+            GcodeFileId = job.GcodeFileId,
+            GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
+            AssignedPrinterId = job.AssignedPrinterId,
+            AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
+            Status = (PrintJobStatus?)job.Status,
+            Priority = job.Priority,
+            QueuePosition = job.QueuePosition,
+            RequiredNozzleDiameter = job.RequiredNozzleDiameter,
+            RequiredMaterialType = job.RequiredMaterialType,
+            EstimatedPrintTime = job.EstimatedPrintTime,
+            EstimatedFilamentUsage = job.EstimatedFilamentUsage,
+            ActualStartTime = job.ActualStartTime,
+            ActualEndTime = job.ActualEndTime,
+            ActualPrintTime = job.ActualPrintTime,
+            ActualFilamentUsage = job.ActualFilamentUsage,
+            FailureReason = job.FailureReason,
+            SpoolmanFilamentId = job.SpoolmanFilamentId,
+            FilamentName = job.FilamentName,
+            FilamentVendor = job.FilamentVendor,
+            FilamentColor = job.FilamentColor,
+            EstimatedCost = job.EstimatedCost,
+            ActualCost = job.ActualCost,
+            Copies = job.Copies,
+            CompletedCopies = job.CompletedCopies,
+            RemainingCopies = job.RemainingCopies,
+            ProjectFileId = job.ProjectFileId,
+            PlateIndex = job.PlateIndex,
+            PlateName = job.PlateName,
+            DeadlineAtUtc = job.DeadlineAtUtc,
+            CreatedAt = job.CreatedAt,
+            UpdatedAt = job.UpdatedAt,
+            ToolheadUsages = MapToolheadUsages(job)
+        };
     }
 
     /// <summary>
@@ -669,13 +753,19 @@ public class JobQueueService : IJobQueueService
     /// Jobs that are currently printing, starting, or have already completed cannot be removed. Returns false if the
     /// job does not exist or if its current status does not permit removal.
     /// </remarks>
-    public async Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
+    public async Task<bool> RemoveJobAsync(Guid id, CancellationToken ct) =>
+        await RemoveJobAsync(id, ifMatchJobRowVersion: null, ct);
+
+    /// <inheritdoc />
+    public async Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct)
     {
         PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
         if (job == null)
         {
             return false;
         }
+
+        EnsureIfMatch(ifMatchJobRowVersion, job.RowVersion, "job deletion");
 
         if (job.Status != PrintJobStatus.Queued && job.Status != PrintJobStatus.Assigned)
         {
@@ -684,28 +774,47 @@ public class JobQueueService : IJobQueueService
 
         // Invalidate any pending bed-clear acknowledgement for this printer so the ack
         // cannot be consumed for a different job after this one is removed.
-        if (job.AssignedPrinterId.HasValue && _db is not null)
-        {
-            PrinterDispatchState? ds = await _db.PrinterDispatchStates
-                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
-
-            if (ds is not null && ds.AcknowledgedJobId == id)
-            {
-                ds.AcknowledgedJobId = null;
-                ds.AcknowledgedAtUtc = null;
-                ds.AcknowledgedBySubject = null;
-                ds.AcknowledgementIdempotencyKey = null;
-                ds.AcknowledgementExpiresAtUtc = null;
-
-                _logger.LogInformation(
-                    "[Queue] Invalidated bed-clear ack for removed job {JobId} on printer {PrinterId}",
-                    id, job.AssignedPrinterId.Value);
-            }
-        }
+        await InvalidateAcknowledgementForJobAsync(job, id, "job removal", ct);
 
         await _repo.RemoveAsync(job, ct);
         await _repo.SaveChangesAsync(ct);
         return true;
+    }
+
+    /// <summary>
+    /// Enforces a caller-supplied <c>If-Match</c> token against a persisted row version.
+    /// A missing token is a 428; a stale token is a 412. Passing <see langword="null"/>
+    /// is only permitted for trusted internal callers that pass <c>null</c> explicitly.
+    /// </summary>
+    private static void EnsureIfMatch(string? ifMatch, byte[]? actual, string operationDescription)
+    {
+        if (ifMatch is null)
+        {
+            // Trusted internal callers (background services) pass null explicitly.
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            throw new QueuePreconditionRequiredException(
+                $"If-Match is required for {operationDescription}. Fetch the job to obtain its current ETag.");
+        }
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(ifMatch);
+        }
+        catch (FormatException)
+        {
+            throw new ValidationException("If-Match must be a base-64 encoded ETag.");
+        }
+
+        if (!expected.SequenceEqual(actual ?? []))
+        {
+            throw new QueueRevisionConflictException(
+                "The job has changed since the request was prepared. Re-fetch the job ETag and retry.");
+        }
     }
 
     /// <summary>
@@ -722,41 +831,26 @@ public class JobQueueService : IJobQueueService
     /// </remarks>
     public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
         if (job == null)
         {
             return null;
         }
 
+        EnsureIfMatch(request.IfMatchJobRowVersion, job.RowVersion, "job priority updates");
+
         // Reject undefined priority values — every mutation must use a valid semantic priority.
         // PrintJobPriority enum: Low=0, Normal=1, High=2, Urgent=3; any other value is rejected.
-        if (!Enum.IsDefined(typeof(PrintJobPriority), (PrintJobPriority)request.Priority))
+        if (!QueueOrdering.IsDefinedPriority(request.Priority))
         {
-            throw new ValidationException(
-                $"Priority value {request.Priority} is not a valid PrintJobPriority. " +
-                "Use Low (0), Normal (1), High (2), or Urgent (3).");
+            throw new ValidationException(QueueOrdering.UndefinedPriorityMessage(request.Priority));
         }
 
         // Invalidate any pending bed-clear ack when priority changes — the ack was issued for a
         // specific queue position and must be re-issued after reorder.
-        if (job.AssignedPrinterId.HasValue && _db is not null)
-        {
-            PrinterDispatchState? ds = await _db.PrinterDispatchStates
-                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
-
-            if (ds is not null && ds.AcknowledgedJobId == id)
-            {
-                ds.AcknowledgedJobId = null;
-                ds.AcknowledgedAtUtc = null;
-                ds.AcknowledgedBySubject = null;
-                ds.AcknowledgementIdempotencyKey = null;
-                ds.AcknowledgementExpiresAtUtc = null;
-
-                _logger.LogInformation(
-                    "[Queue] Invalidated bed-clear ack for priority-changed job {JobId} on printer {PrinterId}",
-                    id, job.AssignedPrinterId.Value);
-            }
-        }
+        await InvalidateAcknowledgementForJobAsync(job, id, "priority change", ct);
 
         job.Priority = request.Priority;
         job.UpdatedAt = DateTime.UtcNow;
@@ -819,15 +913,77 @@ public class JobQueueService : IJobQueueService
             return null;
         }
 
-        // Update fields if provided
+        // =====================================================================
+        // REVISION PRECONDITION (issue #900, defect 4 and 11).
+        // The generic update endpoint mutates safety-relevant state (assignment,
+        // priority, status) and therefore requires an If-Match token. A stale token
+        // is a 412; the caller must re-fetch and retry.
+        // =====================================================================
+        if (string.IsNullOrWhiteSpace(request.IfMatchJobRowVersion))
+        {
+            throw new QueuePreconditionRequiredException(
+                "If-Match is required for job updates. Fetch the job to obtain its current ETag.");
+        }
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(request.IfMatchJobRowVersion);
+        }
+        catch (FormatException)
+        {
+            throw new ValidationException("If-Match must be a base-64 encoded ETag.");
+        }
+
+        if (!expected.SequenceEqual(job.RowVersion ?? []))
+        {
+            throw new QueueRevisionConflictException(
+                "The job has changed since the request was prepared. Re-fetch the job ETag and retry.");
+        }
+
+        // =====================================================================
+        // STATUS GUARD (issue #900, defect 4).
+        // Starting/Printing are reached ONLY through the shared dispatch claim, which
+        // enforces bed-clear acknowledgement, telemetry, filament and compatibility
+        // gates. The generic update endpoint must never set them.
+        // =====================================================================
         if (request.Status.HasValue)
         {
-            job.Status = (PrintJobStatus)(int)request.Status.Value;
+            PrintJobStatus requested = (PrintJobStatus)(int)request.Status.Value;
+
+            if (!Enum.IsDefined(requested))
+            {
+                throw new ValidationException($"Status value {request.Status} is not a valid PrintJobStatus.");
+            }
+
+            if (requested is PrintJobStatus.Starting or PrintJobStatus.Printing)
+            {
+                throw new ValidationException(
+                    "Status 'Starting' and 'Printing' cannot be set through the generic update endpoint. " +
+                    "Use the dispatch or bed-clear acknowledgement endpoints so the shared claim guards apply.");
+            }
+
+            if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
+            {
+                throw new ValidationException(
+                    $"Job is currently {job.Status}; use the cancel or abort endpoints instead of a generic update.");
+            }
+
+            job.Status = requested;
         }
 
         if (request.Priority.HasValue)
         {
+            if (!QueueOrdering.IsDefinedPriority((int)request.Priority.Value))
+            {
+                throw new ValidationException(QueueOrdering.UndefinedPriorityMessage((int)request.Priority.Value));
+            }
+
             job.Priority = (int)request.Priority.Value;
+
+            // A priority change reorders the queue and therefore invalidates any
+            // bed-clear acknowledgement issued for the previous head-of-queue.
+            await InvalidateAcknowledgementForJobAsync(job, id, "priority change", ct);
         }
 
         if (request.AssignedPrinterId.HasValue)
@@ -839,6 +995,14 @@ public class JobQueueService : IJobQueueService
             if (found == null)
             {
                 return null; // caller will translate to BadRequest
+            }
+
+            if (job.AssignedPrinterId != request.AssignedPrinterId.Value)
+            {
+                // Reassignment invalidates the acknowledgement on BOTH the old and the
+                // new printer: the operator confirmed a specific bed for a specific job.
+                await InvalidateAcknowledgementForJobAsync(job, id, "printer reassignment", ct);
+                await InvalidateAcknowledgementOnPrinterAsync(request.AssignedPrinterId.Value, id, ct);
             }
 
             job.AssignedPrinterId = request.AssignedPrinterId.Value;
@@ -1009,6 +1173,59 @@ public class JobQueueService : IJobQueueService
     private static string? ToBase64RowVersion(byte[]? rowVersion) =>
         rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : null;
 
+    /// <summary>
+    /// Clears any bed-clear acknowledgement issued for <paramref name="jobId"/> on the job's
+    /// currently-assigned printer. Called whenever the queue ordering, assignment or job
+    /// lifecycle changes so an acknowledgement can never be consumed for a different bed state.
+    /// </summary>
+    private async Task InvalidateAcknowledgementForJobAsync(
+        PrintJob job,
+        Guid jobId,
+        string reason,
+        CancellationToken ct)
+    {
+        if (!job.AssignedPrinterId.HasValue || _db is null)
+        {
+            return;
+        }
+
+        await InvalidateAcknowledgementOnPrinterAsync(job.AssignedPrinterId.Value, jobId, ct, reason);
+    }
+
+    /// <summary>
+    /// Clears any bed-clear acknowledgement on <paramref name="printerId"/> that names
+    /// <paramref name="jobId"/>.
+    /// </summary>
+    private async Task InvalidateAcknowledgementOnPrinterAsync(
+        Guid printerId,
+        Guid jobId,
+        CancellationToken ct,
+        string reason = "queue change")
+    {
+        if (_db is null)
+        {
+            return;
+        }
+
+        PrinterDispatchState? ds = await _db.PrinterDispatchStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId, ct);
+
+        if (ds is null || ds.AcknowledgedJobId != jobId)
+        {
+            return;
+        }
+
+        ds.AcknowledgedJobId = null;
+        ds.AcknowledgedAtUtc = null;
+        ds.AcknowledgedBySubject = null;
+        ds.AcknowledgementIdempotencyKey = null;
+        ds.AcknowledgementExpiresAtUtc = null;
+
+        _logger.LogInformation(
+            "[Queue] Invalidated bed-clear ack for job {JobId} on printer {PrinterId} ({Reason})",
+            jobId, printerId, reason);
+    }
+
     private static string BuildDefaultCalibrationIdempotencyScope(QueuePrintJobDto request, Guid? assignedPrinterId)
     {
         if (!string.IsNullOrWhiteSpace(request.IdempotencyScope))
@@ -1026,8 +1243,14 @@ public class JobQueueService : IJobQueueService
             : "calibration";
     }
 
-    private static string ComputeCalibrationRequestSha256(QueuePrintJobDto request, Guid assignedPrinterId)
+    private static string ComputeCalibrationRequestSha256(
+        QueuePrintJobDto request,
+        Guid assignedPrinterId,
+        Guid? sliceJobId)
     {
+        // Canonical idempotency hash. EVERY immutable input that could change the physical
+        // outcome of the print must be included: any difference produces a different hash,
+        // which surfaces as idempotency_payload_mismatch instead of a silent replay.
         string canonicalJson = JsonSerializer.Serialize(new
         {
             jobKind = request.JobKind?.ToString(),
@@ -1039,6 +1262,7 @@ public class JobQueueService : IJobQueueService
             calibrationConfigSnapshotId = request.CalibrationConfigSnapshotId,
             calibrationOrchestrationId = request.CalibrationOrchestrationId,
             sourceArtifactId = request.SourceArtifactId,
+            sliceJobId,
             gcodeContentSha256 = request.GcodeContentSha256,
             requiredFirmwareFamily = request.RequiredFirmwareFamily?.ToString(),
             requiredGcodeDialect = request.RequiredGcodeDialect?.ToString(),
@@ -1052,11 +1276,100 @@ public class JobQueueService : IJobQueueService
             filamentProfileSha256 = request.FilamentProfileSha256,
             printerConfigSnapshotSha256 = request.PrinterConfigSnapshotSha256,
             pinnedPrinterConfigRevision = request.PinnedPrinterConfigRevision,
-            copies = request.Copies
+            copies = request.Copies,
+
+            // Scheduling and hardware selection inputs (issue #900, defect 9).
+            priority = (int)request.Priority,
+            requiredMaterialType = request.RequiredMaterialType,
+            requiredNozzleDiameter = request.RequiredNozzleDiameter,
+            requiredPrinterModel = request.RequiredPrinterModel,
+            spoolmanFilamentId = request.SpoolmanFilamentId,
+            toolheadPlateIndex = request.PlateIndex,
+            toolheadPlateName = request.PlateName,
+            requiredCapabilities = NormalizeCapabilities(request.RequiredCapabilities),
         });
 
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson));
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Capabilities are order-insensitive and case-insensitive: normalise them so a
+    /// re-ordered list is a replay, not a payload mismatch.
+    /// </summary>
+    private static string[] NormalizeCapabilities(string[]? capabilities) =>
+        capabilities is null
+            ? []
+            : capabilities
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .Select(c => c.Trim().ToLowerInvariant())
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+
+    /// <summary>
+    /// Re-reads the winning calibration job for a (scope, key) pair and returns either an
+    /// idempotent replay DTO or throws <see cref="QueueJobIdempotencyConflictException"/>
+    /// when the persisted canonical hash differs from the caller's payload.
+    /// Returns <see langword="null"/> when no winner exists.
+    /// </summary>
+    private async Task<JobQueuePrintJobDto?> TryResolveCalibrationReplayAsync(
+        string idempotencyScope,
+        string idempotencyKey,
+        string? requestSha256,
+        string fallbackGcodeName,
+        CancellationToken ct)
+    {
+        if (_db is null)
+        {
+            return null;
+        }
+
+        PrintJob? existingJob = await _db.PrintJobs
+            .Include(j => j.GcodeFile)
+            .Include(j => j.AssignedPrinter)
+            .FirstOrDefaultAsync(
+                j => j.IdempotencyScope == idempotencyScope &&
+                     j.IdempotencyKey == idempotencyKey,
+                ct);
+
+        if (existingJob is null)
+        {
+            return null;
+        }
+
+        if (!string.Equals(existingJob.IdempotencyRequestSha256, requestSha256, StringComparison.Ordinal))
+        {
+            throw new QueueJobIdempotencyConflictException(
+                "The provided idempotency key was already used with a different calibration payload.");
+        }
+
+        return MapToJobQueuePrintJobDto(
+            existingJob,
+            existingJob.GcodeFile?.Name ?? fallbackGcodeName,
+            existingJob.AssignedPrinter?.Name ?? "Unknown",
+            isIdempotentReplay: true);
+    }
+
+    /// <summary>
+    /// Detaches the losing calibration write so the shared <see cref="AppDbContext"/> can be
+    /// reused for the winner re-read without replaying the rejected INSERT.
+    /// </summary>
+    private void DetachPendingCalibrationWrite(PrintJob job, QueueDispatchOutbox outboxEvent)
+    {
+        if (_db is null)
+        {
+            return;
+        }
+
+        _db.Entry(job).State = EntityState.Detached;
+        _db.Entry(outboxEvent).State = EntityState.Detached;
+
+        OutboxSequenceState? seqState = _db.OutboxSequenceStates.Local.SingleOrDefault();
+        if (seqState is not null)
+        {
+            _db.Entry(seqState).State = EntityState.Detached;
+        }
     }
 
     private static string BuildCalibrationQueueOutboxPayload(PrintJob job)
@@ -1084,6 +1397,7 @@ public class JobQueueService : IJobQueueService
         {
             Id = job.Id,
             RowVersion = ToBase64RowVersion(job.RowVersion),
+            JobKind = job.JobKind,
             IsIdempotentReplay = isIdempotentReplay,
             GcodeFileId = job.GcodeFileId,
             GcodeFileName = gcodeFileName,

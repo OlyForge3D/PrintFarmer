@@ -158,6 +158,19 @@ public sealed class QueueReconciliationService(
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
                 }
 
+                _ = QueueAuditWriter.Add(
+                    db,
+                    attempt.ActorSubject,
+                    QueueAuditOperations.Reconciliation,
+                    QueueAuditOutcomes.Success,
+                    nameof(PrintJob),
+                    resourceId: attempt.PrintJobId,
+                    printerId: attempt.PrinterId,
+                    printJobId: attempt.PrintJobId,
+                    dispatchAttemptId: attempt.Id,
+                    reasonCode: "reconciliation_active",
+                    detail: new { startPathKind = attempt.StartPathKind });
+
                 logger.LogInformation(
                     "[Reconciliation] Attempt {AttemptId} confirmed active on backend → advanced to Printing",
                     attempt.Id);
@@ -190,15 +203,43 @@ public sealed class QueueReconciliationService(
                     dispatchState.ActiveDispatchAttemptId = null;
                 }
 
+                _ = QueueAuditWriter.Add(
+                    db,
+                    attempt.ActorSubject,
+                    QueueAuditOperations.Reconciliation,
+                    QueueAuditOutcomes.Failed,
+                    nameof(PrintJob),
+                    resourceId: attempt.PrintJobId,
+                    printerId: attempt.PrinterId,
+                    printJobId: attempt.PrintJobId,
+                    dispatchAttemptId: attempt.Id,
+                    reasonCode: "reconciliation_absent",
+                    detail: new { startPathKind = attempt.StartPathKind });
+
                 logger.LogWarning(
                     "[Reconciliation] Attempt {AttemptId} absent from backend → lease released, job re-queued",
                     attempt.Id);
                 break;
             default:
-                // Backend is unreachable — leave in current state, retry on next cycle.
+                // Backend is unreachable OR is printing something we cannot positively
+                // match. Either way the state is INDETERMINATE — leave the lease intact
+                // and retry. An unmatched printing backend must never be treated as absent.
                 MarkRequiresReconciliation(
                     attempt,
-                    "Backend unreachable during reconciliation — will retry on next cycle.");
+                    "Backend state indeterminate during reconciliation — lease retained, will retry.");
+
+                _ = QueueAuditWriter.Add(
+                    db,
+                    attempt.ActorSubject,
+                    QueueAuditOperations.Reconciliation,
+                    QueueAuditOutcomes.Unknown,
+                    nameof(PrintJob),
+                    resourceId: attempt.PrintJobId,
+                    printerId: attempt.PrinterId,
+                    printJobId: attempt.PrintJobId,
+                    dispatchAttemptId: attempt.Id,
+                    reasonCode: "reconciliation_indeterminate",
+                    detail: new { startPathKind = attempt.StartPathKind });
                 break;
         }
     }
@@ -227,54 +268,55 @@ public sealed class QueueReconciliationService(
                 logger.LogDebug(
                     "[Reconciliation] Printer {PrinterId} is offline — cannot reconcile attempt {AttemptId}",
                     attempt.PrinterId, attempt.Id);
-                return BackendReconciliationOutcome.BackendUnreachable;
+                return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
-            // If the backend is printing and the filename matches our job, it's active.
+            string? currentFile = status.FileName ?? status.JobName;
+
+            // If the backend is printing, try to positively match it against the identity
+            // persisted BEFORE the network call (backend job id, command id, or file name).
             if (status.State is "printing" or "starting" or "paused")
             {
-                // If we have a BackendJobId, try to match it against the current filename.
-                if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+                if (MatchesPersistedIdentity(attempt, currentFile))
                 {
-                    string? currentFile = status.FileName ?? status.JobName;
-                    if (currentFile is not null &&
-                        currentFile.Contains(attempt.BackendJobId, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return BackendReconciliationOutcome.ActiveOnBackend;
-                    }
+                    return BackendReconciliationOutcome.ActiveOnBackend;
                 }
 
-                // Backend is printing a different job — ours is absent.
-                logger.LogDebug(
-                    "[Reconciliation] Printer {PrinterId} is printing a different job " +
-                    "(current: '{CurrentFile}', expected BackendJobId: '{BackendJobId}') — attempt {AttemptId} is absent",
+                // CRITICAL: a physically printing backend that we cannot positively match
+                // is INDETERMINATE, never absent. Clearing the lease here would allow a
+                // duplicate start on a printer that is already running a job.
+                logger.LogWarning(
+                    "[Reconciliation] Printer {PrinterId} is printing '{CurrentFile}' which does not match " +
+                    "attempt {AttemptId} (backendJobId='{BackendJobId}', commandId='{CommandId}', file='{File}') — " +
+                    "treating as INDETERMINATE; the lease is retained to prevent a duplicate start",
                     attempt.PrinterId,
-                    status.FileName ?? status.JobName ?? "(unknown)",
+                    currentFile ?? "(unknown)",
+                    attempt.Id,
                     attempt.BackendJobId ?? "(none)",
-                    attempt.Id);
-                return BackendReconciliationOutcome.AbsentFromBackend;
+                    attempt.BackendCommandId ?? "(none)",
+                    attempt.BackendFileName ?? "(none)");
+
+                return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
-            // Backend is idle — our job is absent (never started or already finished).
+            // Backend is idle. Confirm via the backend job/command history APIs before
+            // declaring absence.
             logger.LogDebug(
-                "[Reconciliation] Printer {PrinterId} is idle (state='{State}') — attempt {AttemptId} is absent",
+                "[Reconciliation] Printer {PrinterId} is idle (state='{State}') — probing history for attempt {AttemptId}",
                 attempt.PrinterId, status.State, attempt.Id);
 
-            // If we have a BackendJobId, try to confirm via history.
-            if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+            foreach (string identity in EnumerateBackendIdentities(attempt))
             {
                 try
                 {
                     HistoryJob historyJob = await printersSvc.GetHistoryJobAsync(
-                        attempt.PrinterId, attempt.BackendJobId, ct);
+                        attempt.PrinterId, identity, ct);
 
-                    // Job exists in history — it ran and completed (or failed).
-                    // Treat as Accepted (the print actually ran).
                     if (historyJob is not null)
                     {
                         logger.LogInformation(
-                            "[Reconciliation] Attempt {AttemptId} found in backend history — treating as Accepted",
-                            attempt.Id);
+                            "[Reconciliation] Attempt {AttemptId} found in backend history via '{Identity}' — treating as Accepted",
+                            attempt.Id, identity);
                         return BackendReconciliationOutcome.ActiveOnBackend;
                     }
                 }
@@ -282,13 +324,15 @@ public sealed class QueueReconciliationService(
                 {
                     logger.LogDebug(
                         histEx,
-                        "[Reconciliation] Could not query history for BackendJobId='{BackendJobId}' on printer {PrinterId}",
-                        attempt.BackendJobId, attempt.PrinterId);
+                        "[Reconciliation] History probe failed for identity '{Identity}' on printer {PrinterId}",
+                        identity, attempt.PrinterId);
 
-                    // Fall through to AbsentFromBackend
+                    // A failed probe is not evidence of absence.
+                    return BackendReconciliationOutcome.BackendIndeterminate;
                 }
             }
 
+            // Idle backend, all history probes returned nothing: the job is genuinely absent.
             return BackendReconciliationOutcome.AbsentFromBackend;
         }
         catch (OperationCanceledException)
@@ -301,19 +345,63 @@ public sealed class QueueReconciliationService(
                 ex,
                 "[Reconciliation] Backend query failed for printer {PrinterId} during reconciliation of attempt {AttemptId}",
                 attempt.PrinterId, attempt.Id);
-            return BackendReconciliationOutcome.BackendUnreachable;
+            return BackendReconciliationOutcome.BackendIndeterminate;
+        }
+    }
+
+    /// <summary>
+    /// Positively matches a printing backend against the identity persisted for this attempt
+    /// BEFORE the network call. Any of the backend job id, backend command id or the exact
+    /// backend file name is sufficient.
+    /// </summary>
+    private static bool MatchesPersistedIdentity(QueueDispatchAttempt attempt, string? currentFile)
+    {
+        if (string.IsNullOrWhiteSpace(currentFile))
+        {
+            return false;
+        }
+
+        foreach (string identity in EnumerateBackendIdentities(attempt))
+        {
+            if (currentFile.Contains(identity, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateBackendIdentities(QueueDispatchAttempt attempt)
+    {
+        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+        {
+            yield return attempt.BackendJobId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(attempt.BackendCommandId))
+        {
+            yield return attempt.BackendCommandId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(attempt.BackendFileName))
+        {
+            yield return attempt.BackendFileName;
         }
     }
 
     private enum BackendReconciliationOutcome
     {
-        /// <summary>The backend is actively printing the reconciled job.</summary>
+        /// <summary>The backend is actively printing (or historically ran) the reconciled job.</summary>
         ActiveOnBackend,
 
-        /// <summary>The backend has no record of the job (idle, or printing another job).</summary>
+        /// <summary>The backend is idle and has no record of the job across all known identities.</summary>
         AbsentFromBackend,
 
-        /// <summary>The backend is unreachable or returned an error.</summary>
-        BackendUnreachable,
+        /// <summary>
+        /// The backend is unreachable, errored, or is printing something that cannot be
+        /// positively matched. The lease MUST be retained.
+        /// </summary>
+        BackendIndeterminate,
     }
 }

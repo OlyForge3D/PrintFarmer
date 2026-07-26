@@ -4,6 +4,7 @@ using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -39,7 +40,8 @@ public class SlicePrintBridgeController(
     IJobQueueService? jobQueueService = null,
     ISliceGcodeImportService? importService = null,
     ISpoolmanService? spoolmanService = null,
-    IGcodeFilesService? gcodeFilesService = null) : ControllerBase
+    IGcodeFilesService? gcodeFilesService = null,
+    IDispatchClaimService? dispatchClaimService = null) : ControllerBase
 {
     /// <summary>
     /// Send the completed gcode from a slice job to a printer.
@@ -346,14 +348,76 @@ public class SlicePrintBridgeController(
     private async Task<IActionResult> UploadAndStartPrintAsync(
         Guid jobId, Guid printerId, string fileName, Stream stream, CancellationToken ct)
     {
-        UploadAndPrintResult result = await printersService.UploadAndStartPrintAsync(
-            printerId, fileName, stream, progress: null, ct);
+        // =====================================================================
+        // Every start path — including the slice→print bridge — must acquire the
+        // shared dispatch claim BEFORE touching an adapter (issue #900, defect 5).
+        // The claim enforces the printer gates (enabled/available/not in maintenance/
+        // no active lease/telemetry not printing) and writes a durable attempt row so
+        // an unknown outcome is reconcilable instead of invisible.
+        // =====================================================================
+        if (dispatchClaimService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "Dispatch claim service is not available.", code = "DISPATCH_UNAVAILABLE" });
+        }
+
+        string actorSubject = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous";
+
+        DispatchClaimResult claim = await dispatchClaimService.AcquireAdHocClaimAsync(
+            new AdHocDispatchClaimRequest(printerId, actorSubject, "SliceBridge", fileName), ct);
+
+        if (!claim.Success || claim.Attempt is null)
+        {
+            logger.LogWarning(
+                "Slice-bridge start denied for job {JobId} on printer {PrinterId}: {Code}",
+                jobId, printerId, claim.ErrorCode);
+
+            return Conflict(new
+            {
+                error = "Printer cannot accept a new print right now.",
+                code = claim.ErrorCode,
+                detail = claim.ErrorDetail,
+            });
+        }
+
+        Guid attemptId = claim.Attempt.Id;
+
+        UploadAndPrintResult result;
+        try
+        {
+            result = await printersService.UploadAndStartPrintAsync(
+                printerId, fileName, stream, progress: null, ct);
+        }
+        catch (Exception ex)
+        {
+            // Unknown outcome: the command may have been delivered. Never release the
+            // lease here — reconciliation owns the resolution.
+            await dispatchClaimService.RecordUnknownOutcomeAsync(attemptId, ex.Message, ct);
+
+            logger.LogError(
+                ex,
+                "Slice-bridge start produced an unknown outcome for job {JobId} on printer {PrinterId}",
+                jobId, printerId);
+
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "The printer start outcome could not be determined; reconciliation is required.",
+                code = "backend_outcome_unknown",
+            });
+        }
 
         if (!result.Success)
         {
+            await dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                attemptId,
+                "backend_rejected",
+                result.ErrorMessage ?? "The printer rejected the start command.",
+                ct);
+
             logger.LogWarning(
-                "Upload-and-print failed for job {JobId} to printer {PrinterId}: stage={Stage}, error={Error}",
-                jobId, printerId, result.FailedStage, result.ErrorMessage);
+                "Upload-and-print failed for job {JobId} to printer {PrinterId}: stage={Stage}",
+                jobId, printerId, result.FailedStage);
 
             return StatusCode(StatusCodes.Status502BadGateway, new
             {
@@ -362,6 +426,9 @@ public class SlicePrintBridgeController(
                 detail = result.ErrorMessage
             });
         }
+
+        await dispatchClaimService.RecordBackendAcceptedAsync(
+            attemptId, claim.Attempt.BackendCommandId ?? fileName, ct);
 
         return Ok(new SendToPrinterResponse
         {

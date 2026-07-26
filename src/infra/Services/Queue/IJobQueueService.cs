@@ -37,7 +37,21 @@ public interface IJobQueueService
     Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct);
 
     /// <summary>Removes a job from the queue.</summary>
+    /// <param name="id">Job identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the job was removed.</returns>
     Task<bool> RemoveJobAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Removes a job from the queue, enforcing a caller-supplied <c>If-Match</c> revision.
+    /// </summary>
+    /// <param name="id">Job identifier.</param>
+    /// <param name="ifMatchJobRowVersion">
+    /// Base-64 job ETag. Pass <see langword="null"/> only for trusted internal callers.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the job was removed.</returns>
+    Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct);
 
     /// <summary>Updates a job's priority in the queue.</summary>
     Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct);

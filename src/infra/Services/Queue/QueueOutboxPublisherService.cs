@@ -72,28 +72,61 @@ public sealed class QueueOutboxPublisherService(
             return;
         }
 
+        // =====================================================================
+        // Atomic lease: mark every candidate row Processing and COMMIT before any
+        // network I/O. The RowVersion concurrency token means a second publisher
+        // racing on the same rows loses the save and re-reads, so no event can be
+        // delivered twice by concurrent publishers.
+        // =====================================================================
+        foreach (QueueDispatchOutbox evt in events)
+        {
+            evt.Status = QueueOutboxEventStatus.Processing;
+            evt.AttemptCount++;
+            evt.LastAttemptedAtUtc = now;
+        }
+
+        try
+        {
+            _ = await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another publisher instance leased at least one of these rows first.
+            // Abandon the whole batch — the winner owns delivery; we retry next poll.
+            logger.LogDebug(
+                "[OutboxPublisher] Lost lease race on a batch of {Count} event(s) — another publisher owns them",
+                events.Count);
+            return;
+        }
+
         foreach (QueueDispatchOutbox evt in events)
         {
             await ProcessSingleEventAsync(evt, ct);
         }
 
-        await db.SaveChangesAsync(ct);
+        _ = await db.SaveChangesAsync(ct);
     }
 
     private async Task ProcessSingleEventAsync(QueueDispatchOutbox evt, CancellationToken ct)
     {
-        evt.Status = QueueOutboxEventStatus.Processing;
-        evt.AttemptCount++;
-        evt.LastAttemptedAtUtc = DateTime.UtcNow;
-
         try
         {
             // Build an authenticated versioned envelope and publish to authorized groups only.
             // Never use Clients.All — events are scoped to job, printer, and farm groups.
-            var envelope = QueueEventEnvelope.Create(
+            // Identity/time/sequence come from the PERSISTED row so a redelivery is identical
+            // and clients can de-duplicate on (eventId, sequence).
+            QueueEventEnvelope envelope = QueueEventEnvelope.FromOutbox(
+                eventId: evt.Id,
+                sequence: evt.Sequence,
+                occurredAtUtc: evt.CreatedAtUtc,
                 eventType: evt.EventType,
                 jobId: evt.AggregateId,
                 printerId: evt.PrinterId,
+                jobRevision: evt.AggregateRowVersion,
+                dispatchStateRevision: evt.DispatchStateRowVersion,
+                attemptId: evt.AttemptId,
+                bedClearState: evt.BedClearState,
+                failureCode: evt.FailureCode,
                 payloadJson: evt.PayloadJson);
 
             List<Task> sends = new();
@@ -139,5 +172,7 @@ public sealed class QueueOutboxPublisherService(
                     RetryBackoffBase.TotalSeconds * Math.Pow(2, evt.AttemptCount - 1));
             }
         }
+
+        await Task.CompletedTask;
     }
 }

@@ -65,6 +65,12 @@ public class UpdateJobPriorityDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
     public int Priority { get; set; }
+
+    /// <summary>
+    /// Base-64 <c>If-Match</c> token for the job row. Required — reordering the queue
+    /// invalidates bed-clear acknowledgements and must never race a concurrent change.
+    /// </summary>
+    public string? IfMatchJobRowVersion { get; set; }
 }
 
 /// <summary>
@@ -125,6 +131,12 @@ public class QueuePrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Capabilities the printer must advertise (e.g., <c>enclosure</c>, <c>hardened_nozzle</c>).
+    /// Part of the canonical idempotency hash — order and case insensitive.
+    /// </summary>
+    public string[]? RequiredCapabilities { get; set; }
 
     /// <summary>
     /// Required printer model name or slicer alias (e.g., "QIDI X-Plus 4", "COREONEL").
@@ -208,6 +220,13 @@ public class UpdatePrintJobStatusDto
     public string? FailureReason { get; set; }
 
     /// <summary>
+    /// Base-64 <c>If-Match</c> token for the job row. Required — the generic update
+    /// endpoint mutates safety-relevant state and must never blindly overwrite.
+    /// Populated by the controller from the <c>If-Match</c> HTTP header.
+    /// </summary>
+    public string? IfMatchJobRowVersion { get; set; }
+
+    /// <summary>
     /// Spoolman filament ID. Use 0 to clear the assignment.
     /// </summary>
     public int? SpoolmanFilamentId { get; set; }
@@ -256,6 +275,15 @@ public class JobQueuePrintJobDto
     public Guid Id { get; set; }
 
     public string? RowVersion { get; set; }
+
+    /// <summary>
+    /// Current ETag of the assigned printer's dispatch state, when a printer is assigned.
+    /// Callers must echo this as <c>If-Match</c> on dispatch-state mutations.
+    /// </summary>
+    public string? DispatchStateRowVersion { get; set; }
+
+    /// <summary>Server-derived job classification (never client-supplied).</summary>
+    public JobKind? JobKind { get; set; }
 
     public bool IsIdempotentReplay { get; set; }
 

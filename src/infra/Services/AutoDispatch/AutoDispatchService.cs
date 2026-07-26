@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
@@ -353,12 +354,11 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
 
-        // Find and cancel the next queued job
+        // Find and cancel the next queued job, using the SINGLE shared ordering selector
+        // (Urgent first — an ascending sort would cancel the LOWEST-priority job).
         PrintJob? nextJob = await db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt)
+            .OrderByPriorityDescending()
             .FirstOrDefaultAsync(ct);
 
         if (nextJob != null)
@@ -432,7 +432,24 @@ public class AutoDispatchService(
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
 
-        EnsureDispatchState(printer).BedPreConfirmed = true;
+        PrinterDispatchState preClearState = EnsureDispatchState(printer);
+        preClearState.BedPreConfirmed = true;
+
+        // Pre-clearing the bed is a SAFETY OVERRIDE: it lets the next job dispatch without
+        // the per-job bed-clear acknowledgement. It must be durably audited in the SAME
+        // transaction as the flag it sets (issue #900, defect 13).
+        _ = QueueAuditWriter.Add(
+            db,
+            actorSubject: "operator",
+            QueueAuditOperations.SafetyOverride,
+            QueueAuditOutcomes.Success,
+            nameof(Printer),
+            resourceId: printerId,
+            printerId: printerId,
+            reasonCode: "bed_pre_confirmed",
+            dispatchStateRowVersion: preClearState.RowVersion,
+            detail: new { queueDepth = queuedJobs.QueueDepth });
+
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
@@ -733,17 +750,15 @@ public class AutoDispatchService(
 
     private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(Guid printerId, bool includeGcodeFile, CancellationToken ct)
     {
+        // Ready-head selection MUST use the single shared ordering selector so the job the
+        // operator sees at the head of the queue is exactly the job that gets dispatched.
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt);
+            .OrderByPriorityDescending();
 
         IQueryable<PrintJob> unassignedQuery = db.PrintJobs
             .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt);
+            .OrderByPriorityDescending();
 
         if (includeGcodeFile)
         {

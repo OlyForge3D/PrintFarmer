@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -14,10 +15,14 @@ namespace Farm.Infrastructure.Services;
 /// Service for managing job scheduling with timezone support
 /// Phase 4.1: Job Scheduling
 /// </summary>
-public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingService> logger)
+public class JobSchedulingService(
+    AppDbContext context,
+    ILogger<JobSchedulingService> logger,
+    IPrintJobManagementService? printJobManagement = null)
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
     private readonly ILogger<JobSchedulingService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IPrintJobManagementService? _printJobManagement = printJobManagement;
 
     /// <summary>
     /// Schedule a print job for a specific date and time in a given timezone
@@ -306,15 +311,17 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
                     ActualStartTime = now
                 };
 
-                // Update job to trigger printing
-                if (schedule.PrintJob != null)
-                {
-                    schedule.PrintJob.Status = PrintJobStatus.Printing;
-                    schedule.PrintJob.ActualStartTime = now;
-                }
-
                 _context.JobExecutions.Add(execution);
                 await _context.SaveChangesAsync(cancellationToken);
+
+                // =============================================================
+                // The scheduler NEVER sets Status = Printing directly (issue #900,
+                // defect 5). Printing is reachable only through the shared dispatch
+                // claim + adapter orchestration, which enforces bed-clear
+                // acknowledgement, telemetry freshness, filament, capability and
+                // compatibility gates. The scheduler simply invokes that path.
+                // =============================================================
+                await TriggerScheduledDispatchAsync(schedule, execution, cancellationToken);
 
                 _logger.LogInformation(
                     "[JobScheduling] Triggered scheduled job '{JobId}' at {ExecutionTime}", schedule.PrintJobId, now);
@@ -331,6 +338,61 @@ public class JobSchedulingService(AppDbContext context, ILogger<JobSchedulingSer
                 _logger.LogError("[JobScheduling] Failed to trigger job '{JobId}': {ExceptionMessage}", schedule.PrintJobId, ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    /// Routes a due schedule through the shared dispatch orchestration.
+    /// The execution record is updated with the typed outcome so an operator can see why a
+    /// scheduled start was refused instead of finding a job silently stuck in Printing.
+    /// </summary>
+    private async Task TriggerScheduledDispatchAsync(
+        JobSchedule schedule,
+        JobExecution execution,
+        CancellationToken cancellationToken)
+    {
+        if (schedule.PrintJob is null)
+        {
+            execution.Status = "Failed";
+            execution.Message = "Scheduled job no longer exists.";
+            await _context.SaveChangesAsync(cancellationToken);
+            return;
+        }
+
+        if (_printJobManagement is null)
+        {
+            // No orchestrator wired (unit-test/host-less configuration): refuse to
+            // fabricate a Printing state. Leave the job queued for the auto-dispatcher.
+            execution.Status = "Skipped";
+            execution.Message = "Dispatch orchestration is not available in this host.";
+            await _context.SaveChangesAsync(cancellationToken);
+
+            _logger.LogWarning(
+                "[JobScheduling] Dispatch orchestration unavailable; job {JobId} left queued for auto-dispatch",
+                schedule.PrintJobId);
+            return;
+        }
+
+        try
+        {
+            _ = await _printJobManagement.DispatchJobAsync(
+                schedule.PrintJobId.ToString(),
+                "scheduler",
+                ifMatchJobRowVersion: null,
+                cancellationToken);
+
+            execution.Status = "Completed";
+        }
+        catch (Exception ex)
+        {
+            execution.Status = "Failed";
+            execution.Message = ex.Message[..Math.Min(ex.Message.Length, 500)];
+
+            _logger.LogWarning(
+                "[JobScheduling] Scheduled dispatch refused for job {JobId}: {Reason}",
+                schedule.PrintJobId, ex.Message);
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

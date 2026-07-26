@@ -35,7 +35,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
     public CalibrationSequenceAllocationTests()
     {
         int id = System.Threading.Interlocked.Increment(ref _dbCounter);
-        _connectionString = $"Data Source=file:seq_alloc_{id}?mode=memory&cache=shared";
+        _connectionString = $"Data Source=file:seq_alloc_{id}?mode=memory&cache=shared;Foreign Keys=False";
         _keepAlive = new SqliteConnection(_connectionString);
         _keepAlive.Open();
     }
@@ -98,6 +98,26 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             FileHash = new string('e', 64),
             FileSizeBytes = 512,
             FilePath = "/gcode",
+
+            // Promoted immutable calibration artifact: the server derives JobKind and
+            // provenance from THIS lineage (issue #900, defect 3).
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('e', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
+            SpecificationSha256 = new string('a', 64),
+            MachineProfileSha256 = new string('b', 64),
+            ProcessProfileSha256 = new string('c', 64),
+            FilamentProfileSha256 = new string('d', 64),
+            SlicerEngineName = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            PinnedSlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:abc",
+            FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
+            GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
         };
         db.GcodeFiles.Add(gcode);
 
@@ -270,7 +290,10 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 AssignedPrinterId = printer.Id,
                 Status = PrintJobStatus.Assigned,
                 Priority = (int)PrintJobPriority.Normal,
-                JobKind = JobKind.FilamentCalibration,
+
+                // Sequence allocation is job-kind agnostic; a Standard job keeps this test
+                // focused on the outbox counter rather than the calibration policy matrix.
+                JobKind = JobKind.Standard,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 QueuedAt = DateTime.UtcNow,
@@ -301,6 +324,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             var ackSvc = new BedClearAcknowledgementService(
                 ackCtx,
                 allocator,
+                DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
                 NullLogger<BedClearAcknowledgementService>.Instance);
 
             return await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
@@ -309,7 +333,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 ActorSubject: $"actor-{i}",
                 IdempotencyKey: ackKeys[i],
                 IfMatchDispatchState: dsRowVersions[i],
-                ExpectedPrinterConfigRevision: null));
+                ExpectedPrinterConfigRevision: 1));
         });
 
         AcknowledgeBedClearResult[] results = await Task.WhenAll(tasks);
@@ -400,6 +424,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         var ackSvc = new BedClearAcknowledgementService(
             ackCtx,
             new DbOutboxSequenceAllocator(),
+            DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
             NullLogger<BedClearAcknowledgementService>.Instance);
 
         AcknowledgeBedClearResult result = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
@@ -408,7 +433,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             ActorSubject: "actor",
             IdempotencyKey: "single-ack-key",
             IfMatchDispatchState: dsForAck!.RowVersion,
-            ExpectedPrinterConfigRevision: null));
+            ExpectedPrinterConfigRevision: 1));
 
         result.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
@@ -490,12 +515,13 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             var ackSvc = new BedClearAcknowledgementService(
                 ackCtx,
                 new DbOutboxSequenceAllocator(),
+                DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
                 NullLogger<BedClearAcknowledgementService>.Instance);
 
             var r = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
                 printers[i].JobId, printers[i].PrinterId,
                 $"actor-{i}", $"multi-ack-{i}",
-                ds!.RowVersion, null));
+                ds!.RowVersion, 1));
 
             r.Outcome.Should().Be(BedClearAckOutcome.Accepted, $"ack {i} must succeed");
         }

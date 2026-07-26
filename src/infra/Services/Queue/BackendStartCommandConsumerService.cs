@@ -40,6 +40,12 @@ public sealed class BackendStartCommandConsumerService(
     private const int MaxAttempts = 10;
     private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
 
+    /// <summary>
+    /// Failure code stamped on rows whose backend outcome could not be determined.
+    /// Such rows are excluded from stale-lease recovery so they are never retried blindly.
+    /// </summary>
+    private const string UnknownOutcomeFailureCode = "backend_outcome_unknown";
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer started");
@@ -82,10 +88,14 @@ public sealed class BackendStartCommandConsumerService(
 
             DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
 
+            // Rows whose backend outcome is UNKNOWN are deliberately excluded: they may have
+            // been delivered, so re-running them could double-start a printer. They stay
+            // leased until the reconciler resolves the attempt.
             List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
                 .Where(e =>
                     e.EventType == CommandEventType &&
                     e.Status == QueueOutboxEventStatus.Processing &&
+                    e.FailureCode != UnknownOutcomeFailureCode &&
                     e.LastAttemptedAtUtc < staleCutoff)
                 .ToListAsync(ct);
 
@@ -222,32 +232,13 @@ public sealed class BackendStartCommandConsumerService(
         try
         {
             IPrintJobManagementService mgmt = scope.ServiceProvider.GetRequiredService<IPrintJobManagementService>();
-            await mgmt.DispatchJobWithAckAsync(
+            BackendStartOutcome outcome = await mgmt.DispatchJobWithAckAsync(
                 payload.JobId.ToString(),
                 payload.ActorSubject ?? "system",
                 payload.AcknowledgementKey,
                 ct);
 
-            // ===============================================================
-            // Step 4: Mark Published only AFTER successful execution.
-            // ===============================================================
-            await using AsyncServiceScope successScope = scopeFactory.CreateAsyncScope();
-            AppDbContext successDb = successScope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            QueueDispatchOutbox? completed = await successDb.QueueDispatchOutbox
-                .FirstOrDefaultAsync(e => e.Id == evt.Id, ct);
-
-            if (completed is not null)
-            {
-                completed.Status = QueueOutboxEventStatus.Published;
-                completed.CompletedAtUtc = DateTime.UtcNow;
-                await successDb.SaveChangesAsync(ct);
-            }
-
-            logger.LogInformation(
-                "[BackendStartConsumer] Backend start completed successfully: EventId={EventId} Job={JobId}",
-                evt.Id,
-                payload.JobId);
+            await ApplyOutcomeAsync(evt.Id, payload.JobId, outcome, ct);
         }
         catch (OperationCanceledException)
         {
@@ -261,43 +252,116 @@ public sealed class BackendStartCommandConsumerService(
         {
             logger.LogWarning(
                 ex,
-                "[BackendStartConsumer] Backend start failed for EventId={EventId} Job={JobId} (attempt {Count})",
+                "[BackendStartConsumer] Backend start threw for EventId={EventId} Job={JobId} (attempt {Count})",
                 evt.Id,
                 payload.JobId,
                 evt.AttemptCount);
 
-            // ===============================================================
-            // Step 5: Record failure and schedule retry or dead-letter.
-            // ===============================================================
-            await using AsyncServiceScope failScope = scopeFactory.CreateAsyncScope();
-            AppDbContext failDb = failScope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // An unexpected exception is an UNKNOWN outcome: never mark it Published,
+            // never retry blindly. Keep the row leased for the reconciler.
+            await ApplyOutcomeAsync(
+                evt.Id,
+                payload.JobId,
+                BackendStartOutcome.Unknown(ex.Message, attemptId: null),
+                ct);
+        }
+    }
 
-            QueueDispatchOutbox? failedEvt = await failDb.QueueDispatchOutbox
-                .FirstOrDefaultAsync(e => e.Id == evt.Id, ct);
+    /// <summary>
+    /// Applies a typed backend-start outcome to the durable outbox row.
+    ///
+    /// <c>Published</c> means "a backend command was confirmed accepted" — nothing else.
+    /// Unknown outcomes stay in <see cref="QueueOutboxEventStatus.Processing"/> (leased and
+    /// reconcilable) and are never retried blindly. Permanent rejections are dead-lettered
+    /// so an operator can act; transient rejections get bounded exponential retries.
+    /// </summary>
+    private async Task ApplyOutcomeAsync(
+        Guid eventId,
+        Guid jobId,
+        BackendStartOutcome outcome,
+        CancellationToken ct)
+    {
+        await using AsyncServiceScope outcomeScope = scopeFactory.CreateAsyncScope();
+        AppDbContext outcomeDb = outcomeScope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            if (failedEvt is not null)
-            {
-                failedEvt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
+        QueueDispatchOutbox? row = await outcomeDb.QueueDispatchOutbox
+            .FirstOrDefaultAsync(e => e.Id == eventId, ct);
 
-                if (failedEvt.AttemptCount >= MaxAttempts)
+        if (row is null)
+        {
+            return;
+        }
+
+        switch (outcome.Status)
+        {
+            case BackendStartStatus.Accepted:
+            case BackendStartStatus.AlreadyStarted:
+                row.Status = QueueOutboxEventStatus.Published;
+                row.CompletedAtUtc = DateTime.UtcNow;
+                row.LastError = null;
+                row.FailureCode = null;
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+
+                logger.LogInformation(
+                    "[BackendStartConsumer] Backend start confirmed ({Status}): EventId={EventId} Job={JobId}",
+                    outcome.Status, eventId, jobId);
+                break;
+
+            case BackendStartStatus.Unknown:
+                // Leave the row in Processing: the command may have been delivered.
+                // The reconciler owns the resolution; blind retry could double-start.
+                row.Status = QueueOutboxEventStatus.Processing;
+                row.FailureCode = outcome.ErrorCode;
+                row.LastError = Truncate(outcome.ErrorDetail);
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+                row.RetryAfterUtc = null;
+
+                logger.LogError(
+                    "[BackendStartConsumer] UNKNOWN backend outcome: EventId={EventId} Job={JobId} — " +
+                    "row remains leased for reconciliation and is NOT retried",
+                    eventId, jobId);
+                break;
+
+            case BackendStartStatus.RejectedPermanently:
+                row.Status = QueueOutboxEventStatus.DeadLettered;
+                row.CompletedAtUtc = DateTime.UtcNow;
+                row.FailureCode = outcome.ErrorCode;
+                row.LastError = Truncate(outcome.ErrorDetail);
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+
+                logger.LogError(
+                    "[BackendStartConsumer] Backend start permanently rejected ({Code}): EventId={EventId} Job={JobId}",
+                    outcome.ErrorCode, eventId, jobId);
+                break;
+
+            default:
+                row.FailureCode = outcome.ErrorCode;
+                row.LastError = Truncate(outcome.ErrorDetail);
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+
+                if (row.AttemptCount >= MaxAttempts)
                 {
-                    failedEvt.Status = QueueOutboxEventStatus.DeadLettered;
-                    failedEvt.CompletedAtUtc = DateTime.UtcNow;
+                    row.Status = QueueOutboxEventStatus.DeadLettered;
+                    row.CompletedAtUtc = DateTime.UtcNow;
                     logger.LogError(
                         "[BackendStartConsumer] Event {EventId} dead-lettered after {Max} attempts",
-                        evt.Id, MaxAttempts);
+                        eventId, MaxAttempts);
                 }
                 else
                 {
-                    double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, failedEvt.AttemptCount - 1);
-                    failedEvt.Status = QueueOutboxEventStatus.Pending;
-                    failedEvt.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
+                    double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, row.AttemptCount - 1);
+                    row.Status = QueueOutboxEventStatus.Pending;
+                    row.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
                 }
 
-                await failDb.SaveChangesAsync(ct);
-            }
+                break;
         }
+
+        _ = await outcomeDb.SaveChangesAsync(ct);
     }
+
+    private static string? Truncate(string? value) =>
+        value is null ? null : value[..Math.Min(value.Length, 2047)];
 
     /// <summary>Payload shape for <c>BackendStartCommand.v1</c> outbox events.</summary>
     private sealed record BackendStartPayload(

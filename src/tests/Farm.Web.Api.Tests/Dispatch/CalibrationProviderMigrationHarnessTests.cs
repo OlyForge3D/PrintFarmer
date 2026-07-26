@@ -23,8 +23,8 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// The SQLite test always runs (no external dependency).
 ///
 /// The tests verify:
-/// 1. All pending migrations can be applied without error (<see cref="EnsureCreatedAsync"/>
-///    or <c>MigrateAsync()</c> paths as appropriate per provider).
+/// 1. All pending migrations can be applied without error using REAL migrations
+///    (<c>MigrateAsync()</c>) on every provider — never <c>EnsureCreated</c>.
 /// 2. After migration, the <c>OutboxSequenceState</c> seed row (Id=1, NextSequence=0) is present.
 /// 3. The <c>QueueDispatchOutbox</c>, <c>QueueDispatchAttempts</c>, and
 ///    <c>PrinterDispatchState</c> tables exist and are queryable.
@@ -48,7 +48,7 @@ public class CalibrationProviderMigrationHarnessTests
     private static AppDbContext CreateSqliteContext(string connString)
     {
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlite(connString)
+            .UseSqlite(connString, sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"))
             .Options;
         var ctx = new AppDbContext(opts);
         ctx.Database.ExecuteSqlRaw("PRAGMA foreign_keys = OFF;");
@@ -64,14 +64,26 @@ public class CalibrationProviderMigrationHarnessTests
     public async Task SQLite_CalibrationQueueDispatchSchema_CreatesCleanly()
     {
         string dbName = $"pfarm_mig_{Guid.NewGuid():N}";
-        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
 
         using var keepAlive = new SqliteConnection(connString);
         keepAlive.Open();
 
         await using var ctx = CreateSqliteContext(connString);
-        bool created = await ctx.Database.EnsureCreatedAsync();
-        created.Should().BeTrue("SQLite in-memory DB must be created on first use");
+
+        // REAL migrations — never EnsureCreated (issue #900, defect 14).
+        await ctx.Database.MigrateAsync();
+
+        IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
+        applied.Should().Contain(
+            m => m.EndsWith("AddCalibrationQueueDispatch", StringComparison.Ordinal),
+            "the calibration queue dispatch migration must be applied");
+        applied.Should().Contain(
+            m => m.EndsWith("AddQueueAuditAndBackendIdentity", StringComparison.Ordinal),
+            "the queue audit / backend identity migration must be applied");
+
+        (await ctx.Database.GetPendingMigrationsAsync()).Should().BeEmpty(
+            "no pending migrations may remain after MigrateAsync");
 
         // Seed row must exist after schema creation.
         OutboxSequenceState seqState = await ctx.OutboxSequenceStates.SingleAsync();
@@ -82,6 +94,7 @@ public class CalibrationProviderMigrationHarnessTests
         (await ctx.QueueDispatchOutbox.LongCountAsync()).Should().Be(0);
         (await ctx.QueueDispatchAttempts.LongCountAsync()).Should().Be(0);
         (await ctx.PrinterDispatchStates.LongCountAsync()).Should().Be(0);
+        (await ctx.QueueOperationAudits.LongCountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -89,13 +102,13 @@ public class CalibrationProviderMigrationHarnessTests
     public async Task SQLite_PrintJobBackfill_LegacyJobsDefaultToStandard_NullCalibrationFields()
     {
         string dbName = $"pfarm_backfill_{Guid.NewGuid():N}";
-        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
 
         using var keepAlive = new SqliteConnection(connString);
         keepAlive.Open();
 
         await using var seedCtx = CreateSqliteContext(connString);
-        await seedCtx.Database.EnsureCreatedAsync();
+        await seedCtx.Database.MigrateAsync();
 
         // Seed a minimal PrintJob to simulate a pre-calibration-feature row.
         var mfr = new Manufacturer { Id = Guid.NewGuid(), Name = "BackfillMfr" };
@@ -103,8 +116,14 @@ public class CalibrationProviderMigrationHarnessTests
         var mdl = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mfr.Id, Name = "BackfillModel" };
         seedCtx.PrinterModels.Add(mdl);
 
+        var folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+
+        seedCtx.Set<FolderNode>().Add(folder);
+
+
         var gcode = new GcodeFile
         {
+            FolderId = folder.Id,
             Id = Guid.NewGuid(),
             Name = "legacy.gcode",
             FileName = "legacy.gcode",
@@ -151,21 +170,27 @@ public class CalibrationProviderMigrationHarnessTests
         // Verifies the filtered unique index on (IdempotencyScope, IdempotencyKey) prevents
         // duplicate active calibration jobs with the same scope+key.
         string dbName = $"pfarm_idx_{Guid.NewGuid():N}";
-        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
 
         using var keepAlive = new SqliteConnection(connString);
         keepAlive.Open();
 
         await using var seedCtx = CreateSqliteContext(connString);
-        await seedCtx.Database.EnsureCreatedAsync();
+        await seedCtx.Database.MigrateAsync();
 
         var mfr = new Manufacturer { Id = Guid.NewGuid(), Name = "IdxMfr" };
         seedCtx.Manufacturers.Add(mfr);
         var mdl = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mfr.Id, Name = "IdxModel" };
         seedCtx.PrinterModels.Add(mdl);
 
+        var folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+
+        seedCtx.Set<FolderNode>().Add(folder);
+
+
         var gcode = new GcodeFile
         {
+            FolderId = folder.Id,
             Id = Guid.NewGuid(),
             Name = "idx.gcode",
             FileName = "idx.gcode",
@@ -224,21 +249,27 @@ public class CalibrationProviderMigrationHarnessTests
         // existing terminal jobs and returns a replay; the unique index prevents raw
         // duplicate DB inserts that bypass the application layer.
         string dbName = $"pfarm_terminal_{Guid.NewGuid():N}";
-        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared";
+        string connString = $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
 
         using var keepAlive = new SqliteConnection(connString);
         keepAlive.Open();
 
         await using var seedCtx = CreateSqliteContext(connString);
-        await seedCtx.Database.EnsureCreatedAsync();
+        await seedCtx.Database.MigrateAsync();
 
         var mfr = new Manufacturer { Id = Guid.NewGuid(), Name = "TermMfr" };
         seedCtx.Manufacturers.Add(mfr);
         var mdl = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mfr.Id, Name = "TermModel" };
         seedCtx.PrinterModels.Add(mdl);
 
+        var folder = new FolderNode { Id = Guid.NewGuid(), Path = "/", FolderType = "gcode" };
+
+        seedCtx.Set<FolderNode>().Add(folder);
+
+
         var gcode = new GcodeFile
         {
+            FolderId = folder.Id,
             Id = Guid.NewGuid(),
             Name = "term.gcode",
             FileName = "term.gcode",
@@ -299,11 +330,17 @@ public class CalibrationProviderMigrationHarnessTests
     public async Task PostgreSQL_CalibrationQueueDispatch_MigrationsApplyAndSchemaIsConsistent()
     {
         string? connString = Environment.GetEnvironmentVariable(PostgresConnEnvVar);
+
+        // The provider job MUST report visibly rather than silently returning green:
+        // a skipped provider test is reported as Skipped by the test framework, so CI can
+        // assert that provisioned provider jobs actually executed (issue #900, defect 14).
         if (string.IsNullOrWhiteSpace(connString))
         {
-            // No Postgres container — skip gracefully. CI with a real container must set this.
-            return;
+            Assert.Fail(
+                $"PostgreSQL provider verification DID NOT RUN: set {PostgresConnEnvVar} to a live " +
+            "PostgreSQL connection string. CI provider jobs MUST provision this.");
         }
+
 
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
             .UseNpgsql(connString)
@@ -321,10 +358,14 @@ public class CalibrationProviderMigrationHarnessTests
     public async Task SqlServer_CalibrationQueueDispatch_MigrationsApplyAndSchemaIsConsistent()
     {
         string? connString = Environment.GetEnvironmentVariable(SqlServerConnEnvVar);
+
         if (string.IsNullOrWhiteSpace(connString))
         {
-            return;
+            Assert.Fail(
+                $"SQL Server provider verification DID NOT RUN: set {SqlServerConnEnvVar} to a live " +
+            "SQL Server connection string. CI provider jobs MUST provision this.");
         }
+
 
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlServer(connString)
@@ -343,8 +384,17 @@ public class CalibrationProviderMigrationHarnessTests
     {
         await using var ctx = new AppDbContext(opts);
 
-        // Apply all pending migrations.
+        // Apply all pending migrations — REAL migrations, never EnsureCreated, so the
+        // generated provider SQL (filtered indexes, ROWVERSION, backfills) is exercised.
         await ctx.Database.MigrateAsync();
+
+        IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
+        applied.Should().Contain(
+            m => m.EndsWith("AddCalibrationQueueDispatch", StringComparison.Ordinal),
+            $"[{providerName}] the calibration queue dispatch migration must be applied");
+        applied.Should().Contain(
+            m => m.EndsWith("AddQueueAuditAndBackendIdentity", StringComparison.Ordinal),
+            $"[{providerName}] the queue audit / backend identity migration must be applied");
 
         // OutboxSequenceState seed row must exist.
         bool seedExists = await ctx.OutboxSequenceStates.AnyAsync(s => s.Id == 1);
@@ -361,6 +411,24 @@ public class CalibrationProviderMigrationHarnessTests
             .BeGreaterThanOrEqualTo(0, $"[{providerName}] QueueDispatchAttempts must be queryable");
         (await ctx.PrinterDispatchStates.LongCountAsync()).Should()
             .BeGreaterThanOrEqualTo(0, $"[{providerName}] PrinterDispatchStates must be queryable");
+        (await ctx.QueueOperationAudits.LongCountAsync()).Should()
+            .BeGreaterThanOrEqualTo(0, $"[{providerName}] QueueOperationAudits must be queryable");
+
+        // Backfill: every pre-existing PrintJob row must be Standard with null calibration
+        // fields — an ambiguous legacy row must never become a valid ack or lease.
+        int ambiguousLegacyRows = await ctx.PrintJobs
+            .CountAsync(j => j.JobKind == null ||
+                             (j.JobKind == JobKind.Standard &&
+                              (j.IdempotencyKey != null || j.CalibrationAttemptId != null)));
+        ambiguousLegacyRows.Should().Be(
+            0, $"[{providerName}] backfilled rows must be unambiguously Standard with null calibration fields");
+
+        // Fencing: the outbox sequence must be unique at the database level.
+        bool duplicateSequences = await ctx.QueueDispatchOutbox
+            .GroupBy(e => e.Sequence)
+            .AnyAsync(g => g.Count() > 1);
+        duplicateSequences.Should().BeFalse(
+            $"[{providerName}] the unique index must prevent duplicate outbox sequences");
 
         // No pending migrations must remain.
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();

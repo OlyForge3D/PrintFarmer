@@ -54,7 +54,11 @@ public class CalibrationQueueIdempotencyTests
         GcodeFile gcode = await db.GcodeFiles.SingleAsync();
         QueuePrintJobDto firstRequest = CreateCalibrationRequest(gcode.Id, printer.Id, "key-2");
         QueuePrintJobDto conflictingRequest = CreateCalibrationRequest(gcode.Id, printer.Id, "key-2");
-        conflictingRequest.SpecificationSha256 = new string('9', 64);
+
+        // Provenance/hashes are server-derived (defect 3), so the payload difference must be
+        // on an input the client still controls and that changes the physical outcome.
+        conflictingRequest.Priority = PrintJobPriority.Urgent;
+        conflictingRequest.RequiredMaterialType = "PETG";
 
         _ = await sut.AddJobToQueueAsync(firstRequest, Guid.NewGuid(), CancellationToken.None);
 
@@ -103,6 +107,26 @@ public class CalibrationQueueIdempotencyTests
             FileName = "calibration.gcode",
             EstimatedPrintTimeMinutes = 45,
             EstimatedFilamentWeightG = 11.2,
+
+            // Server-authoritative calibration lineage (issue #900, defect 3): the JobKind
+            // and provenance are derived from THIS artifact, never from the client request.
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('1', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
+            SpecificationSha256 = new string('2', 64),
+            MachineProfileSha256 = new string('3', 64),
+            ProcessProfileSha256 = new string('4', 64),
+            FilamentProfileSha256 = new string('5', 64),
+            SlicerEngineName = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            PinnedSlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
+            FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
+            GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
         };
         Printer printer = new()
         {

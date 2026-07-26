@@ -4492,6 +4492,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("bytea");
 
+                    b.Property<Guid?>("SliceJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("uuid");
 
@@ -5838,6 +5841,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("BackendAcceptedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("BackendCommandId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("BackendFileName")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<string>("BackendJobId")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
@@ -5865,7 +5876,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int>("Outcome")
                         .HasColumnType("integer");
 
-                    b.Property<Guid>("PrintJobId")
+                    b.Property<Guid?>("PrintJobId")
                         .HasColumnType("uuid");
 
                     b.Property<long>("PrinterConfigRevision")
@@ -5916,16 +5927,30 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("AttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BedClearState")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<byte[]>("DispatchStateRowVersion")
+                        .HasColumnType("bytea");
+
                     b.Property<string>("EventType")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
 
                     b.Property<DateTime?>("LastAttemptedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -5973,6 +5998,79 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
 
                     b.ToTable("QueueDispatchOutbox");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueueOperationAudit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("DetailJson")
+                        .HasMaxLength(2048)
+                        .HasColumnType("character varying(2048)");
+
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("DispatchStateRowVersion")
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<byte[]>("JobRowVersion")
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTime>("OccurredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("PrintJobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ReasonCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid?>("ResourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OccurredAtUtc")
+                        .HasDatabaseName("IX_QueueOperationAudits_OccurredAt");
+
+                    b.HasIndex("PrinterId", "OccurredAtUtc")
+                        .HasDatabaseName("IX_QueueOperationAudits_Printer_OccurredAt");
+
+                    b.HasIndex("ResourceType", "ResourceId")
+                        .HasDatabaseName("IX_QueueOperationAudits_Resource");
+
+                    b.ToTable("QueueOperationAudits");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>
@@ -8159,9 +8257,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                 {
                     b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
                         .WithMany("DispatchAttempts")
-                        .HasForeignKey("PrintJobId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("PrintJobId");
 
                     b.Navigation("PrintJob");
                 });

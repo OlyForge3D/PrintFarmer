@@ -26,6 +26,12 @@ namespace Farm.Web.Api.Tests.Dispatch;
 [Trait("Category", "DbHeavy")]
 public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 {
+    /// <summary>Spool the seeded calibration job pins; the printer must have it loaded.</summary>
+    private const int CalibrationSpoolId = 4242;
+
+    /// <summary>Material the seeded calibration job pins; the printer must have it loaded.</summary>
+    private const string CalibrationMaterial = "PLA";
+
     private readonly SqliteConnection _keepAlive;
     private readonly string _connectionString;
     private static int _dbCounter;
@@ -33,7 +39,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     public CalibrationQueueConcurrencyTests()
     {
         int id = System.Threading.Interlocked.Increment(ref _dbCounter);
-        _connectionString = $"Data Source=file:calib_concurrency_{id}?mode=memory&cache=shared";
+        _connectionString = $"Data Source=file:calib_concurrency_{id}?mode=memory&cache=shared;Foreign Keys=False";
         _keepAlive = new SqliteConnection(_connectionString);
         _keepAlive.Open();
     }
@@ -84,10 +90,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             r => r.GetStatusSnapshot(printerId) == snapshot);
     }
 
-    private static BedClearAcknowledgementService CreateAckService(AppDbContext db, IDbOutboxSequenceAllocator? allocator = null)
+    private static BedClearAcknowledgementService CreateAckService(AppDbContext db, IDbOutboxSequenceAllocator? allocator = null, IPrinterStatusSnapshotReader? statusReader = null)
     {
         allocator ??= new DbOutboxSequenceAllocator();
-        return new(db, allocator, NullLogger<BedClearAcknowledgementService>.Instance);
+        statusReader ??= DispatchTestDoubles.OnlineIdleReader(Guid.Empty);
+        return new(db, allocator, statusReader, NullLogger<BedClearAcknowledgementService>.Instance);
     }
 
     /// <summary>Applies migrations and seeds a printer + dispatch state + print job.</summary>
@@ -108,6 +115,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         };
         db.PrinterModels.Add(model);
 
+        Guid calibrationProjectId = Guid.NewGuid();
+        Guid calibrationAttemptId = Guid.NewGuid();
+        Guid calibrationOrchestrationId = Guid.NewGuid();
+        bool isCalibration = jobKind == JobKind.FilamentCalibration;
+
         var gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),
@@ -116,6 +128,19 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             FileHash = new string('a', 64),
             FileSizeBytes = 1024,
             FilePath = "/gcode",
+
+            // Promoted immutable calibration artifact lineage (issue #900, defects 3 and 7).
+            IsImmutable = isCalibration,
+            PromotedAtUtc = isCalibration ? DateTime.UtcNow.AddMinutes(-1) : null,
+            ContentSha256 = isCalibration ? new string('a', 64) : null,
+            CalibrationProjectId = isCalibration ? calibrationProjectId : null,
+            CalibrationAttemptId = isCalibration ? calibrationAttemptId : null,
+            CalibrationOrchestrationId = isCalibration ? calibrationOrchestrationId : null,
+            CalibrationManifestSha256 = isCalibration ? new string('9', 64) : null,
+            SpecificationSha256 = isCalibration ? new string('s', 64) : null,
+            MachineProfileSha256 = isCalibration ? new string('m', 64) : null,
+            ProcessProfileSha256 = isCalibration ? new string('p', 64) : null,
+            FilamentProfileSha256 = isCalibration ? new string('f', 64) : null,
         };
         db.GcodeFiles.Add(gcode);
 
@@ -135,6 +160,10 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             CalibrationSlicerDistribution = "upstream",
             CalibrationSlicerVersion = "2.3.0",
             ConfigurationRevision = 1,
+
+            // Hard filament gate inputs.
+            CurrentSpoolId = CalibrationSpoolId,
+            CurrentMaterial = CalibrationMaterial,
         };
         db.Printers.Add(printer);
 
@@ -151,22 +180,24 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.High,
             JobKind = jobKind,
-            RequiredFirmwareFamily = jobKind == JobKind.FilamentCalibration ? PrinterFirmwareFamily.Klipper : null,
-            RequiredGcodeDialect = jobKind == JobKind.FilamentCalibration ? PrinterGcodeDialect.Klipper : null,
-            RequiredSlicerEngine = jobKind == JobKind.FilamentCalibration ? "OrcaSlicer" : null,
-            RequiredSlicerDistribution = jobKind == JobKind.FilamentCalibration ? "upstream" : null,
-            RequiredSlicerVersion = jobKind == JobKind.FilamentCalibration ? "2.3.0" : null,
-            PinnedPrinterConfigRevision = jobKind == JobKind.FilamentCalibration ? 1L : null,
+            RequiredFirmwareFamily = isCalibration ? PrinterFirmwareFamily.Klipper : null,
+            RequiredGcodeDialect = isCalibration ? PrinterGcodeDialect.Klipper : null,
+            RequiredSlicerEngine = isCalibration ? "OrcaSlicer" : null,
+            RequiredSlicerDistribution = isCalibration ? "upstream" : null,
+            RequiredSlicerVersion = isCalibration ? "2.3.0" : null,
+            PinnedPrinterConfigRevision = isCalibration ? 1L : null,
+            SpoolmanSpoolId = isCalibration ? CalibrationSpoolId : null,
+            RequiredMaterialType = isCalibration ? CalibrationMaterial : null,
             // Required by the authoritative claim policy for calibration jobs (#900):
-            CalibrationProjectId = jobKind == JobKind.FilamentCalibration ? Guid.NewGuid() : null,
-            CalibrationAttemptId = jobKind == JobKind.FilamentCalibration ? Guid.NewGuid() : null,
-            CalibrationConfigSnapshotId = jobKind == JobKind.FilamentCalibration ? Guid.NewGuid() : null,
-            CalibrationOrchestrationId = jobKind == JobKind.FilamentCalibration ? Guid.NewGuid() : null,
-            GcodeContentSha256 = jobKind == JobKind.FilamentCalibration ? new string('a', 64) : null,
-            SpecificationSha256 = jobKind == JobKind.FilamentCalibration ? new string('s', 64) : null,
-            MachineProfileSha256 = jobKind == JobKind.FilamentCalibration ? new string('m', 64) : null,
-            ProcessProfileSha256 = jobKind == JobKind.FilamentCalibration ? new string('p', 64) : null,
-            FilamentProfileSha256 = jobKind == JobKind.FilamentCalibration ? new string('f', 64) : null,
+            CalibrationProjectId = isCalibration ? calibrationProjectId : null,
+            CalibrationAttemptId = isCalibration ? calibrationAttemptId : null,
+            CalibrationConfigSnapshotId = isCalibration ? Guid.NewGuid() : null,
+            CalibrationOrchestrationId = isCalibration ? calibrationOrchestrationId : null,
+            GcodeContentSha256 = isCalibration ? new string('a', 64) : null,
+            SpecificationSha256 = isCalibration ? new string('s', 64) : null,
+            MachineProfileSha256 = isCalibration ? new string('m', 64) : null,
+            ProcessProfileSha256 = isCalibration ? new string('p', 64) : null,
+            FilamentProfileSha256 = isCalibration ? new string('f', 64) : null,
             QueuePosition = 1,
             IdempotencyScope = "test-scope",
             IdempotencyKey = Guid.NewGuid().ToString(),
@@ -307,6 +338,16 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             FileHash = new string('b', 64),
             FileSizeBytes = 512,
             FilePath = "/gcode",
+
+            // Promoted immutable calibration artifact — the only artifact a
+            // calibration job may print (issue #900, defects 3 and 7).
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('b', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
         };
         ctx.GcodeFiles.Add(gcode);
 
@@ -351,6 +392,16 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             FileHash = new string('c', 64),
             FileSizeBytes = 256,
             FilePath = "/gcode",
+
+            // Promoted immutable calibration artifact — the only artifact a
+            // calibration job may print (issue #900, defects 3 and 7).
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('c', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
         };
         seedCtx.GcodeFiles.Add(gcode);
 
@@ -395,6 +446,17 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             RequiredSlicerDistribution = "upstream",
             RequiredSlicerVersion = "2.3.0",
             PinnedPrinterConfigRevision = 1,
+            GcodeContentSha256 = new string('c', 64),
+            SpoolmanSpoolId = CalibrationSpoolId,
+            RequiredMaterialType = CalibrationMaterial,
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            SpecificationSha256 = new string('s', 64),
+            MachineProfileSha256 = new string('m', 64),
+            ProcessProfileSha256 = new string('p', 64),
+            FilamentProfileSha256 = new string('f', 64),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,
@@ -507,6 +569,16 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             FileHash = new string('d', 64),
             FileSizeBytes = 128,
             FilePath = "/gcode",
+
+            // Promoted immutable calibration artifact — the only artifact a
+            // calibration job may print (issue #900, defects 3 and 7).
+            IsImmutable = true,
+            PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            ContentSha256 = new string('d', 64),
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationManifestSha256 = new string('9', 64),
         };
         seedCtx.GcodeFiles.Add(gcode);
 
@@ -536,6 +608,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             AssignedPrinterId = printer.Id,
             Status = PrintJobStatus.Assigned,
             JobKind = JobKind.FilamentCalibration,
+            GcodeContentSha256 = new string('d', 64), // Matches the promoted artifact hash.
             RequiredFirmwareFamily = null, // ← intentionally null — fails closed
             RequiredGcodeDialect = null,
             RequiredSlicerEngine = null,
@@ -680,7 +753,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
         var ackSvc = CreateAckService(ackCtx);
         AcknowledgeBedClearResult ack1 = await ackSvc.AcknowledgeAsync(
-            new AcknowledgeBedClearRequest(jobId1, printerId, "actor", "mono-key-1", ds1!.RowVersion, null));
+            new AcknowledgeBedClearRequest(jobId1, printerId, "actor", "mono-key-1", ds1!.RowVersion, 1));
         ack1.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
         // Pre-stamp an ack so the claim can fire and write a second outbox event.
