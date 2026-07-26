@@ -61,3 +61,33 @@ Verified red-before-green by stashing only `SettingsPage.tsx`: the new test fail
 
 Summary lines have leading whitespace, so `Select-String "Tests "` on raw console output misses
 them. Pipe to a file first: `npm run test:run 2>&1 | Out-File -Encoding utf8 t.log`.
+
+### Fresh worktrees don't have `node_modules`
+
+Worktrees under `D:\s\copilot-worktrees\...` are pristine git checkouts — no `node_modules`. Any
+`vitest` / `npm run build` run fails with `Cannot find package 'vitest'` (it tries to resolve
+against the main checkout at `D:\s\pfarm1\...` and gets the wrong path). Fix: run
+`npm ci --no-audit --no-fund` in the worktree's `src/Web/ReactApp` first. This doesn't touch
+`package.json` or `package-lock.json`, so it stays inside the "no dependency changes" rule.
+
+### The four admin feedback patterns, and which one to reach for
+
+As of epic #931 merge, the admin surface has four distinct failure-feedback shapes:
+
+1. `adminToast.error(msg)` — imperative, button-triggered "action failed" (Save, Search, Export).
+   Used by `SettingsPage`. **This is the right choice for anything that isn't a query hook.**
+2. `<AdminError error={error} ... />` — declarative, for React Query load failures with retry.
+   Used by `LoginAuditPage`, `AdminControlCenterPage`.
+3. `setSectionErrors` / `setFieldErrors` — inline, form-level, for validation errors on a
+   specific field. Only in `SettingsPage`'s `GroupSaveBlock`.
+4. `window.alert()` — legacy. Should not exist anywhere on the admin surface. Was in
+   `SystemLogsContent.tsx`; #943 removed it. Grep before adding more; there are still two
+   in `features/slicer/components/SlicerConfigModal.tsx` (non-admin, so out of #943's scope).
+
+Do NOT introduce a fifth shape for two call sites. Match #1 or #2 to the call shape.
+
+### `createObjectURL` without `revokeObjectURL` is a codebase-wide pattern
+
+`SystemLogsContent.exportLogs` creates a blob URL for the download `<a>` and never revokes it —
+small memory leak per export. Noted in the #943 PR but not fixed (scope). Worth grepping the
+codebase for the same shape before touching any other export path.

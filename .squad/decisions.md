@@ -4789,3 +4789,61 @@ Only safe global identifier: `` `${key}.${name}` ``. `SettingsPagelet.tsx:101` c
 
 **Related lesson**: Deliberate-break proofs mandatory for every new test. Revert fix, run test, confirm fail, restore. Six agents shipped green suite with real defects; agent doing proofs shipped clean. Cost under a minute per fix.
 
+
+---
+
+# 2026-07-26: Reviewer-rejection author lockout — RESCINDED
+
+**By:** Jeff (repo owner) — directive, restated multiple times
+**Status:** Authoritative. Supersedes every prior lockout decision in this file and in
+`decisions-archive.md`.
+
+## Decision
+
+**When a reviewer rejects work, the original author fixes it.** There is no author lockout.
+Nobody is ever excluded from an artifact because they authored a version of it that was rejected.
+
+- Reviewers report *what* is wrong and *why*. They do not assign who does the fix.
+- Repeated rejection is a signal to give the author better information — the specific finding,
+  a failing test, a clearer spec — not a signal to rotate authors.
+- Reassignment is a normal routing decision (skill gap, capacity, explicit user request) and must
+  be justified on those grounds. It is never a consequence of rejection.
+- Do not add a team member to work around a rejection.
+
+## Why this kept coming back
+
+The user rescinded this rule more than once and it kept reappearing. The cause was **duplication**,
+not forgetfulness: the rule was written into twelve separate files, including the coordinator's own
+agent definition (reloaded into the system prompt every session) and several agent `history.md`
+files (read at every spawn). Recording the rescission in `decisions.md` alone could never win
+against those, because they are loaded earlier and treated as governance.
+
+## Files corrected
+
+| File | Why it mattered |
+|---|---|
+| `.github/agents/squad.agent.md` | Coordinator definition — loaded into system prompt every session. **Primary cause.** |
+| `.github/skills/reviewer-protocol/SKILL.md` | An entire skill dedicated to enforcing lockout |
+| `.github/skills/agent-collaboration/SKILL.md` | Told every agent with review authority to lock the author out |
+| `.github/rai-policy.md`, `.squad/templates/rai-policy.md` | Rai red-verdict escalation path |
+| `.github/Rai-charter.md`, `.squad/templates/rai-charter.md`, `.squad/agents/Rai/charter.md` | Rai's charter, three copies |
+| `.squad/templates/fact-checker-policy.md` | Fact Checker contradiction path |
+| `.squad/issue-lifecycle.md`, `.squad/templates/issue-lifecycle.md` | Squad-member PR review |
+| `.squad/agents/{bishop,brett,dallas,hicks,kane,lambert,ripley,vasquez}/history.md` | Carried it as a **learning**, re-teaching it at every spawn |
+| `.squad/agents/drake/charter.md` | Seat was justified by the rescinded rule |
+
+Historical records in `decisions.md` and `decisions-archive.md` are left intact — they document
+what happened at the time and are append-only. This entry is the current word.
+
+## Cost of the rule, for the record
+
+During epic #931 a fourth frontend dev (**Drake**) was added purely because Ripley, Newt and Lambert
+were each considered locked out of the same artifact. That hire was unnecessary. Earlier, on
+2026-05-12, the rule had to be explicitly overridden twice because Lambert was the only Backend Dev
+on the roster and the escalation path was unavailable.
+
+## What is retained
+
+Multi-reviewer consensus with fresh-hand rotation stays — it is genuinely effective and caught real
+defects across four gate rounds. What is dropped is only the part that **barred the author from
+their own fix**.

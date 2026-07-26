@@ -7,8 +7,6 @@ import {
   Select,
   FormField,
   Badge,
-  Spinner,
-  EmptyState,
   Tooltip,
   Table,
   TableHead,
@@ -17,6 +15,7 @@ import {
   TableHeaderCell,
   TableCell,
 } from '@/common/components/ui';
+import { AdminLoading, AdminError, AdminEmpty } from '@/common/components/admin';
 import { ShieldIcon, RefreshIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { useUrlFilterState } from '@/common/hooks/useUrlFilterState';
 import { useLoginAudit } from '@/features/admin/hooks/useLoginAudit';
@@ -72,7 +71,7 @@ export function LoginAuditPage() {
     [from, to, username, success, page, pageSize],
   );
 
-  const { data, isLoading, isError, error, isFetching } = useLoginAudit(auditFilters);
+  const { data, isLoading, isError, error, isFetching, refetch } = useLoginAudit(auditFilters);
 
   const currentPage = (page as number);
   const currentPageSize = (pageSize as number);
@@ -160,18 +159,16 @@ export function LoginAuditPage() {
 
       {/* Table area */}
       {isLoading ? (
-        <div className="flex justify-center py-12" role="status" aria-label="Loading login audit entries">
-          <Spinner size="lg" />
-        </div>
+        <AdminLoading variant="table" cols={6} rows={8} label="Loading login audit entries" />
       ) : isError ? (
-        <div
-          className="p-4 rounded-md bg-pf-error-bg border border-pf-error/30 text-pf-error-text"
-          role="alert"
-        >
-          Failed to load login audit log: {String(error)}
-        </div>
+        <AdminError
+          title="Failed to load login audit log"
+          description="Something went wrong while fetching the audit entries. Retry, or check that the API is reachable."
+          error={error}
+          onRetry={() => { void refetch(); }}
+        />
       ) : !data?.items.length ? (
-        <EmptyState
+        <AdminEmpty
           title="No login attempts found"
           description={hasActiveFilters ? 'Try adjusting your filters.' : 'No login attempts have been recorded yet.'}
         />

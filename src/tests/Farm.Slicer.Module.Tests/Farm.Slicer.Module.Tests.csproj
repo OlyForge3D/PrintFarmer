@@ -9,20 +9,22 @@
     <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
   </PropertyGroup>
 
-  <!-- Enable deterministic per-project coverlet outputs (lcov) so CI can merge them predictably -->
-  <PropertyGroup>
-    <CollectCoverage>true</CollectCoverage>
-    <CoverletOutput>$(MSBuildProjectDirectory)/../coverage/$(MSBuildProjectName).info</CoverletOutput>
-    <CoverletOutputFormat>lcov</CoverletOutputFormat>
-  </PropertyGroup>
-
+  <!-- Coverage is collected on-demand via the VSTest data collector (coverlet.collector),
+       not the coverlet.msbuild post-test target. The msbuild target read back its own hit
+       file in a separate build task after the test host exited; under runner contention the
+       host's process-exit flush could be truncated, so that read crashed with
+       "Unable to read beyond the end of the stream" and failed a job whose tests all passed
+       (issue #965). The collector flushes during the test host's controlled session-end, which
+       is not subject to that race. Enable it by running `dotnet test` with the
+       "XPlat Code Coverage" collector and the coverlet.runsettings settings file
+       (see src/coverlet.runsettings). -->
   <ItemGroup>
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.10" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.9" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <PackageReference Include="FluentAssertions" Version="8.10.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -30,8 +32,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.msbuild" Version="10.0.1">
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
   </ItemGroup>

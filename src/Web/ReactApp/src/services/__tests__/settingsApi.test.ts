@@ -3,7 +3,6 @@ import {
   fetchSettingsMetadata,
   fetchSettingsGroups,
   fetchSettingsUnified,
-  saveAllSettings,
   fetchSettingsValues,
   saveSettingsValues,
 } from '../settingsApi';
@@ -14,7 +13,6 @@ vi.mock('../api', () => ({
     getSettingsMetadata: vi.fn(),
     getSettingsGroups: vi.fn(),
     getAllSettings: vi.fn(),
-    saveAllSettings: vi.fn(),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),
   },
@@ -88,22 +86,6 @@ describe('settingsApi', () => {
 
       expect(apiClient.getAllSettings).toHaveBeenCalled();
       expect(result).toEqual(mockSettings);
-    });
-  });
-
-  describe('saveAllSettings', () => {
-    it('should save all settings', async () => {
-      const settings = {
-        theme: 'light',
-        language: 'es',
-        autoRefresh: false,
-      };
-
-      vi.mocked(apiClient.saveAllSettings).mockResolvedValue(undefined);
-
-      await saveAllSettings(settings);
-
-      expect(apiClient.saveAllSettings).toHaveBeenCalledWith(settings);
     });
   });
 

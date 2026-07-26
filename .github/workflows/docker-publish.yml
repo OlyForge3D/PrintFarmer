@@ -62,7 +62,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 
@@ -522,7 +522,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.21.0
+        uses: anchore/sbom-action/download-syft@v0.24.0
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
@@ -696,7 +696,7 @@ jobs:
             SBOM_URL=${{ steps.source.outputs.sbom_url }}
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@v0.21.0
+        uses: anchore/sbom-action/download-syft@v0.24.0
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v4.1.2
@@ -761,7 +761,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
 

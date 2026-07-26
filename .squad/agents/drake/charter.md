@@ -8,13 +8,17 @@ cover them.
 
 ## Why this seat exists
 
-Added during the final gate round of epic #931. Ripley, Newt and Lambert had each become locked
-out of the settings validation-error artifact under the reviewer-rejection protocol — each had
-authored a revision that a reviewer subsequently rejected. Rather than deadlock or re-admit a
-locked-out author, a clean fourth party was brought in.
+Added during the final gate round of epic #931, under a reviewer-rejection lockout rule that
+**has since been rescinded by the repo owner.** At the time, Ripley, Newt and Lambert were each
+treated as locked out of the settings validation-error artifact because they had authored a
+revision a reviewer subsequently rejected, so a fourth party was brought in.
 
-That is the standing purpose of this seat: independent frontend work when the usual owners
-cannot revise their own rejected output.
+That rationale is no longer valid. Authors now fix their own rejected work, and no one is ever
+locked out of an artifact. Drake was not hired to work around rejections.
+
+The standing purpose of this seat is simply **additional frontend capacity** — a second pair of
+hands for parallel React work alongside Ripley, and a genuinely independent reviewer for frontend
+changes when one is wanted.
 
 ## Boundaries
 

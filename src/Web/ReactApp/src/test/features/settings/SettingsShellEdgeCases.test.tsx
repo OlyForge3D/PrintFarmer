@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
   ThemeSwitcher: () => <div data-testid="theme-switcher">Theme Switcher</div>,
@@ -78,6 +79,16 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   }),
 }));
 
+vi.mock('@/common/hooks/useTheme', () => ({
+  useTheme: () => ({
+    theme: 'dark',
+    setTheme: vi.fn(),
+    themes: ['light', 'dark'],
+    isLight: false,
+    isDark: true,
+  }),
+}));
+
 vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true }),
 }));
@@ -95,7 +106,9 @@ function renderSettings(initialRoute = '/settings') {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialRoute]}>
-        <SettingsShell />
+        <GlobalCommandPaletteProvider>
+          <SettingsShell />
+        </GlobalCommandPaletteProvider>
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,

@@ -1441,6 +1441,218 @@ validation, storage, cancellation, or database commit fails.
 
 The updated ETag is also returned in the `ETag` response header.
 
+## Settings API
+
+The settings API is served by `UnifiedSettingsController` under `/api/settings`. It
+backs the tabbed Settings Shell in the React frontend (`/settings`, `/admin/settings`,
+`/admin/manage`). Each backend `[AppSetting]` class is one section, keyed by its
+`SectionName`. See [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md) for the
+end-to-end model.
+
+Two sections (`HomeAssistant`, `Telegram`) manage encrypted tokens through dedicated
+admin controllers and are blocklisted from the generic endpoints below. They return
+`404 Not Found` if you address them via `/api/settings/{keyName}`.
+
+### List All Sections With Current Values
+
+```http
+GET /api/settings
+```
+
+Anonymous. Returns a dictionary keyed by `SectionName`, where each value is the current
+settings object for that section (with camelCase properties matching the class's
+`[JsonPropertyName]` values).
+
+**Response:**
+
+```json
+{
+  "SystemLog": {
+    "enabled": true,
+    "minimumLevel": "Warning",
+    "retentionDays": 30,
+    "enableExport": true
+  },
+  "NetworkDiscovery": {
+    "enableDiscovery": true,
+    "discoverySubnets": ["192.168.1.0/24"],
+    "backgroundScanEnabled": false
+  }
+}
+```
+
+### Get Section Values
+
+```http
+GET /api/settings/{keyName}
+```
+
+Anonymous. Returns the current values for one section. `keyName` is the `SectionName`
+constant on the settings class (e.g. `"SystemLog"`, `"NetworkDiscovery"`).
+
+**Status codes:**
+
+- `200 OK` — section object.
+- `404 Not Found` — unknown or blocklisted `keyName`.
+
+### Get Metadata For The UI
+
+```http
+GET /api/settings/metadata
+```
+
+Requires authentication. Returns display metadata for every non-blocklisted section:
+class name, section key, group, display name/description/icon, and per-property display
+metadata (input type, allowed values, min/max, order, etc.). The frontend uses this to
+render the dynamic settings pages without any hand-written form code.
+
+### Get Group Metadata
+
+```http
+GET /api/settings/groups
+```
+
+Requires authentication. Returns the ordered list of group metadata (declared via
+`[SettingGroup]` on settings classes). Used to build sidebar entries within a settings
+sub-page.
+
+### Save A Single Section
+
+```http
+POST /api/settings/{keyName}
+Content-Type: application/json
+
+{
+  "enabled": true,
+  "retentionDays": 30,
+  "minimumLevel": "Warning"
+}
+```
+
+Requires authentication. This is the canonical save endpoint — the settings UI fires one
+call per group when the user presses Save. There is no "Save All" button; each group has
+its own save button.
+
+**Status codes:**
+
+- `200 OK` — section saved and re-validated.
+- `400 Bad Request` — validation failed. Body shape:
+  `{ "message": "Validation failed for class '<keyName>'", "errors": { "<property>": "..." } }`.
+- `404 Not Found` — unknown or blocklisted `keyName`.
+
+### Save All Sections (Legacy, Do Not Use For UI)
+
+```http
+POST /api/settings
+```
+
+Kept for test scaffolding and seed scripts. **Not** invoked by the settings UI in
+production, and the settings-page tests explicitly assert that `saveAllSettings` is
+never called on save. Prefer `POST /api/settings/{keyName}` for anything user-driven.
+
+### Discovery Heartbeat
+
+```http
+POST /api/settings/{keyName}/heartbeat
+```
+
+Anonymous. Only meaningful for `NetworkDiscovery`. Bumps the `LastHeartbeat` timestamp
+so the health check can distinguish a running discovery worker from a stalled one.
+Returns `204 No Content` on success.
+
+## Admin Control Center
+
+### Overview Snapshot
+
+```http
+GET /api/admin/overview
+```
+
+Requires the `farm_admin` role. Returns a single snapshot the `/admin` hub renders in
+one call: subsystem health tiles plus a ranked list of items needing operator attention.
+
+Implementation notes that shape client expectations:
+
+- **Aggregates existing health checks.** The endpoint calls
+  `HealthCheckService.CheckHealthAsync()` and splits the results into per-subsystem
+  tiles. It does not run new probes and does not touch the database directly.
+- **8-second timeout.** The health-check aggregation is guarded by an 8s
+  `CancellationTokenSource`. If it does not complete in time, non-API subsystems are
+  marked `Unknown` and an `Error`-severity attention item is added.
+- **Never 500s.** Any unexpected exception is caught and reported the same way as a
+  timeout. The endpoint always returns 200 with a valid `AdminOverviewDto`.
+- **String enums.** `SubsystemStatus` and `AttentionSeverity` are serialized as strings
+  via `JsonStringEnumConverter`. Clients receive `"Healthy" | "Degraded" | "Unhealthy" |
+  "Unknown"` and `"Info" | "Warning" | "Error"`, not integers.
+
+**Status codes:**
+
+- `200 OK` — snapshot returned.
+- `401 Unauthorized` — no session.
+- `403 Forbidden` — authenticated but missing the `farm_admin` role.
+
+**Response:**
+
+```json
+{
+  "checkedAt": "2025-12-19T10:30:00Z",
+  "subsystems": [
+    {
+      "key": "api",
+      "name": "API",
+      "status": "Healthy",
+      "detail": "Responding"
+    },
+    {
+      "key": "database",
+      "name": "Database",
+      "status": "Healthy",
+      "detail": "PostgreSQL · 4 ms"
+    },
+    {
+      "key": "signalr",
+      "name": "SignalR Hub",
+      "status": "Healthy",
+      "detail": null
+    },
+    {
+      "key": "backends",
+      "name": "Printer Backends",
+      "status": "Degraded",
+      "detail": "1 of 8 unreachable"
+    }
+  ],
+  "attention": [
+    {
+      "key": "backend-printer-42-offline",
+      "severity": "Warning",
+      "title": "Printer offline",
+      "detail": "\"Voron 2.4\" has not responded to Moonraker probes for 3 minutes.",
+      "actionLabel": "Open printer",
+      "actionRoute": "/printers/42"
+    }
+  ]
+}
+```
+
+Fields:
+
+- `checkedAt` — UTC timestamp when the snapshot was generated.
+- `subsystems[]` — ordered subsystem tiles. Always includes `api`, `database`, `signalr`,
+  `backends`. Optional subsystems (e.g. `spoolman`) appear only when configured.
+- `subsystems[].key` — stable machine key. Do not localize.
+- `subsystems[].detail` — optional one-line status detail, may be `null`.
+- `attention[]` — sorted `Error` first, then `Warning`, then `Info`. Empty when
+  everything is healthy.
+- `attention[].actionLabel` / `actionRoute` — optional call-to-action pair. `actionRoute`
+  is always a client-side router path, never a raw URL.
+
+To add a subsystem tile, add a `BuildTileFromEntry` or `BuildTileFromSubcheck` call in
+`AdminOverviewService.BuildSubsystems`. To add an attention item, append to
+`AppendAttentionForEntry` or `AppendExternalServicesAttention` in the same service. Do
+not add probes to the overview endpoint directly — register them under the existing
+`comprehensive` health check so the aggregation stays in one place.
+
 ## System Source API
 
 ### Get License and Corresponding Source

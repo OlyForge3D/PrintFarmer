@@ -1,0 +1,375 @@
+import React from 'react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+import { AdminControlCenterPage } from '@/features/admin/pages/AdminControlCenterPage';
+import type { AdminOverviewDto } from '@/types/adminOverview';
+
+// ── Mocks ────────────────────────────────────────────────────────────────────
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    get: vi.fn(),
+  },
+}));
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: vi.fn(),
+}));
+
+// Fold PageTemplate to a minimal wrapper so we can assert on the hub's own DOM
+// without navigating global chrome. The real PageTemplate is covered elsewhere.
+vi.mock('@/common/components/PageTemplate', () => ({
+  PageTemplate: ({
+    title,
+    subtitle,
+    actions,
+    children,
+  }: {
+    title: string;
+    subtitle?: string;
+    actions?: React.ReactNode;
+    children: React.ReactNode;
+  }) => (
+    <div data-testid="page-template">
+      <h1>{title}</h1>
+      {subtitle && <p>{subtitle}</p>}
+      {actions && <div data-testid="page-template-actions">{actions}</div>}
+      {children}
+    </div>
+  ),
+}));
+
+import { apiClient } from '@/services/api';
+import { useAuth } from '@/features/auth/hooks/useAuth';
+
+const mockedApiGet = vi.mocked(apiClient.get);
+const mockedUseAuth = vi.mocked(useAuth);
+
+// ── Fixtures ─────────────────────────────────────────────────────────────────
+
+function makeOverview(overrides: Partial<AdminOverviewDto> = {}): AdminOverviewDto {
+  return {
+    checkedAt: '2026-07-25T17:04:00Z',
+    subsystems: [
+      { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+      {
+        key: 'database',
+        name: 'Database',
+        status: 'Healthy',
+        detail: 'PostgreSQL · seeded (8 manufacturers)',
+      },
+      { key: 'signalr', name: 'SignalR Hub', status: 'Healthy', detail: 'Hub accessible' },
+      {
+        key: 'backends',
+        name: 'Printer Backends',
+        status: 'Degraded',
+        detail: '2 / 3 reachable',
+      },
+    ],
+    attention: [
+      {
+        key: 'printer-1111-unreachable',
+        severity: 'Warning',
+        title: "Printer 'printer-02' is unreachable",
+        detail:
+          'printer-02 did not respond at http://printer-02.local:7125/server/info (Connection refused).',
+        actionLabel: 'Open Printers',
+        actionRoute: '/printers',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function farmAdminAccess() {
+  return {
+    isAuthenticated: true,
+    isLoading: false,
+    user: {
+      id: 'user-1',
+      email: 'admin@test.com',
+      roles: ['farm_admin'],
+      isActive: true,
+    },
+    hasRole: (role: string) => role === 'farm_admin',
+    hasPermission: () => true,
+    error: null,
+    login: vi.fn(),
+    loginWithPasskey: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+  };
+}
+
+function operatorAccess() {
+  return {
+    ...farmAdminAccess(),
+    hasRole: (role: string) => role === 'operator',
+    hasPermission: () => false,
+  };
+}
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0, staleTime: 0 },
+    },
+  });
+}
+
+function renderHub() {
+  const client = createQueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/admin']}>
+        <AdminControlCenterPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+describe('AdminControlCenterPage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: authenticated farm_admin.
+    // Individual tests override via mockReturnValue.
+    mockedUseAuth.mockReturnValue(
+      farmAdminAccess() as unknown as ReturnType<typeof useAuth>,
+    );
+  });
+
+  it('renders the AdminLoading placeholder while the overview is in flight', () => {
+    // Keep the promise unresolved for this render pass.
+    mockedApiGet.mockImplementation(() => new Promise(() => {}));
+
+    renderHub();
+
+    expect(screen.getByTestId('admin-loading-card-grid')).toBeInTheDocument();
+  });
+
+  it('renders subsystem tiles for every subsystem the server returns', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    const tiles = screen.getAllByTestId('admin-hub-subsystem');
+    expect(tiles).toHaveLength(4);
+
+    const keys = tiles.map((tile) => tile.getAttribute('data-subsystem-key'));
+    expect(keys).toEqual(['api', 'database', 'signalr', 'backends']);
+
+    // Status text is present alongside icon (WCAG: no color-only signalling).
+    expect(within(tiles[3]).getByText('Degraded')).toBeInTheDocument();
+  });
+
+  it('does not hardcode the four subsystems — renders whatever arrives (e.g. spoolman)', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        subsystems: [
+          { key: 'api', name: 'API', status: 'Healthy', detail: 'Responding' },
+          { key: 'spoolman', name: 'Spoolman', status: 'Healthy', detail: 'Connected' },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    const tiles = screen.getAllByTestId('admin-hub-subsystem');
+    expect(tiles).toHaveLength(2);
+    expect(tiles[1].getAttribute('data-subsystem-key')).toBe('spoolman');
+    expect(within(tiles[1]).getByText('Spoolman')).toBeInTheDocument();
+  });
+
+  it('degrades unknown subsystem statuses to the Unknown treatment without crashing', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        subsystems: [
+          {
+            key: 'future',
+            name: 'Something New',
+            status: 'Chartreuse',
+            detail: 'never before seen',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+
+    const tile = screen.getByTestId('admin-hub-subsystem');
+    expect(tile.getAttribute('data-subsystem-status')).toBe('Chartreuse');
+    // Falls through to a labelled badge — the label is the raw value so the
+    // operator still gets a signal, but there is no thrown error.
+    expect(within(tile).getByText('Chartreuse')).toBeInTheDocument();
+    expect(tile).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('Unknown status "Chartreuse"'),
+    );
+  });
+
+  it('renders a genuinely reassuring empty state when the attention list is empty', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview({ attention: [] }) });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'Nothing needs your attention' }),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText('Every subsystem is reporting healthy.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-hub-attention')).not.toBeInTheDocument();
+  });
+
+  it('renders attention rows with action links when actionRoute is present', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    expect(within(row).getByText("Printer 'printer-02' is unreachable")).toBeInTheDocument();
+    // Text label paired with icon/colour.
+    expect(within(row).getByText('Warning')).toBeInTheDocument();
+
+    const actionLink = within(row).getByRole('link', { name: /Open Printers/i });
+    expect(actionLink).toHaveAttribute('href', '/printers');
+  });
+
+  it('omits the action link when actionRoute is missing', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'nolink',
+            severity: 'Info',
+            title: 'Something is worth noting',
+            detail: 'No dedicated destination for this.',
+            actionLabel: null,
+            actionRoute: null,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    // The only <a> matching an attention row shouldn't exist.
+    const row = screen.getByTestId('admin-hub-attention-item');
+    expect(within(row).queryByRole('link')).not.toBeInTheDocument();
+  });
+
+  it('degrades unknown attention severities to the Info treatment without crashing', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'unknown-sev',
+            severity: 'CosmicRay',
+            title: 'A brand-new severity',
+            detail: 'Client older than server; should still render.',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    expect(row.getAttribute('data-attention-severity')).toBe('CosmicRay');
+    expect(within(row).getByText('CosmicRay')).toBeInTheDocument();
+    expect(within(row).getByText('A brand-new severity')).toBeInTheDocument();
+  });
+
+  it('renders AdminError with a working retry when the fetch fails', async () => {
+    const user = userEvent.setup();
+    const errorInstance = new Error('boom');
+    mockedApiGet
+      .mockRejectedValueOnce(errorInstance)
+      .mockResolvedValueOnce({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: "Couldn't load the admin overview" }),
+      ).toBeInTheDocument();
+    });
+
+    const retryButton = screen.getByRole('button', { name: /try again/i });
+    await user.click(retryButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-subsystems')).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole('heading', { name: "Couldn't load the admin overview" }),
+    ).not.toBeInTheDocument();
+    expect(mockedApiGet).toHaveBeenCalledTimes(2);
+  });
+
+  it('renders destination cards from the registry, gated by access', async () => {
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-domains')).toBeInTheDocument();
+    });
+
+    const cards = screen.getAllByTestId('admin-hub-destination');
+    // The registry contains multiple hub tiles across several groups.
+    expect(cards.length).toBeGreaterThan(3);
+    // Every card links somewhere absolute.
+    for (const card of cards) {
+      expect(card.getAttribute('href')).toMatch(/^\//);
+    }
+  });
+
+  it('hides every admin destination for a non-admin user', async () => {
+    mockedUseAuth.mockReturnValue(
+      operatorAccess() as unknown as ReturnType<typeof useAuth>,
+    );
+    mockedApiGet.mockResolvedValue({ data: makeOverview() });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'No admin destinations available' }),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('admin-hub-destination')).not.toBeInTheDocument();
+  });
+});

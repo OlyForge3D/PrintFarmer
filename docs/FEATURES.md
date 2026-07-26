@@ -47,7 +47,8 @@ Printers can optionally be assigned to a location. Unassigned printers have no l
 #### Create a Location
 
 **UI:**
-1. Go to **Admin > Manage Locations**
+1. Open **Locations** from the primary navigation (or the Admin Control Center's
+   Hardware group)
 2. Click **Create Location**
 3. Enter name (e.g., "Workshop") and description (e.g., "Main workspace")
 4. Click **Create**
@@ -66,7 +67,7 @@ Content-Type: application/json
 #### Assign Printer to Location
 
 **UI (Drag-and-Drop):**
-1. Go to **Admin > Assign Printers**
+1. Open **Locations** and switch to the assignment view
 2. Drag unassigned printer to a location card
 3. Drop to assign (automatic API update)
 
@@ -88,7 +89,7 @@ Content-Type: application/json
 #### Remove Printer from Location
 
 **UI (Drag-and-Drop):**
-1. Go to **Admin > Assign Printers**
+1. Open **Locations** and switch to the assignment view
 2. Drag printer from location back to "Unassigned" area
 3. Drop to unassign
 
@@ -257,7 +258,8 @@ Printer 3,http://192.168.1.102:7125,Moonraker,yyy_api_key_yyy,Workshop
 
 ### Import Steps
 
-1. Go to **Admin > Import Printers**
+1. Open the **Admin Control Center** at `/admin`, then **Data → Data Management**
+   (or navigate directly to `/admin/manage?tab=data&sub=management`)
 2. Select CSV file
 3. Preview imported printers
 4. Click **Import**
@@ -280,7 +282,7 @@ Camera URLs typically appear within 1-3 seconds. If you don't see cameras after 
 
 ### Export Steps
 
-1. Go to **Admin > Export Printers**
+1. Open the **Admin Control Center** at `/admin`, then **Data → Data Management**
 2. Select which columns to export
 3. Click **Download CSV**
 4. File contains all active printers
@@ -299,7 +301,7 @@ Automatically discover printers on your network.
 
 ### Discovery Process
 
-1. Go to **Admin > Discover Printers**
+1. Open the **Printers** page and click **Discover Printers** to open the discovery modal
 2. Select desired backends
 3. Set timeout (30 seconds recommended)
 4. Click **Start Scan**
@@ -442,11 +444,13 @@ GET /api/healthz       # Quick health check
 
 ### Diagnostics Tools
 
-Available in Admin panel:
-- Connection test for each printer
-- Network discovery test
-- Database connectivity test
-- SignalR connection diagnostic
+Available from the Admin Control Center's **Operations → Status** page
+(`/admin/manage?tab=operations&sub=status`) and the `/admin` overview tiles:
+
+- Subsystem health tiles (API, database, SignalR, backends, Spoolman when configured)
+- Ranked attention list with per-item deep-links into the relevant page
+- Connection test for each printer (from the printer's own page)
+- Network discovery test (from **Printers → Discover Printers**)
 
 ---
 
@@ -529,14 +533,16 @@ Tools to diagnose and resolve issues.
 
 ### Connection Test
 
-1. Go to **Admin > Diagnostics**
-2. Select printer
-3. Click **Test Connection**
-4. Results show API responses and timing
+1. Open the printer's detail page from **Printers**
+2. Click **Test Connection**
+3. Results show API responses and timing
+
+The Admin Control Center at `/admin` also surfaces cross-cutting connectivity via
+the API, database, SignalR, and backend subsystem tiles.
 
 ### Network Discovery Test
 
-1. Go to **Admin > Discover Printers**
+1. Open **Printers → Discover Printers**
 2. Run discovery
 3. View detailed results for each found service
 

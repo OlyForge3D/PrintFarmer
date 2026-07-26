@@ -13,7 +13,7 @@ Ripley is the frontend architect and API integration specialist.
 
 ## 2026-05-31: Trio Review Cycle #355, #371, #405
 Participated in multi-round trio review cycle with strict three-reviewer consensus and fresh-hand rotation (Brett, Kane). Key learnings:
-1. **Reviewer-lockout protocol:** Prevents fatigue in multi-round cycles
+1. **Multi-reviewer consensus:** Three independent reviewers with fresh hands prevents fatigue. (The author-lockout rule that once accompanied this has been RESCINDED by the repo owner — authors fix their own rejected work; nobody is ever locked out of an artifact.)
 2. **Kane surgical-fix MVP:** Small, scoped corrections proved cost-effective
 3. **Session-end report validation:** Always verify trio drops match current commit SHA
 4. **PR auto-close gap:** Manual close required for development branch merges
@@ -52,6 +52,24 @@ Older entries (pre-2026-05-26) archived to history-archive.md for size managemen
 - 2026-06-03T11:34:00-07:00: Settings search is easier to scan when matches are highlighted inline and the search box supports the `/` focus shortcut; `SettingsSidebar.tsx`, `SettingsSubTabs.tsx`, and `SettingsSearch.tsx` now treat search as navigational affordance instead of a badge-only filter.
 - 2026-06-03T11:36:03-07:00: Settings navigation metadata now lives in `src/Web/ReactApp/src/features/settings/settings-navigation.ts`, so the sidebar and Command-K palette share one source for category icons, descriptions, and route targets while fuzzy jumps stay scoped to `SettingsShell.tsx`.
 - 2026-06-03T12:26:51-07:00: The settings workspace works best as a fixed-height split shell keyed off `data-settings-shell`; shell-scoped card-heading typography and number-input styling let embedded admin pages inherit the industrial settings treatment while only the content pane scrolls.
+
+
+## 2026-07-25 — #942 tag edit "silent discard" — fix was already in dev, test gap was real
+
+The issue said `TagAdminPage.handleSaveEdit` was still a `// In a full implementation` stub that silently discarded edits, and asked me to wire it up + add a backend endpoint. Neither claim held against `development`:
+
+- Commit `24dba89c5` (PR #844) had already removed the stub, wired the mutation, added the revision-conflict dialog, and shipped `PUT /api/tags/{tagId}` on `TagsController`.
+- `TagService.UpdateTagAsync` already catches `DbUpdateException` for UNIQUE-key violations and rethrows as `DuplicateEntityException`; `TagsController` maps that to a 409 with `{ error }` (no revision fields).
+- `TagAdminPage.test.tsx` already had 8 tests covering success, generic-Error, revision-conflict, deleted-tag placeholder, reload, escape, missing-revision.
+
+**One gap was real:** no test proved the duplicate-name collision path (409 with `{ error }` and no revision fields → must fall through `getRevisionConflict` to `setSaveError`, not misclassify as a concurrency conflict). Added exactly that one test in `TagAdminPage.test.tsx`. Verified break-first by temporarily stubbing `handleSaveEdit` back to its pre-#844 form: 7 of 9 tests failed (including mine); after restore, all 9 pass.
+
+Lessons carried forward:
+
+- **Grep the exact quoted comment/line before believing an issue's "stub" claim.** A 30-second `grep "In a full implementation"` returned zero matches and would have caught the issue-vs-reality drift immediately. The issue was filed 2026-07-25 against code that had already been fixed months earlier.
+- **When an issue's "Done when" list is more specific than the "The bug" narrative, treat the Done-when list as the real spec.** The narrative here was stale, but the "test covers both the success AND collision path" bullet exposed a genuine, small, still-needed test gap.
+- **The Axios interceptor unpacks `data.error` → `ApiError.message` for you.** For any 409 with `{ error: "..." }` in the body, `getErrorMessage(error, fallback)` returns the backend's own message. Don't mock `ApiError.message` and `data.error` differently in tests — mirror the real interceptor shape so tests catch classification bugs.
+- Validation: `npm run lint` = 0/0; `npm run build` = ✓ 11.69s; `npm run test:run` = 276 files / 2903 tests / 0 failed (baseline was 2902, net +1).
 
 
 
