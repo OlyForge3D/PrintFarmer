@@ -9,13 +9,10 @@
   <VSTestTestCaseFilter>Category!='Docker'</VSTestTestCaseFilter>
   </PropertyGroup>
 
-  <!-- Enable deterministic per-project coverlet outputs (lcov) so CI can merge them predictably -->
-  <PropertyGroup>
-    <CollectCoverage>true</CollectCoverage>
-    <CoverletOutput>$(MSBuildProjectDirectory)/../coverage/$(MSBuildProjectName).info</CoverletOutput>
-    <CoverletOutputFormat>lcov</CoverletOutputFormat>
-  </PropertyGroup>
-
+  <!-- Coverage is collected on-demand via the VSTest data collector (coverlet.collector),
+       not the coverlet.msbuild post-test target — see issue #965. Enable it by running
+       `dotnet test` with the "XPlat Code Coverage" collector and the coverlet.runsettings
+       settings file (see src/coverlet.runsettings). -->
   <ItemGroup>
     <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
@@ -30,8 +27,9 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.msbuild" Version="10.0.1">
+    <PackageReference Include="coverlet.collector" Version="10.0.1">
       <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <!-- Additional packages for slicer services testing -->
     <PackageReference Include="StackExchange.Redis" Version="2.10.1" />
