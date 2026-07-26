@@ -81,6 +81,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-3),
             StartedAt = DateTime.UtcNow.AddMinutes(-2),
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
