@@ -9,6 +9,7 @@ using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.Configuration;
+using Farm.Web.Api.Services.Calibration;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Services.Capabilities;
@@ -59,6 +60,9 @@ public sealed class CalibrationCapabilityService(
             ["printers"] = "/api/printers",
             ["calibrationCandidates"] = "/api/printers/calibration-candidates",
             ["calibrationContext"] = "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
+            ["calibrationProjects"] = "/api/calibration-projects",
+            ["calibrationSync"] = "/api/calibration-sync/changes",
+            ["calibrationImports"] = "/api/calibration-imports/legacy-v4",
             ["sliceJobs"] = "/api/slice-jobs",
             ["sliceJob"] = "/api/slice-jobs/{id}",
             ["jobArtifact"] = "/api/artifacts/job/{jobId}",
@@ -78,7 +82,7 @@ public sealed class CalibrationCapabilityService(
                 "model/obj",
                 "model/stl",
             ],
-            ["photo"] = [],
+            ["photo"] = ["image/jpeg", "image/png", "image/webp"],
         };
 
     private readonly IConfiguration _configuration = configuration;
@@ -87,6 +91,11 @@ public sealed class CalibrationCapabilityService(
         configuration.GetSection(SlicerArtifactStorageSettings.SectionName)
             .Get<SlicerArtifactStorageSettings>() ??
         new SlicerArtifactStorageSettings();
+
+    private readonly CalibrationBlobStorageOptions _calibrationBlobStorage =
+        configuration.GetSection(CalibrationBlobStorageOptions.SectionName)
+            .Get<CalibrationBlobStorageOptions>() ??
+        new CalibrationBlobStorageOptions();
 
     private readonly ILogger<CalibrationCapabilityService> _logger = logger;
 
@@ -160,10 +169,10 @@ public sealed class CalibrationCapabilityService(
             SlicingConfigured = slicingConfigured,
             SlicingOperational = slicingOperational,
             CalibrationContextEnabled = calibrationContextOperational,
-            CalibrationPersistenceEnabled = false,
-            CalibrationSyncEnabled = false,
-            CalibrationPhotosEnabled = false,
-            CalibrationProfileHistoryEnabled = false,
+            CalibrationPersistenceEnabled = true,
+            CalibrationSyncEnabled = true,
+            CalibrationPhotosEnabled = true,
+            CalibrationProfileHistoryEnabled = true,
             CalibrationGenerationEnabled = false,
             CalibrationSlicingEnabled = false,
             CalibrationArtifactPromotionEnabled = false,
@@ -189,11 +198,11 @@ public sealed class CalibrationCapabilityService(
             Limits = new CapabilityLimitsDto
             {
                 ModelUploadMaxBytes = _artifactStorage.MaxFileSizeBytes,
-                PhotoUploadMaxBytes = 0,
-                PhotoMaxPixels = 0,
+                PhotoUploadMaxBytes = _calibrationBlobStorage.MaxBytes,
+                PhotoMaxPixels = _calibrationBlobStorage.MaxPixels,
             },
             AcceptedMimeTypes = MimeTypes,
-            SupportedExportFormats = [],
+            SupportedExportFormats = ["orca-json"],
             HealthyCompatibleWorker = new CompatibleWorkerCapabilityDto
             {
                 Available = workerHealth.HealthyCount > 0,
@@ -354,14 +363,14 @@ public sealed class CalibrationCapabilityService(
         bool calibrationContextOperational) =>
         new()
         {
-            CanCreate = false,
-            CanRead =
+            CanCreate =
                 calibrationContextOperational &&
-                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Read),
-            CanUpdate = false,
-            CanDelete = false,
+                PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Create),
+            CanRead = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Read),
+            CanUpdate = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Update),
+            CanDelete = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Delete),
             CanGenerate = false,
-            CanPublish = false,
+            CanPublish = PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Calibration.Publish),
             CanSubmitSlicing =
                 slicingOperational &&
                 PrintFarmerPermissions.HasPermission(user, PrintFarmerPermissions.Slicing.Submit),

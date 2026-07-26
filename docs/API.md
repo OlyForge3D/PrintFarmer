@@ -82,10 +82,10 @@ caller-specific permissions:
   "slicingConfigured": true,
   "slicingOperational": false,
   "calibrationContextEnabled": true,
-  "calibrationPersistenceEnabled": false,
-  "calibrationSyncEnabled": false,
-  "calibrationPhotosEnabled": false,
-  "calibrationProfileHistoryEnabled": false,
+  "calibrationPersistenceEnabled": true,
+  "calibrationSyncEnabled": true,
+  "calibrationPhotosEnabled": true,
+  "calibrationProfileHistoryEnabled": true,
   "calibrationGenerationEnabled": false,
   "calibrationSlicingEnabled": false,
   "calibrationArtifactPromotionEnabled": false,
@@ -112,6 +112,9 @@ caller-specific permissions:
     "printers": "/api/printers",
     "calibrationCandidates": "/api/printers/calibration-candidates",
     "calibrationContext": "/api/printers/{id}/calibration-context?slicerType=OrcaSlicer",
+    "calibrationProjects": "/api/calibration-projects",
+    "calibrationSync": "/api/calibration-sync/changes",
+    "calibrationImports": "/api/calibration-imports/legacy-v4",
     "sliceJobs": "/api/slice-jobs",
     "sliceJob": "/api/slice-jobs/{id}",
     "jobArtifact": "/api/artifacts/job/{jobId}",
@@ -143,9 +146,11 @@ available capacity. Calibration context is operational when the caller can
 reach the local upstream OrcaSlicer profile resolver. The monolith advertises
 and serves that context; a split API without a caller-reachable resolver
 advertises it as non-operational and returns
-`503 profile_service_unavailable`. Later project, generation, slicing,
-promotion, queue, and event feature flags remain false. Routes are canonical
-same-origin paths and never disclose internal service addresses.
+`503 profile_service_unavailable`. Persistence, synchronization, private
+photos, and immutable generated-profile history are implemented independently.
+Generation, slicing, promotion, queue, and event-streaming feature flags remain
+false. Routes are canonical same-origin paths and never disclose internal
+service addresses.
 
 ### Effective calibration capabilities
 
@@ -296,6 +301,39 @@ dispatch calibration work from an ineligible context.
 This context supports the public **Printer Calibration** workflow for Klipper
 printers based on upstream OrcaSlicer and its
 [official calibration wiki](https://github.com/SoftFever/OrcaSlicer/wiki/Calibration).
+
+### Calibration persistence and synchronization
+
+All calibration persistence routes require a PrintFarmer JWT, the corresponding
+`calibration:*` permission, and owner or farm-resource authorization. The
+authoritative resources are available through these route groups:
+
+- projects and drafts: `/api/calibration-projects`;
+- attempts, append-only events, observations, and private photos:
+  `/api/calibration-attempts` and `/api/calibration-photos`;
+- immutable upstream OrcaSlicer profile history:
+  `/api/calibration-generated-profiles`;
+- cursor pull and ordered mutation apply: `/api/calibration-sync`;
+- legacy v4 preview and commit: `/api/calibration-imports/legacy-v4`.
+
+Editable projects, drafts, and photo metadata return a strong `ETag` and body
+`revision`. Updates and deletes require both `If-Match` and `baseRevision`.
+Missing preconditions return `428 precondition_required`; stale revisions return
+`412 revision_conflict` with the current safe representation. Reusing an
+operation ID with a different canonical request returns
+`409 idempotency_payload_mismatch`. The service never applies a client-wins or
+last-write-wins fallback.
+
+The change feed uses an opaque owner-scoped cursor and includes soft-delete
+tombstones. Attempt plans, lifecycle events, observations, printer snapshots,
+and generated profile revisions are immutable. Profile create/export/publish
+routes only persist externally generated exact JSON and operation history; they
+do not generate G-code, submit slicing, promote artifacts, or dispatch jobs.
+
+Photo bytes are private and authenticated. Responses never expose storage keys
+or paths. Uploads are size-limited, decoded and checked against JPEG, PNG, or
+WebP magic, re-encoded without EXIF/GPS metadata, and deleted through a durable
+two-phase reconciliation process.
 
 ### List All Printers
 
