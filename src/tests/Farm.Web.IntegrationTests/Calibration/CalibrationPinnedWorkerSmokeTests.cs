@@ -235,7 +235,7 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
 
             SliceJob job = await ReadSliceJobAsync(fixture.OrchestrationId, cancellationToken);
             _ = job.Status.Should().Be(SliceJobStatus.Completed);
-            _ = job.WorkerId.Should().Be(serviceId.ToString());
+            _ = job.WorkerId.Should().Be(workerId.ToString());
 
             // The worker receives, verifies and reports the effective documents: the exact upstream
             // baselines with the forbidden command and notes keys neutralized by the plan compiler.
