@@ -140,6 +140,39 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     expect(within(dialog).getByRole('table')).toHaveTextContent('My Local Edit');
   });
 
+  it('surfaces a clear inline error and keeps the edit form open on a duplicate-name collision (HTTP 409, no revision fields) — #942', async () => {
+    // A rename that collides with another tag: TagService throws DuplicateEntityException,
+    // TagsController returns HTTP 409 with `{ error: "A tag named 'X' already exists" }`
+    // and NO expectedRevision/actualRevision fields (that distinguishes it from a
+    // concurrency conflict). The frontend must NOT open the revision-conflict dialog,
+    // must NOT silently close the edit form, and must surface the backend's own message
+    // (not a generic fallback) as an accessible inline alert.
+    vi.mocked(apiClient.updateTag).mockRejectedValue(
+      makeApiError({
+        statusCode: 409,
+        message: "A tag named 'Wood' already exists",
+        data: { error: "A tag named 'Wood' already exists" },
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await startEditingResin(user);
+    const nameInput = screen.getByDisplayValue('Resin');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Wood');
+    const row = nameInput.closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+
+    // Backend message reaches the user — not a generic "Failed to update tag" fallback.
+    expect(await screen.findByRole('alert')).toHaveTextContent(/A tag named 'Wood' already exists/);
+    // No revision-conflict dialog should open for a duplicate-name conflict.
+    expect(screen.queryByRole('dialog', { name: /conflict updating/i })).not.toBeInTheDocument();
+    // The edit form must remain open with the attempted rename visible so the user
+    // can pick a different name — not silently closed as if the save had succeeded.
+    expect(screen.getByDisplayValue('Wood')).toBeInTheDocument();
+  });
+
   it('reloads the latest revision on "Reload latest version" without discarding the typed name, then allows retrying save', async () => {
     vi.mocked(apiClient.updateTag)
       .mockRejectedValueOnce(
