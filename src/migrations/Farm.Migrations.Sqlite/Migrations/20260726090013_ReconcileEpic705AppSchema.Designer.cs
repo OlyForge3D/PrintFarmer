@@ -872,7 +872,22 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("FinalArtifactId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("GcodeFileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GcodeSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GenerationRequestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GeneratorVersion")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastErrorCode")
@@ -880,6 +895,17 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("LastErrorJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LeaseExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseOwner")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManifestSha256")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("Model3DId")
@@ -893,10 +919,18 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PlanManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrintJobId")
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromotionOperationId")
+                        .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("RetryCount")
@@ -909,19 +943,39 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("SliceJobId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("SlicerBinarySha256")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("SourceArtifactId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpecificationSha256")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("StepStartedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("WorkerId")
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
                     b.HasIndex("AttemptId")
                         .IsUnique();
+
+                    b.HasIndex("LeaseExpiresAtUtc");
 
                     b.HasIndex("ProjectId");
 
@@ -1942,6 +1996,26 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<int?>("BottomSolidLayers")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationManifestJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CalibrationManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -1975,6 +2049,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("FilamentPerExtruderWeightG")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FilamentProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FileHash")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -1993,10 +2071,26 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("FirmwareFamily")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<double?>("FirstLayerHeight")
                         .HasColumnType("REAL");
 
                     b.Property<Guid>("FolderId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GcodeDialect")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GeneratorName")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GeneratorVersion")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<int>("HealthStatus")
@@ -2010,6 +2104,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool?>("IroningEnabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IsImmutable")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(false);
+
                     b.Property<DateTime?>("LastHealthCheckDate")
                         .HasColumnType("TEXT");
 
@@ -2021,6 +2120,10 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<double?>("LayerHeight")
                         .HasColumnType("REAL");
+
+                    b.Property<string>("MachineProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.Property<double?>("MaxVolumetricSpeed")
                         .HasColumnType("REAL");
@@ -2047,6 +2150,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<int?>("Perimeters")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("PinnedSlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PrintSettingsId")
                         .HasColumnType("TEXT");
 
@@ -2060,6 +2167,24 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("PrinterModelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProcessProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("PromotedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PromotionCorrelationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromotionOperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PromotionOperationKey")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("RequiredMaterial")
@@ -2080,6 +2205,18 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("BLOB");
 
+                    b.Property<string>("SlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerEngineName")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SlicerName")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -2091,7 +2228,24 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<int>("Source")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("SourceArtifactId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceModelSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("SourcePrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceSliceJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceWorkerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SpecificationSha256")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<bool?>("SupportEnabled")
@@ -2118,6 +2272,10 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CalibrationAttemptId");
+
+                    b.HasIndex("CalibrationOrchestrationId");
+
                     b.HasIndex("FileHash")
                         .IsUnique();
 
@@ -2131,6 +2289,11 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PrinterModelId");
 
+                    b.HasIndex("PromotionOperationId");
+
+                    b.HasIndex("PromotionOperationKey")
+                        .IsUnique();
+
                     b.HasIndex("RequiredMaterial");
 
                     b.HasIndex("RequiredNozzleDiameter");
@@ -2138,6 +2301,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("SourcePrinterId");
 
                     b.HasIndex("UploadedAt");
+
+                    b.HasIndex("SourceArtifactId", "ContentSha256")
+                        .IsUnique();
 
                     b.ToTable("GcodeFiles");
                 });
@@ -2303,6 +2469,101 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("Status", "Priority", "QueuedAt");
 
                     b.ToTable("GcodeHarvestQueueItems");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.GcodePromotionCheckpoint", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FailureCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("GcodeFileId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OperationScope")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("OwnerUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ReconcileAttempts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("SourceAcknowledgedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("SourceArtifactId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceContentSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("SourceSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("SourceSliceJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SourceWorkerId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GcodeFileId")
+                        .IsUnique();
+
+                    b.HasIndex("OperationScope", "OperationId")
+                        .IsUnique();
+
+                    b.HasIndex("SourceArtifactId", "SourceContentSha256")
+                        .IsUnique();
+
+                    b.HasIndex("State", "UpdatedAtUtc");
+
+                    b.ToTable("GcodePromotionCheckpoints");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.GeneratedProfileRevision", b =>

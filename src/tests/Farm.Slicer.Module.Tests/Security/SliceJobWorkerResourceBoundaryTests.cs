@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -105,9 +106,12 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             ProgressMessage = @"Reading D:\private\models\secret.stl",
         };
 
-        HttpResponseMessage response = await _secondWorkerClient.PostAsJsonAsync(
+        using HttpRequestMessage message = CreateLeasedRequest(
+            HttpMethod.Post,
             $"/api/slice/{job.Id}/progress",
-            request);
+            job);
+        message.Content = JsonContent.Create(request);
+        HttpResponseMessage response = await _secondWorkerClient.SendAsync(message);
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -124,8 +128,16 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         byte[] modelBytes = Encoding.UTF8.GetBytes("solid private-test-model");
         SliceJob job = await AddProcessingJobAsync(firstWorker, modelBytes);
 
-        HttpResponseMessage forbidden = await _secondWorkerClient.GetAsync($"/api/slice/{job.Id}/model");
-        HttpResponseMessage allowed = await _firstWorkerClient.GetAsync($"/api/slice/{job.Id}/model");
+        using HttpRequestMessage forbiddenMessage = CreateLeasedRequest(
+            HttpMethod.Get,
+            $"/api/slice/{job.Id}/model",
+            job);
+        HttpResponseMessage forbidden = await _secondWorkerClient.SendAsync(forbiddenMessage);
+        using HttpRequestMessage allowedMessage = CreateLeasedRequest(
+            HttpMethod.Get,
+            $"/api/slice/{job.Id}/model",
+            job);
+        HttpResponseMessage allowed = await _firstWorkerClient.SendAsync(allowedMessage);
 
         _ = forbidden.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         _ = allowed.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -140,14 +152,18 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         Worker firstWorker = await GetWorkerAsync(_firstWorkerClient);
         SliceJob job = await AddProcessingJobAsync(firstWorker);
 
-        using MultipartFormDataContent forbiddenContent = CreateGcodeUpload();
-        HttpResponseMessage forbidden = await _secondWorkerClient.PostAsync(
+        using HttpRequestMessage forbiddenMessage = CreateLeasedRequest(
+            HttpMethod.Post,
             $"/api/slice/{job.Id}/artifacts",
-            forbiddenContent);
-        using MultipartFormDataContent allowedContent = CreateGcodeUpload();
-        HttpResponseMessage allowed = await _firstWorkerClient.PostAsync(
+            job);
+        forbiddenMessage.Content = CreateGcodeUpload();
+        HttpResponseMessage forbidden = await _secondWorkerClient.SendAsync(forbiddenMessage);
+        using HttpRequestMessage allowedMessage = CreateLeasedRequest(
+            HttpMethod.Post,
             $"/api/slice/{job.Id}/artifacts",
-            allowedContent);
+            job);
+        allowedMessage.Content = CreateGcodeUpload();
+        HttpResponseMessage allowed = await _firstWorkerClient.SendAsync(allowedMessage);
         string body = await allowed.Content.ReadAsStringAsync();
         string normalizedBody = body.ToLowerInvariant();
 
@@ -185,9 +201,12 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
         }
 
         CompleteSliceJobRequest request = new() { PrimaryArtifactId = foreignArtifact.Id };
-        HttpResponseMessage response = await _firstWorkerClient.PostAsJsonAsync(
+        using HttpRequestMessage message = CreateLeasedRequest(
+            HttpMethod.Post,
             $"/api/slice/{job.Id}/complete",
-            request);
+            job);
+        message.Content = JsonContent.Create(request);
+        HttpResponseMessage response = await _firstWorkerClient.SendAsync(message);
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -221,7 +240,7 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
 
         foreach (HttpResponseMessage response in new[] { progress, complete, fail, renew, download, upload })
         {
-            _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+            _ = response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         }
 
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -342,16 +361,31 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             Status = SliceJobStatus.Processing,
             ModelFileUrl = modelUrl,
             ModelFileName = @"D:\private\models\model.stl",
-            SlicerEngine = (int)SlicerType.OrcaSlicer,
+            SlicerEngine = (int)SlicerEngineType.OrcaSlicer,
+            SlicerEngineName = SlicerEngineType.OrcaSlicer.ToString(),
             QueuedAt = DateTime.UtcNow.AddMinutes(-1),
             StartedAt = DateTime.UtcNow,
+            ClaimedAt = DateTime.UtcNow,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = Guid.NewGuid(),
+            LeaseFence = 1,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
         await repository.AddAsync(job);
         await repository.SaveChangesAsync();
+        SetDefaultLeaseHeaders(_firstWorkerClient, job);
         return job;
+    }
+
+    private static void SetDefaultLeaseHeaders(HttpClient client, SliceJob job)
+    {
+        _ = client.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseToken);
+        _ = client.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseFence);
+        client.DefaultRequestHeaders.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken!.Value.ToString());
+        client.DefaultRequestHeaders.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private async Task<Artifact> AddArtifactAsync(SliceJob job, Worker worker)
@@ -395,6 +429,23 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(job => job.WorkerId, workerId)
                 .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddMinutes(5)));
+    }
+
+    /// <summary>
+    /// Builds a request that presents the lease a worker was granted for a claimed job.
+    /// </summary>
+    /// <param name="method">HTTP method.</param>
+    /// <param name="requestUri">Target route.</param>
+    /// <param name="job">The claimed job whose lease should be presented.</param>
+    /// <returns>The prepared request message.</returns>
+    private static HttpRequestMessage CreateLeasedRequest(HttpMethod method, string requestUri, SliceJob job)
+    {
+        HttpRequestMessage request = new(method, requestUri);
+        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken!.Value.ToString());
+        request.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return request;
     }
 
     private async Task<Worker> GetWorkerAsync(HttpClient client)

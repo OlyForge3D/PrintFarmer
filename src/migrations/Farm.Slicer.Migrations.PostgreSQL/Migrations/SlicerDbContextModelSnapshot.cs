@@ -40,6 +40,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("DeclaredSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("FileName")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -52,6 +56,26 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("PromotedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("PromotedGcodeFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PromotionCheckpointId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PromotionOperationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("PromotionOperationKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime?>("PromotionStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("RelativePath")
                         .IsRequired()
@@ -74,6 +98,13 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("JobId");
+
+                    b.HasIndex("PromotedGcodeFileId");
+
+                    b.HasIndex("PromotionOperationId");
+
+                    b.HasIndex("PromotionOperationKey")
+                        .IsUnique();
 
                     b.HasIndex("WorkerId");
 
@@ -598,6 +629,15 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<long?>("ArtifactsTotalBytes")
                         .HasColumnType("bigint");
 
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Checksum")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -626,11 +666,47 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ExtruderFilamentProfileNamesJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("FilamentProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("FilamentProfileJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FilamentProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<decimal?>("FilamentUsedGrams")
                         .HasColumnType("numeric");
 
+                    b.Property<Guid>("IdempotencyScopeId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
+
                     b.Property<DateTime?>("LeaseExpiresAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<long>("LeaseFence")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<Guid?>("LeaseToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("MachineProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("MachineProfileJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MachineProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("Model3DId")
+                        .HasColumnType("uuid");
 
                     b.Property<string>("ModelFileName")
                         .IsRequired()
@@ -648,14 +724,31 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ModelFileUrlsJson")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ModelSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("ModelTransformJson")
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("OperationId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");
 
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
+
+                    b.Property<Guid?>("ProcessProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ProcessProfileJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProcessProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<string>("ProgressMessage")
                         .HasMaxLength(512)
@@ -677,10 +770,22 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<int>("SlicerEngine")
                         .HasColumnType("integer");
 
                     b.Property<string>("SlicerEngineVersion")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SlicerEngineName")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 
@@ -689,6 +794,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.Property<string>("SlicerProfileJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
 
                     b.Property<DateTime?>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -709,6 +818,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CalibrationOrchestrationId");
+
+                    b.HasIndex("Model3DId");
+
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("QueuedAt");
@@ -722,6 +835,14 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("WorkerId");
 
                     b.HasIndex("Status", "Priority", "QueuedAt");
+
+                    b.HasIndex("UserId", "IdempotencyScopeId", "Checksum")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum");
+
+                    b.HasIndex("UserId", "IdempotencyScopeId", "CorrelationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation");
 
                     b.ToTable("SliceJobs", "slicer");
                 });

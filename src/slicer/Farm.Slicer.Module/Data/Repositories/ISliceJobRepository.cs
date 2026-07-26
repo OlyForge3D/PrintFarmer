@@ -111,6 +111,25 @@ public interface ISliceJobRepository
         int maxRetries,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Renews an unexpired lease only when the presented worker, lease token and fencing counter
+    /// all still match the persisted row.
+    /// </summary>
+    /// <param name="jobId">The claimed job.</param>
+    /// <param name="workerId">The worker that holds the lease.</param>
+    /// <param name="leaseToken">The lease token issued at claim time.</param>
+    /// <param name="leaseFence">The fencing counter issued at claim time.</param>
+    /// <param name="leaseDurationSeconds">The requested lease extension.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when exactly one row was extended.</returns>
+    Task<bool> TryRenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid leaseToken,
+        long leaseFence,
+        int leaseDurationSeconds,
+        CancellationToken ct = default);
+
     /// <summary>Increments retry count and requeues or fails the job.</summary>
     Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);
 

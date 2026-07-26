@@ -36,6 +36,35 @@ public class HttpProgressReporter : IProgressReporter
         return new StringContent(json, Encoding.UTF8, "application/json");
     }
 
+    /// <summary>
+    /// Attaches the claim-incarnation token, lease token, and fencing counter held for the job.
+    /// </summary>
+    /// <param name="request">The outgoing worker request.</param>
+    /// <param name="jobId">The claimed job.</param>
+    /// <param name="claimToken">The durable claim incarnation held by this worker.</param>
+    /// <returns>
+    /// <see langword="false"/> when no lease is held, in which case the caller must not send the
+    /// request: an unfenced worker mutation is rejected by the API and must never be attempted.
+    /// </returns>
+    private bool TryAddLeaseHeaders(HttpRequestMessage request, Guid jobId, Guid claimToken)
+    {
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) ||
+            lease.Token == Guid.Empty ||
+            lease.ClaimToken == Guid.Empty ||
+            lease.ClaimToken != claimToken)
+        {
+            _logger.LogWarning("Worker request skipped because no lease is held for job {JobId}", jobId);
+            return false;
+        }
+
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, lease.ClaimToken.ToString());
+        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, lease.Token.ToString());
+        request.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            lease.Fence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return true;
+    }
+
     public async Task ReportProgressAsync(
         Guid jobId,
         Guid claimToken,
@@ -64,9 +93,13 @@ public class HttpProgressReporter : IProgressReporter
             {
                 Content = ToJsonContent(payload),
             };
-            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
-            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+            request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
+            request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
+            if (!TryAddLeaseHeaders(request, jobId, claimToken))
+            {
+                return;
+            }
+
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -112,9 +145,13 @@ public class HttpProgressReporter : IProgressReporter
             {
                 Content = ToJsonContent(new FailSliceJobRequest("Slicing worker could not complete the job.")),
             };
-            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
-            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+            request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
+            request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
+            if (!TryAddLeaseHeaders(request, jobId, claimToken))
+            {
+                return;
+            }
+
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {

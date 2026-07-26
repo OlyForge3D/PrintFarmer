@@ -60,6 +60,9 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         DefaultHttpContext httpContext = new DefaultHttpContext();
         httpContext.Request.Headers["X-Worker-Key"] = "test-worker-key";
         httpContext.Request.Headers["X-Worker-Id"] = serviceId.ToString();
+        Guid leaseToken = Guid.NewGuid();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseToken] = leaseToken.ToString();
+        httpContext.Request.Headers[WorkerLeaseHeaders.LeaseFence] = "1";
         SliceJobController controller = new SliceJobController(
             repo,
             evtSvc,
@@ -74,21 +77,25 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
 
-        // Create job in Processing state
+        // Create job in Processing state under an active, fenced lease.
         Guid claimToken = Guid.NewGuid();
+        httpContext.Request.Headers[WorkerClaimHeaders.ClaimToken] = claimToken.ToString();
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
             Status = SliceJobStatus.Processing,
             QueuedAt = DateTime.UtcNow.AddMinutes(-3),
             StartedAt = DateTime.UtcNow.AddMinutes(-2),
-            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl",
             WorkerId = worker.Id,
             ClaimToken = claimToken,
+            ClaimedAt = DateTime.UtcNow.AddMinutes(-2),
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
+            LeaseToken = leaseToken,
+            LeaseFence = 1
         };
         await jobRepo.AddAsync(job);
         await jobRepo.SaveChangesAsync();

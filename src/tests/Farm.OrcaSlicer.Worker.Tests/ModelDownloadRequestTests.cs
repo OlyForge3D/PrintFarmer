@@ -19,6 +19,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
     {
         Guid serviceId = Guid.NewGuid();
         Guid claimToken = Guid.NewGuid();
+        Guid leaseToken = Guid.NewGuid();
         var state = new WorkerStateService();
         state.SetRegisteredService(serviceId, "worker-secret");
         IConfiguration configuration = new ConfigurationBuilder()
@@ -37,12 +38,16 @@ public sealed class ModelDownloadRequestTests : IDisposable
 
         using HttpRequestMessage request = service.CreateModelDownloadRequest(
             "/api/slice/123/models/1",
-            claimToken);
+            claimToken,
+            leaseToken,
+            leaseFence: 7);
 
         request.RequestUri.Should().Be(new Uri("https://slicer.example.test:5246/api/slice/123/models/1"));
         request.Headers.GetValues("X-Worker-Key").Should().ContainSingle().Which.Should().Be("worker-secret");
         request.Headers.GetValues("X-Worker-Id").Should().ContainSingle().Which.Should().Be(serviceId.ToString());
         request.Headers.GetValues(WorkerClaimHeaders.ClaimToken).Should().ContainSingle().Which.Should().Be(claimToken.ToString());
+        request.Headers.GetValues(WorkerLeaseHeaders.LeaseToken).Should().ContainSingle().Which.Should().Be(leaseToken.ToString());
+        request.Headers.GetValues(WorkerLeaseHeaders.LeaseFence).Should().ContainSingle().Which.Should().Be("7");
     }
 
     public void Dispose()

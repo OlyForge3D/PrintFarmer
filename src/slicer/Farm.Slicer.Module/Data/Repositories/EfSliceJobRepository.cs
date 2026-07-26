@@ -1,4 +1,5 @@
 ﻿using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Slicer.Module.Data.Repositories;
@@ -262,7 +263,13 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.ProgressMessage, progressMessage)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
-        return updated == 1;
+        if (updated == 1)
+        {
+            _db.ChangeTracker.Clear();
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc/>
@@ -320,7 +327,13 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.ArtifactsCount, ids.Length)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
-        return updated == 1;
+        if (updated == 1)
+        {
+            _db.ChangeTracker.Clear();
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc/>
@@ -347,7 +360,13 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.ErrorMessage, errorMessage)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
-        return updated == 1;
+        if (updated == 1)
+        {
+            _db.ChangeTracker.Clear();
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc/>
@@ -365,7 +384,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                            (j.Status == SliceJobStatus.Processing &&
                             j.LeaseExpiresAt != null &&
                             j.LeaseExpiresAt < now))
-                .OrderBy(j => j.Priority)
+                .OrderByDescending(j => j.Priority)
                 .ThenBy(j => j.QueuedAt);
             if (capabilities != null && capabilities.Length > 0)
             {
@@ -380,6 +399,17 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     j.RequiredCapabilitiesJson == "[]" ||
                     capabilities.Any(cap =>
                         EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
+
+                bool supportsOrca = capabilities.Contains("orcaslicer", StringComparer.OrdinalIgnoreCase);
+                bool supportsPrusa = capabilities.Contains("prusaslicer", StringComparer.OrdinalIgnoreCase);
+                bool supportsSuper = capabilities.Contains("superslicer", StringComparer.OrdinalIgnoreCase);
+                bool supportsCura = capabilities.Contains("cura", StringComparer.OrdinalIgnoreCase);
+                compatible = compatible.Where(job =>
+                    (job.SlicerEngineName == null && supportsOrca) ||
+                    (job.SlicerEngineName == nameof(SlicerEngineType.OrcaSlicer) && supportsOrca) ||
+                    (job.SlicerEngineName == nameof(SlicerEngineType.PrusaSlicer) && supportsPrusa) ||
+                    (job.SlicerEngineName == nameof(SlicerEngineType.SuperSlicer) && supportsSuper) ||
+                    (job.SlicerEngineName == nameof(SlicerEngineType.Cura) && supportsCura));
             }
 
             Guid? jobId = await compatible
@@ -403,6 +433,8 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                         .SetProperty(job => job.WorkerId, workerId)
                         .SetProperty(job => job.ClaimedAt, now)
                         .SetProperty(job => job.ClaimToken, claimToken)
+                        .SetProperty(job => job.LeaseToken, claimToken)
+                        .SetProperty(job => job.LeaseFence, job => job.LeaseFence + 1)
                         .SetProperty(job => job.LeaseExpiresAt, leaseExpiration)
                         .SetProperty(job => job.StartedAt, job => job.StartedAt ?? now)
                         .SetProperty(job => job.UpdatedAt, now),
@@ -479,7 +511,13 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.LeaseExpiresAt, leaseExpiresAt)
                     .SetProperty(job => job.UpdatedAt, now),
                 ct);
-        return updated == 1;
+        if (updated == 1)
+        {
+            _db.ChangeTracker.Clear();
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc/>
@@ -506,6 +544,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.WorkerId, (Guid?)null)
                     .SetProperty(job => job.ClaimedAt, (DateTime?)null)
                     .SetProperty(job => job.ClaimToken, (Guid?)null)
+                    .SetProperty(job => job.LeaseToken, (Guid?)null)
                     .SetProperty(job => job.LeaseExpiresAt, (DateTime?)null)
                     .SetProperty(
                         job => job.Status,
@@ -539,6 +578,44 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
+    public async Task<bool> TryRenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid leaseToken,
+        long leaseFence,
+        int leaseDurationSeconds,
+        CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        DateTime leaseExpiration = now.AddSeconds(Math.Clamp(
+            leaseDurationSeconds,
+            SliceJob.MinimumLeaseDurationSeconds,
+            SliceJob.MaximumLeaseDurationSeconds));
+
+        // Renewal is only valid while the lease is still active; an expired lease must be re-claimed.
+        int affected = await _db.SliceJobs
+            .Where(j => j.Id == jobId &&
+                        j.WorkerId == workerId &&
+                        j.Status == SliceJobStatus.Processing &&
+                        j.LeaseToken == leaseToken &&
+                        j.LeaseFence == leaseFence &&
+                        j.LeaseExpiresAt != null &&
+                        j.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(j => j.LeaseExpiresAt, leaseExpiration)
+                    .SetProperty(j => j.UpdatedAt, now),
+                ct);
+
+        if (affected > 0)
+        {
+            _db.ChangeTracker.Clear();
+        }
+
+        return affected > 0;
+    }
+
+    /// <inheritdoc/>
     public async Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
     {
         SliceJob? job = await GetByIdAsync(jobId, ct);
@@ -551,6 +628,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.WorkerId = null;
         job.ClaimedAt = null;
         job.LeaseExpiresAt = null;
+        job.LeaseToken = null;
         job.UpdatedAt = DateTime.UtcNow;
 
         if (job.RetryCount > maxRetries)
@@ -591,6 +669,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.WorkerId, (Guid?)null)
                     .SetProperty(job => job.ClaimedAt, (DateTime?)null)
                     .SetProperty(job => job.ClaimToken, (Guid?)null)
+                    .SetProperty(job => job.LeaseToken, (Guid?)null)
                     .SetProperty(job => job.LeaseExpiresAt, (DateTime?)null)
                     .SetProperty(
                         job => job.Status,
@@ -676,6 +755,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     .SetProperty(job => job.WorkerId, (Guid?)null)
                     .SetProperty(job => job.ClaimedAt, (DateTime?)null)
                     .SetProperty(job => job.ClaimToken, (Guid?)null)
+                    .SetProperty(job => job.LeaseToken, (Guid?)null)
                     .SetProperty(job => job.LeaseExpiresAt, (DateTime?)null)
                     .SetProperty(job => job.ErrorMessage, (string?)null)
                     .SetProperty(job => job.StartedAt, (DateTime?)null)

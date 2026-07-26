@@ -174,6 +174,25 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
+    public Task<bool> TryRenewLeaseAsync(Guid jobId, Guid workerId, Guid leaseToken, long leaseFence, int leaseDurationSeconds, CancellationToken ct = default)
+    {
+        DateTime now = DateTime.UtcNow;
+        SliceJob? j = Jobs.Find(x =>
+            x.Id == jobId &&
+            x.WorkerId == workerId &&
+            x.Status == SliceJobStatus.Processing &&
+            x.LeaseToken == leaseToken &&
+            x.LeaseFence == leaseFence &&
+            x.LeaseExpiresAt != null &&
+            x.LeaseExpiresAt > now);
+        if (j is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        j.LeaseExpiresAt = now.AddSeconds(leaseDurationSeconds);
+        return Task.FromResult(true);
+    }
     public Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
     {
         SliceJob? j = Jobs.Find(x => x.Id == jobId);

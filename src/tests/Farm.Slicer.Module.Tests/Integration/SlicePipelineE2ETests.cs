@@ -1,4 +1,5 @@
-﻿using System.Net;
+﻿using System.Globalization;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 using Xunit.Abstractions;
@@ -83,10 +84,10 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = claimed.ClaimToken.Should().NotBe(Guid.Empty);
         _ = claimed.Status.Should().Be("Processing");
         _ = claimed.ModelFileUrl.Should().Be($"/api/slice/{submitted.JobId}/model");
-        _workerClient.DefaultRequestHeaders.Add(
-            WorkerClaimHeaders.ClaimToken,
-            claimed.ClaimToken.ToString());
         _output.WriteLine($"Job claimed with protected model route {claimed.ModelFileUrl}");
+
+        // Every subsequent worker mutation must carry the lease the claim issued.
+        ApplyLease(claimed);
 
         // 5. Report progress (50%)
         var progressReq = new SliceJobProgressUpdateRequest
@@ -181,13 +182,10 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
             Capabilities = ["orcaslicer"],
             LeaseDurationSeconds = 300,
         };
-        HttpResponseMessage claimResp =
-            await _workerClient.PostAsJsonAsync("/api/slice/claim", claimReq);
-        WorkerSliceJobResponse? claimed =
-            await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
-        _workerClient.DefaultRequestHeaders.Add(
-            WorkerClaimHeaders.ClaimToken,
-            claimed!.ClaimToken.ToString());
+        HttpResponseMessage claimResponse = await _workerClient.PostAsJsonAsync("/api/slice/claim", claimReq);
+        WorkerSliceJobResponse? claimed = await claimResponse.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        _ = claimed.Should().NotBeNull();
+        ApplyLease(claimed!);
 
         // Fail the job
         var failReq = new { ErrorMessage = "Slicer crashed: out of memory" };
@@ -225,4 +223,22 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
 
     private Guid GetWorkerId() =>
         Guid.Parse(_workerClient.DefaultRequestHeaders.GetValues("X-Worker-Id").Single());
+
+    /// <summary>
+    /// Binds the worker client to the lease a successful claim issued. Every mutating worker route
+    /// is lease-fenced, so the headers must accompany progress, artifact, completion and failure
+    /// reports for the rest of the job's life.
+    /// </summary>
+    /// <param name="claimed">The claim response carrying the issued lease.</param>
+    private void ApplyLease(WorkerSliceJobResponse claimed)
+    {
+        _ = _workerClient.DefaultRequestHeaders.Remove(WorkerClaimHeaders.ClaimToken);
+        _ = _workerClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseToken);
+        _ = _workerClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseFence);
+        _workerClient.DefaultRequestHeaders.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
+        _workerClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
+        _workerClient.DefaultRequestHeaders.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            claimed.LeaseFence.ToString(CultureInfo.InvariantCulture));
+    }
 }

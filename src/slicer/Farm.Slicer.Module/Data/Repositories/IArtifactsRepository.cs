@@ -41,6 +41,53 @@ public interface IArtifactsRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Artifact>> GetOlderThanAsync(DateTime cutoffDate, CancellationToken ct = default);
 
+    /// <summary>
+    /// Pins an artifact against cleanup while a promotion runs, or confirms an existing pin held by the
+    /// same operation.
+    /// </summary>
+    /// <param name="artifactId">The artifact being promoted.</param>
+    /// <param name="checkpointId">
+    /// The durable core-context checkpoint coordinating the promotion, or <see langword="null"/> when
+    /// the caller is reserving the artifact before its checkpoint exists.
+    /// </param>
+    /// <param name="operation">The owner-scoped identity of the promotion that owns the artifact.</param>
+    /// <param name="startedAtUtc">The UTC timestamp of the pin.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// <see langword="true"/> when the artifact is pinned by <paramref name="operation"/>;
+    /// <see langword="false"/> when another operation already owns it or the artifact no longer exists.
+    /// </returns>
+    Task<bool> TryPinForPromotionAsync(
+        Guid artifactId,
+        Guid? checkpointId,
+        PromotionOperationIdentity operation,
+        DateTime startedAtUtc,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Records the durable promotion result on the artifact so its lineage survives cleanup.
+    /// </summary>
+    /// <param name="artifactId">The promoted artifact.</param>
+    /// <param name="gcodeFileId">The promoted G-code file identity.</param>
+    /// <param name="promotedAtUtc">The UTC completion timestamp.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when the artifact was found and acknowledged.</returns>
+    Task<bool> MarkPromotedAsync(
+        Guid artifactId,
+        Guid gcodeFileId,
+        DateTime promotedAtUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Releases a promotion pin after a permanent failure so cleanup may resume.</summary>
+    /// <param name="artifactId">The artifact to release.</param>
+    /// <param name="operation">The owner-scoped identity that holds the pin.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when a pin held by the operation was released.</returns>
+    Task<bool> ReleasePromotionPinAsync(
+        Guid artifactId,
+        PromotionOperationIdentity operation,
+        CancellationToken ct = default);
+
     /// <summary>Gets the total size of all artifacts in bytes.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task<long> GetTotalSizeAsync(CancellationToken ct = default);

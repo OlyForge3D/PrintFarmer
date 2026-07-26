@@ -34,8 +34,11 @@ public sealed class DatabaseMigrationTests
         first.AppliedMigrations.Should().Equal(
             "20260725032040_InitialV1",
             "20260725085243_AddCalibrationPrinterContext",
+            "20260725144853_AddGcodePromotionLineage",
             "20260725173426_AlignDevelopmentAppSchema",
+            "20260725184947_AddOwnerScopedPromotionOperationKey",
             "20260725203646_AddCalibrationPersistenceSync",
+            "20260725204532_AddCalibrationGenerationOrchestration",
             "20260726090013_ReconcileEpic705AppSchema");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
@@ -273,10 +276,88 @@ public sealed class DatabaseMigrationTests
         result.AppliedMigrations.Should().Equal(
             "20260725032053_InitialV1",
             "20260725095108_AddCalibrationProfileIdentity",
+            "20260725140244_AddSliceJobLeaseAndCalibrationProvenance",
+            "20260725144915_AddArtifactPromotionCoordination",
             "20260725173232_AlignDevelopmentSlicerSchema",
+            "20260725185010_AddOwnerScopedPromotionOperationKey",
             "20260726084205_AddSliceJobSlicerEngineVersion",
             "20260726170804_AddSliceJobClaimIncarnation");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite", false)]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL", false)]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer", true)]
+    public void SliceJobLeaseMigration_ForEveryProvider_AddsFencingAndOwnerScopedUniqueness(
+        string provider,
+        string migrationAssembly,
+        bool expectsFilteredIndexes)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        IMigrationsAssembly migrationsAssembly = context.GetService<IMigrationsAssembly>();
+        Migration migration = CreateMigration(
+            migrationsAssembly,
+            context,
+            "_AddSliceJobLeaseAndCalibrationProvenance");
+
+        string[] addedColumns = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "SliceJobs")
+            .Select(operation => operation.Name)
+            .ToArray();
+        _ = addedColumns.Should().Contain(
+            nameof(SliceJob.LeaseToken),
+            nameof(SliceJob.LeaseFence),
+            nameof(SliceJob.Model3DId),
+            nameof(SliceJob.ModelSha256),
+            nameof(SliceJob.SlicerEngineName),
+            nameof(SliceJob.MachineProfileJson),
+            nameof(SliceJob.ProcessProfileJson),
+            nameof(SliceJob.FilamentProfileJson),
+            nameof(SliceJob.MachineProfileSha256),
+            nameof(SliceJob.CalibrationProjectId),
+            nameof(SliceJob.IdempotencyScopeId));
+
+        // Every added column must be nullable or defaulted so existing non-calibration jobs survive.
+        _ = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Should().OnlyContain(operation => operation.IsNullable || operation.DefaultValue != null);
+
+        CreateIndexOperation[] uniqueIndexes = migration.UpOperations
+            .OfType<CreateIndexOperation>()
+            .Where(operation => operation.IsUnique)
+            .ToArray();
+        _ = uniqueIndexes.Select(operation => operation.Name).Should().BeEquivalentTo(
+            "IX_SliceJobs_Owner_Project_Correlation",
+            "IX_SliceJobs_Owner_Project_Checksum");
+        _ = uniqueIndexes.Should().OnlyContain(operation =>
+            operation.Columns.Contains(nameof(SliceJob.UserId)) &&
+            operation.Columns.Contains(nameof(SliceJob.IdempotencyScopeId)));
+
+        // Only SQL Server treats nulls as duplicates, so only it needs a filter.
+        _ = uniqueIndexes.Should().OnlyContain(operation =>
+            expectsFilteredIndexes ? operation.Filter != null : operation.Filter == null);
     }
 
     [Fact]
@@ -557,6 +638,263 @@ public sealed class DatabaseMigrationTests
             "FilamentProfiles");
         _ = identityColumns.Should().OnlyContain(operation =>
             operation.IsNullable && operation.DefaultValue == null);
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Migrations.Sqlite", false)]
+    [InlineData("postgres", "Farm.Migrations.PostgreSQL", false)]
+    [InlineData("sqlserver", "Farm.Migrations.SqlServer", true)]
+    public void PromotionLineageMigration_ForEveryProvider_AddsOutboxAndSafeLineageColumns(
+        string provider,
+        string migrationAssembly,
+        bool expectsFilteredIndexes)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using AppDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddGcodePromotionLineage");
+
+        string[] lineageColumns = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "GcodeFiles")
+            .Select(operation => operation.Name)
+            .ToArray();
+        _ = lineageColumns.Should().Contain(
+            nameof(GcodeFile.SourceArtifactId),
+            nameof(GcodeFile.SourceSliceJobId),
+            nameof(GcodeFile.CalibrationAttemptId),
+            nameof(GcodeFile.CalibrationOrchestrationId),
+            nameof(GcodeFile.PromotionOperationId),
+            nameof(GcodeFile.ContentSha256),
+            nameof(GcodeFile.SpecificationSha256),
+            nameof(GcodeFile.SlicerContainerDigest),
+            nameof(GcodeFile.FirmwareFamily),
+            nameof(GcodeFile.CalibrationManifestJson),
+            nameof(GcodeFile.IsImmutable));
+
+        // Existing library rows have no promotion lineage, so every added column stays optional.
+        _ = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Should().OnlyContain(operation => operation.IsNullable || operation.DefaultValue != null);
+
+        _ = migration.UpOperations
+            .OfType<CreateTableOperation>()
+            .Select(operation => operation.Name)
+            .Should().ContainSingle()
+            .Which.Should().Be("GcodePromotionCheckpoints");
+        _ = migration.UpOperations
+            .OfType<AddForeignKeyOperation>()
+            .Should().NotContain(operation =>
+                operation.PrincipalTable.Contains("Artifact", StringComparison.OrdinalIgnoreCase) ||
+                operation.PrincipalTable.Contains("SliceJob", StringComparison.OrdinalIgnoreCase));
+
+        CreateIndexOperation[] uniqueIndexes = migration.UpOperations
+            .OfType<CreateIndexOperation>()
+            .Where(operation => operation.IsUnique)
+            .ToArray();
+        _ = uniqueIndexes.Select(operation => operation.Name).Should().Contain(
+            "IX_GcodeFiles_SourceArtifactId_ContentSha256",
+            "IX_GcodePromotionCheckpoints_OperationScope_OperationId",
+            "IX_GcodePromotionCheckpoints_SourceArtifactId_SourceContentSha256");
+
+        // Only SQL Server treats nulls as duplicates, so only it needs the null-tolerant filter that
+        // keeps existing non-promoted rows valid.
+        CreateIndexOperation[] nullableUniqueIndexes = uniqueIndexes
+            .Where(operation => operation.Table == "GcodeFiles")
+            .ToArray();
+        _ = nullableUniqueIndexes.Should().OnlyContain(operation =>
+            expectsFilteredIndexes ? operation.Filter != null : operation.Filter == null);
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Migrations.Sqlite", "GcodeFiles")]
+    [InlineData("postgres", "Farm.Migrations.PostgreSQL", "GcodeFiles")]
+    [InlineData("sqlserver", "Farm.Migrations.SqlServer", "GcodeFiles")]
+    public void OwnerScopedPromotionKeyMigration_ForEveryCoreProvider_ReplacesGlobalOperationUniqueness(
+        string provider,
+        string migrationAssembly,
+        string table)
+    {
+        DbContextOptionsBuilder<AppDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using AppDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddOwnerScopedPromotionOperationKey");
+
+        AssertOperationKeyReplacesGlobalUniqueness(migration, table, nameof(GcodeFile.PromotionOperationKey));
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite", "Artifacts")]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL", "Artifacts")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer", "Artifacts")]
+    public void OwnerScopedPromotionKeyMigration_ForEverySlicerProvider_ReplacesGlobalOperationUniqueness(
+        string provider,
+        string migrationAssembly,
+        string table)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddOwnerScopedPromotionOperationKey");
+
+        AssertOperationKeyReplacesGlobalUniqueness(migration, table, nameof(Artifact.PromotionOperationKey));
+    }
+
+    /// <summary>
+    /// Asserts that a migration moves promotion uniqueness from the caller-supplied idempotency key
+    /// onto the owner-scoped key, so two owners can reuse the same raw key.
+    /// </summary>
+    /// <param name="migration">The migration under test.</param>
+    /// <param name="table">The table that carries the promotion identity.</param>
+    /// <param name="keyColumn">The owner-scoped key column name.</param>
+    private static void AssertOperationKeyReplacesGlobalUniqueness(
+        Migration migration,
+        string table,
+        string keyColumn)
+    {
+        _ = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Should().ContainSingle(operation => operation.Table == table && operation.Name == keyColumn)
+            .Which.IsNullable.Should().BeTrue();
+
+        CreateIndexOperation[] indexes = migration.UpOperations
+            .OfType<CreateIndexOperation>()
+            .Where(operation => operation.Table == table)
+            .ToArray();
+        _ = indexes.Should().ContainSingle(operation =>
+            operation.IsUnique && operation.Columns.SequenceEqual(new[] { keyColumn }));
+        _ = indexes.Should().ContainSingle(operation =>
+            !operation.IsUnique && operation.Columns.SequenceEqual(new[] { "PromotionOperationId" }));
+        _ = migration.UpOperations
+            .OfType<DropIndexOperation>()
+            .Select(operation => operation.Name)
+            .Should().Contain($"IX_{table}_PromotionOperationId");
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite")]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer")]
+    public void ArtifactPromotionMigration_ForEveryProvider_AddsOptionalCoordinationColumns(
+        string provider,
+        string migrationAssembly)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddArtifactPromotionCoordination");
+
+        AddColumnOperation[] artifactColumns = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "Artifacts")
+            .ToArray();
+        _ = artifactColumns.Select(operation => operation.Name).Should().Contain(
+            nameof(Artifact.PromotionOperationId),
+            nameof(Artifact.PromotionCheckpointId),
+            nameof(Artifact.PromotionStartedAtUtc),
+            nameof(Artifact.PromotedAtUtc),
+            nameof(Artifact.PromotedGcodeFileId));
+
+        // Existing non-calibration artifacts have never been promoted, so nothing may become required.
+        _ = artifactColumns.Should().OnlyContain(operation => operation.IsNullable);
+        _ = migration.UpOperations.OfType<CreateTableOperation>().Should().BeEmpty();
+    }
+
+    private static Migration CreateMigration(
+        IMigrationsAssembly migrationsAssembly,
+        DbContext context,
+        string migrationSuffix)
+    {
+        KeyValuePair<string, System.Reflection.TypeInfo> definition =
+            migrationsAssembly.Migrations.Single(candidate =>
+                candidate.Key.EndsWith(migrationSuffix, StringComparison.Ordinal));
+        return migrationsAssembly.CreateMigration(
+            definition.Value,
+            context.Database.ProviderName!);
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()

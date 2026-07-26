@@ -47,6 +47,32 @@
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
     <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Migrations.Sqlite\Farm.Migrations.Sqlite.csproj" />
+    <!--
+      The monolith ships the slicer module and its API layer next to the API assembly, and the shim
+      discovers them by scanning loaded assemblies. Referencing them here reproduces that deployment
+      shape so the artifact, worker and promotion hops are routable in the smoke host.
+    -->
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module\Farm.Slicer.Module.csproj" />
+    <ProjectReference Include="..\..\slicer\Farm.Slicer.Module.Api\Farm.Slicer.Module.Api.csproj" />
+  </ItemGroup>
+
+  <!--
+    The pinned OrcaSlicer worker smoke gate reuses the calibration seed and the publication/digest
+    rules that the default test suite already covers, so the operational gate and its focused unit
+    tests exercise one implementation instead of two drifting copies.
+  -->
+  <ItemGroup>
+    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\PinnedOrcaPublication.cs"
+             Link="Calibration\Shared\PinnedOrcaPublication.cs" />
+    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\CalibrationGenerationSeed.cs"
+             Link="Calibration\Shared\CalibrationGenerationSeed.cs" />
+    <Compile Include="..\Farm.Web.Api.Tests\Calibration\Generation\CalibrationGenerationFixture.cs"
+             Link="Calibration\Shared\CalibrationGenerationFixture.cs" />
+    <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\TestAuthHandler.cs"
+             Link="Calibration\Shared\TestAuthHandler.cs" />
+    <Compile Include="..\Farm.Web.Api.Tests\TestInfrastructure\SlicerModulePreloader.cs"
+             Link="Calibration\Shared\SlicerModulePreloader.cs" />
   </ItemGroup>
 
 </Project>

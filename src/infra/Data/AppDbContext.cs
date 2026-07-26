@@ -303,6 +303,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<CalibrationSyncCursor> CalibrationSyncCursors => Set<CalibrationSyncCursor>();
 
+    /// <summary>Durable checkpoints for slicer artifact to G-code library promotions.</summary>
+    public DbSet<GcodePromotionCheckpoint> GcodePromotionCheckpoints =>
+        Set<GcodePromotionCheckpoint>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);

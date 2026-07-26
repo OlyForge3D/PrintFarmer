@@ -27,6 +27,26 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
         builder.Property(g => g.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
         builder.Property(g => g.LastVerificationResult).HasColumnType("TEXT");
 
+        // Promotion lineage — identifiers, hashes and versions only. Never paths or private URLs.
+        builder.Property(g => g.PromotionOperationId).HasMaxLength(128);
+        builder.Property(g => g.PromotionOperationKey).HasMaxLength(64);
+        builder.Property(g => g.ContentSha256).HasMaxLength(64);
+        builder.Property(g => g.SpecificationSha256).HasMaxLength(64);
+        builder.Property(g => g.SourceModelSha256).HasMaxLength(64);
+        builder.Property(g => g.MachineProfileSha256).HasMaxLength(64);
+        builder.Property(g => g.ProcessProfileSha256).HasMaxLength(64);
+        builder.Property(g => g.FilamentProfileSha256).HasMaxLength(64);
+        builder.Property(g => g.CalibrationManifestSha256).HasMaxLength(64);
+        builder.Property(g => g.SlicerEngineName).HasMaxLength(32);
+        builder.Property(g => g.SlicerDistribution).HasMaxLength(64);
+        builder.Property(g => g.PinnedSlicerVersion).HasMaxLength(64);
+        builder.Property(g => g.SlicerContainerDigest).HasMaxLength(128);
+        builder.Property(g => g.FirmwareFamily).HasMaxLength(64);
+        builder.Property(g => g.GcodeDialect).HasMaxLength(64);
+        builder.Property(g => g.GeneratorName).HasMaxLength(128);
+        builder.Property(g => g.GeneratorVersion).HasMaxLength(64);
+        builder.Property(g => g.IsImmutable).HasDefaultValue(false);
+
         // Foreign Keys
         // StoredFile.FolderId is required (comment on StoredFile.cs says REQUIRED). Deleting a
         // folder that still has files is prohibited (Restrict). Callers must move files to a
@@ -67,5 +87,14 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
         builder.HasIndex(g => g.HealthStatus);
         builder.HasIndex(g => g.LastHealthCheckDate);
         builder.HasIndex(g => g.PrinterGroupId);
+
+        // Promotion uniqueness: one promoted file per source artifact content and per owner-scoped
+        // operation key. The raw idempotency key is only unique inside its owner scope, so it is
+        // indexed for lookups but never enforced as globally unique.
+        builder.HasIndex(g => new { g.SourceArtifactId, g.ContentSha256 }).IsUnique();
+        builder.HasIndex(g => g.PromotionOperationKey).IsUnique();
+        builder.HasIndex(g => g.PromotionOperationId);
+        builder.HasIndex(g => g.CalibrationAttemptId);
+        builder.HasIndex(g => g.CalibrationOrchestrationId);
     }
 }

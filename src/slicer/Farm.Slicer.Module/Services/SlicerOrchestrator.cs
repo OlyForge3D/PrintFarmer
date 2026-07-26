@@ -494,9 +494,12 @@ public class SlicerOrchestrator(
     private static Dictionary<SlicerEngineType, EngineMetadata> BuildStaticCatalog() =>
         new()
         {
-            // Version strings here are placeholders overridden per-request by the registry
-            // (issue #578). Never rely on them for actual routing or UI rendering.
-            [SlicerEngineType.OrcaSlicer] = new EngineMetadata(SlicerEngineType.OrcaSlicer, "unknown", "OrcaSlicer", s_orcaSupportedExtensions),
+            // Registry metadata overrides this fallback when a matching library is loaded.
+            [SlicerEngineType.OrcaSlicer] = new EngineMetadata(
+                SlicerEngineType.OrcaSlicer,
+                Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.SlicerVersion,
+                "OrcaSlicer",
+                s_orcaSupportedExtensions),
             [SlicerEngineType.PrusaSlicer] = new EngineMetadata(SlicerEngineType.PrusaSlicer, "2.8.0", "PrusaSlicer", s_prusaSupportedExtensions)
         };
 

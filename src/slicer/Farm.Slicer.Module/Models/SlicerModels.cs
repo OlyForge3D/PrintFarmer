@@ -150,6 +150,20 @@ public class DistributedSlicingJob : SlicingJobDto
 
     public SlicerEngineType EngineType { get; set; }
 
+    /// <summary>
+    /// Exact native slicer profile documents plus digests, delivered with the claim.
+    /// </summary>
+    public NativeSlicerProfiles? NativeProfiles { get; set; }
+
+    /// <summary>SHA-256 (hex) of the stored model bytes, verified after download.</summary>
+    public string? ModelSha256 { get; set; }
+
+    /// <summary>Lease token that must accompany every mutation for this job.</summary>
+    public Guid LeaseToken { get; set; }
+
+    /// <summary>Fencing counter that must accompany every mutation for this job.</summary>
+    public long LeaseFence { get; set; }
+
     public SlicingJobPriority Priority { get; set; } = SlicingJobPriority.Normal;
 
     // Extended distributed processing fields

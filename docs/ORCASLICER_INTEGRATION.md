@@ -937,6 +937,71 @@ To load bed STL models:
 
 ## Debugging & Testing
 
+### Pinned Worker Publication & Mandatory Calibration Smoke Gate
+
+Calibration generation (issue #899) is only allowed to report itself operational after the **published,
+digest-pinned** OrcaSlicer 2.3.1 worker has completed a real calibration run. This is enforced by
+`.github/workflows/orcaslicer-strict-build.yml`, which is manual-dispatch only and double-guarded.
+
+**Publication (`build-orcaslicer-strict`)**
+
+- Job permissions are exactly `contents: read` and `packages: write`; `GITHUB_TOKEN` is used only to log
+  in to GHCR.
+- Only an image that already passed `scripts/verify-orcaslicer-worker.sh require-real` is pushed.
+- Two immutable tags are pushed to `ghcr.io/<owner>/printfarmer-orcaslicer-worker-pinned`:
+  `sha-<commit>` and `<orcaVersion>-sha-<commit>`.
+- The manifest digest is taken from the push result **and** re-read from the registry with
+  `docker buildx imagetools inspect`; both must agree and must match `^sha256:[0-9a-f]{64}$`. The digest
+  is never invented or pre-embedded.
+- The published image is then re-verified **by digest** (`repository@sha256:...`).
+- Job outputs `image`, `digest` and `image_ref` carry the identity forward; a small non-secret evidence
+  artifact (`pinned-orca-publication.json`) records repository, tags, digest and the pinned upstream
+  checksum.
+
+General 2.4.x slicing is unaffected: it is built and published by `docker-publish.yml` and
+`orcaslicer-base-image.yml`, which this workflow does not touch.
+
+**Mandatory smoke gate (`calibration-pinned-smoke`)**
+
+Permissions are `contents: read` and `packages: read`. The job pulls the published image by digest and
+runs the explicitly filtered gate:
+
+```bash
+cd src
+RunIntegrationTests=true \
+PRINTFARMER_ORCA_SMOKE=required \
+PRINTFARMER_ORCASLICER_IMAGE=ghcr.io/<owner>/printfarmer-orcaslicer-worker-pinned \
+PRINTFARMER_ORCASLICER_IMAGE_DIGEST=sha256:<64 hex> \
+dotnet test ./tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj \
+  -c Release -p:RunIntegrationTests=true --filter 'Category=PinnedOrcaSmoke'
+```
+
+The gate (`src/tests/Farm.Web.IntegrationTests/Calibration/`) drives every hop through production code:
+
+1. The API runs on a **real Kestrel loopback listener** (`KestrelCalibrationApiHost`), not an in-memory
+   test server, so the container can dial it. The container joins the runner's network namespace.
+2. Capability is asserted **false** first, with `pinned_worker_unavailable` as the only blocked hop.
+3. The published worker is pulled and run **by digest**; `Worker__ContainerDigest` is injected at
+   runtime only, because embedding it during the build would change the digest it claims.
+4. The worker registers itself through `POST /api/slicers/register` with `X-Slicer-Api-Key`, receives its
+   registry-issued identity and key, and claims work with `X-Worker-Key` + `X-Worker-Id` under an active
+   lease and fencing token.
+5. A tiny deterministic STL is uploaded through `POST /api/3d-models/upload` and proven to round-trip
+   byte for byte through the authenticated download route.
+6. The immutable snapshot is seeded with the **exact native profiles the running container publishes**
+   (`GET /api/profiles`), so OrcaSlicer receives its own documents back and verifies their digests.
+7. The worker downloads the model over the authenticated worker route, runs the pinned build, uploads its
+   artifact and completes the job; the saga reconciles, annotates, safety-validates and promotes the
+   result to an immutable `GcodeFile`, and the test asserts byte, hash and lineage equality.
+
+If the gate cannot execute, `PRINTFARMER_ORCA_SMOKE=required` turns the blocker into a failure, so the
+workflow fails and capability never flips. Without that variable the same test reports the concrete
+blocker and asserts capability stayed false, which is the only honest local outcome.
+
+Digest validation and gating rules are unit-tested in the default suite
+(`Farm.Web.Api.Tests.Calibration.Generation.PinnedOrcaPublicationTests`); the gate compiles the same
+source file, so there is one implementation rather than two.
+
 ### Verify Worker Container
 
 ```bash

@@ -5,6 +5,9 @@ public class WorkerStateService : IWorkerStateService
     private readonly WorkerState _state = new();
     private readonly Lock _lock = new();
 
+    /// <summary>Leases currently held by this worker, keyed by job.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, WorkerJobLease> _leases = new();
+
     public WorkerState GetWorkerState()
     {
         lock (_lock)
@@ -68,4 +71,13 @@ public class WorkerStateService : IWorkerStateService
             }
         }
     }
+
+    /// <inheritdoc/>
+    public void SetJobLease(Guid jobId, WorkerJobLease lease) => _leases[jobId] = lease;
+
+    /// <inheritdoc/>
+    public bool TryGetJobLease(Guid jobId, out WorkerJobLease lease) => _leases.TryGetValue(jobId, out lease);
+
+    /// <inheritdoc/>
+    public void ClearJobLease(Guid jobId) => _leases.TryRemove(jobId, out _);
 }
