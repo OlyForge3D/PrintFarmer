@@ -6164,7 +6164,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
                         .WithMany("Files")
                         .HasForeignKey("FolderId")
-                        .OnDelete(DeleteBehavior.SetNull)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
@@ -6635,7 +6635,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.GcodeFile", "GcodeFile")
                         .WithMany()
                         .HasForeignKey("GcodeFileId")
-                        .OnDelete(DeleteBehavior.Cascade);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("Farm.Infrastructure.Domain.PartInventory", "PartInventory")
                         .WithMany("Mappings")
@@ -6921,7 +6921,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
                         .WithMany()
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
@@ -7153,7 +7153,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Manufacturer", "Manufacturer")
                         .WithMany()
                         .HasForeignKey("ManufacturerId")
-                        .OnDelete(DeleteBehavior.SetNull)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("DefaultExtruder");

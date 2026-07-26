@@ -24,6 +24,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;
@@ -860,26 +861,73 @@ public class GcodeFilesService(
             }
         }
 
-        // Step 3: Clear FK references that would otherwise block deletion.
-        // - PrintJobs keep history; we null out the FK.
-        // - Harvest import mappings are safe to remove when deleting the library file.
-        foreach (GcodeFile file in filesToDelete)
+        // F4 — Wrap Step 3 compensating deletes + Step 4 parent GcodeFile removal in a
+        // single transaction so a failure late in the sequence rolls back the earlier
+        // ExecuteDeleteAsync writes (queue references cleared, harvest import mappings
+        // deleted, direct PartOutputMappings deleted). Cooperate with any outer
+        // transaction opened by a caller. Physical file deletion (Step 5) is intentionally
+        // OUTSIDE the transaction — filesystem operations cannot participate in an EF
+        // transaction, and the code already tolerates the "DB removed / physical file
+        // missing" state further down.
+        IDbContextTransaction? ownedTransaction = await _unitOfWork.BeginOwnedTransactionAsync(ct);
+        try
         {
-            await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
-            await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+            // Step 3: Clear FK references that would otherwise block deletion.
+            // - PrintJobs keep history; we null out the FK.
+            // - Harvest import mappings are safe to remove when deleting the library file.
+            // - Direct PartOutputMappings (GcodeFileId path) must be explicitly deleted
+            //   because their FK to GcodeFiles is Restrict, not Cascade, after the Dallas
+            //   cascade adjudication for #953 (broke the SQL Server 1785 multi-cascading-path
+            //   graph GcodeFiles ⇒ PartOutputMappings via {direct, via PrintProjectFiles}).
+            //   Mappings that reach the file indirectly via PrintProjectFileId are NOT touched
+            //   here — they cascade normally when the PrintProjectFile is removed.
+            foreach (GcodeFile file in filesToDelete)
+            {
+                await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
+                await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+                await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFileAsync(file.Id, ct);
+            }
+
+            // Step 4: Delete database records first (before deleting physical files)
+            _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
+
+            foreach (GcodeFile file in filesToDelete)
+            {
+                _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
+                await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
+            }
+
+            await _unitOfWork.SaveChangesAsync(ct);
+            _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
+
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
         }
-
-        // Step 4: Delete database records first (before deleting physical files)
-        _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
-
-        foreach (GcodeFile file in filesToDelete)
+        catch
         {
-            _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
-            await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
-        }
+            if (ownedTransaction is not null)
+            {
+                try
+                {
+                    await ownedTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Rollback best-effort; original exception propagates.
+                }
+            }
 
-        await _unitOfWork.SaveChangesAsync(ct);
-        _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
 
         // Step 5: Delete physical files (gcode + thumbnails)
         // If a physical file is missing, we still count it as deleted since the DB record was removed

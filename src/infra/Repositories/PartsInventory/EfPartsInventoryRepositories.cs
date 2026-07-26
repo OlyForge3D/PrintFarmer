@@ -250,6 +250,19 @@ public class EfPartOutputMappingRepository(AppDbContext context) : IPartOutputMa
         return Task.CompletedTask;
     }
 
+    public async Task DeleteDirectMappingsForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default)
+    {
+        // Restrict FK on GcodeFileId means we MUST delete these before the GcodeFile is
+        // removed, or the delete will fail. ExecuteDeleteAsync is preferred to loading the
+        // entities because we do not need the tracked instances — the deletion is bulk,
+        // matches the tightest existing-pattern equivalent
+        // (IHarvestRepository.DeleteFileImportMappingsForGcodeFileAsync), and preserves
+        // atomicity through the shared UnitOfWork DbContext.
+        _ = await _context.PartOutputMappings
+            .Where(m => m.GcodeFileId == gcodeFileId)
+            .ExecuteDeleteAsync(ct);
+    }
+
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
     {
         return await _context.SaveChangesAsync(ct);

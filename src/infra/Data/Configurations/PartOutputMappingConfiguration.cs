@@ -39,7 +39,7 @@ public class PartOutputMappingConfiguration : IEntityTypeConfiguration<PartOutpu
         _ = builder.HasOne(m => m.GcodeFile)
             .WithMany()
             .HasForeignKey(m => m.GcodeFileId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Restrict);
 
         _ = builder.HasOne(m => m.PrintProjectFile)
             .WithMany()

@@ -63,5 +63,18 @@ public interface IPartOutputMappingRepository
 
     Task RemoveAsync(PartOutputMapping entity, CancellationToken ct = default);
 
+    /// <summary>
+    /// Deletes every PartOutputMapping whose direct source is the given <paramref name="gcodeFileId"/>
+    /// (i.e., <c>GcodeFileId</c> matches, not <c>PrintProjectFileId</c>). Used by
+    /// <c>GcodeFilesService.DeleteFilesAsync</c> to clear the direct FK before the GcodeFile
+    /// is removed, since <c>FK_PartOutputMappings_GcodeFiles_GcodeFileId</c> is
+    /// <c>OnDelete(Restrict)</c> after the Dallas cascade adjudication for #953 (broke the
+    /// SQL Server 1785 multi-cascading-path graph GcodeFiles ⇒ PartOutputMappings via
+    /// {direct, via PrintProjectFiles}). Mappings that reach the GcodeFile indirectly via
+    /// <c>PrintProjectFileId</c> are NOT touched — they cascade normally when the
+    /// PrintProjectFile is deleted.
+    /// </summary>
+    Task DeleteDirectMappingsForGcodeFileAsync(Guid gcodeFileId, CancellationToken ct = default);
+
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }

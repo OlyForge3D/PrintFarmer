@@ -4,9 +4,11 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.DataManagement;
@@ -19,15 +21,18 @@ public class DataImportService : IDataImportService
     private readonly AppDbContext _context;
     private readonly ILogger<DataImportService> _logger;
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector;
+    private readonly IPrintersRepository _printersRepository;
 
     public DataImportService(
         AppDbContext context,
         ILogger<DataImportService> logger,
-        Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector)
+        Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
+        IPrintersRepository printersRepository)
     {
         _context = context;
         _logger = logger;
         _sensitiveDataProtector = sensitiveDataProtector;
+        _printersRepository = printersRepository;
     }
 
     private string? ProtectIfNeeded(string? value)
@@ -744,7 +749,65 @@ public class DataImportService : IDataImportService
     private async Task DeleteAllPrintersAsync(CancellationToken ct)
     {
         _logger.LogWarning("[DataImport] Deleting all printers (Replace mode)");
-        _context.Printers.RemoveRange(await _context.Printers.ToListAsync(ct));
-        await _context.SaveChangesAsync(ct);
+
+        // F1 + F4 — route printer deletion through the authoritative
+        // IPrintersRepository.RemoveAsync path rather than raw RemoveRange. The repository
+        // path runs every compensating cleanup that the Dallas cascade adjudication for
+        // #953 now requires (schedules Restrict FK, direct PartOutputMappings Restrict FK,
+        // Queue references, harvest ops, PrintJobs) and wraps each per-printer removal in
+        // its own owned transaction. To make the whole Replace-mode batch atomic and to
+        // let each repo call ride on our transaction instead of opening its own, we open
+        // ONE outer transaction here on relational providers. The repository detects the
+        // outer transaction (via `_db.Database.CurrentTransaction`) and skips owning one.
+        // Non-relational (in-memory) providers return a null handle from
+        // BeginTransactionAsync via the same IsRelational() guard used elsewhere; in that
+        // case there is no explicit transaction and each RemoveAsync runs in the
+        // provider's implicit-per-SaveChanges scope.
+        IDbContextTransaction? ownedTransaction = _context.Database.IsRelational()
+            && _context.Database.CurrentTransaction is null
+                ? await _context.Database.BeginTransactionAsync(ct)
+                : null;
+        try
+        {
+            // Snapshot the printer IDs first — RemoveAsync mutates the DbSet and would
+            // invalidate a live enumeration.
+            List<Guid> printerIds = await _context.Printers
+                .AsNoTracking()
+                .Select(p => p.Id)
+                .ToListAsync(ct);
+
+            foreach (Guid printerId in printerIds)
+            {
+                await _printersRepository.RemoveAsync(new Printer { Id = printerId }, ct);
+            }
+
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
+        }
+        catch
+        {
+            if (ownedTransaction is not null)
+            {
+                try
+                {
+                    await ownedTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Rollback best-effort; original exception propagates.
+                }
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
     }
 }

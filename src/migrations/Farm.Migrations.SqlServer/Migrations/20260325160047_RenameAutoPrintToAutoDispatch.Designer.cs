@@ -4114,7 +4114,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.FolderNode", "Folder")
                         .WithMany("Files")
                         .HasForeignKey("FolderId")
-                        .OnDelete(DeleteBehavior.SetNull)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.PrinterGroup", "PrinterGroup")
@@ -4312,7 +4312,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.MaintenanceAlert", "ResolvedAlert")
                         .WithMany()
                         .HasForeignKey("ResolvedAlertId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("MaintenanceTask");
 
@@ -4599,7 +4599,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
                         .WithMany()
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("MaintenancePlan");
@@ -4799,7 +4799,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Manufacturer", "Manufacturer")
                         .WithMany()
                         .HasForeignKey("ManufacturerId")
-                        .OnDelete(DeleteBehavior.SetNull)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.Navigation("DefaultExtruder");

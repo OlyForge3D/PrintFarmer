@@ -21,11 +21,15 @@ public class FolderNodeConfiguration : IEntityTypeConfiguration<FolderNode>
         // Navigation: FolderNode -> Models removed (Model3D migrated to Farm.Slicer.Module)
         // The FK relationship is maintained via FolderId soft reference on Model3D.
 
-        // Navigation: FolderNode -> Files (inverse of GcodeFile.Folder)
+        // Navigation: FolderNode -> Files (inverse of GcodeFile.Folder).
+        // Restrict — GcodeFile.FolderId is required (StoredFile.FolderId is a non-nullable Guid).
+        // Deleting a folder that still has files is prohibited; callers must relocate files or
+        // use the FolderNode.DeletedAt soft-delete pattern instead. See GcodeFileConfiguration
+        // for the primary FK definition; this must stay in sync.
         _ = builder.HasMany(f => f.Files)
             .WithOne(g => g.Folder)
             .HasForeignKey(g => g.FolderId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Indexes
         _ = builder.HasIndex(f => new { f.Path, f.FolderType }).IsUnique();

@@ -873,7 +873,7 @@ public partial class InitialV1 : Migration
                     column: x => x.ManufacturerId,
                     principalTable: "Manufacturers",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.NoAction);
                 table.ForeignKey(
                     name: "FK_ToolheadModelDefinitions_NozzleModelDefinitions_DefaultNozzleId",
                     column: x => x.DefaultNozzleId,
@@ -1088,7 +1088,7 @@ public partial class InitialV1 : Migration
                     column: x => x.FolderId,
                     principalTable: "FolderNode",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.NoAction);
                 table.ForeignKey(
                     name: "FK_GcodeFiles_PrinterModels_PrinterModelId",
                     column: x => x.PrinterModelId,
@@ -1513,7 +1513,7 @@ public partial class InitialV1 : Migration
                     column: x => x.PrinterId,
                     principalTable: "Printers",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.Cascade);
+                    onDelete: ReferentialAction.Restrict);
             });
 
         migrationBuilder.CreateTable(
@@ -1910,7 +1910,7 @@ public partial class InitialV1 : Migration
                     column: x => x.ResolvedAlertId,
                     principalTable: "MaintenanceAlerts",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
                     name: "FK_MaintenanceLogs_MaintenanceTasks_MaintenanceTaskId",
                     column: x => x.MaintenanceTaskId,
