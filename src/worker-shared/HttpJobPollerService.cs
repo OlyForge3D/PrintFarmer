@@ -93,6 +93,10 @@ public abstract class HttpJobPollerService(
                     int.TryParse(_configuration["Worker:HttpTimeoutSeconds"], out int timeoutSeconds) && timeoutSeconds > 0
                         ? timeoutSeconds
                         : 600);
+
+                // Only the claim is allowed to rely on default headers: it is the one worker request
+                // that has no job and therefore no lease. Every job mutation builds its own headers
+                // explicitly (see CreateJobMutationRequest), and a job lease is never stored here.
                 httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerKey, currentWorkerState.RegisteredServiceApiKey);
                 httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.WorkerId, registeredServiceId.Value.ToString());
 
@@ -159,20 +163,10 @@ public abstract class HttpJobPollerService(
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
                 job.Profile = await ResolveProfileFromJsonAsync(jobStatus.SlicerProfileJson, stoppingToken);
 
-                // Every subsequent mutation for this job must carry the lease it was claimed under.
-                _workerState.SetJobLease(job.Id, new WorkerJobLease(job.LeaseToken, job.LeaseFence));
-                httpClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseToken);
-                httpClient.DefaultRequestHeaders.Remove(WorkerLeaseHeaders.LeaseFence);
-                httpClient.DefaultRequestHeaders.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken.ToString());
-                httpClient.DefaultRequestHeaders.Add(
-                    WorkerLeaseHeaders.LeaseFence,
-                    job.LeaseFence.ToString(CultureInfo.InvariantCulture));
-
+                // The lease this job was claimed under is registered inside HandleJobAsync and
+                // released there, so it is never ambient on the client's default headers.
                 _workerState.IncrementActiveJobs();
                 _logger.LogInformation("Claimed job {JobId}, starting processing", job.Id);
-
-                // Emit initial progress (0%)
-                await TrySendProgressAsync(httpClient, job.Id, 0, "Starting slicing", stoppingToken);
 
                 await HandleJobAsync(job, httpClient, stoppingToken);
             }
@@ -191,35 +185,61 @@ public abstract class HttpJobPollerService(
         _logger.LogInformation("HTTP job poller stopped");
     }
 
+    /// <summary>
+    /// Runs the full lifecycle of one claimed job: lease renewal, pipeline execution, artifact
+    /// upload and terminal reporting.
+    /// </summary>
+    /// <remarks>
+    /// The lease this job was claimed under is registered here and released in the finally block,
+    /// so every mutation issued for the job — including the ones the background renewal loop sends —
+    /// resolves the same lease from a single source of truth.
+    /// </remarks>
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
     {
         DateTime start = DateTime.UtcNow;
-        CancellationTokenSource? localLinkedCts = null;
         SlicingResult? result = null;
         bool terminalAcknowledgement = false;
+
+        // Written by the renewal loop, read after the loop has been awaited or after the linked
+        // token has been observed as cancelled; Volatile/Interlocked keeps the hand-off explicit.
+        int leaseLost = 0;
+        Task? renewalLoop = null;
+
+        _workerState.SetJobLease(job.Id, new WorkerJobLease(job.LeaseToken, job.LeaseFence));
+
+        using CancellationTokenSource jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        CancellationToken jobToken = jobCts.Token;
+
         try
         {
             using IServiceScope scope = _serviceProvider.CreateScope();
 
+            // Emit initial progress (0%)
+            await TrySendProgressAsync(httpClient, job.Id, 0, "Starting slicing", jobToken);
+
             // Start a lease-renewal loop to prevent the API from reclaiming the job while we're actively processing.
             try
             {
-                localLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300");
                 int renewIntervalSeconds = Math.Max(10, leaseDurationSeconds / 3);
 
-                _ = Task.Run(
+                renewalLoop = Task.Run(
                     async () =>
                 {
-                    while (!localLinkedCts.Token.IsCancellationRequested)
+                    while (!jobToken.IsCancellationRequested)
                     {
                         try
                         {
-                            RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
-                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew-lease", renewReq, localLinkedCts.Token);
-                            if (!resp.IsSuccessStatusCode)
+                            LeaseRenewalOutcome outcome =
+                                await RenewLeaseOnceAsync(httpClient, job, leaseDurationSeconds, jobToken);
+                            if (outcome == LeaseRenewalOutcome.Lost)
                             {
-                                _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
+                                // The lease is gone. Continuing to slice would burn compute and could
+                                // publish an artifact under a fencing token the API has already
+                                // superseded, so stop the job's work now.
+                                _ = Interlocked.Exchange(ref leaseLost, 1);
+                                await jobCts.CancelAsync();
+                                break;
                             }
                         }
                         catch (OperationCanceledException)
@@ -231,32 +251,41 @@ public abstract class HttpJobPollerService(
                             _logger.LogDebug(ex, "Failed to renew lease for job {JobId}", job.Id);
                         }
 
-                        await Task.Delay(TimeSpan.FromSeconds(renewIntervalSeconds), localLinkedCts.Token);
+                        try
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(renewIntervalSeconds), jobToken);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
                     }
-                }, localLinkedCts.Token);
+                }, CancellationToken.None);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Failed to start lease renew loop for job {JobId}", job.Id);
-                localLinkedCts?.Dispose();
-                localLinkedCts = null;
             }
 
             // Execute the slicing pipeline (downloads STL, runs slicer, generates G-code)
-            result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
+            result = await ExecutePipelineAsync(job, scope.ServiceProvider, jobToken);
             if (!result.Success)
             {
                 throw new InvalidOperationException("Slicing pipeline reported failure");
             }
 
+            // A lease lost while the pipeline was finishing must never be followed by an upload:
+            // the fence the API holds is newer than the one this artifact would be published under.
+            jobToken.ThrowIfCancellationRequested();
+
             // Mid-progress update (pipeline finished but artifacts pending)
             // Use heuristic progress since SlicingResult doesn't expose granular percentage yet.
-            await TrySendProgressAsync(httpClient, job.Id, 85, "Slicing complete, uploading artifacts", ct);
+            await TrySendProgressAsync(httpClient, job.Id, 85, "Slicing complete, uploading artifacts", jobToken);
 
             _logger.LogInformation("Job {JobId} slicing completed in {TotalSeconds:F1}s", job.Id, (DateTime.UtcNow - start).TotalSeconds);
 
             // Upload artifacts (G-code file and any metadata) with declared digests
-            List<Guid> artifactIds = await UploadArtifactsAsync(job, result, httpClient, ct);
+            List<Guid> artifactIds = await UploadArtifactsAsync(job, result, httpClient, jobToken);
 
             // Complete the job with artifact references and the profile digests actually written
             CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
@@ -271,11 +300,17 @@ public abstract class HttpJobPollerService(
                 FilamentProfileSha256 = job.NativeProfiles?.FilamentSha256,
             };
 
-            HttpResponseMessage completeResponse = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/complete", completeRequest, ct);
+            using HttpRequestMessage completeMessage = CreateJobMutationRequest(
+                httpClient,
+                HttpMethod.Post,
+                job.Id,
+                $"/api/slice/{job.Id}/complete",
+                JsonContent.Create(completeRequest));
+            using HttpResponseMessage completeResponse = await httpClient.SendAsync(completeMessage, jobToken);
 
             if (!completeResponse.IsSuccessStatusCode)
             {
-                string errorContent = await completeResponse.Content.ReadAsStringAsync(ct);
+                string errorContent = await completeResponse.Content.ReadAsStringAsync(jobToken);
                 throw new InvalidOperationException($"Failed to complete job: {completeResponse.StatusCode} - {errorContent}");
             }
 
@@ -285,33 +320,61 @@ public abstract class HttpJobPollerService(
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Job {JobId} cancelled", job.Id);
+            if (Volatile.Read(ref leaseLost) == 1)
+            {
+                // The API no longer accepts this worker's lease for this job. Nothing further may be
+                // reported under it, so the failure is recorded durably on disk and the API reclaims
+                // the job when the lease expires.
+                _logger.LogError(
+                    "Job {JobId} lost its lease; slicing was cancelled so no artifact is published under a stale fencing token",
+                    job.Id);
+                TryWriteRecoveryMarker(job.Id, result, "lease_lost");
+            }
+            else
+            {
+                _logger.LogWarning("Job {JobId} cancelled", job.Id);
 
-            // Job will timeout and be reassigned by the API's error recovery system. The local work
-            // is kept and marked so a later run cannot mistake it for reclaimable scratch space.
-            TryWriteRecoveryMarker(job.Id, result, "cancelled");
+                // Job will timeout and be reassigned by the API's error recovery system. The local work
+                // is kept and marked so a later run cannot mistake it for reclaimable scratch space.
+                TryWriteRecoveryMarker(job.Id, result, "cancelled");
+            }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Job {JobId} failed: {Message}", job.Id, ex.Message);
 
-            // Report failure to the API so the job doesn't sit in Processing until lease expires
-            await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
+            if (Volatile.Read(ref leaseLost) == 1)
+            {
+                // Reporting the failure would be denied: the lease this worker holds is no longer
+                // the one the API recognises. Fail closed rather than issue an unauthorised request.
+                _logger.LogError(
+                    "Job {JobId} failure could not be reported because its lease is no longer current; the API will reclaim it on lease expiry",
+                    job.Id);
+            }
+            else
+            {
+                // Report failure to the API so the job doesn't sit in Processing until lease expires
+                await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
+            }
 
             // The outcome is ambiguous from the worker's point of view, so the local work is kept
             // and marked for recovery instead of being deleted.
-            TryWriteRecoveryMarker(job.Id, result, ex.GetType().Name);
+            TryWriteRecoveryMarker(job.Id, result, Volatile.Read(ref leaseLost) == 1 ? "lease_lost" : ex.GetType().Name);
         }
         finally
         {
-            // Stop lease renew task if running by cancelling and disposing localLinkedCts
+            // Stop the lease renewal loop and wait for it so nothing outlives the job.
             try
             {
-                if (localLinkedCts != null)
+                await jobCts.CancelAsync();
+                if (renewalLoop is not null)
                 {
-                    await localLinkedCts.CancelAsync();
-                    localLinkedCts.Dispose();
+                    await renewalLoop;
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected: the renewal loop observes the job's cancellation.
             }
             catch (ObjectDisposedException exception)
             {
@@ -328,6 +391,162 @@ public abstract class HttpJobPollerService(
         }
     }
 
+    /// <summary>
+    /// Outcome of a single lease renewal attempt.
+    /// </summary>
+    private enum LeaseRenewalOutcome
+    {
+        /// <summary>The API extended the lease.</summary>
+        Renewed,
+
+        /// <summary>The attempt failed for a reason that may resolve on the next attempt.</summary>
+        Transient,
+
+        /// <summary>The API refuses this worker's lease for this job; the job must stop.</summary>
+        Lost,
+    }
+
+    /// <summary>
+    /// Builds a request for a job mutation carrying exactly one value for each of the four headers
+    /// <c>AuthorizeWorkerMutationAsync</c> requires.
+    /// </summary>
+    /// <param name="httpClient">The client the request will be sent on; its default headers are consulted so a value is never presented twice.</param>
+    /// <param name="method">HTTP method for the mutation.</param>
+    /// <param name="jobId">The claimed job being mutated.</param>
+    /// <param name="requestUri">Request URI relative to the client's base address.</param>
+    /// <param name="content">Request body, when the mutation has one.</param>
+    /// <returns>A request that is safe to send exactly once.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The worker is not registered, or holds no lease for <paramref name="jobId"/>. The path fails
+    /// closed rather than emitting an unauthenticated or unfenced request.
+    /// </exception>
+    private HttpRequestMessage CreateJobMutationRequest(
+        HttpClient httpClient,
+        HttpMethod method,
+        Guid jobId,
+        string requestUri,
+        HttpContent? content)
+    {
+        WorkerState state = _workerState.GetWorkerState();
+        if (state.RegisteredServiceId is not { } serviceId || string.IsNullOrWhiteSpace(state.RegisteredServiceApiKey))
+        {
+            throw new InvalidOperationException(
+                $"Worker registration is unavailable; refusing to send an unauthenticated mutation for job {jobId}.");
+        }
+
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) || lease.Token == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                $"No lease is held for job {jobId}; refusing to send an unfenced mutation.");
+        }
+
+        HttpRequestMessage request = new(method, requestUri);
+        try
+        {
+            request.Content = content;
+            SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.WorkerKey, state.RegisteredServiceApiKey!);
+            SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.WorkerId, serviceId.ToString());
+            SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.LeaseToken, lease.Token.ToString());
+            SetSingleHeaderValue(
+                request,
+                httpClient,
+                WorkerLeaseHeaders.LeaseFence,
+                lease.Fence.ToString(CultureInfo.InvariantCulture));
+            return request;
+        }
+        catch
+        {
+            request.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Guarantees the wire carries this header exactly once with the given value.
+    /// </summary>
+    /// <remarks>
+    /// A value already inherited from <see cref="HttpClient.DefaultRequestHeaders"/> is left alone
+    /// when it is a single value that already matches; otherwise the request carries the value
+    /// itself, which takes precedence over the client's defaults. Either way the receiving API sees
+    /// one unambiguous value rather than a two-element <c>StringValues</c>.
+    /// </remarks>
+    /// <param name="request">The outgoing request.</param>
+    /// <param name="httpClient">The client whose default headers may already supply the value.</param>
+    /// <param name="name">The header name.</param>
+    /// <param name="value">The single value the API must observe.</param>
+    private static void SetSingleHeaderValue(HttpRequestMessage request, HttpClient httpClient, string name, string value)
+    {
+        _ = request.Headers.Remove(name);
+
+        if (httpClient.DefaultRequestHeaders.TryGetValues(name, out IEnumerable<string>? defaults))
+        {
+            string[] defaultValues = defaults as string[] ?? defaults.ToArray();
+            if (defaultValues.Length == 1 && string.Equals(defaultValues[0], value, StringComparison.Ordinal))
+            {
+                // Inherited exactly once with the correct value: adding it again is what produced
+                // ambiguous authentication headers in the first place.
+                return;
+            }
+        }
+
+        request.Headers.Add(name, value);
+    }
+
+    /// <summary>
+    /// Sends a single lease renewal request, explicitly carrying the worker identity and the
+    /// exact lease token and fencing counter this job was claimed under.
+    /// </summary>
+    /// <remarks>
+    /// The renewal must not depend on the shared <see cref="HttpClient"/>'s default headers: the
+    /// loop runs concurrently with the poll loop for the lifetime of a potentially long-running
+    /// slice, and a job lease is never ambient state. Building the request explicitly keeps renewal
+    /// self-contained and duplicate-free.
+    /// </remarks>
+    /// <param name="httpClient">Client bound to the API base address.</param>
+    /// <param name="job">The claimed job whose lease is being renewed.</param>
+    /// <param name="leaseDurationSeconds">Requested lease extension.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Whether the lease was renewed, transiently failed, or is gone for good.</returns>
+    private async Task<LeaseRenewalOutcome> RenewLeaseOnceAsync(
+        HttpClient httpClient,
+        DistributedSlicingJob job,
+        int leaseDurationSeconds,
+        CancellationToken ct)
+    {
+        RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
+        using HttpRequestMessage renewRequest = CreateJobMutationRequest(
+            httpClient,
+            HttpMethod.Post,
+            job.Id,
+            $"/api/slice/{job.Id}/renew-lease",
+            JsonContent.Create(renewReq));
+
+        using HttpResponseMessage resp = await httpClient.SendAsync(renewRequest, ct);
+        if (resp.IsSuccessStatusCode)
+        {
+            return LeaseRenewalOutcome.Renewed;
+        }
+
+        switch (resp.StatusCode)
+        {
+            case HttpStatusCode.Conflict:
+            case HttpStatusCode.Forbidden:
+            case HttpStatusCode.Unauthorized:
+            case HttpStatusCode.NotFound:
+                // The API no longer recognises this worker's claim on the job: the lease expired,
+                // was reassigned, superseded by a newer fence, or the job itself is gone. Retrying
+                // cannot recover it, so this is terminal for the job rather than transient.
+                _logger.LogWarning(
+                    "Lease renew for job {JobId} was rejected as a conflict ({RespStatusCode}); this worker's lease or fencing token is no longer current",
+                    job.Id,
+                    resp.StatusCode);
+                return LeaseRenewalOutcome.Lost;
+            default:
+                _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
+                return LeaseRenewalOutcome.Transient;
+        }
+    }
+
     private async Task TrySendProgressAsync(HttpClient client, Guid jobId, int percent, string message, CancellationToken ct)
     {
         try
@@ -337,7 +556,13 @@ public abstract class HttpJobPollerService(
                 ProgressPercent = percent,
                 ProgressMessage = message
             };
-            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/progress", progressReq, ct);
+            using HttpRequestMessage request = CreateJobMutationRequest(
+                client,
+                HttpMethod.Post,
+                jobId,
+                $"/api/slice/{jobId}/progress",
+                JsonContent.Create(progressReq));
+            using HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Progress update for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
@@ -354,9 +579,14 @@ public abstract class HttpJobPollerService(
         try
         {
             string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
-            var failReq = new { errorMessage = truncated };
 
-            HttpResponseMessage resp = await client.PostAsJsonAsync($"/api/slice/{jobId}/fail", failReq, ct);
+            using HttpRequestMessage request = CreateJobMutationRequest(
+                client,
+                HttpMethod.Post,
+                jobId,
+                $"/api/slice/{jobId}/fail",
+                JsonContent.Create(new FailSliceJobRequest(truncated)));
+            using HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Fail report for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
@@ -416,8 +646,13 @@ public abstract class HttpJobPollerService(
             new StringContent(gcodeStream.Length.ToString(CultureInfo.InvariantCulture)),
             "sizeBytes");
 
-        using HttpResponseMessage uploadResponse =
-            await httpClient.PostAsync($"/api/slice/{job.Id}/artifacts", gcodeContent, ct);
+        using HttpRequestMessage uploadRequest = CreateJobMutationRequest(
+            httpClient,
+            HttpMethod.Post,
+            job.Id,
+            $"/api/slice/{job.Id}/artifacts",
+            gcodeContent);
+        using HttpResponseMessage uploadResponse = await httpClient.SendAsync(uploadRequest, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {

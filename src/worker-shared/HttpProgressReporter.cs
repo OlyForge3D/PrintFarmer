@@ -41,17 +41,23 @@ public class HttpProgressReporter : IProgressReporter
     /// </summary>
     /// <param name="request">The outgoing worker request.</param>
     /// <param name="jobId">The claimed job.</param>
-    private void AddLeaseHeaders(HttpRequestMessage request, Guid jobId)
+    /// <returns>
+    /// <see langword="false"/> when no lease is held, in which case the caller must not send the
+    /// request: an unfenced worker mutation is rejected by the API and must never be attempted.
+    /// </returns>
+    private bool TryAddLeaseHeaders(HttpRequestMessage request, Guid jobId)
     {
-        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease))
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) || lease.Token == Guid.Empty)
         {
-            return;
+            _logger.LogWarning("Worker request skipped because no lease is held for job {JobId}", jobId);
+            return false;
         }
 
         request.Headers.Add(WorkerLeaseHeaders.LeaseToken, lease.Token.ToString());
         request.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,
             lease.Fence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return true;
     }
 
     public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
@@ -79,7 +85,11 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
             request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
-            AddLeaseHeaders(request, jobId);
+            if (!TryAddLeaseHeaders(request, jobId))
+            {
+                return;
+            }
+
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -123,7 +133,11 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
             request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
-            AddLeaseHeaders(request, jobId);
+            if (!TryAddLeaseHeaders(request, jobId))
+            {
+                return;
+            }
+
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {

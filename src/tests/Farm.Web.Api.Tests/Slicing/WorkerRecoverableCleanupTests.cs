@@ -104,10 +104,16 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         ServiceCollection services = new();
         _ = services.AddSingleton<IHttpClientFactory>(new StubHttpClientFactory(handler));
         ServiceProvider provider = services.BuildServiceProvider();
+
+        // Job mutations fail closed without a registered worker identity, so these cleanup and
+        // recovery scenarios have to start from an authenticated worker.
+        WorkerStateService workerState = new();
+        workerState.SetRegisteredService(Guid.NewGuid(), "test-worker-api-key");
+
         return new RecordingPoller(
             provider.GetRequiredService<IHttpClientFactory>(),
             provider,
-            new WorkerStateService(),
+            workerState,
             new ConfigurationBuilder().AddInMemoryCollection().Build(),
             handler);
     }
