@@ -176,6 +176,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
             });
         });
         using HttpClient client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
 
         HttpResponseMessage response = await client.GetAsync(FleetRoute);
 
@@ -204,6 +205,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
             });
         });
         using HttpClient client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
 
         HttpResponseMessage response = await client.GetAsync(string.Format(PerPrinterRoute, Guid.NewGuid()));
 
@@ -275,6 +277,7 @@ public class FilamentCoverageControllerTests : IAsyncLifetime
             });
         });
         using HttpClient client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = _client!.DefaultRequestHeaders.Authorization;
 
         HttpResponseMessage response = await client.GetAsync(FleetRoute);
 
