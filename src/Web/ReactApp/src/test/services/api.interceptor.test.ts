@@ -91,6 +91,22 @@ describe('ApiClient — 401 response interceptor', () => {
     expect(window.location.href).toBe('http://localhost/');
   });
 
+  it('keeps the current identity when password login returns invalid credentials', async () => {
+    localStorage.setItem('auth-token', 'current-identity-token');
+    const removeItemSpy = vi.spyOn(localStorage, 'removeItem');
+
+    await expect(client.login({
+      username: 'different-user',
+      password: 'invalid-password',
+    })).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(localStorage.getItem('auth-token')).toBe('current-identity-token');
+    expect(removeItemSpy).not.toHaveBeenCalledWith('auth-token');
+    expect(signalRSessionTestState.reset).not.toHaveBeenCalled();
+    expect(authenticationExpirationTestState.notify).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('http://localhost/');
+  });
+
   it('clears the token and redirects to /login on 401 without skipAuthRedirect', async () => {
     localStorage.setItem('auth-token', 'test-token');
     const removeItemSpy = vi.spyOn(localStorage, 'removeItem');

@@ -2798,7 +2798,8 @@ export class ApiClient {
 
     const response = await this.client.post<AuthenticationResult>(
       "/auth/login",
-      payload
+      payload,
+      { skipAuthRedirect: true },
     );
     return response.data;
   }
