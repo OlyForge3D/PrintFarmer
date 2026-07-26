@@ -96,14 +96,25 @@ public sealed class DispatchClaimService(
         }
 
         // --- Telemetry freshness and online/idle check ---
+        // Calibration jobs FAIL CLOSED: fresh telemetry is mandatory.
+        // Standard jobs pass through if no telemetry is available.
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
-        if (snapshot is not null)
+
+        if (job.JobKind == JobKind.FilamentCalibration)
         {
+            // Must have a telemetry snapshot — null means no data, which is a hard gate.
+            if (snapshot is null)
+            {
+                return DispatchClaimResult.Fail(
+                    "telemetry_unavailable",
+                    $"Fresh telemetry is required for calibration dispatch. No snapshot is available for printer {request.PrinterId}.");
+            }
+
             DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
             bool isFresh = observedAt.HasValue &&
                            (DateTime.UtcNow - observedAt.Value) <= TelemetryFreshnessLimit;
 
-            if (job.JobKind == JobKind.FilamentCalibration && !isFresh)
+            if (!isFresh)
             {
                 return DispatchClaimResult.Fail(
                     "telemetry_stale",
@@ -122,49 +133,99 @@ public sealed class DispatchClaimService(
             {
                 return DispatchClaimResult.Fail(
                     "printer_busy_telemetry",
+                    $"Printer {request.PrinterId} is in state '{state}' per telemetry; cannot start a calibration job.");
+            }
+        }
+        else if (snapshot is not null)
+        {
+            // Standard jobs: check online/idle status only when telemetry is available.
+            if (!snapshot.Status.IsOnline)
+            {
+                return DispatchClaimResult.Fail(
+                    "printer_offline",
+                    $"Printer {request.PrinterId} is not online per telemetry.");
+            }
+
+            string? state = snapshot.Status.State;
+            if (state is "printing" or "starting" or "paused")
+            {
+                return DispatchClaimResult.Fail(
+                    "printer_busy_telemetry",
                     $"Printer {request.PrinterId} is in state '{state}' per telemetry; cannot start a new job.");
             }
         }
 
         // --- Calibration-specific compatibility checks ---
+        // All compatibility fields must be explicitly set (non-null, non-Unknown).
+        // Null fields are not inferred from manufacturer/model/backend — they fail closed.
         if (job.JobKind == JobKind.FilamentCalibration)
         {
-            if (job.RequiredFirmwareFamily.HasValue &&
-                job.RequiredFirmwareFamily != PrinterFirmwareFamily.Unknown &&
-                printer.FirmwareFamily != job.RequiredFirmwareFamily)
+            // Required firmware family must be explicitly Klipper (not null or Unknown).
+            if (!job.RequiredFirmwareFamily.HasValue || job.RequiredFirmwareFamily == PrinterFirmwareFamily.Unknown)
+            {
+                return DispatchClaimResult.Fail(
+                    "compatibility_incomplete",
+                    "Calibration job is missing required firmware family. Null or Unknown compatibility fields are not permitted.");
+            }
+
+            if (!job.RequiredGcodeDialect.HasValue || job.RequiredGcodeDialect == PrinterGcodeDialect.Unknown)
+            {
+                return DispatchClaimResult.Fail(
+                    "compatibility_incomplete",
+                    "Calibration job is missing required G-code dialect. Null or Unknown compatibility fields are not permitted.");
+            }
+
+            if (string.IsNullOrWhiteSpace(job.RequiredSlicerEngine))
+            {
+                return DispatchClaimResult.Fail(
+                    "compatibility_incomplete",
+                    "Calibration job is missing required slicer engine.");
+            }
+
+            if (string.IsNullOrWhiteSpace(job.RequiredSlicerDistribution))
+            {
+                return DispatchClaimResult.Fail(
+                    "compatibility_incomplete",
+                    "Calibration job is missing required slicer distribution.");
+            }
+
+            if (string.IsNullOrWhiteSpace(job.RequiredSlicerVersion))
+            {
+                return DispatchClaimResult.Fail(
+                    "compatibility_incomplete",
+                    "Calibration job is missing required slicer version.");
+            }
+
+            // Validate actual compatibility against printer configuration.
+            if (printer.FirmwareFamily != job.RequiredFirmwareFamily)
             {
                 return DispatchClaimResult.Fail(
                     "firmware_family_mismatch",
                     $"Job requires firmware family '{job.RequiredFirmwareFamily}' but printer has '{printer.FirmwareFamily}'.");
             }
 
-            if (job.RequiredGcodeDialect.HasValue &&
-                job.RequiredGcodeDialect != PrinterGcodeDialect.Unknown &&
-                printer.GcodeDialect != job.RequiredGcodeDialect)
+            if (printer.GcodeDialect != job.RequiredGcodeDialect)
             {
                 return DispatchClaimResult.Fail(
                     "gcode_dialect_mismatch",
                     $"Job requires G-code dialect '{job.RequiredGcodeDialect}' but printer has '{printer.GcodeDialect}'.");
             }
 
-            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerEngine) &&
-                !string.Equals(printer.CalibrationSlicerEngine, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(printer.CalibrationSlicerEngine, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase))
             {
                 return DispatchClaimResult.Fail(
                     "slicer_tuple_mismatch",
                     $"Job requires slicer engine '{job.RequiredSlicerEngine}' but printer is configured for '{printer.CalibrationSlicerEngine}'.");
             }
 
-            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerDistribution) &&
-                !string.Equals(printer.CalibrationSlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(printer.CalibrationSlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase))
             {
                 return DispatchClaimResult.Fail(
                     "slicer_tuple_mismatch",
                     $"Job requires slicer distribution '{job.RequiredSlicerDistribution}' but printer is configured for '{printer.CalibrationSlicerDistribution}'.");
             }
 
-            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerVersion) &&
-                !string.Equals(printer.CalibrationSlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(printer.CalibrationSlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase))
             {
                 return DispatchClaimResult.Fail(
                     "slicer_tuple_mismatch",
@@ -179,6 +240,7 @@ public sealed class DispatchClaimService(
                     $"Printer configuration revision {printer.ConfigurationRevision} does not match the pinned revision {job.PinnedPrinterConfigRevision}.");
             }
 
+            // Ack key is required in the claim request.
             if (string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
             {
                 return DispatchClaimResult.Fail(
@@ -186,29 +248,35 @@ public sealed class DispatchClaimService(
                     "Calibration jobs require a valid bed-clear acknowledgement idempotency key.");
             }
 
-            if (dispatchState.AcknowledgedJobId.HasValue)
+            // A persisted ack MUST exist — fail closed. An ack key in the request with no
+            // persisted counterpart is a programming error or a replay attack.
+            if (!dispatchState.AcknowledgedJobId.HasValue)
             {
-                if (dispatchState.AcknowledgedJobId != request.JobId)
-                {
-                    return DispatchClaimResult.Fail(
-                        "wrong_acknowledgement_job",
-                        $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {request.JobId}.");
-                }
+                return DispatchClaimResult.Fail(
+                    "acknowledgement_missing",
+                    "No persisted bed-clear acknowledgement found for this printer. The operator must acknowledge bed-clear before calibration dispatch.");
+            }
 
-                if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
-                    dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
-                {
-                    return DispatchClaimResult.Fail(
-                        "acknowledgement_expired",
-                        $"Bed-clear acknowledgement for job {request.JobId} has expired.");
-                }
+            if (dispatchState.AcknowledgedJobId != request.JobId)
+            {
+                return DispatchClaimResult.Fail(
+                    "wrong_acknowledgement_job",
+                    $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {request.JobId}.");
+            }
 
-                if (dispatchState.AcknowledgementIdempotencyKey != request.AcknowledgementIdempotencyKey)
-                {
-                    return DispatchClaimResult.Fail(
-                        "acknowledgement_key_mismatch",
-                        "Acknowledgement idempotency key does not match the persisted value.");
-                }
+            if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
+                dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
+            {
+                return DispatchClaimResult.Fail(
+                    "acknowledgement_expired",
+                    $"Bed-clear acknowledgement for job {request.JobId} has expired.");
+            }
+
+            if (dispatchState.AcknowledgementIdempotencyKey != request.AcknowledgementIdempotencyKey)
+            {
+                return DispatchClaimResult.Fail(
+                    "acknowledgement_key_mismatch",
+                    "Acknowledgement idempotency key does not match the persisted value.");
             }
         }
 
@@ -234,6 +302,7 @@ public sealed class DispatchClaimService(
         var outboxEvent = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
+            Sequence = DateTime.UtcNow.Ticks, // Monotonic: ticks provide orderable value; DB-generated sequence can replace this via migration.
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,

@@ -1040,6 +1040,148 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Dispatches a job using an explicit bed-clear acknowledgement key.
+    /// Called by the outbox publisher's BackendStartCommand handler to drive the
+    /// durable bed-clear start path through the shared dispatch claim service.
+    /// </summary>
+    public async Task DispatchJobWithAckAsync(
+        string jobId,
+        string actorSubject,
+        string ackKey,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dispatchClaimService is null)
+        {
+            throw new InvalidOperationException(
+                "IDispatchClaimService is required for DispatchJobWithAckAsync. Register the service in DI.");
+        }
+
+        PrintJob? job = await _repository.GetByIdWithRelationsAsync(Guid.Parse(jobId), cancellationToken);
+
+        if (job is null)
+        {
+            throw new InvalidOperationException($"Print job {jobId} not found");
+        }
+
+        // Idempotent: job already dispatched — nothing to do.
+        if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
+        {
+            _logger.LogInformation(
+                "DispatchJobWithAckAsync: Job {JobId} already in {Status} — no-op (idempotent)",
+                jobId, job.Status);
+            return;
+        }
+
+        if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
+        {
+            throw new InvalidOperationException(
+                $"DispatchJobWithAckAsync: Job {jobId} is in state {job.Status} and cannot be dispatched.");
+        }
+
+        if (job.AssignedPrinterId is null || job.AssignedPrinter is null)
+        {
+            throw new InvalidOperationException(
+                $"DispatchJobWithAckAsync: Job {jobId} has no assigned printer.");
+        }
+
+        if (job.GcodeFile is null)
+        {
+            throw new InvalidOperationException(
+                $"DispatchJobWithAckAsync: Job {jobId} has no G-code artifact.");
+        }
+
+        // Acquire the shared dispatch claim. This validates the persisted ack against
+        // ackKey, checks telemetry, firmware, slicer compatibility, and sets Starting.
+        DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                Guid.Parse(jobId),
+                job.AssignedPrinterId.Value,
+                actorSubject,
+                "BedClear",
+                ackKey,
+                null,
+                null),
+            cancellationToken);
+
+        if (!claimResult.Success || claimResult.Attempt is null)
+        {
+            throw new InvalidOperationException(
+                $"DispatchJobWithAckAsync: Claim failed — {claimResult.ErrorCode}: {claimResult.ErrorDetail}");
+        }
+
+        Guid attemptId = claimResult.Attempt.Id;
+
+        string printerFileName = job.GcodeFile.Name;
+        string gcodeStorageRoot = _storagePathService.GetGcodeStorageDirectory();
+        string localFilePath = Path.Combine(
+            gcodeStorageRoot,
+            job.GcodeFile.FilePath.TrimStart('/'),
+            job.GcodeFile.FileName);
+
+        _logger.LogInformation(
+            "DispatchJobWithAckAsync: Uploading job {JobId} to printer {PrinterId}",
+            jobId, job.AssignedPrinterId.Value);
+
+        try
+        {
+            if (!System.IO.File.Exists(localFilePath))
+            {
+                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                    attemptId, "backend_rejected", DispatchArtifactUnavailable, cancellationToken);
+
+                _logger.LogError(
+                    "DispatchJobWithAckAsync: G-code artifact unavailable for job {JobId}",
+                    jobId);
+                return;
+            }
+
+            await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
+            var stageProgress = new Progress<UploadAndPrintStage>(stage =>
+                _logger.LogDebug("DispatchJobWithAckAsync: Job {JobId} stage {Stage}", jobId, stage));
+
+            var uploadResult = await _printersService.UploadAndStartPrintAsync(
+                job.AssignedPrinterId.Value,
+                printerFileName,
+                fileStream,
+                stageProgress,
+                cancellationToken);
+
+            if (uploadResult.Success)
+            {
+                await _dispatchClaimService.RecordBackendAcceptedAsync(
+                    attemptId, null, cancellationToken);
+
+                await SnapshotSlicerEstimatesAsync(job, cancellationToken);
+
+                _logger.LogInformation(
+                    "DispatchJobWithAckAsync: Job {JobId} successfully started on printer {PrinterId}",
+                    jobId, job.AssignedPrinterId.Value);
+            }
+            else
+            {
+                string failureDetail = uploadResult.ErrorMessage ?? DispatchPrinterFailure;
+                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                    attemptId, "backend_rejected", failureDetail, cancellationToken);
+
+                _logger.LogWarning(
+                    "DispatchJobWithAckAsync: Backend rejected job {JobId} — {Failure}",
+                    jobId, failureDetail);
+            }
+        }
+        catch (Exception ex)
+        {
+            await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId, ex.Message, cancellationToken);
+
+            _logger.LogError(
+                ex,
+                "DispatchJobWithAckAsync: Unknown outcome for job {JobId} on printer {PrinterId}",
+                jobId,
+                job.AssignedPrinterId.Value);
+        }
+    }
+
+    /// <summary>
     /// Cancel a job (remove from queue or stop printing).
     /// If the job is currently Printing or Paused, sends a cancel command to the printer.
     /// </summary>

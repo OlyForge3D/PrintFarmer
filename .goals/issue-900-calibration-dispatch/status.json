@@ -1,7 +1,7 @@
 {
   "goal_id": "issue-900-calibration-dispatch",
-  "status": "inspecting",
-  "iteration": 3,
+  "status": "building",
+  "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "ee453fd301240fc35a9b86c13e2888d5b30c32b3",
@@ -22,8 +22,8 @@
     {
       "timestamp": "2026-07-26T09:35:00.0000000Z",
       "iteration": 3,
-      "verdict": "PASS",
-      "summary": "All 10 gaps addressed: provider-correct row-version fencing, atomic ack+claim, all start-path claim integration, verified outbox publishing, SignalR events, reconciliation, comprehensive DbHeavy tests, multi-provider migrations. 4325 tests pass; build clean; production-ready."
+      "verdict": "FAIL",
+      "summary": "Coordinator and read-only audit found critical ack, dispatch, fencing, outbox, reconciliation, auth/audit, ETag and test gaps; Inspector PASS overridden."
     }
   ]
 }

@@ -315,11 +315,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v.UtcDateTime,
                     v => new DateTimeOffset(v, TimeSpan.Zero));
+        }
 
-            // For SQLite, row-version columns are application-managed (the DB does not
-            // auto-generate them). Override the IsRowVersion() store-generated setting so
-            // EF Core does not try to round-trip the DB value after each save, allowing
-            // StampRowVersions() to write a non-null GUID token on every Add/Modify.
+        // For SQLite and PostgreSQL, row-version columns are application-managed (the DB does not
+        // auto-generate them). Override the IsRowVersion() store-generated setting so
+        // EF Core does not try to round-trip the DB value after each save, allowing
+        // StampRowVersions() to write a non-null GUID token on every Add/Modify.
+        // SQL Server uses a native ROWVERSION column that the DB generates and returns.
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
+        {
             _ = modelBuilder.Entity<PrintJob>()
                 .Property(j => j.RowVersion)
                 .HasMaxLength(16)

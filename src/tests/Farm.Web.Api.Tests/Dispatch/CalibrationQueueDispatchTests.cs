@@ -516,6 +516,13 @@ public class CalibrationQueueDispatchTests
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.Normal,
             Copies = 1,
+            // All required compatibility fields set so the claim reaches the ack check.
+            RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
+            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
+            RequiredSlicerEngine = "OrcaSlicer",
+            RequiredSlicerDistribution = "upstream",
+            RequiredSlicerVersion = "2.3.0",
+            PinnedPrinterConfigRevision = 1,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,
@@ -523,12 +530,42 @@ public class CalibrationQueueDispatchTests
 
         db.GcodeFiles.Add(gcode);
         db.PrintJobs.Add(job);
-        db.Printers.Add(new PrinterBuilder().WithId(printerId).WithName("Claim Printer").AsOnlineAndReady().Build());
+
+        // Build printer directly with all required calibration properties.
+        var claimPrinter = new Printer
+        {
+            Id = printerId,
+            Name = "Claim Printer",
+            ServerUrl = "http://claim-test",
+            IsEnabled = true,
+            IsAvailable = true,
+            InMaintenance = false,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            CalibrationSlicerEngine = "OrcaSlicer",
+            CalibrationSlicerDistribution = "upstream",
+            CalibrationSlicerVersion = "2.3.0",
+            ConfigurationRevision = 1,
+            ManufacturerId = Guid.NewGuid(),
+            ModelId = Guid.NewGuid(),
+        };
+        db.Printers.Add(claimPrinter);
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
         await db.SaveChangesAsync();
 
-        DispatchClaimService sut = new(db, Mock.Of<IPrinterStatusSnapshotReader>(), Mock.Of<ILogger<DispatchClaimService>>());
+        // Provide a fresh online/idle telemetry snapshot so the claim reaches the ack check.
+        var freshStatus = new PrinterStatusDto(Id: printerId, IsOnline: true, State: "idle");
+        var freshSnapshot = new PrinterStatusSnapshot(
+            Status: freshStatus,
+            ObservedAtUtc: DateTime.UtcNow,
+            LastSeenAtUtc: DateTime.UtcNow,
+            Source: "test");
+        var mockReader = Mock.Of<IPrinterStatusSnapshotReader>(r =>
+            r.GetStatusSnapshot(printerId) == freshSnapshot);
 
+        DispatchClaimService sut = new(db, mockReader, Mock.Of<ILogger<DispatchClaimService>>());
+
+        // No ack key provided — calibration must reject with acknowledgement_required.
         DispatchClaimResult result = await sut.AcquireClaimAsync(
             new DispatchClaimRequest(job.Id, printerId, "user-1", "Manual", null, null, null),
             CancellationToken.None);
@@ -539,13 +576,15 @@ public class CalibrationQueueDispatchTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task BedClearAcknowledgement_AcknowledgeAsync_AtomicallyAcquiresClaim()
+    public async Task BedClearAcknowledgement_AcknowledgeAsync_WritesAckAndBackendStartCommand()
     {
+        // BedClearAcknowledgementService now writes the ack + BackendStartCommand outbox event.
+        // The actual claim (Job.Status = Starting) is acquired by IDispatchClaimService when
+        // the adapter orchestrator processes the BackendStartCommand.
         AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
         Guid gcodeId = Guid.NewGuid();
 
-        // Need a GcodeFile so the claim can verify it exists.
         db.GcodeFiles.Add(new GcodeFile
         {
             Id = gcodeId,
@@ -570,8 +609,7 @@ public class CalibrationQueueDispatchTests
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
         await db.SaveChangesAsync();
 
-        // After SaveChangesAsync, StampRowVersions writes a non-null RowVersion to the dispatch state.
-        // Read the current RowVersion so the If-Match header matches the stored value.
+        // Read the current RowVersion so the If-Match header matches.
         PrinterDispatchState dispatchState = await db.PrinterDispatchStates.AsNoTracking()
             .SingleAsync(s => s.PrinterId == printerId);
 
@@ -581,24 +619,31 @@ public class CalibrationQueueDispatchTests
             printerId,
             "operator-1",
             "ack-key-1",
-            dispatchState.RowVersion,  // use the stamped RowVersion, not the initial []
+            dispatchState.RowVersion,
             null);
 
         AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
 
-        // New behavior: ack + claim are atomic — job is now Starting, ack is consumed.
+        // Accepted: ack + BackendStartCommand written atomically.
         Assert.Equal(BedClearAckOutcome.Accepted, result.Outcome);
 
         PrinterDispatchState persisted = await db.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
-        // Ack was consumed atomically by the claim — should be null.
-        Assert.Null(persisted.AcknowledgedJobId);
-        Assert.Null(persisted.AcknowledgementIdempotencyKey);
-        // Dispatch state should now track the active job.
-        Assert.Equal(job.Id, persisted.ActiveJobId);
 
+        // Ack is persisted (not consumed — the claim consumes it when processing the BackendStartCommand).
+        Assert.Equal(job.Id, persisted.AcknowledgedJobId);
+        Assert.Equal("ack-key-1", persisted.AcknowledgementIdempotencyKey);
+
+        // No inline claim — job stays Assigned, no ActiveJobId yet.
+        Assert.Null(persisted.ActiveJobId);
         PrintJob updatedJob = await db.PrintJobs.SingleAsync(j => j.Id == job.Id);
-        Assert.Equal(PrintJobStatus.Starting, updatedJob.Status);
-        Assert.NotNull(updatedJob.ActualStartTime);
+        Assert.Equal(PrintJobStatus.Assigned, updatedJob.Status);
+        Assert.Null(updatedJob.ActualStartTime);
+
+        // BackendStartCommand outbox event must be written for the adapter orchestrator.
+        bool hasBackendCmd = await db.QueueDispatchOutbox.AnyAsync(
+            e => e.AggregateId == job.Id
+                && e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
+        Assert.True(hasBackendCmd, "BackendStartCommand must be written to the outbox");
     }
 
     [Fact]

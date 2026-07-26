@@ -345,4 +345,24 @@ public interface IPrintJobManagementService
     Task SyncActiveExternalJobsFromPrintersAsync(
         List<string>? printerIds = null,
         CancellationToken cancellationToken = default);
+
+    // ============= CALIBRATION DISPATCH =============
+
+    /// <summary>
+    /// Dispatches a job to its assigned printer using an explicit bed-clear acknowledgement key.
+    /// This is the entry point for the durable bed-clear start path: the outbox publisher calls
+    /// this method when it processes a <c>BackendStartCommand.v1</c> event. The method acquires
+    /// the shared dispatch claim (validating the persisted ack against <paramref name="ackKey"/>)
+    /// and drives the backend upload/start. Standard jobs may also call this path when an
+    /// acknowledgement key is available.
+    /// </summary>
+    /// <param name="jobId">The print job identifier.</param>
+    /// <param name="actorSubject">The actor subject (user or system identity) that initiated dispatch.</param>
+    /// <param name="ackKey">The bed-clear acknowledgement idempotency key to validate against the persisted ack.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task DispatchJobWithAckAsync(
+        string jobId,
+        string actorSubject,
+        string ackKey,
+        CancellationToken cancellationToken = default);
 }
