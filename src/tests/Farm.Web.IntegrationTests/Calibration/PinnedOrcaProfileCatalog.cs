@@ -20,13 +20,22 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// Official upstream profiles legitimately carry command and notes fields such as
 /// <c>machine_start_gcode</c> or <c>printer_notes</c>. Nothing here filters those out or strips them:
 /// neutralizing them is the production plan compiler's job, and this catalogue deliberately hands it
-/// unmodified upstream documents so the smoke exercises that path. Selection therefore has two layers:
-/// a machine that declares a nozzle diameter closest to 0.4mm, and then a process and a filament that
-/// are explicitly compatible with that exact machine's published name — never an arbitrary first match
-/// and never a "universal" (empty <c>compatible_printers</c>) profile that merely happens to declare
-/// the field the caller is looking for. Real OrcaSlicer rejects a slice whose process/filament wasn't
-/// authored for the selected machine with "process not compatible with printer", so compatibility is a
-/// hard requirement here, not a preference.
+/// unmodified upstream documents so the smoke exercises that path. Selection therefore has three
+/// layers: a machine that declares <b>absolute</b> extrusion (<c>use_relative_e_distances</c>
+/// false/0) and a nozzle diameter closest to 0.4mm, then a process and a filament that are explicitly
+/// compatible with that exact machine's published name — never an arbitrary first match and never a
+/// "universal" (empty <c>compatible_printers</c>) profile that merely happens to declare the field the
+/// caller is looking for. Real OrcaSlicer rejects a slice whose process/filament wasn't authored for
+/// the selected machine with "process not compatible with printer", so compatibility is a hard
+/// requirement here, not a preference.
+/// </para>
+/// <para>
+/// The machine must declare absolute extrusion because the production plan compiler neutralizes
+/// vendor <c>layer_change_gcode</c> (it never reintroduces vendor/profile G-code), and a machine
+/// running relative extrusion depends on its own layer-change hook to emit the <c>G92 E0</c> reset
+/// that keeps relative E offsets sane. Without that hook, real OrcaSlicer rejects the slice. A machine
+/// with absolute extrusion has no such dependency, so it is the only kind of machine this catalogue may
+/// select.
 /// </para>
 /// </remarks>
 internal static class PinnedOrcaProfileCatalog
@@ -38,8 +47,9 @@ internal static class PinnedOrcaProfileCatalog
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The selected exact documents.</returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the container publishes no usable machine, process or filament document, or no
-    /// process/filament is explicitly compatible with the selected machine.
+    /// Thrown when the container publishes no usable machine, process or filament document, no
+    /// machine declares both absolute extrusion (<c>use_relative_e_distances</c> false/0) and a
+    /// nozzle diameter, or no process/filament is explicitly compatible with the selected machine.
     /// </exception>
     public static async Task<PinnedOrcaProfileSelection> SelectAsync(
         string workerBaseAddress,
@@ -76,8 +86,9 @@ internal static class PinnedOrcaProfileCatalog
     /// <param name="root">Root element of the worker's <c>/api/profiles</c> response.</param>
     /// <returns>The selected exact documents.</returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the document publishes no usable machine, process or filament candidate, or no
-    /// process/filament is explicitly compatible with the selected machine.
+    /// Thrown when the document publishes no usable machine, process or filament candidate, no
+    /// machine declares both absolute extrusion (<c>use_relative_e_distances</c> false/0) and a
+    /// nozzle diameter, or no process/filament is explicitly compatible with the selected machine.
     /// </exception>
     internal static PinnedOrcaProfileSelection Select(JsonElement root)
     {
@@ -87,10 +98,15 @@ internal static class PinnedOrcaProfileCatalog
 
         ProfileCandidate machine = machines
             .Where(candidate => TryReadNozzleDiameter(candidate.Settings, out _))
+            .Where(candidate => UsesAbsoluteExtrusion(candidate.Settings))
             .OrderBy(NozzleDistanceFromPreferred)
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no machine profile that declares a nozzle diameter.");
+                "The pinned worker publishes no machine profile that declares both absolute extrusion " +
+                "(use_relative_e_distances false/0) and a nozzle diameter. A machine running relative " +
+                "extrusion depends on its own layer-change G-code to reset E offsets, which the " +
+                "production plan compiler neutralizes, so only an absolute-extrusion machine is safe " +
+                "to select here.");
         _ = TryReadNozzleDiameter(machine.Settings, out double nozzleDiameter);
 
         ProfileCandidate process = SelectCompatible(processes, machine, "layer_height")
@@ -257,6 +273,42 @@ internal static class PinnedOrcaProfileCatalog
         return raw is not null &&
             double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out diameter) &&
             diameter > 0;
+    }
+
+    /// <summary>
+    /// True only when the machine explicitly declares absolute extrusion, i.e. <c>use_relative_e_distances</c>
+    /// is present and reads as false/0. A missing key, an unparsable value, or an explicit true/1 (relative
+    /// extrusion) all return <see langword="false"/>, because this catalogue must never guess: a relative
+    /// -extrusion machine depends on its own layer-change G-code to reset E offsets, and the production plan
+    /// compiler neutralizes that G-code, so only a machine that explicitly opts into absolute extrusion is
+    /// safe to select.
+    /// </summary>
+    private static bool UsesAbsoluteExtrusion(JsonObject machine)
+    {
+        if (!machine.TryGetPropertyValue("use_relative_e_distances", out JsonNode? node) || node is null)
+        {
+            return false;
+        }
+
+        string? raw = node switch
+        {
+            JsonArray array when array.Count > 0 => array[0]?.ToString(),
+            JsonValue value => value.ToString(),
+            _ => null,
+        };
+
+        if (raw is null)
+        {
+            return false;
+        }
+
+        if (bool.TryParse(raw, out bool boolValue))
+        {
+            return !boolValue;
+        }
+
+        return int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int intValue) &&
+            intValue == 0;
     }
 
     /// <summary>
