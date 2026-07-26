@@ -106,4 +106,44 @@ describe('SettingsPagelet', () => {
     );
     expect(screen.getByText('Must be >= 1')).toBeInTheDocument();
   });
+
+  it('emits section-qualified control ids so two sections sharing a property name do not collide', () => {
+    // `Enabled` is declared on 13 backend settings classes, and Obico, Telegram,
+    // HomeAssistant and Go2RTC all render on the connections page. A bare
+    // `prop.name` id produced duplicate DOM ids and pointed both labels at
+    // whichever control rendered first.
+    const shared = (key: string) => ({
+      key,
+      className: key,
+      displayName: key,
+      properties: [
+        { name: 'enabled', displayName: 'Enabled', type: 'bool', attributes: [] },
+      ],
+    });
+
+    const { container } = render(
+      <>
+        <SettingsPagelet
+          metadata={shared('ObicoSettings')}
+          values={{ enabled: true }}
+          onChange={vi.fn()}
+        />
+        <SettingsPagelet
+          metadata={shared('TelegramSettings')}
+          values={{ enabled: false }}
+          onChange={vi.fn()}
+        />
+      </>,
+    );
+
+    const ids = Array.from(container.querySelectorAll('[id]')).map((el) => el.id);
+    expect(ids).toContain('ObicoSettings.enabled');
+    expect(ids).toContain('TelegramSettings.enabled');
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const labels = Array.from(container.querySelectorAll('label[for]')).map((el) =>
+      el.getAttribute('for'),
+    );
+    expect(new Set(labels).size).toBe(labels.length);
+  });
 });

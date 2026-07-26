@@ -112,6 +112,42 @@ Route ownership in microservices mode:
 | Main API | Most `/api/*` endpoints |
 | Slicer host | `/api/workers`, `/api/slicers`, `/api/slicer`, `/api/slice`, `/api/3d-models`, `/api/artifacts`, `/api/admin/slicer`, `/hubs/slicer` |
 
+## Admin And Settings Surface
+
+The admin and settings UI is a single URL-driven React shell that reads its layout from
+the current `?scope`, `?tab`, and `?sub` search params. See
+`docs/SETTINGS_ARCHITECTURE.md` for full detail; the rules that most often bite agents:
+
+- **Three routes, three scopes.** `/settings` renders the `user` scope (any authenticated
+  user). `/admin/settings` renders the `system` scope and `/admin/manage` renders the
+  `admin` scope (both `farm_admin` only). `/admin` itself is the Admin Control Center hub
+  and is not a shell route.
+- **URL contract.** `?scope`, `?tab`, `?sub`, `?q`, and `?field` fully describe the
+  current page. Exactly ONE `<SettingsPage>` mounts at a time.
+- **Save is per-group.** `POST /api/settings/{keyName}` saves one settings section. There
+  is no "Save All" button in the UI; the batch `POST /api/settings` endpoint and its API
+  wrapper `saveAllSettings` are dead code from a UX perspective (tests explicitly assert
+  the wrapper is not called on save). Do not add a Save-All button.
+- **Legacy paths auto-redirect.** `src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`
+  is the canonical list of moved routes. When you rename a route, add a new entry to keep
+  external bookmarks working — do not delete existing entries.
+- **Palette is global.** `GlobalCommandPaletteProvider` is mounted in `Layout.tsx`, so
+  `Ctrl+K` (or `Cmd+K`) works on every authenticated route, not just settings.
+- **Palette deep-links are section-qualified.** `?field=Section.Property` (e.g.
+  `?field=SystemLog.Enabled`) — `Enabled` alone appears on 13 settings classes so a bare
+  property name resolves to the wrong row.
+- **⚠️ Essential-manifest gotcha.** `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`
+  keys off the backend `SectionName` and `JsonPropertyName`. **Renaming either silently
+  demotes the property from Essential to Advanced** without any build error or warning.
+  If you rename a settings section or property, update `essential-manifest.ts` in the
+  same PR.
+- **Admin overview.** `GET /api/admin/overview` aggregates existing `HealthCheckService`
+  results into subsystem tiles plus a ranked attention list. It is `farm_admin`-only,
+  has an 8s timeout, never returns 500, and serializes `SubsystemStatus` and
+  `AttentionSeverity` as string enums via `JsonStringEnumConverter`. To add a new tile
+  or attention item, register the probe with the existing `comprehensive` health check
+  and update `AdminOverviewService`.
+
 ## Pre-PR Review Gate
 
 **All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.

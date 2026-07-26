@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { ArrowRightIcon, CloseIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input } from '@/common/components/ui';
-import { getSettingsCategoryIcon, type SettingsCommandItem } from '@/features/settings/settings-navigation';
+import {
+  getSettingsCategoryIcon,
+  type SettingsCommandItem,
+  type SettingsCommandItemKind,
+} from '@/features/settings/settings-navigation';
 
 const PREMIUM_TRANSITION_MS = 280;
 const MAX_VISIBLE_ITEMS = 12;
@@ -35,6 +39,28 @@ interface FuzzyResult {
   score: number;
   labelMatches: number[];
   breadcrumbMatches: number[];
+}
+
+interface FuzzyGroup {
+  kind: SettingsCommandItemKind;
+  label: string;
+  results: FuzzyResult[];
+}
+
+/**
+ * Display order and human-readable label for each palette section. Kinds
+ * missing from this list still render, but only at the tail of the results in
+ * insertion order — the map is authoritative for the visible sections.
+ */
+const KIND_SECTION_ORDER: { kind: SettingsCommandItemKind; label: string }[] = [
+  { kind: 'destination', label: 'Places' },
+  { kind: 'settings-nav', label: 'Settings sections' },
+  { kind: 'setting', label: 'Individual settings' },
+  { kind: 'action', label: 'Actions' },
+];
+
+function getItemKind(item: SettingsCommandItem): SettingsCommandItemKind {
+  return item.kind ?? 'settings-nav';
 }
 
 function normalizeQuery(value: string): string {
@@ -185,6 +211,32 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
     return results.slice(0, MAX_VISIBLE_ITEMS);
   }, [items, query]);
+
+  const filteredGroups = useMemo<FuzzyGroup[]>(() => {
+    if (filteredItems.length === 0) {
+      return [];
+    }
+    const byKind = new Map<SettingsCommandItemKind, FuzzyResult[]>();
+    for (const result of filteredItems) {
+      const kind = getItemKind(result.item);
+      const bucket = byKind.get(kind) ?? [];
+      bucket.push(result);
+      byKind.set(kind, bucket);
+    }
+
+    const groups: FuzzyGroup[] = [];
+    for (const { kind, label } of KIND_SECTION_ORDER) {
+      const bucket = byKind.get(kind);
+      if (bucket && bucket.length > 0) {
+        groups.push({ kind, label, results: bucket });
+        byKind.delete(kind);
+      }
+    }
+    for (const [kind, bucket] of byKind.entries()) {
+      groups.push({ kind, label: kind, results: bucket });
+    }
+    return groups;
+  }, [filteredItems]);
 
 
   useEffect(() => {
@@ -404,9 +456,9 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         <div className="relative border-b border-pf-border/70 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Settings</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Search</p>
               <h2 id={titleId} className="mt-1 text-lg font-semibold text-pf-text-primary">Command palette</h2>
-              <p id={descriptionId} className="mt-1 text-sm text-pf-text-secondary">Jump to any settings area with fuzzy search and keyboard navigation.</p>
+              <p id={descriptionId} className="mt-1 text-sm text-pf-text-secondary">Jump to a page, a specific setting, or run a quick action.</p>
             </div>
             <Button
               type="button"
@@ -435,7 +487,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                 inputRef.current?.focus();
               }}
               onKeyDown={handleInputKeyDown}
-              placeholder="Search settings, sections, or keywords"
+              placeholder="Search pages, settings, or actions"
               aria-label="Search settings command palette"
               aria-autocomplete="list"
               aria-controls={filteredItems.length > 0 ? listboxId : undefined}
@@ -451,73 +503,94 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
         <div className="relative px-3 py-3">
           {filteredItems.length > 0 ? (
-            <div id={listboxId} role="listbox" aria-label="Settings search results" className="max-h-[24rem] space-y-1.5 overflow-y-auto pr-1">
-              {filteredItems.map((result, index) => {
-                const Icon = getSettingsCategoryIcon(result.item.categoryId);
-                const isActive = index === boundedActiveIndex;
-
+            <div id={listboxId} role="listbox" aria-label="Command palette results" className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
+              {filteredGroups.map((group) => {
+                const startIndex = filteredItems.indexOf(group.results[0]);
                 return (
-                  <div
-                    key={result.item.id}
-                    id={`${listboxId}-${result.item.id}`}
-                    ref={(element) => {
-                      if (element) {
-                        resultRefs.current.set(result.item.id, element);
-                      } else {
-                        resultRefs.current.delete(result.item.id);
-                      }
-                    }}
-                    role="option"
-                    aria-selected={isActive}
-                    onMouseMove={() => setActiveIndex(index)}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => handleSelect(result.item)}
-                    className={clsx(
-                      'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
-                      isActive
-                        ? 'border-pf-accent/60 bg-pf-accent-bg/22 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
-                        : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
-                    )}
-                    style={transitionStyle}
-                  >
-                    <span
-                      className={clsx(
-                        'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pf-border/70 bg-pf-bg-0/80',
-                        isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
-                      )}
-                      aria-hidden="true"
+                  <div key={group.kind} className="space-y-1.5">
+                    <div
+                      role="presentation"
+                      className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary"
                     >
-                      <Icon className="h-4 w-4" />
-                    </span>
+                      {group.label}
+                    </div>
+                    {group.results.map((result, offset) => {
+                      const index = startIndex + offset;
+                      const fallbackIcon = getSettingsCategoryIcon(result.item.categoryId);
+                      const Icon = result.item.icon ?? fallbackIcon;
+                      const isActive = index === boundedActiveIndex;
+                      const isDestructive = Boolean(result.item.confirmMessage);
 
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
-                        <HighlightedFuzzyText text={result.item.breadcrumb} matches={result.breadcrumbMatches} />
-                      </span>
-                      <span className="mt-1 block text-sm font-medium text-pf-text-primary">
-                        <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
-                      </span>
-                      <span className="mt-1 block text-sm text-pf-text-secondary">{result.item.description}</span>
-                    </span>
+                      return (
+                        <div
+                          key={result.item.id}
+                          id={`${listboxId}-${result.item.id}`}
+                          ref={(element) => {
+                            if (element) {
+                              resultRefs.current.set(result.item.id, element);
+                            } else {
+                              resultRefs.current.delete(result.item.id);
+                            }
+                          }}
+                          role="option"
+                          aria-selected={isActive}
+                          onMouseMove={() => setActiveIndex(index)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => handleSelect(result.item)}
+                          className={clsx(
+                            'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
+                            isActive
+                              ? 'border-pf-accent/60 bg-pf-accent-bg/22 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+                              : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
+                          )}
+                          style={transitionStyle}
+                        >
+                          <span
+                            className={clsx(
+                              'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pf-border/70 bg-pf-bg-0/80',
+                              isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
+                            )}
+                            aria-hidden="true"
+                          >
+                            <Icon className="h-4 w-4" />
+                          </span>
 
-                    <span aria-hidden="true">
-                      <ArrowRightIcon
-                        className={clsx(
-                          'mt-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none',
-                          isActive ? 'translate-x-0 text-pf-accent' : 'text-pf-text-tertiary group-hover:translate-x-0.5',
-                        )}
-                        style={transitionStyle}
-                        ariaLabel="Open setting"
-                      />
-                    </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+                              <HighlightedFuzzyText text={result.item.breadcrumb} matches={result.breadcrumbMatches} />
+                            </span>
+                            <span className="mt-1 flex items-center gap-2 text-sm font-medium text-pf-text-primary">
+                              <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
+                              {isDestructive ? (
+                                <span className="rounded-md border border-pf-status-danger/40 bg-pf-status-danger/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pf-status-danger">
+                                  Confirm
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="mt-1 block text-sm text-pf-text-secondary">{result.item.description}</span>
+                          </span>
+
+                          <span aria-hidden="true">
+                            <ArrowRightIcon
+                              className={clsx(
+                                'mt-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none',
+                                isActive ? 'translate-x-0 text-pf-accent' : 'text-pf-text-tertiary group-hover:translate-x-0.5',
+                              )}
+                              style={transitionStyle}
+                              ariaLabel="Open"
+                            />
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-pf-border/80 bg-pf-bg-1/45 px-5 py-8 text-center">
-              <p className="text-sm font-medium text-pf-text-primary">No settings matched</p>
-              <p className="mt-2 text-sm text-pf-text-secondary">Try a broader term like theme, workers, audit, or camera.</p>
+              <p className="text-sm font-medium text-pf-text-primary">Nothing matched</p>
+              <p className="mt-2 text-sm text-pf-text-secondary">Try a broader term like printers, theme, audit, or sign out.</p>
             </div>
           )}
         </div>

@@ -134,22 +134,7 @@ public class UnifiedSettingsController(
                                 catch (ValidationException vex)
                                 {
                                     _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", key, vex.Message);
-
-                                    // Return structured validation error for this section
-                                    Dictionary<string, string> errors = new();
-                                    if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-                                    {
-                                        foreach (string member in vex.ValidationResult.MemberNames)
-                                        {
-                                            errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        errors[key] = vex.Message;
-                                    }
-
-                                    return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
+                                    return BuildValidationErrorResponse(vex, key);
                                 }
                             }
 
@@ -360,6 +345,7 @@ public class UnifiedSettingsController(
     /// <param name="keyName">The key name of the settings section.</param>
     /// <param name="settingsValues">The updated settings object for the section.</param>
     /// <returns>Result of save operation for the specified section.</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("{keyName}")]
     public async Task<ActionResult> UpdateSettingsByKeyNameAsync(string keyName, [FromBody] object settingsValues)
     {
@@ -377,20 +363,8 @@ public class UnifiedSettingsController(
         }
         catch (ValidationException vex)
         {
-            Dictionary<string, string> errors = new();
-            if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-            {
-                foreach (string member in vex.ValidationResult.MemberNames)
-                {
-                    errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                }
-            }
-            else
-            {
-                errors[string.Empty] = vex.Message;
-            }
-
-            return BadRequest(new { message = $"Validation failed for class '{keyName}'", errors });
+            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", keyName, vex.Message);
+            return BuildValidationErrorResponse(vex, keyName);
         }
         catch (Exception ex)
         {
@@ -437,6 +411,17 @@ public class UnifiedSettingsController(
             object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
             if (typedSettings != null)
             {
+                // Run the same validation the bulk POST path runs. Without this, invalid values
+                // that the bulk endpoint would reject with a structured 400 would silently persist
+                // through the per-key endpoint. ValidationException bubbles to the caller, which
+                // translates it into the shared structured 400 response.
+                if (typedSettings is IValidatableSetting validatable)
+                {
+                    _logger.LogDebug("Settings POST (per-key): Validating section '{Key}'", keyName);
+                    validatable.Validate();
+                    _logger.LogDebug("Settings POST (per-key): Validation succeeded for section '{Key}'", keyName);
+                }
+
                 // Save using the modular service
                 await Task.Run(() =>
                 {
@@ -452,5 +437,43 @@ public class UnifiedSettingsController(
                 // and cleared the change tracker to ensure fresh data on next query
             }
         }
+    }
+
+    /// <summary>
+    /// Translates a <see cref="ValidationException"/> into the structured <c>400 Bad Request</c>
+    /// response the settings UI expects: an object with <c>message</c> (string) and
+    /// <c>errors</c> (dictionary of field-name → error-message). The React SettingsPage parses
+    /// <c>errors</c> keys, splitting on '.' into <c>section.field</c> and mapping unqualified
+    /// keys back to their section via metadata. Called from both the bulk and per-key POST
+    /// paths so both endpoints produce byte-for-byte identical error bodies.
+    /// </summary>
+    /// <remarks>
+    /// The top-level <c>message</c> is the string the React SettingsPage renders in its save-error
+    /// banner (<c>firstMessage ?? summary</c>). It carries <see cref="Exception.Message"/> — the
+    /// concrete reason (e.g. "Invalid CIDR subnet: 10.0.0.0/foo") — rather than a generic
+    /// "Validation failed for section 'X'". Most settings classes raise memberless
+    /// <see cref="ValidationException"/>s (21 of the 23 <c>throw new ValidationException(...)</c>
+    /// sites at time of writing); for those the <c>errors[sectionKey]</c> entry does not map to
+    /// any rendered <c>prop.name</c> in <c>SettingsPagelet</c>, so the top-level <c>message</c>
+    /// is the only place the concrete reason reaches the user.
+    /// </remarks>
+    private static BadRequestObjectResult BuildValidationErrorResponse(ValidationException vex, string sectionKey)
+    {
+        Dictionary<string, string> errors = new();
+        if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
+        {
+            foreach (string member in vex.ValidationResult.MemberNames)
+            {
+                errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
+            }
+        }
+        else
+        {
+            // Memberless throws — the frontend recognises a bare key that equals the section key
+            // as a section-level error and renders it via SettingsPagelet's `error` prop.
+            errors[sectionKey] = vex.Message;
+        }
+
+        return new BadRequestObjectResult(new { message = vex.Message, errors });
     }
 }

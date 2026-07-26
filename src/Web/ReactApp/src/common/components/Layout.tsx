@@ -10,7 +10,6 @@ import {
   PrinterIcon,
   LayersIcon,
   SettingsIcon,
-  DashboardIcon,
   MenuIcon,
   CloseIcon,
   GearIcon,
@@ -45,6 +44,7 @@ import { printerSignalRService } from '@/services/printer-signalr';
 import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
 import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
 import { FloatingControlBar } from '@/common/components/FloatingControlBar';
+import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
 import {
   createDefaultNavPreferences,
@@ -220,22 +220,13 @@ const navigation: NavigationElement[] = [
     matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
-    id: 'system-settings',
-    name: 'System Settings',
-    href: '/admin/settings',
-    icon: GearIcon,
+    id: 'admin',
+    name: 'Admin',
+    href: '/admin',
+    icon: SettingsIcon,
     requiredRole: 'farm_admin',
     anchored: true,
-    matches: (pathname) => pathname.startsWith('/admin/settings')
-  },
-  {
-    id: 'admin-console',
-    name: 'Admin Console',
-    href: '/admin/manage',
-    icon: DashboardIcon,
-    requiredRole: 'farm_admin',
-    anchored: true,
-    matches: (pathname) => pathname.startsWith('/admin/manage') || pathname.startsWith('/admin/system') || pathname.startsWith('/slice-jobs')
+    matches: (pathname) => pathname === '/admin' || pathname.startsWith('/admin/')
   },
 ];
 
@@ -1181,7 +1172,9 @@ export function Layout() {
                   </div>
                 }
               >
-                <Outlet />
+                <GlobalCommandPaletteProvider>
+                  <Outlet />
+                </GlobalCommandPaletteProvider>
               </Suspense>
             </RouteErrorBoundary>
           </div>

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -8,20 +8,15 @@ import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { Button } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { CommandPalette } from '@/features/settings/components/CommandPalette';
+import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
-import { SettingsSearch } from '@/features/settings/components/SettingsSearch';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
 import { SettingsSubTabs } from '@/features/settings/components/SettingsSubTabs';
 import { UserSettingsSection } from '@/features/settings/components/UserSettingsSection';
 import { FarmSettingsSection } from '@/features/settings/components/FarmSettingsSection';
 import { TelegramSettingsCard } from '@/features/settings/components/TelegramSettingsCard';
-import {
-  buildSettingsCommandItems,
-  resolveSettingsNavigationTarget,
-  type SettingsCommandItem,
-} from '@/features/settings/settings-navigation';
+import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import {
   DEFAULT_SCOPE,
   SETTINGS_SCOPES,
@@ -49,6 +44,7 @@ import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroups
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
 import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
+import { SUB_PAGE_ALLOWED_GROUPS } from '@/features/settings/subpage-groups';
 
 const LazySlicerProfilesPage = lazy(() =>
   import('@/features/slicer/pages/SlicerProfilesPage').then((mod) => ({ default: mod.SlicerProfilesPage })),
@@ -63,18 +59,6 @@ const SETTINGS_FRAME_GRID = [
   'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
   'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
 ].join(', ');
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-
-  if (target.isContentEditable) {
-    return true;
-  }
-
-  return ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
-}
 
 function scrollBehavior(): ScrollBehavior {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
@@ -127,7 +111,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.farm': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['General']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.farm']}
         introText="Configure farm identity, timezone, and other farm-wide defaults."
         afterContent={<FarmSettingsSection />}
       />
@@ -136,7 +120,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.system': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['System', 'Networking', 'Catalog', 'Files', 'Printers']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.system']}
         introText="Configure database, logging, network discovery, and file parameters."
       />
     </SettingsSection>
@@ -144,7 +128,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'general.automation': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Operations', 'Monitoring', 'Maintenance']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['general.automation']}
         introText="Configure cost tracking, Obico print failure detection, and automatic tag rules."
       />
     </SettingsSection>
@@ -152,7 +136,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'integrations.connections': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Integrations']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['integrations.connections']}
         introText="Configure third-party services, Smart Plugs, and slicer API connections."
         afterContent={<TelegramSettingsCard />}
       />
@@ -182,7 +166,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   'slicing.defaults': (
     <SettingsSection>
       <SettingsPage
-        allowedGroups={['Slicing']}
+        allowedGroups={SUB_PAGE_ALLOWED_GROUPS['slicing.defaults']}
         introText="Configure slicer defaults, process behavior, and plate-related settings for the farm."
       />
     </SettingsSection>
@@ -223,7 +207,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const { hasRole } = useAuth();
   const isFarmAdmin = hasRole('farm_admin');
   const [searchParams, setSearchParams] = useSearchParams();
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const { open: openCommandPalette } = useCommandPalette();
 
   const requestedScope = searchParams.get('scope');
   const requestedCategory = searchParams.get('tab');
@@ -268,10 +252,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const shouldFocusSectionRef = useRef(false);
   const previousRenderedKeyRef = useRef<string | null>(null);
-  const commandPaletteItems = useMemo(
-    () => buildSettingsCommandItems().filter((item) => availableScopes.some((scope) => scope.id === item.scopeId)),
-    [availableScopes],
-  );
 
   const handleScopeChange = useCallback(
     (scopeId: string) => {
@@ -351,51 +331,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       });
     },
     [activeCategory, activeScope, setSearchParams],
-  );
-
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        if (value) {
-          next.set('q', value);
-        } else {
-          next.delete('q');
-        }
-        return next;
-      }, { replace: true });
-    },
-    [setSearchParams],
-  );
-
-  const openCommandPalette = useCallback(() => {
-    setIsCommandPaletteOpen(true);
-  }, []);
-
-  const closeCommandPalette = useCallback(() => {
-    setIsCommandPaletteOpen(false);
-  }, []);
-
-  const navigateToSetting = useCallback(
-    (item: SettingsCommandItem) => {
-      const target = resolveSettingsNavigationTarget(item.categoryId, item.subPageId, item.scopeId);
-      shouldFocusSectionRef.current = true;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', target.scopeId);
-        next.set('tab', target.categoryId);
-        if (target.subPageId) {
-          next.set('sub', target.subPageId);
-        } else {
-          next.delete('sub');
-        }
-        next.delete('q');
-        next.delete('workerTab');
-        return next;
-      });
-      setIsCommandPaletteOpen(false);
-    },
-    [setSearchParams],
   );
 
   const { matchingCategoryIds, matchingSubPageIds, firstMatchingSubPageCategoryId, isFiltering } = useMemo(() => {
@@ -575,26 +510,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [activeSubPageLabel, currentCategory.label, currentScopeMeta, hasSubTabs]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key.toLowerCase() !== 'k'
-        || (!event.ctrlKey && !event.metaKey)
-        || event.altKey
-        || event.shiftKey
-        || isEditableTarget(event.target)
-      ) {
-        return;
-      }
-
-      event.preventDefault();
-      setIsCommandPaletteOpen(true);
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  useEffect(() => {
     if (isFiltering && matchingCategoryIds?.length === 0) {
       if (requestedCategory === null && requestedSubPage === null) {
         return;
@@ -706,8 +621,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
   const toolbar = (
     <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:mr-72">
-        <SettingsSearch value={query} onChange={handleSearchChange} />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:mr-72">
         <Button
           type="button"
           variant="subtle"
@@ -820,13 +734,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           )}
           </div>
         </div>
-
-        <CommandPalette
-          isOpen={isCommandPaletteOpen}
-          items={commandPaletteItems}
-          onClose={closeCommandPalette}
-          onSelect={navigateToSetting}
-        />
       </PageTemplate>
     </>
   );

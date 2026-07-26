@@ -8,7 +8,10 @@ PrintFarmer supports a distributed slicer job queue where one or more workers pe
 
 ## Admin UI
 
-- Location: `Admin → Slicer Worker Settings` (`/admin/slicer` in the UI, protected to `farm_admin` role).
+- Location: **Admin Settings → Slicing → Defaults**
+  (`/admin/settings?tab=slicing&sub=defaults`, protected to `farm_admin` role).
+  The metadata-driven form renders the `Slicer` settings section from the
+  slicer module.
 - Settings surfaced:
   - Enabled: toggle the local worker on/off.
   - Per-engine executable path: absolute path or command for PrusaSlicer/OrcaSlicer/etc.
@@ -31,7 +34,10 @@ The admin UI controls the global `JitterPercent` used by the worker. If the DB v
 
 ## Runtime configuration sources
 
-- Admin UI (preferred for operations): persisted to DB via `/api/slicer/settings` (POST)
+- Admin UI (preferred for operations): persisted to DB via the metadata-driven
+  `POST /api/settings/Slicer` endpoint, or the dedicated
+  `PUT /api/admin/slicer/settings` endpoint (both `farm_admin`-only). Read back
+  with `GET /api/settings/Slicer` or `GET /api/admin/slicer/settings`.
 - `appsettings.json` and environment variable `SlicerWorker:JitterPercent` are used for default initial values on startup
 
 ## Migration notes
