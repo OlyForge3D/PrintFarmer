@@ -1,10 +1,16 @@
 {
   "goal_id": "issue-900-calibration-dispatch",
-  "status": "building",
+  "status": "passed",
   "iteration": 1,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "ee453fd301240fc35a9b86c13e2888d5b30c32b3",
   "created_at": "2026-07-26T05:57:51.508-07:00",
-  "history": []
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "PASS",
+      "timestamp": "2026-07-26T06:34:48.164-07:00"
+    }
+  ]
 }
