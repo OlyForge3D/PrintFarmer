@@ -3,6 +3,7 @@ import React, { createContext, useEffect, useState, ReactNode, useCallback } fro
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
+import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -20,6 +21,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [error, setError] = useState<string | null>(null);
 
   const isAuthenticated = user !== null;
+
+  // Persist the session token, set the user, and notify module-scope singletons
+  // (e.g. the SignalR services) that a credential is now available. Those
+  // singletons load authenticated settings at import time — before any login —
+  // so they must re-load once the user signs in. See AUTH_SESSION_ESTABLISHED_EVENT.
+  const establishSession = useCallback((token: string, sessionUser: UserDto) => {
+    localStorage.setItem('auth-token', token);
+    setUser(sessionUser);
+    window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
+  }, []);
 
   // Initialize authentication state on mount
   useEffect(() => {
@@ -64,8 +75,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (result.success && result.token && result.user) {
-        localStorage.setItem('auth-token', result.token);
-        setUser(result.user);
+        establishSession(result.token, result.user);
         return true;
       } else {
         setError(result.error || 'Login failed');
@@ -93,8 +103,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       if (result.success && result.token && result.user) {
-        localStorage.setItem('auth-token', result.token);
-        setUser(result.user);
+        establishSession(result.token, result.user);
         return true;
       } else {
         setError(result.error || 'Passkey login failed');
@@ -117,8 +126,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return 'pending';
       }
       if (result.success && result.token && result.user) {
-        localStorage.setItem('auth-token', result.token);
-        setUser(result.user);
+        establishSession(result.token, result.user);
         return true;
       } else {
         setError(result.error || 'Registration failed');
