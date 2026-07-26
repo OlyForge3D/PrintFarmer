@@ -30,6 +30,20 @@ public class UnifiedSettingsController(
         TelegramSettings.SectionName
     };
 
+    // Section keys that may be read WITHOUT authentication. This is an allowlist, not a blocklist:
+    // it fails CLOSED. Only sections that a trusted, tokenless internal component genuinely needs
+    // are listed here; every other section requires a signed-in user. The printer-discovery
+    // microservice runs out-of-process, holds no user credential, and polls its own configuration
+    // (NetworkDiscovery) to decide when/what to scan — see
+    // src/printer-discovery/BackgroundServices/PeriodicDiscoveryBackgroundService.cs. Adding a new
+    // setting can never silently expose it anonymously; a key must be listed here deliberately.
+    private static readonly HashSet<string> _anonymousReadAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        NetworkDiscoverySettings.SectionName
+    };
+
+    private bool IsAuthenticated() => User.Identity?.IsAuthenticated == true;
+
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
 
@@ -40,9 +54,12 @@ public class UnifiedSettingsController(
     /// </summary>
     /// <remarks>
     /// Returns a dictionary where each key is a settings section name (keyName) and the value is the current settings object for that section.
+    /// Requires authentication (class-level <c>[Authorize]</c>): the aggregate surface exposes internal
+    /// URLs, intervals, file paths, feature flags and hostnames, and has no anonymous consumer. The
+    /// printer-discovery microservice reads only a single section via the per-key endpoint, so this
+    /// endpoint deliberately does not carry <c>[AllowAnonymous]</c>.
     /// </remarks>
     /// <returns>Dictionary of all settings sections keyed by section name.</returns>
-    [AllowAnonymous]
     [HttpGet]
     public ActionResult<IDictionary<string, object>> Get()
     {
@@ -77,6 +94,10 @@ public class UnifiedSettingsController(
     [HttpPost]
     public ActionResult Update([FromBody] Dictionary<string, object> settingsSections)
     {
+        // Tracks the section being processed so the outer catch can attribute a memberless
+        // ValidationException (thrown from Save via reflection) to a real section key rather than
+        // an empty string. See the outer catch and BuildValidationErrorResponse for the shape.
+        string? currentKey = null;
         try
         {
             _logger.LogDebug("Settings POST: Raw payload object keys: {Keys}", string.Join(", ", settingsSections.Keys));
@@ -91,6 +112,7 @@ public class UnifiedSettingsController(
             {
                 string key = kvp.Key;
                 object value = kvp.Value;
+                currentKey = key;
                 _logger.LogDebug("Settings POST: Processing section key '{Key}'", key);
 
                 // Skip settings types that manage their own secret fields.
@@ -187,23 +209,13 @@ public class UnifiedSettingsController(
 
             _logger.LogError(actualException, "Settings POST: Exception during settings update");
 
-            // If it's a ValidationException thrown from Save via reflection, return structured response
+            // If it's a ValidationException thrown from Save via reflection, return the same
+            // structured response the inline/per-key paths produce: top-level `message` carries the
+            // concrete reason (not a generic "Validation failed"), and a memberless exception is
+            // keyed under the section being processed rather than an unlookup-able empty string.
             if (actualException is ValidationException vex)
             {
-                Dictionary<string, string> errors = new();
-                if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-                {
-                    foreach (string member in vex.ValidationResult.MemberNames)
-                    {
-                        errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                    }
-                }
-                else
-                {
-                    errors[string.Empty] = vex.Message;
-                }
-
-                return BadRequest(new { message = "Validation failed", errors });
+                return BuildValidationErrorResponse(vex, currentKey ?? "settings");
             }
 
             return BadRequest(new { message = $"Failed to save settings: {actualException.Message}" });
@@ -265,6 +277,12 @@ public class UnifiedSettingsController(
     /// <summary>
     /// Gets the settings for a specific section by keyName.
     /// </summary>
+    /// <remarks>
+    /// Carries <c>[AllowAnonymous]</c> so the tokenless printer-discovery microservice can read its
+    /// own configuration, but anonymous access is restricted to <see cref="_anonymousReadAllowlist"/>
+    /// (fails closed). Any other section requires a signed-in user; secret-bearing sections in
+    /// <see cref="_settingsBlocklist"/> are hidden entirely.
+    /// </remarks>
     /// <param name="keyName">The key name of the settings section.</param>
     /// <returns>The settings object for the specified section.</returns>
     [AllowAnonymous]
@@ -275,6 +293,15 @@ public class UnifiedSettingsController(
         if (_settingsBlocklist.Contains(keyName))
         {
             return NotFound($"Settings key '{keyName}' not found");
+        }
+
+        // Fail closed for anonymous callers: only allowlisted sections may be read without a user
+        // token. This prevents the endpoint from leaking internal URLs, intervals, paths and feature
+        // flags to unauthenticated callers, while still letting the discovery microservice read the
+        // one section it depends on.
+        if (!IsAuthenticated() && !_anonymousReadAllowlist.Contains(keyName))
+        {
+            return Unauthorized();
         }
 
         try
@@ -298,6 +325,18 @@ public class UnifiedSettingsController(
     /// Heartbeat endpoint for discovery service.
     /// Updates the LastHeartbeat timestamp in NetworkDiscoverySettings to confirm service is alive.
     /// </summary>
+    /// <remarks>
+    /// Deliberately <c>[AllowAnonymous]</c>: the printer-discovery microservice posts this heartbeat
+    /// on a timer (src/printer-discovery/BackgroundServices/HeartbeatBackgroundService.cs) and holds
+    /// no user credential. The endpoint is narrowly scoped — it rejects any keyName other than
+    /// <c>NetworkDiscovery</c> and only writes <c>LastHeartbeat</c> — so the residual abuse is
+    /// limited to an anonymous caller keeping discovery <em>looking</em> alive and suppressing a
+    /// genuine "discovery down" dashboard signal. It cannot read or mutate any other setting.
+    /// Fully removing anonymous access here requires a coordinated change: a shared service
+    /// credential provisioned to both the API and the discovery microservice (and wired through the
+    /// compose templates). That is out of scope for this fix and tracked as a follow-up; closing it
+    /// here without updating the microservice would silently break discovery heartbeats.
+    /// </remarks>
     /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
     /// <returns>NoContent on success.</returns>
     [AllowAnonymous]
