@@ -193,6 +193,30 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithoutAutoIncrementWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            PRAGMA writable_schema = ON;
+            UPDATE sqlite_schema
+            SET sql = replace(sql, ' AUTOINCREMENT', '')
+            WHERE type = 'table' AND name = 'AppSettingsEntities';
+            PRAGMA writable_schema = OFF;
+            """,
+            "AppSettingsEntities.Id (autoincrement)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsNullableTextPrimaryKeyWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT CONSTRAINT "PK_RetryPolicies" PRIMARY KEY"""),
+            "RetryPolicies.Id (nullability)");
+    }
+
+    [Fact]
     public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyWithoutRecordingHistory()
     {
         return AssertCorruptedLegacySchemaRejectedAsync(

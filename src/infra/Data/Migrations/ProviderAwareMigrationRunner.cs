@@ -262,7 +262,8 @@ public static class ProviderAwareMigrationRunner
                         column.StoreType,
                         column.IsNullable,
                         GetDefaultSql(column),
-                        primaryKeyOrdinals.GetValueOrDefault(column.Name)),
+                        primaryKeyOrdinals.GetValueOrDefault(column.Name),
+                        IsExpectedSqliteAutoIncrement(provider, column, primaryKeyOrdinals.ContainsKey(column.Name))),
                     provider.IdentifierComparer);
             HashSet<IndexContract> indexes =
             [
@@ -310,6 +311,16 @@ public static class ProviderAwareMigrationRunner
 
         return new SchemaContract(tables);
     }
+
+    private static bool IsExpectedSqliteAutoIncrement(
+        SupportedProvider provider,
+        IColumn column,
+        bool isPrimaryKeyColumn) =>
+        provider.Kind == ProviderKind.Sqlite &&
+        isPrimaryKeyColumn &&
+        string.Equals(NormalizeStoreType(column.StoreType), "INTEGER", StringComparison.Ordinal) &&
+        column.PropertyMappings.Any(mapping =>
+            mapping.Property.ValueGenerated == ValueGenerated.OnAdd);
 
     private static IEnumerable<IndexContract> BuildExpectedSqlitePrimaryKeyIndexes(
         ITable table,
@@ -506,7 +517,14 @@ public static class ProviderAwareMigrationRunner
         TableIdentifier table,
         CancellationToken cancellationToken)
     {
+        string? createTableSql = await ReadSqliteCreateTableSqlAsync(
+            connection,
+            table,
+            cancellationToken);
+        bool hasAutoIncrement = createTableSql is not null &&
+                                ContainsSqlKeyword(createTableSql, "AUTOINCREMENT");
         var columns = new Dictionary<string, ColumnContract>(StringComparer.OrdinalIgnoreCase);
+        var rawColumns = new List<(string Name, string StoreType, bool IsNullable, string? DefaultSql, int PrimaryKeyOrdinal)>();
         await using (DbCommand command = connection.CreateCommand())
         {
             command.CommandText =
@@ -520,19 +538,41 @@ public static class ProviderAwareMigrationRunner
                 string? defaultSql = await reader.IsDBNullAsync(3, cancellationToken)
                     ? null
                     : NormalizeSql(reader.GetString(3));
-                columns.Add(
+                rawColumns.Add((
                     name,
-                    new ColumnContract(
-                        reader.GetString(1),
-                        reader.GetInt32(2) == 0 && primaryKeyOrdinal == 0,
-                        defaultSql,
-                        primaryKeyOrdinal));
+                    reader.GetString(1),
+                    reader.GetInt32(2) == 0,
+                    defaultSql,
+                    primaryKeyOrdinal));
             }
         }
 
-        if (columns.Count == 0)
+        if (rawColumns.Count == 0)
         {
             return null;
+        }
+
+        var primaryKeyColumns = rawColumns
+            .Where(column => column.PrimaryKeyOrdinal > 0)
+            .ToArray();
+        bool isIntegerRowIdAlias = primaryKeyColumns.Length == 1 &&
+                                   string.Equals(
+                                       NormalizeStoreType(primaryKeyColumns[0].StoreType),
+                                       "INTEGER",
+                                       StringComparison.Ordinal);
+        foreach ((string name, string storeType, bool isNullable, string? defaultSql, int primaryKeyOrdinal)
+                 in rawColumns)
+        {
+            bool isRowIdAlias = isIntegerRowIdAlias &&
+                                primaryKeyOrdinal > 0;
+            columns.Add(
+                name,
+                new ColumnContract(
+                    storeType,
+                    isNullable && !isRowIdAlias,
+                    defaultSql,
+                    primaryKeyOrdinal,
+                    isRowIdAlias && hasAutoIncrement));
         }
 
         HashSet<IndexContract> indexes = await ReadSqliteIndexesAsync(
@@ -543,8 +583,9 @@ public static class ProviderAwareMigrationRunner
             connection,
             table,
             cancellationToken);
-        HashSet<CheckConstraintContract> checkConstraints =
-            await ReadSqliteCheckConstraintsAsync(connection, table, cancellationToken);
+        HashSet<CheckConstraintContract> checkConstraints = createTableSql is null
+            ? []
+            : ExtractSqliteCheckConstraints(createTableSql);
         return new SqliteTableContract(columns, indexes, foreignKeys, checkConstraints);
     }
 
@@ -672,7 +713,7 @@ public static class ProviderAwareMigrationRunner
         ];
     }
 
-    private static async Task<HashSet<CheckConstraintContract>> ReadSqliteCheckConstraintsAsync(
+    private static async Task<string?> ReadSqliteCreateTableSqlAsync(
         DbConnection connection,
         TableIdentifier table,
         CancellationToken cancellationToken)
@@ -682,9 +723,7 @@ public static class ProviderAwareMigrationRunner
             "SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = @tableName";
         AddParameter(command, "@tableName", table.Name);
         object? sqlValue = await command.ExecuteScalarAsync(cancellationToken);
-        return sqlValue is string createTableSql
-            ? ExtractSqliteCheckConstraints(createTableSql)
-            : [];
+        return sqlValue as string;
     }
 
     private static HashSet<CheckConstraintContract> ExtractSqliteCheckConstraints(
@@ -807,6 +846,64 @@ public static class ProviderAwareMigrationRunner
         return result.ToString();
     }
 
+    private static bool ContainsSqlKeyword(string sql, string keyword)
+    {
+        sql = RemoveSqlComments(sql);
+        char closingQuote = '\0';
+        int index = 0;
+        while (index < sql.Length)
+        {
+            char character = sql[index];
+            if (closingQuote != '\0')
+            {
+                if (character != closingQuote)
+                {
+                    index++;
+                    continue;
+                }
+
+                if (index + 1 < sql.Length && sql[index + 1] == closingQuote)
+                {
+                    index += 2;
+                    continue;
+                }
+
+                closingQuote = '\0';
+                index++;
+                continue;
+            }
+
+            closingQuote = character switch
+            {
+                '\'' => '\'',
+                '"' => '"',
+                '`' => '`',
+                '[' => ']',
+                _ => '\0',
+            };
+            if (closingQuote != '\0')
+            {
+                index++;
+                continue;
+            }
+
+            if (index <= sql.Length - keyword.Length &&
+                sql.AsSpan(index, keyword.Length).Equals(
+                    keyword,
+                    StringComparison.OrdinalIgnoreCase) &&
+                (index == 0 || !IsSqlIdentifierCharacter(sql[index - 1])) &&
+                (index + keyword.Length == sql.Length ||
+                 !IsSqlIdentifierCharacter(sql[index + keyword.Length])))
+            {
+                return true;
+            }
+
+            index++;
+        }
+
+        return false;
+    }
+
     private static int FindSqlClosingParenthesis(string sql, int openingParenthesis)
     {
         int depth = 0;
@@ -904,6 +1001,11 @@ public static class ProviderAwareMigrationRunner
             if (expectedColumn.PrimaryKeyOrdinal != actualColumn.PrimaryKeyOrdinal)
             {
                 mismatches.Add($"{table.DisplayName}.{columnName} (primary key)");
+            }
+
+            if (expectedColumn.IsAutoIncrement != actualColumn.IsAutoIncrement)
+            {
+                mismatches.Add($"{table.DisplayName}.{columnName} (autoincrement)");
             }
         }
 
@@ -1120,7 +1222,8 @@ public static class ProviderAwareMigrationRunner
         string StoreType,
         bool IsNullable,
         string? DefaultSql,
-        int PrimaryKeyOrdinal);
+        int PrimaryKeyOrdinal,
+        bool IsAutoIncrement);
 
     private sealed record IndexContract(
         string? Name,

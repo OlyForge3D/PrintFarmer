@@ -201,7 +201,8 @@ sqlcmd -S "$SQLSERVER_HOST" -Q \
 Previously supported SQLite databases created with `EnsureCreated` and without
 migration history are adopted only when the complete relational fingerprint
 matches the current model. Validation covers table and column names, store
-types, nullability, defaults, primary keys, explicit and constraint index
+types, declared nullability (including non-integer primary keys), defaults,
+primary keys and `AUTOINCREMENT` semantics, explicit and constraint index
 identity, uniqueness, filters, and per-key sort order and collation (including
 SQLite primary-key autoindexes), foreign keys, foreign-key update and delete
 actions, and check constraints. The migration-history baseline is then recorded
