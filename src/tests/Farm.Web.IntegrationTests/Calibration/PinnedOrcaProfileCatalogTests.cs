@@ -18,7 +18,11 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// relative extrusion (<c>use_relative_e_distances=1</c>) depends on its own layer-change G-code to
 /// reset E offsets, and the production plan compiler neutralizes that G-code, so the catalogue must
 /// never select a relative-extrusion machine even when its nozzle diameter is otherwise the closest
-/// match.
+/// match. Finally, they exercise the follow-up bug from run 30199157513: selection must not stop at
+/// the first eligible (absolute-extrusion + nozzle) machine — if that machine has no process or
+/// filament explicitly compatible with its exact name, selection must fall through to the next
+/// eligible machine, and only throw once every eligible machine has been tried and none has a
+/// complete tuple.
 /// </remarks>
 public sealed class PinnedOrcaProfileCatalogTests
 {
@@ -190,7 +194,10 @@ public sealed class PinnedOrcaProfileCatalogTests
         Action select = () => PinnedOrcaProfileCatalog.Select(document.RootElement);
 
         _ = select.Should().Throw<InvalidOperationException>()
-            .WithMessage("*no process profile explicitly compatible with machine 'Generic 0.4 nozzle'*");
+            .WithMessage("*no complete machine/process/filament tuple*")
+            .WithMessage("*1 eligible machine(s)*")
+            .WithMessage("*2 process candidate(s)*")
+            .WithMessage("*1 filament candidate(s)*");
     }
 
     [Fact]
@@ -233,7 +240,190 @@ public sealed class PinnedOrcaProfileCatalogTests
         Action select = () => PinnedOrcaProfileCatalog.Select(document.RootElement);
 
         _ = select.Should().Throw<InvalidOperationException>()
-            .WithMessage("*no filament profile explicitly compatible with machine 'Generic 0.4 nozzle'*");
+            .WithMessage("*no complete machine/process/filament tuple*")
+            .WithMessage("*1 eligible machine(s)*")
+            .WithMessage("*1 process candidate(s)*")
+            .WithMessage("*1 filament candidate(s)*");
+    }
+
+    [Fact]
+    public void Select_FallsThroughToNextEligibleMachine_WhenNearestNozzleMachineHasNoCompatibleFilament()
+    {
+        // "Generic 0.4 nozzle" is the closest match to the preferred 0.4mm nozzle and has a compatible
+        // process, but no filament in the document names it explicitly compatible. Selection must skip
+        // it and fall through to "Generic 0.6 nozzle", which has a complete tuple.
+        using JsonDocument document = JsonDocument.Parse(
+            """
+            {
+              "machineProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic 0.4 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.4"], "use_relative_e_distances": "0" }
+                  },
+                  {
+                    "name": "Generic 0.6 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.6"], "use_relative_e_distances": "0" }
+                  }
+                ]
+              },
+              "processProfiles": {
+                "Generic": [
+                  {
+                    "name": "0.20mm Standard @0.4 nozzle",
+                    "compatible_printers": ["Generic 0.4 nozzle"],
+                    "settings": { "layer_height": "0.2" }
+                  },
+                  {
+                    "name": "0.28mm Draft @0.6 nozzle",
+                    "compatible_printers": ["Generic 0.6 nozzle"],
+                    "settings": { "layer_height": "0.28" }
+                  }
+                ]
+              },
+              "filamentProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic PETG @0.6 nozzle",
+                    "manufacturer": "Generic",
+                    "compatible_printers": ["Generic 0.6 nozzle"],
+                    "settings": { "filament_type": "PETG" }
+                  },
+                  {
+                    "name": "Universal ambiguous filament",
+                    "compatible_printers": [],
+                    "settings": { "filament_type": "PLA" }
+                  }
+                ]
+              }
+            }
+            """);
+
+        PinnedOrcaProfileSelection selection = PinnedOrcaProfileCatalog.Select(document.RootElement);
+
+        _ = selection.NozzleDiameterMillimeters.Should().Be(
+            0.6,
+            "the 0.4mm machine has no explicitly compatible filament, so selection must fall through " +
+            "to the next eligible machine instead of failing outright");
+        _ = selection.ProcessJson.Should().Contain("\"layer_height\":\"0.28\"");
+        _ = selection.FilamentJson.Should().Contain("PETG").And.NotContain("PLA");
+    }
+
+    [Fact]
+    public void Select_SkipsNearestNozzleMachineWithNoCompatibleProcess_AndSelectsNextEligibleMachine()
+    {
+        // "Generic 0.4 nozzle" is the closest match to the preferred 0.4mm nozzle but no process names
+        // it explicitly compatible at all. Selection must skip it and fall through to
+        // "Generic 0.6 nozzle", which has a complete tuple.
+        using JsonDocument document = JsonDocument.Parse(
+            """
+            {
+              "machineProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic 0.4 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.4"], "use_relative_e_distances": "0" }
+                  },
+                  {
+                    "name": "Generic 0.6 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.6"], "use_relative_e_distances": "0" }
+                  }
+                ]
+              },
+              "processProfiles": {
+                "Generic": [
+                  {
+                    "name": "0.28mm Draft @0.6 nozzle",
+                    "compatible_printers": ["Generic 0.6 nozzle"],
+                    "settings": { "layer_height": "0.28" }
+                  }
+                ]
+              },
+              "filamentProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic PLA @0.4 nozzle",
+                    "manufacturer": "Generic",
+                    "compatible_printers": ["Generic 0.4 nozzle"],
+                    "settings": { "filament_type": "PLA" }
+                  },
+                  {
+                    "name": "Generic PETG @0.6 nozzle",
+                    "manufacturer": "Generic",
+                    "compatible_printers": ["Generic 0.6 nozzle"],
+                    "settings": { "filament_type": "PETG" }
+                  }
+                ]
+              }
+            }
+            """);
+
+        PinnedOrcaProfileSelection selection = PinnedOrcaProfileCatalog.Select(document.RootElement);
+
+        _ = selection.NozzleDiameterMillimeters.Should().Be(
+            0.6,
+            "the 0.4mm machine has no explicitly compatible process at all, so selection must fall " +
+            "through to the next eligible machine instead of failing outright");
+        _ = selection.ProcessJson.Should().Contain("\"layer_height\":\"0.28\"");
+        _ = selection.FilamentJson.Should().Contain("PETG");
+    }
+
+    [Fact]
+    public void Select_Throws_WhenNoEligibleMachineHasACompleteTuple()
+    {
+        // Two eligible machines, but neither has both an explicitly compatible process and filament:
+        // the 0.4mm machine has no compatible process, and the 0.6mm machine has no compatible filament.
+        using JsonDocument document = JsonDocument.Parse(
+            """
+            {
+              "machineProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic 0.4 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.4"], "use_relative_e_distances": "0" }
+                  },
+                  {
+                    "name": "Generic 0.6 nozzle",
+                    "manufacturer": "Generic",
+                    "settings": { "nozzle_diameter": ["0.6"], "use_relative_e_distances": "0" }
+                  }
+                ]
+              },
+              "processProfiles": {
+                "Generic": [
+                  {
+                    "name": "0.28mm Draft @0.6 nozzle",
+                    "compatible_printers": ["Generic 0.6 nozzle"],
+                    "settings": { "layer_height": "0.28" }
+                  }
+                ]
+              },
+              "filamentProfiles": {
+                "Generic": [
+                  {
+                    "name": "Generic PLA @0.4 nozzle",
+                    "manufacturer": "Generic",
+                    "compatible_printers": ["Generic 0.4 nozzle"],
+                    "settings": { "filament_type": "PLA" }
+                  }
+                ]
+              }
+            }
+            """);
+
+        Action select = () => PinnedOrcaProfileCatalog.Select(document.RootElement);
+
+        _ = select.Should().Throw<InvalidOperationException>()
+            .WithMessage("*no complete machine/process/filament tuple*")
+            .WithMessage("*2 eligible machine(s)*")
+            .WithMessage("*1 process candidate(s)*")
+            .WithMessage("*1 filament candidate(s)*")
+            .Which.Message.Should().NotContain("Generic 0.4 nozzle").And.NotContain("Generic 0.6 nozzle");
     }
 
     [Fact]

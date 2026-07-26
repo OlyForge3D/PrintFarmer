@@ -20,14 +20,17 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// Official upstream profiles legitimately carry command and notes fields such as
 /// <c>machine_start_gcode</c> or <c>printer_notes</c>. Nothing here filters those out or strips them:
 /// neutralizing them is the production plan compiler's job, and this catalogue deliberately hands it
-/// unmodified upstream documents so the smoke exercises that path. Selection therefore has three
-/// layers: a machine that declares <b>absolute</b> extrusion (<c>use_relative_e_distances</c>
-/// false/0) and a nozzle diameter closest to 0.4mm, then a process and a filament that are explicitly
-/// compatible with that exact machine's published name — never an arbitrary first match and never a
-/// "universal" (empty <c>compatible_printers</c>) profile that merely happens to declare the field the
-/// caller is looking for. Real OrcaSlicer rejects a slice whose process/filament wasn't authored for
-/// the selected machine with "process not compatible with printer", so compatibility is a hard
-/// requirement here, not a preference.
+/// unmodified upstream documents so the smoke exercises that path. Selection first narrows to every
+/// eligible machine — one that declares <b>absolute</b> extrusion (<c>use_relative_e_distances</c>
+/// false/0) and a nozzle diameter — ordered by nozzle distance from 0.4mm and then by name for a
+/// deterministic tie-break. It then walks those candidates in order looking for the first machine that
+/// also has a process <em>and</em> a filament explicitly compatible with its exact published name —
+/// never an arbitrary first match and never a "universal" (empty <c>compatible_printers</c>) profile
+/// that merely happens to declare the field the caller is looking for. A machine whose nozzle is
+/// closest to 0.4mm but that has no explicitly compatible process or filament is skipped in favor of
+/// the next eligible machine, rather than failing the whole selection outright. Real OrcaSlicer
+/// rejects a slice whose process/filament wasn't authored for the selected machine with "process not
+/// compatible with printer", so compatibility is a hard requirement here, not a preference.
 /// </para>
 /// <para>
 /// The machine must declare absolute extrusion because the production plan compiler neutralizes
@@ -47,9 +50,9 @@ internal static class PinnedOrcaProfileCatalog
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The selected exact documents.</returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the container publishes no usable machine, process or filament document, no
-    /// machine declares both absolute extrusion (<c>use_relative_e_distances</c> false/0) and a
-    /// nozzle diameter, or no process/filament is explicitly compatible with the selected machine.
+    /// Thrown when the container publishes no eligible machine (absolute extrusion + nozzle
+    /// diameter), or when none of the eligible machines has both a process and a filament explicitly
+    /// compatible with its exact published name.
     /// </exception>
     public static async Task<PinnedOrcaProfileSelection> SelectAsync(
         string workerBaseAddress,
@@ -86,9 +89,9 @@ internal static class PinnedOrcaProfileCatalog
     /// <param name="root">Root element of the worker's <c>/api/profiles</c> response.</param>
     /// <returns>The selected exact documents.</returns>
     /// <exception cref="InvalidOperationException">
-    /// Thrown when the document publishes no usable machine, process or filament candidate, no
-    /// machine declares both absolute extrusion (<c>use_relative_e_distances</c> false/0) and a
-    /// nozzle diameter, or no process/filament is explicitly compatible with the selected machine.
+    /// Thrown when the document publishes no eligible machine (absolute extrusion + nozzle
+    /// diameter), or when none of the eligible machines has both a process and a filament explicitly
+    /// compatible with its exact published name.
     /// </exception>
     internal static PinnedOrcaProfileSelection Select(JsonElement root)
     {
@@ -96,35 +99,63 @@ internal static class PinnedOrcaProfileCatalog
         IReadOnlyList<ProfileCandidate> processes = ReadCandidates(root, "processProfiles");
         IReadOnlyList<ProfileCandidate> filaments = ReadCandidates(root, "filamentProfiles");
 
-        ProfileCandidate machine = machines
+        List<EligibleMachine> eligibleMachines = machines
             .Where(candidate => TryReadNozzleDiameter(candidate.Settings, out _))
             .Where(candidate => UsesAbsoluteExtrusion(candidate.Settings))
-            .OrderBy(NozzleDistanceFromPreferred)
-            .FirstOrDefault()
-            ?? throw new InvalidOperationException(
+            .Select(candidate =>
+            {
+                _ = TryReadNozzleDiameter(candidate.Settings, out double diameter);
+                return new EligibleMachine(candidate, diameter);
+            })
+            .OrderBy(eligible => Math.Abs(eligible.NozzleDiameter - 0.4))
+            .ThenBy(eligible => eligible.Machine.Name, StringComparer.Ordinal)
+            .ToList();
+
+        if (eligibleMachines.Count == 0)
+        {
+            throw new InvalidOperationException(
                 "The pinned worker publishes no machine profile that declares both absolute extrusion " +
                 "(use_relative_e_distances false/0) and a nozzle diameter. A machine running relative " +
                 "extrusion depends on its own layer-change G-code to reset E offsets, which the " +
                 "production plan compiler neutralizes, so only an absolute-extrusion machine is safe " +
                 "to select here.");
-        _ = TryReadNozzleDiameter(machine.Settings, out double nozzleDiameter);
+        }
 
-        ProfileCandidate process = SelectCompatible(processes, machine, "layer_height")
-            ?? throw new InvalidOperationException(
-                $"The pinned worker publishes no process profile explicitly compatible with machine '{machine.Name}' " +
-                "(its compatible_printers metadata does not include that machine).");
+        // Walk the eligible machines in preference order (nearest 0.4mm nozzle first, deterministic
+        // name tie-break) and take the first one that also has a process AND a filament explicitly
+        // compatible with its exact published name. A closer-nozzle machine that lacks either is
+        // skipped in favor of the next eligible machine rather than failing the whole selection.
+        foreach (EligibleMachine eligible in eligibleMachines)
+        {
+            ProfileCandidate? process = SelectCompatible(processes, eligible.Machine, "layer_height");
+            if (process is null)
+            {
+                continue;
+            }
 
-        ProfileCandidate filament = SelectCompatible(filaments, machine, "filament_type")
-            ?? throw new InvalidOperationException(
-                $"The pinned worker publishes no filament profile explicitly compatible with machine '{machine.Name}' " +
-                "(its compatible_printers metadata does not include that machine).");
+            ProfileCandidate? filament = SelectCompatible(filaments, eligible.Machine, "filament_type");
+            if (filament is null)
+            {
+                continue;
+            }
 
-        return new PinnedOrcaProfileSelection(
-            Canonicalize(machine.Settings),
-            Canonicalize(process.Settings),
-            Canonicalize(filament.Settings),
-            nozzleDiameter);
+            return new PinnedOrcaProfileSelection(
+                Canonicalize(eligible.Machine.Settings),
+                Canonicalize(process.Settings),
+                Canonicalize(filament.Settings),
+                eligible.NozzleDiameter);
+        }
+
+        throw new InvalidOperationException(
+            $"The pinned worker publishes no complete machine/process/filament tuple: {eligibleMachines.Count} " +
+            $"eligible machine(s) (absolute extrusion + nozzle diameter) were evaluated against " +
+            $"{processes.Count} process candidate(s) and {filaments.Count} filament candidate(s), but no " +
+            "eligible machine had both a process and a filament explicitly compatible with its exact " +
+            "published name (compatible_printers metadata never invented or treated as universal).");
     }
+
+    /// <summary>A machine that passed the absolute-extrusion + nozzle-diameter eligibility filter.</summary>
+    private sealed record EligibleMachine(ProfileCandidate Machine, double NozzleDiameter);
 
     /// <summary>
     /// Selects the best process/filament candidate that both declares the given functional settings
@@ -252,9 +283,6 @@ internal static class PinnedOrcaProfileCatalog
 
         return ordered.ToJsonString();
     }
-
-    private static double NozzleDistanceFromPreferred(ProfileCandidate machine) =>
-        TryReadNozzleDiameter(machine.Settings, out double diameter) ? Math.Abs(diameter - 0.4) : double.MaxValue;
 
     private static bool TryReadNozzleDiameter(JsonObject machine, out double diameter)
     {
