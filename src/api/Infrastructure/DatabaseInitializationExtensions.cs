@@ -3,7 +3,6 @@ using System.Globalization;
 using System.Linq;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
-using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
