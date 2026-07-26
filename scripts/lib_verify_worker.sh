@@ -150,14 +150,18 @@ vw_invoke_help() {
 
 vw_check_readiness() {
   vw_log "Checking readiness (/health/ready) including ${HEALTH_KEY}..."
-  STATUS=$(docker exec "${CONTAINER_NAME}" sh -c 'wget -q -S -O - http://localhost:8080/health/ready' 2>&1 | awk '/HTTP\//{code=$2} END{print code}') || true
+  local readiness_body="/tmp/printfarmer-readiness.json"
+  STATUS=$(docker exec "${CONTAINER_NAME}" curl -sS \
+    -o "${readiness_body}" \
+    -w '%{http_code}' \
+    http://localhost:8080/health/ready) || true
   if [ "${STATUS}" != "200" ]; then
     vw_err "Readiness endpoint returned ${STATUS:-?}. Dumping logs + body (if any):"
     docker logs --tail=80 "${CONTAINER_NAME}" 2>&1 | sed "s/^/[verify-${LOG_PREFIX}][log] /"
-    docker exec "${CONTAINER_NAME}" wget -q -O - http://localhost:8080/health/ready 2>/dev/null | sed "s/^/[verify-${LOG_PREFIX}][body] /" || true
+    docker exec "${CONTAINER_NAME}" cat "${readiness_body}" 2>/dev/null | sed "s/^/[verify-${LOG_PREFIX}][body] /" || true
     exit 8
   fi
-  BODY=$(docker exec "${CONTAINER_NAME}" wget -q -O - http://localhost:8080/health/ready || true)
+  BODY=$(docker exec "${CONTAINER_NAME}" cat "${readiness_body}" || true)
 
   # Detect relaxed readiness
   local RELAXED
