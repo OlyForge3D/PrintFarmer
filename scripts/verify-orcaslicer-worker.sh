@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Modes:
 #   allow-stub     (default) Accept a stub binary; skips readiness enforcement
-#   require-real   Enforce real binary (size > 2KB AND --help succeeds) and readiness OK with orca_binary Healthy
+#   require-real   Enforce real payload (size > 2KB AND launcher --help succeeds) and readiness OK with orca_binary Healthy
 #
 # Arguments precedence:
 #   1) Explicit CLI args override
@@ -75,6 +75,8 @@ DEFAULT_IMAGE="orcaslicer-worker"
 DEFAULT_CONTAINER="pfarm_verify_orca"
 DEFAULT_MODE="allow-stub"
 BINARY_PATH="/usr/local/bin/orcaslicer"
+# AppRun is intentionally a small launcher; assess the extracted upstream executable instead.
+BINARY_PAYLOAD_PATH="/opt/orcaslicer/bin/orca-slicer"
 HEALTH_KEY="orca_binary"
 LOG_PREFIX="orca"
 SIZE_THRESHOLD=2048

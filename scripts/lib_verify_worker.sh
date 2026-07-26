@@ -8,6 +8,7 @@
 #   DEFAULT_CONTAINER  Default container name
 #   DEFAULT_MODE       Default mode (allow-stub | require-real)
 #   BINARY_PATH        Path to binary inside container
+#   BINARY_PAYLOAD_PATH Optional real payload path when BINARY_PATH is a small launcher
 #   HEALTH_KEY         Health check key present in readiness JSON (.checks.HEALTH_KEY.status)
 #   LOG_PREFIX         Short lowercase identifier for log prefix (prusa | orca)
 #   SIZE_THRESHOLD     Minimum size (bytes) that indicates a real binary (e.g. 2048)
@@ -98,11 +99,12 @@ vw_wait_liveness() {
 }
 
 vw_assess_binary() {
-  vw_log "Assessing binary at ${BINARY_PATH}..."
-  if ! docker exec "${CONTAINER_NAME}" test -f "${BINARY_PATH}"; then
-    vw_err "Binary ${BINARY_PATH} missing"; exit 5
+  local assessment_path="${BINARY_PAYLOAD_PATH:-${BINARY_PATH}}"
+  vw_log "Assessing binary payload at ${assessment_path}..."
+  if ! docker exec "${CONTAINER_NAME}" test -f "${assessment_path}"; then
+    vw_err "Binary payload ${assessment_path} missing"; exit 5
   fi
-  BINSIZE=$(docker exec "${CONTAINER_NAME}" stat -c %s "${BINARY_PATH}" 2>/dev/null || echo 0)
+  BINSIZE=$(docker exec "${CONTAINER_NAME}" stat -c %s "${assessment_path}" 2>/dev/null || echo 0)
   if [ "${BINSIZE}" -le "${SIZE_THRESHOLD}" ]; then
     vw_log "Binary size (${BINSIZE}) suggests stub or invalid binary (<${SIZE_THRESHOLD}+1)"
     if [ "${MODE}" = "require-real" ]; then vw_err "Stub binary not permitted in require-real mode"; exit 6; fi
