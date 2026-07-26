@@ -60,12 +60,14 @@ vi.mock('@/services/api', () => ({
 
 vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getHubUrl: vi.fn(() => 'http://localhost:5245/hubs/printers'),
+  getSignalRAccessToken: vi.fn(() => localStorage.getItem('auth-token') || ''),
 }));
 
 describe('PrinterSignalRService auto-dispatch updates', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    localStorage.clear();
     signalRTestState.connectionHandlers.clear();
     signalRTestState.connection.state = 'Disconnected';
     signalRTestState.getSettings.mockResolvedValue({
@@ -73,6 +75,20 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       consoleLoggingEnabled: false,
     });
     window.PrintFarmerDebug = undefined;
+  });
+
+  it('uses the canonical auth token for the secured printer hub', async () => {
+    localStorage.setItem('auth-token', 'jwt-printer');
+
+    const { printerSignalRService } = await import('../printer-signalr');
+    await vi.waitFor(() => expect(signalRTestState.builder.withUrl).toHaveBeenCalled());
+
+    const options = signalRTestState.builder.withUrl.mock.calls[0][1] as {
+      accessTokenFactory: () => string;
+    };
+    expect(options.accessTokenFactory()).toBe('jwt-printer');
+
+    printerSignalRService.dispose();
   });
 
   it('registers the auto-dispatch event name for status updates', async () => {

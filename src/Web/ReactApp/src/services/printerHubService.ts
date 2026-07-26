@@ -1,4 +1,5 @@
 import * as signalR from "@microsoft/signalr";
+import { getSignalRAccessToken } from "@/common/utils/apiUrlHelpers";
 
 /**
  * SignalR hub events broadcast by the backend
@@ -34,6 +35,7 @@ export class PrinterHubService {
 
     this.connection = new signalR.HubConnectionBuilder()
       .withUrl(hubUrl, {
+        accessTokenFactory: getSignalRAccessToken,
         withCredentials: true,
         skipNegotiation: false,
         transport:

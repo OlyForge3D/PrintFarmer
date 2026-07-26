@@ -6,7 +6,10 @@ import {
 } from '@microsoft/signalr';
 import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { getHubUrl } from '@/common/utils/apiUrlHelpers';
+import {
+  getHubUrl,
+  getSignalRAccessToken,
+} from '@/common/utils/apiUrlHelpers';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -194,7 +197,9 @@ export class SignalRService {
       console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     }
     this.connection = new HubConnectionBuilder()
-      .withUrl(harvestSignalrUrl)
+      .withUrl(harvestSignalrUrl, {
+        accessTokenFactory: getSignalRAccessToken,
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           const delay = Math.min(

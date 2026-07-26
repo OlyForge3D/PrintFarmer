@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { getApiBaseUrl, getAuthHeaders, getHubUrl } from '../apiUrlHelpers';
+import {
+  getApiBaseUrl,
+  getAuthHeaders,
+  getHubUrl,
+  getSignalRAccessToken,
+} from '../apiUrlHelpers';
 
 describe('apiUrlHelpers', () => {
   // Save original values
@@ -103,6 +108,21 @@ describe('apiUrlHelpers', () => {
       const headers = getAuthHeaders();
 
       expect(headers).toEqual({});
+    });
+  });
+
+  describe('getSignalRAccessToken', () => {
+    it('returns the canonical stored token', () => {
+      vi.mocked(localStorage.getItem).mockReturnValue('jwt-signalr');
+
+      expect(getSignalRAccessToken()).toBe('jwt-signalr');
+      expect(localStorage.getItem).toHaveBeenCalledWith('auth-token');
+    });
+
+    it('returns an empty string when no token is stored', () => {
+      vi.mocked(localStorage.getItem).mockReturnValue(null);
+
+      expect(getSignalRAccessToken()).toBe('');
     });
   });
 

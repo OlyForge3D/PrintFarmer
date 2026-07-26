@@ -29,9 +29,5 @@ public class QueueConsumerService(
     }
 
     protected override string[] GetWorkerCapabilities()
-        => _capabilityProvider
-            .GetCapabilities()
-            .Append(WorkerConstants.UpstreamDistributionCapability)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
+        => _capabilityProvider.GetCapabilities();
 }

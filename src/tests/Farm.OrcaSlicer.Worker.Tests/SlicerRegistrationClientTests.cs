@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -52,6 +53,42 @@ public sealed class SlicerRegistrationClientTests
         _ = serviceId.Should().Be(Guid.Parse("11111111-1111-1111-1111-111111111111"));
         _ = apiKey.Should().Be("registered-key");
         _ = sentApiKey.Should().Be("the-key");
+    }
+
+    [Fact]
+    public async Task RegisterAsync_AdvertisesUpstreamDistributionCapability()
+    {
+        string? requestBody = null;
+        CapturingHandler handler = new CapturingHandler(request =>
+        {
+            requestBody = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent("""{"id":"11111111-1111-1111-1111-111111111111","apiKey":"registered-key"}""")
+            };
+        });
+        using HttpClient httpClient = new HttpClient(handler);
+        IConfiguration configuration = CreateConfiguration(
+            new KeyValuePair<string, string?>("SlicerApi:BaseUrl", "http://api:5245"),
+            new KeyValuePair<string, string?>("Worker:EngineVersion", "2.4.0"));
+        SlicerRegistrationClient client = new SlicerRegistrationClient(
+            httpClient,
+            configuration,
+            NullLogger<SlicerRegistrationClient>.Instance,
+            new WorkerCapabilityProvider(configuration));
+
+        _ = await client.RegisterAsync();
+
+        using JsonDocument registration = JsonDocument.Parse(requestBody!);
+        string capabilitiesJson = registration.RootElement.GetProperty("CapabilitiesJson").GetString()!;
+        using JsonDocument capabilities = JsonDocument.Parse(capabilitiesJson);
+        string[] advertisedCapabilities = capabilities.RootElement
+            .GetProperty("capabilities")
+            .EnumerateArray()
+            .Select(value => value.GetString()!)
+            .ToArray();
+        _ = advertisedCapabilities.Should().Contain(WorkerConstants.UpstreamDistributionCapability);
+        _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.0");
     }
 
     private static IConfiguration CreateConfiguration(params KeyValuePair<string, string?>[] values)

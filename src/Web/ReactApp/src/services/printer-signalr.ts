@@ -15,7 +15,10 @@ import {
   FailureDetectionEvent,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
-import { getHubUrl } from "@/common/utils/apiUrlHelpers";
+import {
+  getHubUrl,
+  getSignalRAccessToken,
+} from "@/common/utils/apiUrlHelpers";
 import {
   decodeFilamentCoverageChangedEvent,
   type FilamentCoverageChangedEvent,
@@ -70,7 +73,9 @@ export class PrinterSignalRService {
       );
     }
     this.connection = new HubConnectionBuilder()
-      .withUrl(printersSignalrUrl)
+      .withUrl(printersSignalrUrl, {
+        accessTokenFactory: getSignalRAccessToken,
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           const delay = Math.min(

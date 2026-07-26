@@ -7,12 +7,11 @@ namespace Farm.Web.Api.Services.Tasks;
 
 /// <summary>
 /// SignalR implementation of task broadcaster.
-/// Broadcasts non-maintenance task events to authenticated farm clients.
+/// Broadcasts task events to their least-privileged authenticated audience.
 /// </summary>
 /// <remarks>
-/// Maintenance-sourced DTOs remain REST-authoritative and are deliberately omitted
-/// from the farm-wide event stream because non-admin users must not receive their
-/// contents.
+/// Maintenance-sourced DTOs are restricted to authenticated administrators because
+/// non-admin users must not receive their contents.
 /// </remarks>
 public class SignalRTaskBroadcaster(IHubContext<PrinterHub> hubContext) : ITaskBroadcaster
 {
@@ -21,24 +20,14 @@ public class SignalRTaskBroadcaster(IHubContext<PrinterHub> hubContext) : ITaskB
     /// <inheritdoc />
     public async Task BroadcastTaskCreatedAsync(UserTaskDto task, CancellationToken ct = default)
     {
-        if (IsMaintenanceOnlyBroadcast(task))
-        {
-            return;
-        }
-
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+        await _hubContext.Clients.Group(GetAudience(task))
             .SendAsync("taskcreated", task, ct);
     }
 
     /// <inheritdoc />
     public async Task BroadcastTaskUpdatedAsync(UserTaskDto task, CancellationToken ct = default)
     {
-        if (IsMaintenanceOnlyBroadcast(task))
-        {
-            return;
-        }
-
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+        await _hubContext.Clients.Group(GetAudience(task))
             .SendAsync("taskupdated", task, ct);
     }
 
@@ -49,6 +38,8 @@ public class SignalRTaskBroadcaster(IHubContext<PrinterHub> hubContext) : ITaskB
             .SendAsync("pendingtaskcount", new { count }, ct);
     }
 
-    private static bool IsMaintenanceOnlyBroadcast(UserTaskDto task)
-        => task.SourceKind == UserTaskSourceKind.Maintenance;
+    private static string GetAudience(UserTaskDto task) =>
+        task.SourceKind == UserTaskSourceKind.Maintenance
+            ? PrinterHub.AdminTaskGroup
+            : Farm.Infrastructure.Security.AuthorizedHubGroups.Farm;
 }

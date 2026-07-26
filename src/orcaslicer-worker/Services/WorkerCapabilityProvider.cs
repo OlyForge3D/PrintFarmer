@@ -37,6 +37,7 @@ public sealed class WorkerCapabilityProvider(IConfiguration configuration)
         [
             "orcaslicer",
             $"orcaslicer:{EngineVersion}",
+            WorkerConstants.UpstreamDistributionCapability,
             "stl-processing",
             "gcode-generation"
         ];

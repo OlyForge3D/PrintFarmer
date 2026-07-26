@@ -10,13 +10,8 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Services.Tasks;
 
 /// <summary>
-/// Fix R3-3 (issue #713, round 3; supersedes round-2 Fix C): maintenance-sourced task
-/// DTOs are no longer routed to <see cref="PrinterHub.AdminTaskGroup"/> — that group is
-/// unreachable in practice because <see cref="PrinterHub"/> is mapped
-/// <c>AllowAnonymous()</c> and the React client never authenticates against it. Routing
-/// there was misleading (implying admins receive live updates when none do). Maintenance
-/// DTOs are now a documented no-op broadcast; REST remains authoritative. All other
-/// (non-maintenance) task events keep broadcasting to authorized farm clients.
+/// Maintenance-sourced task DTOs are restricted to the authenticated administrator
+/// group. All other task events broadcast to authenticated farm clients.
 /// </summary>
 public class SignalRTaskBroadcasterTests
 {
@@ -42,7 +37,7 @@ public class SignalRTaskBroadcasterTests
         SourceId: sourceKind == UserTaskSourceKind.Maintenance ? "maintenancealert:1" : "failure:1");
 
     [Fact]
-    public async Task BroadcastTaskCreatedAsync_MaintenanceTask_IsNoOp_DoesNotSendToAllOrAdminGroup()
+    public async Task BroadcastTaskCreatedAsync_MaintenanceTask_SendsOnlyToAdminGroup()
     {
         Mock<IHubClients> clients = new();
         Mock<IClientProxy> all = new();
@@ -54,12 +49,9 @@ public class SignalRTaskBroadcasterTests
 
         await broadcaster.BroadcastTaskCreatedAsync(Dto(UserTaskSourceKind.Maintenance));
 
-        // Fix R3-3: the admin group is unreachable via this (anonymous) hub, so
-        // routing there would be misleading. The broadcast is a documented no-op;
-        // REST remains the authoritative source for maintenance content.
         adminGroup.Verify(
-            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            p => p.SendCoreAsync("taskcreated", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Once);
         all.Verify(
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -69,7 +61,7 @@ public class SignalRTaskBroadcasterTests
     }
 
     [Fact]
-    public async Task BroadcastTaskUpdatedAsync_MaintenanceTask_IsNoOp_DoesNotSendToAllOrAdminGroup()
+    public async Task BroadcastTaskUpdatedAsync_MaintenanceTask_SendsOnlyToAdminGroup()
     {
         Mock<IHubClients> clients = new();
         Mock<IClientProxy> all = new();
@@ -82,8 +74,8 @@ public class SignalRTaskBroadcasterTests
         await broadcaster.BroadcastTaskUpdatedAsync(Dto(UserTaskSourceKind.Maintenance));
 
         adminGroup.Verify(
-            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            p => p.SendCoreAsync("taskupdated", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Once);
         all.Verify(
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
