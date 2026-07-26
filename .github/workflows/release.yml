@@ -204,7 +204,7 @@ jobs:
           echo "All image signatures and SPDX attestations verified." >> RELEASE_NOTES.md
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2.4.3
+        uses: ossf/scorecard-action@v2.4.4
         with:
           results_file: scorecard.json
           results_format: json
