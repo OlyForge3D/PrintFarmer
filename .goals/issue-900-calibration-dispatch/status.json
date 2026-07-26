@@ -1,6 +1,6 @@
 {
   "goal_id": "issue-900-calibration-dispatch",
-  "status": "building",
+  "status": "inspecting",
   "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -11,7 +11,13 @@
       "iteration": 1,
       "verdict": "FAIL",
       "summary": "Coordinator acceptance review found 12 blocking production-path gaps; inspector PASS overridden.",
-      "timestamp": "2026-07-26T06:48:01.270-07:00"
+      "timestamp": "2026-07-26T06:48:01.27-07:00"
+    },
+    {
+      "timestamp": "2026-07-26T15:17:13.7345040Z",
+      "iteration": 2,
+      "verdict": "FAIL",
+      "summary": "Provider fencing untested; incomplete start paths; SQLite row versions NULL; outbox inert; reconciliation absent; race tests missing; 10 gaps require fixes"
     }
   ]
 }
