@@ -36,6 +36,19 @@ public class SliceJobTimeoutRecoveryTests
         Assert.True(reloaded.LeaseExpiresAt > DateTime.UtcNow.AddSeconds(200));
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
+    public async Task RenewLeaseAsync_InvalidDuration_Throws(int leaseDurationSeconds)
+    {
+        await using SlicerDbContext db = CreateInMemoryContext();
+        var repo = new EfSliceJobRepository(db);
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            () => repo.RenewLeaseAsync(Guid.NewGuid(), leaseDurationSeconds));
+    }
+
     [Fact]
     public async Task IncrementRetryAndRequeueAsync_RequeuesOrFails()
     {

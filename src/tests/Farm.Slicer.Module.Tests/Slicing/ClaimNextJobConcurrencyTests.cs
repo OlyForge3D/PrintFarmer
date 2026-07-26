@@ -1,4 +1,6 @@
-﻿using System.Data.Common;
+﻿using System.ComponentModel.DataAnnotations;
+using System.Data.Common;
+using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -81,6 +83,45 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         await using SlicerDbContext verification = CreateContext(connectionString);
         (await verification.SliceJobs.CountAsync(job => job.Status == SliceJobStatus.Processing))
             .Should().Be(2);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
+    public async Task ClaimNextJobAsync_InvalidLeaseDuration_Throws(int leaseDurationSeconds)
+    {
+        await using SlicerDbContext context = CreateContext("Data Source=:memory:");
+        var repository = new EfSliceJobRepository(context);
+
+        Func<Task> claim = () => repository.ClaimNextJobAsync(
+            Guid.NewGuid(),
+            ["orcaslicer"],
+            leaseDurationSeconds);
+
+        await claim.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(0)]
+    [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
+    public void LeaseRequests_InvalidDuration_FailModelValidation(int leaseDurationSeconds)
+    {
+        object[] requests =
+        [
+            new ClaimJobRequest { LeaseDurationSeconds = leaseDurationSeconds },
+            new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds },
+        ];
+
+        foreach (object request in requests)
+        {
+            Validator.TryValidateObject(
+                request,
+                new ValidationContext(request),
+                new List<ValidationResult>(),
+                validateAllProperties: true).Should().BeFalse();
+        }
     }
 
     public ValueTask DisposeAsync()

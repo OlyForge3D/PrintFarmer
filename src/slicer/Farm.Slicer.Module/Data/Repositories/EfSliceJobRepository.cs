@@ -220,6 +220,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     /// <inheritdoc/>
     public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
+        ValidateLeaseDuration(leaseDurationSeconds);
         DateTime now = DateTime.UtcNow;
         DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
 
@@ -320,6 +321,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     /// <inheritdoc/>
     public async Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
     {
+        ValidateLeaseDuration(leaseDurationSeconds);
         SliceJob? job = await GetByIdAsync(jobId, ct);
         if (job == null)
         {
@@ -329,6 +331,16 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
         job.UpdatedAt = DateTime.UtcNow;
         await SaveChangesAsync(ct);
+    }
+
+    private static void ValidateLeaseDuration(int leaseDurationSeconds)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(
+            leaseDurationSeconds,
+            SliceJob.MinimumLeaseDurationSeconds);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            leaseDurationSeconds,
+            SliceJob.MaximumLeaseDurationSeconds);
     }
 
     /// <inheritdoc/>
