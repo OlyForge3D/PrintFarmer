@@ -23,6 +23,18 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// </remarks>
 internal static class PinnedOrcaProfileCatalog
 {
+    private static readonly string[] ForbiddenProfileKeys =
+    [
+        "post_process",
+        "machine_start_gcode",
+        "machine_end_gcode",
+        "before_layer_change_gcode",
+        "layer_change_gcode",
+        "change_filament_gcode",
+        "template_custom_gcode",
+        "printer_notes",
+    ];
+
     /// <summary>
     /// Selects a machine, process and filament document the pinned worker publishes.
     /// </summary>
@@ -61,19 +73,22 @@ internal static class PinnedOrcaProfileCatalog
         IReadOnlyList<JsonObject> filaments = ReadSettings(document.RootElement, "filamentProfiles");
 
         JsonObject machine = machines
+            .Where(IsSafeProfile)
             .Where(candidate => TryReadNozzleDiameter(candidate, out _))
             .OrderBy(candidate => NozzleDistanceFromPreferred(candidate))
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no machine profile that declares a nozzle diameter.");
+                "The pinned worker publishes no command-free machine profile that declares a nozzle diameter.");
         _ = TryReadNozzleDiameter(machine, out double nozzleDiameter);
 
-        JsonObject process = processes.FirstOrDefault(candidate => candidate.ContainsKey("layer_height"))
+        JsonObject process = processes.FirstOrDefault(
+            candidate => IsSafeProfile(candidate) && candidate.ContainsKey("layer_height"))
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no process profile that declares a layer height.");
-        JsonObject filament = filaments.FirstOrDefault(candidate => candidate.ContainsKey("filament_type"))
+                "The pinned worker publishes no command-free process profile that declares a layer height.");
+        JsonObject filament = filaments.FirstOrDefault(
+            candidate => IsSafeProfile(candidate) && candidate.ContainsKey("filament_type"))
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no filament profile that declares a filament type.");
+                "The pinned worker publishes no command-free filament profile that declares a filament type.");
 
         return new PinnedOrcaProfileSelection(
             Canonicalize(machine),
@@ -137,6 +152,19 @@ internal static class PinnedOrcaProfileCatalog
 
     private static double NozzleDistanceFromPreferred(JsonObject machine) =>
         TryReadNozzleDiameter(machine, out double diameter) ? Math.Abs(diameter - 0.4) : double.MaxValue;
+
+    private static bool IsSafeProfile(JsonObject profile) =>
+        ForbiddenProfileKeys.All(key =>
+            !profile.TryGetPropertyValue(key, out JsonNode? value) || !HasContent(value));
+
+    private static bool HasContent(JsonNode? value) => value switch
+    {
+        null => false,
+        JsonValue scalar => !string.IsNullOrWhiteSpace(scalar.ToString()),
+        JsonArray array => array.Any(HasContent),
+        JsonObject properties => properties.Count > 0,
+        _ => true,
+    };
 
     private static bool TryReadNozzleDiameter(JsonObject machine, out double diameter)
     {
