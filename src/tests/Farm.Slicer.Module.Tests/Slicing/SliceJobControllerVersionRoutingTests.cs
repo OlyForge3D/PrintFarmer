@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+using System.Security.Claims;
+using System.Text.Json;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Contracts.Libraries;
@@ -42,7 +43,13 @@ public class SliceJobControllerVersionRoutingTests
         {
             ControllerContext = new ControllerContext
             {
-                HttpContext = new DefaultHttpContext()
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(
+                        new ClaimsIdentity(
+                            [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
+                            "Test"))
+                }
             }
         };
         return controller;

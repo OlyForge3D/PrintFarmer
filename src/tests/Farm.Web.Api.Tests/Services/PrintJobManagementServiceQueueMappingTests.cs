@@ -307,7 +307,7 @@ public class PrintJobManagementServiceQueueMappingTests
 
         Assert.Equal(nameof(PrintJobStatus.Assigned), result.Status);
         Assert.NotNull(job.DispatchedAt);
-        Assert.Contains("not found on disk", job.FailureReason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("The G-code artifact is unavailable for dispatch.", job.FailureReason);
         snapshots.VerifyAll();
         repository.Verify(
             value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),

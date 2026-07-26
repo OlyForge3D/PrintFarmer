@@ -31,7 +31,12 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         first.LegacySchemaBaselined.Should().BeFalse();
-        first.AppliedMigrations.Should().NotBeEmpty();
+        first.AppliedMigrations.Should().Equal(
+            "20260725032040_InitialV1",
+            "20260725085243_AddCalibrationPrinterContext",
+            "20260725173426_AlignDevelopmentAppSchema",
+            "20260725203646_AddCalibrationPersistenceSync",
+            "20260726090013_ReconcileEpic705AppSchema");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -117,7 +122,8 @@ public sealed class DatabaseMigrationTests
         result.AppliedMigrations.Should().Equal(
             "20260725032053_InitialV1",
             "20260725095108_AddCalibrationProfileIdentity",
-            "20260725173232_AlignDevelopmentSlicerSchema");
+            "20260725173232_AlignDevelopmentSlicerSchema",
+            "20260726084205_AddSliceJobSlicerEngineVersion");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

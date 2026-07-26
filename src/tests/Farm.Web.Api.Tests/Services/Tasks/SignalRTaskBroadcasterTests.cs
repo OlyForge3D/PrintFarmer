@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Tasks;
 using Farm.Web.Api.Services.Tasks;
@@ -15,7 +16,7 @@ namespace Farm.Web.Api.Tests.Services.Tasks;
 /// <c>AllowAnonymous()</c> and the React client never authenticates against it. Routing
 /// there was misleading (implying admins receive live updates when none do). Maintenance
 /// DTOs are now a documented no-op broadcast; REST remains authoritative. All other
-/// (non-maintenance) task events keep broadcasting to every connected client.
+/// (non-maintenance) task events keep broadcasting to authorized farm clients.
 /// </summary>
 public class SignalRTaskBroadcasterTests
 {
@@ -48,6 +49,7 @@ public class SignalRTaskBroadcasterTests
         Mock<IClientProxy> adminGroup = new();
         clients.Setup(c => c.All).Returns(all.Object);
         clients.Setup(c => c.Group(PrinterHub.AdminTaskGroup)).Returns(adminGroup.Object);
+        Mock<IClientProxy> farmGroup = ConfigureFarmGroup(clients);
         SignalRTaskBroadcaster broadcaster = Build(clients);
 
         await broadcaster.BroadcastTaskCreatedAsync(Dto(UserTaskSourceKind.Maintenance));
@@ -61,6 +63,9 @@ public class SignalRTaskBroadcasterTests
         all.Verify(
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
+        farmGroup.Verify(
+            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -71,6 +76,7 @@ public class SignalRTaskBroadcasterTests
         Mock<IClientProxy> adminGroup = new();
         clients.Setup(c => c.All).Returns(all.Object);
         clients.Setup(c => c.Group(PrinterHub.AdminTaskGroup)).Returns(adminGroup.Object);
+        Mock<IClientProxy> farmGroup = ConfigureFarmGroup(clients);
         SignalRTaskBroadcaster broadcaster = Build(clients);
 
         await broadcaster.BroadcastTaskUpdatedAsync(Dto(UserTaskSourceKind.Maintenance));
@@ -79,6 +85,9 @@ public class SignalRTaskBroadcasterTests
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
         all.Verify(
+            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        farmGroup.Verify(
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
@@ -91,13 +100,17 @@ public class SignalRTaskBroadcasterTests
         Mock<IClientProxy> adminGroup = new();
         clients.Setup(c => c.All).Returns(all.Object);
         clients.Setup(c => c.Group(PrinterHub.AdminTaskGroup)).Returns(adminGroup.Object);
+        Mock<IClientProxy> farmGroup = ConfigureFarmGroup(clients);
         SignalRTaskBroadcaster broadcaster = Build(clients);
 
         await broadcaster.BroadcastTaskCreatedAsync(Dto(UserTaskSourceKind.FailureIncident));
 
-        all.Verify(
+        farmGroup.Verify(
             p => p.SendCoreAsync("taskcreated", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Once);
+        all.Verify(
+            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
         adminGroup.Verify(
             p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Never);
@@ -113,13 +126,32 @@ public class SignalRTaskBroadcasterTests
         Mock<IHubClients> clients = new();
         Mock<IClientProxy> all = new();
         clients.Setup(c => c.All).Returns(all.Object);
+        Mock<IClientProxy> farmGroup = ConfigureFarmGroup(clients);
         SignalRTaskBroadcaster broadcaster = Build(clients);
 
         await broadcaster.BroadcastPendingTaskCountAsync(3);
 
-        all.Verify(
+        farmGroup.Verify(
             p => p.SendCoreAsync("pendingtaskcount", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Once);
+        all.Verify(
+            p => p.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    private static Mock<IClientProxy> ConfigureFarmGroup(Mock<IHubClients> clients)
+    {
+        Mock<IClientProxy> farmGroup = new();
+        _ = farmGroup
+            .Setup(proxy => proxy.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _ = clients
+            .Setup(value => value.Group(AuthorizedHubGroups.Farm))
+            .Returns(farmGroup.Object);
+        return farmGroup;
     }
 
     private static SignalRTaskBroadcaster Build(Mock<IHubClients> clients)

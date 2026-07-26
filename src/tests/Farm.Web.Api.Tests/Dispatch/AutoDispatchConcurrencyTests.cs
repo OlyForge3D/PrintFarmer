@@ -68,6 +68,8 @@ public class AutoDispatchConcurrencyTests : IDisposable
         _clientProxyMock = new Mock<IClientProxy>();
         var hubClientsMock = new Mock<IHubClients>();
         hubClientsMock.Setup(c => c.All).Returns(_clientProxyMock.Object);
+        hubClientsMock.Setup(c => c.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm))
+            .Returns(_clientProxyMock.Object);
         _hubMock = new Mock<IHubContext<PrinterHub>>();
         _hubMock.Setup(h => h.Clients).Returns(hubClientsMock.Object);
     }

@@ -4,6 +4,7 @@ using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Hubs;
@@ -41,6 +42,7 @@ public sealed class MaintenanceControllerResolveAlertGateTests
             .Returns(Task.CompletedTask);
         var clients = new Mock<IHubClients>();
         clients.SetupGet(c => c.All).Returns(clientProxy.Object);
+        clients.Setup(c => c.Group(AuthorizedHubGroups.Farm)).Returns(clientProxy.Object);
         _maintenanceHub.SetupGet(h => h.Clients).Returns(clients.Object);
 
         _logRepository
