@@ -315,6 +315,21 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v.UtcDateTime,
                     v => new DateTimeOffset(v, TimeSpan.Zero));
+
+            // For SQLite, row-version columns are application-managed (the DB does not
+            // auto-generate them). Override the IsRowVersion() store-generated setting so
+            // EF Core does not try to round-trip the DB value after each save, allowing
+            // StampRowVersions() to write a non-null GUID token on every Add/Modify.
+            _ = modelBuilder.Entity<PrintJob>()
+                .Property(j => j.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<PrinterDispatchState>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
         }
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
@@ -647,6 +662,30 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             if (entry.State is EntityState.Added or EntityState.Modified)
             {
                 entry.Entity.RowVersion = newVersion;
+            }
+        }
+
+        // Provider-correct non-null application-managed concurrency tokens.
+        // SQL Server uses a native ROWVERSION column (stamped automatically by the database);
+        // SQLite and PostgreSQL do NOT generate non-null tokens from [Timestamp] alone, so we
+        // stamp a fresh GUID-derived byte array on every write so the concurrency check never
+        // compares NULL == NULL (which would allow multiple concurrent winners).
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<PrinterDispatchState> entry in ChangeTracker.Entries<PrinterDispatchState>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
             }
         }
     }

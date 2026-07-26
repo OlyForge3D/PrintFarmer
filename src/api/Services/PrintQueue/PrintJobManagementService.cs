@@ -783,35 +783,29 @@ public class PrintJobManagementService(
                 throw new InvalidOperationException($"G-code file not found for job {jobId}");
             }
 
-            Guid? dispatchAttemptId = null;
-            if (_dispatchClaimService is not null)
+            if (_dispatchClaimService is null)
             {
-                DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
-                    new DispatchClaimRequest(
-                        Guid.Parse(jobId),
-                        job.AssignedPrinterId.Value,
-                        userId,
-                        "Manual",
-                        null,
-                        null,
-                        null),
-                    cancellationToken);
-
-                if (!claimResult.Success || claimResult.Attempt is null)
-                {
-                    throw new InvalidOperationException($"{claimResult.ErrorCode} {claimResult.ErrorDetail}".Trim());
-                }
-
-                dispatchAttemptId = claimResult.Attempt.Id;
+                throw new InvalidOperationException(
+                    "IDispatchClaimService is required for dispatch. This service must be registered in the DI container.");
             }
-            else
+
+            DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
+                new DispatchClaimRequest(
+                    Guid.Parse(jobId),
+                    job.AssignedPrinterId.Value,
+                    userId,
+                    "Manual",
+                    null,
+                    null,
+                    null),
+                cancellationToken);
+
+            if (!claimResult.Success || claimResult.Attempt is null)
             {
-                job.Status = PrintJobStatus.Starting;
-                job.FailureReason = null;
-                job.ActualStartTime = DateTime.UtcNow;
-                job.UpdatedAt = DateTime.UtcNow;
-                await _repository.SaveChangesAsync(cancellationToken);
+                throw new InvalidOperationException($"{claimResult.ErrorCode} {claimResult.ErrorDetail}".Trim());
             }
+
+            Guid? dispatchAttemptId = claimResult.Attempt.Id;
 
             // Use original filename for the printer (not the GUID-based storage filename)
             string printerFileName = job.GcodeFile.Name;
@@ -830,19 +824,11 @@ public class PrintJobManagementService(
                 if (!System.IO.File.Exists(localFilePath))
                 {
                     job.FailureReason = DispatchArtifactUnavailable;
-                    if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
-                    {
-                        await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
-                            dispatchAttemptId.Value,
-                            "backend_rejected",
-                            DispatchArtifactUnavailable,
-                            cancellationToken);
-                    }
-                    else
-                    {
-                        job.Status = PrintJobStatus.Assigned;
-                        job.ActualStartTime = null;
-                    }
+                    await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                        dispatchAttemptId.Value,
+                        "backend_rejected",
+                        DispatchArtifactUnavailable,
+                        cancellationToken);
 
                     _logger.LogError(
                         "G-code artifact is unavailable for print job {JobId}",
@@ -939,18 +925,10 @@ public class PrintJobManagementService(
                             await ReportProgressAsync(totalBytes, force: true);
                         }
 
-                        if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
-                        {
-                            await _dispatchClaimService.RecordBackendAcceptedAsync(
-                                dispatchAttemptId.Value,
-                                null,
-                                cancellationToken);
-                        }
-                        else
-                        {
-                            job.Status = PrintJobStatus.Printing;
-                            job.ActualStartTime = DateTime.UtcNow;
-                        }
+                        await _dispatchClaimService.RecordBackendAcceptedAsync(
+                            dispatchAttemptId.Value,
+                            null,
+                            cancellationToken);
 
                         // Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
                         await SnapshotSlicerEstimatesAsync(job, cancellationToken);
@@ -961,19 +939,11 @@ public class PrintJobManagementService(
                     {
                         job.FailureReason = DispatchPrinterFailure;
                         string failureDetail = result.ErrorMessage ?? DispatchPrinterFailure;
-                        if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
-                        {
-                            await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
-                                dispatchAttemptId.Value,
-                                "backend_rejected",
-                                failureDetail,
-                                cancellationToken);
-                        }
-                        else
-                        {
-                            job.Status = PrintJobStatus.Assigned;
-                            job.ActualStartTime = null;
-                        }
+                        await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                            dispatchAttemptId.Value,
+                            "backend_rejected",
+                            failureDetail,
+                            cancellationToken);
 
                         _logger.LogWarning(
                             "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}",
@@ -1003,20 +973,12 @@ public class PrintJobManagementService(
             }
             catch (Exception printEx)
             {
-                // Revert to Assigned status on exception
+                // Record unknown outcome — job stays in Starting for reconciliation.
                 job.FailureReason = DispatchUnexpectedFailure;
-                if (dispatchAttemptId.HasValue && _dispatchClaimService is not null)
-                {
-                    await _dispatchClaimService.RecordUnknownOutcomeAsync(
-                        dispatchAttemptId.Value,
-                        printEx.Message,
-                        cancellationToken);
-                }
-                else
-                {
-                    job.Status = PrintJobStatus.Assigned;
-                    job.ActualStartTime = null;
-                }
+                await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                    dispatchAttemptId.Value,
+                    printEx.Message,
+                    cancellationToken);
 
                 _logger.LogError(
                     "Error dispatching print job {JobId} to printer {PrinterId}; exception type {ExceptionType}",
@@ -1329,6 +1291,16 @@ public class PrintJobManagementService(
             // Find the job to rerun
             PrintJob originalJob = await _repository.GetByIdAsync(Guid.Parse(jobId), cancellationToken)
                 ?? throw new InvalidOperationException($"Job {jobId} not found");
+
+            // Calibration jobs cannot be rerun through the standard RerunJobAsync path.
+            // A calibration rerun must go through a new calibration workflow (new idempotency
+            // key, new acknowledgement, new provenance) — provenance must not be stripped.
+            if (originalJob.JobKind == JobKind.FilamentCalibration)
+            {
+                throw new InvalidOperationException(
+                    "Calibration jobs cannot be rerun through the standard job queue. " +
+                    "Create a new calibration attempt with a new idempotency key and acknowledgement.");
+            }
 
             // Prefer a user-friendly name (original filename) when the linked G-code file still exists.
             string newJobName = originalJob.Name;

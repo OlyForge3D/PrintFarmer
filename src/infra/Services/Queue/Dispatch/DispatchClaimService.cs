@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -14,9 +15,14 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// </summary>
 public sealed class DispatchClaimService(
     AppDbContext db,
+    IPrinterStatusSnapshotReader statusReader,
     ILogger<DispatchClaimService> logger) : IDispatchClaimService
 {
+    /// <summary>Maximum age of a telemetry snapshot for calibration dispatch.</summary>
+    private static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
+
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
     private readonly ILogger<DispatchClaimService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
@@ -26,7 +32,6 @@ public sealed class DispatchClaimService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // Load job + dispatch state in a single round-trip.
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .FirstOrDefaultAsync(j => j.Id == request.JobId, ct);
@@ -52,22 +57,16 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail("printer_not_found", $"Printer dispatch state for {request.PrinterId} not found.");
         }
 
-        // --- Pre-claim validations ---
         if (!printer.IsEnabled)
         {
-            return DispatchClaimResult.Fail(
-                "printer_disabled",
-                $"Printer {request.PrinterId} is disabled.");
+            return DispatchClaimResult.Fail("printer_disabled", $"Printer {request.PrinterId} is disabled.");
         }
 
         if (printer.InMaintenance)
         {
-            return DispatchClaimResult.Fail(
-                "printer_in_maintenance",
-                $"Printer {request.PrinterId} is in maintenance.");
+            return DispatchClaimResult.Fail("printer_in_maintenance", $"Printer {request.PrinterId} is in maintenance.");
         }
 
-        // Job must be in a Queued or Assigned state (not already Starting/Printing/terminal).
         if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
         {
             return DispatchClaimResult.Fail(
@@ -75,7 +74,6 @@ public sealed class DispatchClaimService(
                 $"Job {request.JobId} is in state {job.Status}, which cannot be dispatched.");
         }
 
-        // Job must be assigned to the claimed printer.
         if (job.AssignedPrinterId != request.PrinterId)
         {
             return DispatchClaimResult.Fail(
@@ -90,7 +88,6 @@ public sealed class DispatchClaimService(
                 $"Job {request.JobId} is missing its G-code artifact.");
         }
 
-        // Verify no other active job is already claiming this printer.
         if (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != request.JobId)
         {
             return DispatchClaimResult.Fail(
@@ -98,43 +95,123 @@ public sealed class DispatchClaimService(
                 $"Printer {request.PrinterId} already has an active job {dispatchState.ActiveJobId}.");
         }
 
-        // For calibration jobs, validate the acknowledgement idempotency key when required.
-        if (job.JobKind == JobKind.FilamentCalibration &&
-            string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
+        // --- Telemetry freshness and online/idle check ---
+        PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
+        if (snapshot is not null)
         {
-            return DispatchClaimResult.Fail(
-                "acknowledgement_required",
-                "Calibration jobs require a valid bed-clear acknowledgement.");
-        }
+            DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
+            bool isFresh = observedAt.HasValue &&
+                           (DateTime.UtcNow - observedAt.Value) <= TelemetryFreshnessLimit;
 
-        if (job.JobKind == JobKind.FilamentCalibration &&
-            request.AcknowledgementIdempotencyKey is not null)
-        {
-            // Verify the stored acknowledgement matches this exact job and has not expired.
-            if (dispatchState.AcknowledgedJobId != request.JobId)
+            if (job.JobKind == JobKind.FilamentCalibration && !isFresh)
             {
                 return DispatchClaimResult.Fail(
-                    "wrong_acknowledgement_job",
-                    $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {request.JobId}.");
+                    "telemetry_stale",
+                    $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes. Calibration requires fresh online+idle status.");
             }
 
-            if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
-                dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
+            if (!snapshot.Status.IsOnline)
             {
                 return DispatchClaimResult.Fail(
-                    "acknowledgement_expired",
-                    $"Bed-clear acknowledgement for job {request.JobId} has expired.");
+                    "printer_offline",
+                    $"Printer {request.PrinterId} is not online per telemetry.");
             }
 
-            if (dispatchState.AcknowledgementIdempotencyKey != request.AcknowledgementIdempotencyKey)
+            string? state = snapshot.Status.State;
+            if (state is "printing" or "starting" or "paused")
             {
                 return DispatchClaimResult.Fail(
-                    "acknowledgement_key_mismatch",
-                    "Acknowledgement idempotency key does not match the persisted value.");
+                    "printer_busy_telemetry",
+                    $"Printer {request.PrinterId} is in state '{state}' per telemetry; cannot start a new job.");
             }
         }
 
-        // --- Compute next attempt number ---
+        // --- Calibration-specific compatibility checks ---
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            if (job.RequiredFirmwareFamily.HasValue &&
+                job.RequiredFirmwareFamily != PrinterFirmwareFamily.Unknown &&
+                printer.FirmwareFamily != job.RequiredFirmwareFamily)
+            {
+                return DispatchClaimResult.Fail(
+                    "firmware_family_mismatch",
+                    $"Job requires firmware family '{job.RequiredFirmwareFamily}' but printer has '{printer.FirmwareFamily}'.");
+            }
+
+            if (job.RequiredGcodeDialect.HasValue &&
+                job.RequiredGcodeDialect != PrinterGcodeDialect.Unknown &&
+                printer.GcodeDialect != job.RequiredGcodeDialect)
+            {
+                return DispatchClaimResult.Fail(
+                    "gcode_dialect_mismatch",
+                    $"Job requires G-code dialect '{job.RequiredGcodeDialect}' but printer has '{printer.GcodeDialect}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerEngine) &&
+                !string.Equals(printer.CalibrationSlicerEngine, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase))
+            {
+                return DispatchClaimResult.Fail(
+                    "slicer_tuple_mismatch",
+                    $"Job requires slicer engine '{job.RequiredSlicerEngine}' but printer is configured for '{printer.CalibrationSlicerEngine}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerDistribution) &&
+                !string.Equals(printer.CalibrationSlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase))
+            {
+                return DispatchClaimResult.Fail(
+                    "slicer_tuple_mismatch",
+                    $"Job requires slicer distribution '{job.RequiredSlicerDistribution}' but printer is configured for '{printer.CalibrationSlicerDistribution}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(job.RequiredSlicerVersion) &&
+                !string.Equals(printer.CalibrationSlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase))
+            {
+                return DispatchClaimResult.Fail(
+                    "slicer_tuple_mismatch",
+                    $"Job requires slicer version '{job.RequiredSlicerVersion}' but printer is configured for '{printer.CalibrationSlicerVersion}'.");
+            }
+
+            if (job.PinnedPrinterConfigRevision.HasValue &&
+                printer.ConfigurationRevision != job.PinnedPrinterConfigRevision.Value)
+            {
+                return DispatchClaimResult.Fail(
+                    "printer_config_revision_stale",
+                    $"Printer configuration revision {printer.ConfigurationRevision} does not match the pinned revision {job.PinnedPrinterConfigRevision}.");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
+            {
+                return DispatchClaimResult.Fail(
+                    "acknowledgement_required",
+                    "Calibration jobs require a valid bed-clear acknowledgement idempotency key.");
+            }
+
+            if (dispatchState.AcknowledgedJobId.HasValue)
+            {
+                if (dispatchState.AcknowledgedJobId != request.JobId)
+                {
+                    return DispatchClaimResult.Fail(
+                        "wrong_acknowledgement_job",
+                        $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {request.JobId}.");
+                }
+
+                if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
+                    dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
+                {
+                    return DispatchClaimResult.Fail(
+                        "acknowledgement_expired",
+                        $"Bed-clear acknowledgement for job {request.JobId} has expired.");
+                }
+
+                if (dispatchState.AcknowledgementIdempotencyKey != request.AcknowledgementIdempotencyKey)
+                {
+                    return DispatchClaimResult.Fail(
+                        "acknowledgement_key_mismatch",
+                        "Acknowledgement idempotency key does not match the persisted value.");
+                }
+            }
+        }
+
         int attemptNumber = await _db.QueueDispatchAttempts
             .Where(a => a.PrintJobId == request.JobId)
             .CountAsync(ct) + 1;
@@ -154,7 +231,6 @@ public sealed class DispatchClaimService(
             UpdatedAtUtc = DateTime.UtcNow,
         };
 
-        // Write outbox event in the same transaction.
         var outboxEvent = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -170,13 +246,12 @@ public sealed class DispatchClaimService(
             CreatedAtUtc = DateTime.UtcNow,
         };
 
-        // --- Atomic state transition ---
         job.Status = PrintJobStatus.Starting;
         job.ActualStartTime = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
 
-        // Consume the acknowledgement by clearing it.
-        if (request.AcknowledgementIdempotencyKey is not null)
+        if (request.AcknowledgementIdempotencyKey is not null &&
+            dispatchState.AcknowledgedJobId == request.JobId)
         {
             dispatchState.AcknowledgedJobId = null;
             dispatchState.AcknowledgedAtUtc = null;
@@ -237,14 +312,12 @@ public sealed class DispatchClaimService(
         PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
 
-        // Update attempt.
         attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
         attempt.ErrorCode = errorCode;
         attempt.ErrorDetail = errorDetail;
         attempt.IsRetryable = true;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
 
-        // Return job to Assigned so it can be re-dispatched.
         if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
         {
             attempt.PrintJob.Status = PrintJobStatus.Assigned;
@@ -252,7 +325,6 @@ public sealed class DispatchClaimService(
             attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
         }
 
-        // Release printer active job reference.
         if (dispatchState is not null && dispatchState.ActiveDispatchAttemptId == attemptId)
         {
             dispatchState.ActiveJobId = null;
@@ -324,16 +396,12 @@ public sealed class DispatchClaimService(
         await _db.SaveChangesAsync(ct);
 
         _logger.LogWarning(
-            "Dispatch outcome unknown — reconciliation required: Attempt={AttemptId}",
+            "Dispatch outcome unknown - reconciliation required: Attempt={AttemptId}",
             attemptId);
     }
 
-    /// <summary>
-    /// Builds a minimal, credential-free JSON payload for the outbox event.
-    /// </summary>
-    private static string BuildOutboxPayload(PrintJob job, QueueDispatchAttempt attempt)
-    {
-        return System.Text.Json.JsonSerializer.Serialize(new
+    private static string BuildOutboxPayload(PrintJob job, QueueDispatchAttempt attempt) =>
+        System.Text.Json.JsonSerializer.Serialize(new
         {
             jobId = job.Id,
             jobKind = job.JobKind?.ToString() ?? "Standard",
@@ -346,5 +414,4 @@ public sealed class DispatchClaimService(
             calibrationAttemptId = job.CalibrationAttemptId,
             claimedAtUtc = attempt.ClaimedAtUtc,
         });
-    }
 }

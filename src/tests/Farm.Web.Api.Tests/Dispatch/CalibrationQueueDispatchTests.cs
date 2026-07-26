@@ -527,7 +527,7 @@ public class CalibrationQueueDispatchTests
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
         await db.SaveChangesAsync();
 
-        DispatchClaimService sut = new(db, Mock.Of<ILogger<DispatchClaimService>>());
+        DispatchClaimService sut = new(db, Mock.Of<IPrinterStatusSnapshotReader>(), Mock.Of<ILogger<DispatchClaimService>>());
 
         DispatchClaimResult result = await sut.AcquireClaimAsync(
             new DispatchClaimRequest(job.Id, printerId, "user-1", "Manual", null, null, null),
@@ -539,14 +539,25 @@ public class CalibrationQueueDispatchTests
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task BedClearAcknowledgement_AcknowledgeAsync_PersistsAcknowledgement()
+    public async Task BedClearAcknowledgement_AcknowledgeAsync_AtomicallyAcquiresClaim()
     {
         AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
+        Guid gcodeId = Guid.NewGuid();
+
+        // Need a GcodeFile so the claim can verify it exists.
+        db.GcodeFiles.Add(new GcodeFile
+        {
+            Id = gcodeId,
+            Name = "calibration.gcode",
+            FileName = "calibration.gcode",
+        });
+
         PrintJob job = new()
         {
             Id = Guid.NewGuid(),
             Name = "Calibration Ack",
+            GcodeFileId = gcodeId,
             AssignedPrinterId = printerId,
             JobKind = JobKind.FilamentCalibration,
             Status = PrintJobStatus.Assigned,
@@ -559,33 +570,42 @@ public class CalibrationQueueDispatchTests
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
         await db.SaveChangesAsync();
 
+        // After SaveChangesAsync, StampRowVersions writes a non-null RowVersion to the dispatch state.
+        // Read the current RowVersion so the If-Match header matches the stored value.
+        PrinterDispatchState dispatchState = await db.PrinterDispatchStates.AsNoTracking()
+            .SingleAsync(s => s.PrinterId == printerId);
+
         BedClearAcknowledgementService sut = new(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
         AcknowledgeBedClearRequest request = new(
             job.Id,
             printerId,
             "operator-1",
             "ack-key-1",
-            [],
+            dispatchState.RowVersion,  // use the stamped RowVersion, not the initial []
             null);
 
         AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
 
+        // New behavior: ack + claim are atomic — job is now Starting, ack is consumed.
         Assert.Equal(BedClearAckOutcome.Accepted, result.Outcome);
 
         PrinterDispatchState persisted = await db.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
-        Assert.Equal(job.Id, persisted.AcknowledgedJobId);
-        Assert.Equal("operator-1", persisted.AcknowledgedBySubject);
-        Assert.Equal("ack-key-1", persisted.AcknowledgementIdempotencyKey);
-        Assert.NotNull(persisted.AcknowledgedAtUtc);
-        Assert.NotNull(persisted.AcknowledgementExpiresAtUtc);
+        // Ack was consumed atomically by the claim — should be null.
+        Assert.Null(persisted.AcknowledgedJobId);
+        Assert.Null(persisted.AcknowledgementIdempotencyKey);
+        // Dispatch state should now track the active job.
+        Assert.Equal(job.Id, persisted.ActiveJobId);
+
+        PrintJob updatedJob = await db.PrintJobs.SingleAsync(j => j.Id == job.Id);
+        Assert.Equal(PrintJobStatus.Starting, updatedJob.Status);
+        Assert.NotNull(updatedJob.ActualStartTime);
     }
 
     [Fact]
     [Trait("Category", "Unit")]
-    public async Task PrintJobManagementService_RerunCalibrationJob_DoesNotCopyCalibrationFields()
+    public async Task PrintJobManagementService_RerunCalibrationJob_ThrowsInvalidOperation()
     {
         Mock<IPrintJobManagementRepository> repository = new();
-        PrintJob? capturedJob = null;
         GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "rerun.gcode", FileName = "rerun.gcode" };
         PrintJob originalJob = new()
         {
@@ -596,24 +616,8 @@ public class CalibrationQueueDispatchTests
             JobKind = JobKind.FilamentCalibration,
             CalibrationProjectId = Guid.NewGuid(),
             CalibrationAttemptId = Guid.NewGuid(),
-            CalibrationConfigSnapshotId = Guid.NewGuid(),
-            CalibrationOrchestrationId = Guid.NewGuid(),
-            SourceArtifactId = Guid.NewGuid(),
             IdempotencyKey = "old-key",
-            IdempotencyScope = "old-scope",
-            IdempotencyRequestSha256 = new string('a', 64),
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
-            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
-            RequiredSlicerEngine = "OrcaSlicer",
-            RequiredSlicerDistribution = "upstream",
-            RequiredSlicerVersion = "2.0.0",
-            RequiredSlicerContainerDigest = "sha256:abc",
-            SpecificationSha256 = new string('b', 64),
-            MachineProfileSha256 = new string('c', 64),
-            ProcessProfileSha256 = new string('d', 64),
-            FilamentProfileSha256 = new string('e', 64),
-            PrinterConfigSnapshotSha256 = new string('f', 64),
-            PinnedPrinterConfigRevision = 12,
             Status = PrintJobStatus.Completed,
             Priority = (int)PrintJobPriority.High,
             CreatedAt = DateTime.UtcNow.AddHours(-1),
@@ -623,11 +627,6 @@ public class CalibrationQueueDispatchTests
 
         repository.Setup(r => r.GetByIdAsync(originalJob.Id, It.IsAny<CancellationToken>())).ReturnsAsync(originalJob);
         repository.Setup(r => r.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>())).ReturnsAsync(gcode);
-        repository.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(4);
-        repository
-            .Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
-            .Callback<PrintJob, CancellationToken>((job, _) => capturedJob = job)
-            .ReturnsAsync((PrintJob job, CancellationToken _) => job);
 
         PrintJobManagementService sut = new(
             repository.Object,
@@ -638,30 +637,9 @@ public class CalibrationQueueDispatchTests
             Mock.Of<IStoredFileOperationsService>(),
             Mock.Of<IPrinterStatusCacheReader>());
 
-        await sut.RerunJobAsync(originalJob.Id.ToString(), "user-1", CancellationToken.None);
-
-        Assert.NotNull(capturedJob);
-        Assert.Equal(JobKind.Standard, capturedJob!.JobKind);
-        Assert.Null(capturedJob.CalibrationProjectId);
-        Assert.Null(capturedJob.CalibrationAttemptId);
-        Assert.Null(capturedJob.CalibrationConfigSnapshotId);
-        Assert.Null(capturedJob.CalibrationOrchestrationId);
-        Assert.Null(capturedJob.SourceArtifactId);
-        Assert.Null(capturedJob.IdempotencyKey);
-        Assert.Null(capturedJob.IdempotencyScope);
-        Assert.Null(capturedJob.IdempotencyRequestSha256);
-        Assert.Null(capturedJob.RequiredFirmwareFamily);
-        Assert.Null(capturedJob.RequiredGcodeDialect);
-        Assert.Null(capturedJob.RequiredSlicerEngine);
-        Assert.Null(capturedJob.RequiredSlicerDistribution);
-        Assert.Null(capturedJob.RequiredSlicerVersion);
-        Assert.Null(capturedJob.RequiredSlicerContainerDigest);
-        Assert.Null(capturedJob.SpecificationSha256);
-        Assert.Null(capturedJob.MachineProfileSha256);
-        Assert.Null(capturedJob.ProcessProfileSha256);
-        Assert.Null(capturedJob.FilamentProfileSha256);
-        Assert.Null(capturedJob.PrinterConfigSnapshotSha256);
-        Assert.Null(capturedJob.PinnedPrinterConfigRevision);
+        // Calibration jobs cannot be rerun through the standard path — must use new calibration workflow.
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => sut.RerunJobAsync(originalJob.Id.ToString(), "user-1", CancellationToken.None));
     }
 
     // =========================================================================

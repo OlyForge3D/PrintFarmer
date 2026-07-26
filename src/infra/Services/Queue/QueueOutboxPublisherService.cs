@@ -1,5 +1,8 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.SignalR;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -9,12 +12,13 @@ namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Hosted background service that processes the QueueDispatchOutbox.
-/// Reads Pending events, publishes them via SignalR, and marks them Published.
-/// Idempotent: re-running after a crash will re-process any events that were
-/// not marked Published before the crash.
+/// Reads Pending events, publishes them via SignalR to authorized groups,
+/// and marks them Published. Idempotent: re-running after a crash will
+/// re-process any events that were not marked Published before the crash.
 /// </summary>
 public sealed class QueueOutboxPublisherService(
     IServiceScopeFactory scopeFactory,
+    IHubContext<PrinterHub> hub,
     ILogger<QueueOutboxPublisherService> logger) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
@@ -70,17 +74,38 @@ public sealed class QueueOutboxPublisherService(
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task ProcessSingleEventAsync(QueueDispatchOutbox evt, AppDbContext db, CancellationToken ct)
+    private async Task ProcessSingleEventAsync(QueueDispatchOutbox evt, CancellationToken ct)
     {
-        _ = db;
-        _ = ct;
-
         evt.Status = QueueOutboxEventStatus.Processing;
         evt.AttemptCount++;
         evt.LastAttemptedAtUtc = DateTime.UtcNow;
 
         try
         {
+            // Build an authenticated versioned envelope and publish to authorized groups only.
+            // Never use Clients.All — events are scoped to job, printer, and farm groups.
+            var envelope = QueueEventEnvelope.Create(
+                eventType: evt.EventType,
+                jobId: evt.AggregateId,
+                printerId: evt.PrinterId,
+                payloadJson: evt.PayloadJson);
+
+            List<Task> sends = new();
+
+            // Farm-wide group: all authenticated farm users receive queue lifecycle events.
+            sends.Add(hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("queueevent", envelope, ct));
+
+            // Job-scoped group: narrower delivery for clients watching this specific job.
+            sends.Add(hub.Clients.Group(AuthorizedHubGroups.QueueJob(evt.AggregateId)).SendAsync("queueevent", envelope, ct));
+
+            // Printer-scoped group (when the event is associated with a printer).
+            if (evt.PrinterId.HasValue)
+            {
+                sends.Add(hub.Clients.Group(AuthorizedHubGroups.Printer(evt.PrinterId.Value)).SendAsync("queueevent", envelope, ct));
+            }
+
+            await Task.WhenAll(sends);
+
             evt.Status = QueueOutboxEventStatus.Published;
             evt.CompletedAtUtc = DateTime.UtcNow;
 

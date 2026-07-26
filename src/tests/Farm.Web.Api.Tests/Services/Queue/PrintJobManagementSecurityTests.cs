@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using FluentAssertions;
@@ -21,6 +22,7 @@ public sealed class PrintJobManagementSecurityTests
     private readonly Mock<IHubContext<PrinterHub>> _hub = new();
     private readonly Mock<IStoredFileOperationsService> _fileOperations = new();
     private readonly Mock<IPrinterStatusCacheReader> _statusCache = new();
+    private readonly Mock<IDispatchClaimService> _claimService = new();
     private readonly RecordingLogger<PrintJobManagementService> _logger = new();
 
     [Fact]
@@ -126,15 +128,36 @@ public sealed class PrintJobManagementSecurityTests
             .Returns(Task.CompletedTask);
     }
 
-    private PrintJobManagementService CreateService() =>
-        new(
+    private PrintJobManagementService CreateService()
+    {
+        // Claim service must succeed for dispatch to proceed past the claim gate.
+        _claimService
+            .Setup(s => s.AcquireClaimAsync(It.IsAny<DispatchClaimRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DispatchClaimResult.Ok(new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = Guid.NewGuid(),
+                PrinterId = Guid.NewGuid(),
+                ClaimedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+            }));
+        _claimService
+            .Setup(s => s.ReleaseClaimOnKnownFailureAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _claimService
+            .Setup(s => s.RecordUnknownOutcomeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        return new(
             _repository.Object,
             _logger,
             _printers.Object,
             _storagePaths.Object,
             _hub.Object,
             _fileOperations.Object,
-            _statusCache.Object);
+            _statusCache.Object,
+            dispatchClaimService: _claimService.Object);
+    }
 
     private static PrintJob CreateJob()
     {

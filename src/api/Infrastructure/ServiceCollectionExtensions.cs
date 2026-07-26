@@ -758,6 +758,9 @@ public static class ServiceCollectionExtensions
             // Durable queue outbox publisher for calibration queue-dispatch events.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();
 
+            // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();
+
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
 

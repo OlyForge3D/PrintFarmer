@@ -1,6 +1,5 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -11,11 +10,15 @@ namespace Farm.Infrastructure.Services.Queue;
 /// Each acknowledgement is scoped to the specific job at the front of the
 /// printer queue; reorder, job insertion, cancellation, changed compatibility
 /// data, or expiry all invalidate the acknowledgement.
+///
+/// <strong>Atomicity guarantee:</strong> acknowledgement fields and the dispatch-claim
+/// state transition (Job.Status = Starting, QueueDispatchAttempt, QueueDispatchOutbox) are
+/// written in a SINGLE <see cref="AppDbContext.SaveChangesAsync"/> call so a process crash
+/// between "ack persisted" and "claim acquired" cannot leave a job permanently unclaimed.
 /// </summary>
 public sealed class BedClearAcknowledgementService(
     AppDbContext db,
-    ILogger<BedClearAcknowledgementService> logger,
-    IDispatchClaimService? dispatchClaimService = null) : IBedClearAcknowledgementService
+    ILogger<BedClearAcknowledgementService> logger) : IBedClearAcknowledgementService
 {
     /// <summary>
     /// Default acknowledgement validity window.
@@ -26,8 +29,6 @@ public sealed class BedClearAcknowledgementService(
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
-
-    private readonly IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
 
     /// <inheritdoc />
     public async Task<AcknowledgeBedClearResult> AcknowledgeAsync(
@@ -46,6 +47,7 @@ public sealed class BedClearAcknowledgementService(
 
         // --- Load job and dispatch state ---
         PrintJob? job = await _db.PrintJobs
+            .Include(j => j.GcodeFile)
             .FirstOrDefaultAsync(j => j.Id == request.JobId, ct);
 
         if (job is null)
@@ -77,6 +79,14 @@ public sealed class BedClearAcknowledgementService(
                 job.RowVersion,
                 null,
                 $"Job is in state {job.Status} and cannot be acknowledged.");
+        }
+
+        if (job.GcodeFile is null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.CalibrationJobIncompatible,
+                job.RowVersion, null,
+                "Job is missing its G-code artifact.");
         }
 
         PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
@@ -152,47 +162,116 @@ public sealed class BedClearAcknowledgementService(
                 $"Calibration job blocked: {job.BlockedReasonCode}");
         }
 
-        // --- Persist the acknowledgement ---
+        // Verify printer configuration revision has not advanced beyond the pinned value.
+        if (request.ExpectedPrinterConfigRevision.HasValue)
+        {
+            Printer? printer = await _db.Printers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
+
+            if (printer is not null &&
+                printer.ConfigurationRevision != request.ExpectedPrinterConfigRevision.Value)
+            {
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    job.RowVersion, dispatchState.RowVersion,
+                    $"Printer configuration revision {printer.ConfigurationRevision} does not match expected {request.ExpectedPrinterConfigRevision}.");
+            }
+        }
+
+        // =========================================================================
+        // ATOMIC WRITE: acknowledgement + dispatch claim in ONE transaction.
+        // A crash between "ack persisted" and "claim acquired" must not leave the
+        // job permanently unclaimed. Both state changes happen in a single
+        // SaveChangesAsync so EF Core's unit of work keeps them together.
+        // =========================================================================
         DateTime now = DateTime.UtcNow;
+
+        // --- Persist the acknowledgement on dispatch state ---
         dispatchState.AcknowledgedJobId = request.JobId;
         dispatchState.AcknowledgedAtUtc = now;
         dispatchState.AcknowledgedBySubject = request.ActorSubject;
         dispatchState.AcknowledgementIdempotencyKey = request.IdempotencyKey;
         dispatchState.AcknowledgementExpiresAtUtc = now + DefaultAcknowledgementTtl;
 
+        // --- Atomically acquire the dispatch claim (inline — no separate transaction) ---
+        int attemptNumber = await _db.QueueDispatchAttempts
+            .Where(a => a.PrintJobId == request.JobId)
+            .CountAsync(ct) + 1;
+
+        var attempt = new QueueDispatchAttempt
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = request.JobId,
+            PrinterId = request.PrinterId,
+            PrinterConfigRevision = job.PinnedPrinterConfigRevision ?? 0,
+            AttemptNumber = attemptNumber,
+            ActorSubject = request.ActorSubject,
+            StartPathKind = "BedClear",
+            AcknowledgementIdempotencyKey = request.IdempotencyKey,
+            ClaimedAtUtc = now,
+            Outcome = DispatchAttemptOutcome.InProgress,
+            UpdatedAtUtc = now,
+        };
+
+        var outboxEvent = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            AggregateType = nameof(PrintJob),
+            AggregateId = request.JobId,
+            AggregateRowVersion = job.RowVersion,
+            PrinterId = request.PrinterId,
+            PrinterConfigRevision = job.PinnedPrinterConfigRevision,
+            EventType = "PrintFarmer.Queue.JobDispatchStarted.v1",
+            SchemaVersion = "1",
+            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId = job.Id,
+                jobKind = job.JobKind?.ToString() ?? "Standard",
+                printerId = request.PrinterId,
+                attemptId = attempt.Id,
+                attemptNumber,
+                startPathKind = "BedClear",
+                actorSubject = request.ActorSubject,
+                calibrationProjectId = job.CalibrationProjectId,
+                calibrationAttemptId = job.CalibrationAttemptId,
+                claimedAtUtc = now,
+            }),
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = now,
+        };
+
+        // Transition job to Starting and consume the acknowledgement.
+        job.Status = PrintJobStatus.Starting;
+        job.ActualStartTime = now;
+        job.UpdatedAt = now;
+
+        // Consume acknowledgement by clearing it from dispatch state (it's been recorded on the attempt).
+        dispatchState.AcknowledgedJobId = null;
+        dispatchState.AcknowledgedAtUtc = null;
+        dispatchState.AcknowledgedBySubject = null;
+        dispatchState.AcknowledgementIdempotencyKey = null;
+        dispatchState.AcknowledgementExpiresAtUtc = null;
+
+        // Set active job on dispatch state.
+        dispatchState.ActiveJobId = request.JobId;
+        dispatchState.ActiveDispatchAttemptId = attempt.Id;
+
+        attempt.JobRowVersionAtClaim = job.RowVersion;
+        attempt.DispatchStateRowVersionAtClaim = dispatchState.RowVersion;
+
+        _db.QueueDispatchAttempts.Add(attempt);
+        _db.QueueDispatchOutbox.Add(outboxEvent);
+
         try
         {
+            // Single SaveChangesAsync: ack fields + claim state in one transaction.
             await _db.SaveChangesAsync(ct);
 
-            if (_dispatchClaimService is not null &&
-                job.AssignedPrinterId.HasValue &&
-                job.JobKind == JobKind.FilamentCalibration)
-            {
-                DispatchClaimResult dispatchResult = await _dispatchClaimService.AcquireClaimAsync(
-                    new DispatchClaimRequest(
-                        request.JobId,
-                        job.AssignedPrinterId.Value,
-                        request.ActorSubject,
-                        "BedClear",
-                        request.IdempotencyKey,
-                        null,
-                        null),
-                    ct);
-
-                if (!dispatchResult.Success)
-                {
-                    _logger.LogWarning(
-                        "Bed-clear acknowledgement persisted but dispatch claim failed for Job={JobId}: {Code} {Detail}",
-                        request.JobId,
-                        dispatchResult.ErrorCode,
-                        dispatchResult.ErrorDetail);
-                }
-            }
-
             _logger.LogInformation(
-                "Bed-clear acknowledged: Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Expires={Expires:u}",
+                "Bed-clear acknowledged and claim acquired atomically: Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Attempt={AttemptId}",
                 request.JobId, request.PrinterId, request.ActorSubject,
-                request.IdempotencyKey, dispatchState.AcknowledgementExpiresAtUtc);
+                request.IdempotencyKey, attempt.Id);
 
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.Accepted,
@@ -202,7 +281,7 @@ public sealed class BedClearAcknowledgementService(
         {
             _logger.LogWarning(
                 ex,
-                "Concurrency conflict persisting bed-clear acknowledgement for Job={JobId}",
+                "Concurrency conflict persisting bed-clear acknowledgement+claim for Job={JobId}",
                 request.JobId);
 
             return new AcknowledgeBedClearResult(
