@@ -17,7 +17,7 @@ namespace Farm.Migrations.SqlServer.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.9")
+                .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
@@ -4252,6 +4252,24 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("AssignedPrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("BlockedReasonCode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("BlockedReasonJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationConfigSnapshotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationOrchestrationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CalibrationProjectId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("CompletedCopies")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
@@ -4267,6 +4285,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatorSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
 
                     b.Property<DateTime?>("DeadlineAtUtc")
                         .HasColumnType("datetime2");
@@ -4310,21 +4332,48 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
+                    b.Property<string>("FilamentProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("FilamentVendor")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<string>("GcodeContentSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("GcodeFileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<string>("IdempotencyRequestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("IdempotencyScope")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("bit");
+
+                    b.Property<int?>("JobKind")
+                        .HasColumnType("int");
 
                     b.Property<decimal?>("KwhUsed")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal?>("LaborCostUsd")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("MachineProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<decimal?>("MachineTimeCostUsd")
                         .HasColumnType("decimal(18,2)");
@@ -4340,6 +4389,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<long?>("PinnedPrinterConfigRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<int?>("PlateIndex")
                         .HasColumnType("int");
 
@@ -4350,10 +4402,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("PreferredPrinterIds")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PrinterConfigSnapshotSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<int>("Priority")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
+
+                    b.Property<string>("ProcessProfileSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("ProjectFileId")
                         .HasColumnType("uniqueidentifier");
@@ -4374,19 +4434,48 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("RequiredCapabilities")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("RequiredFirmwareFamily")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("RequiredGcodeDialect")
+                        .HasColumnType("int");
+
                     b.Property<string>("RequiredMaterialType")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal?>("RequiredNozzleDiameter")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("RequiredSlicerContainerDigest")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RequiredSlicerDistribution")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RequiredSlicerEngine")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RequiredSlicerVersion")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
+                    b.Property<Guid?>("SourceArtifactId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("SourcePrinterId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SpecificationSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int?>("SpoolmanFilamentId")
                         .HasColumnType("int");
@@ -4432,6 +4521,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique()
                         .HasDatabaseName("IX_PrintJobs_ExternalJobId_SourcePrinterId")
                         .HasFilter("[ExternalJobId] IS NOT NULL AND [SourcePrinterId] IS NOT NULL");
+
+                    b.HasIndex("IdempotencyScope", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_PrintJobs_Idempotency_Calibration")
+                        .HasFilter("[IdempotencyScope] IS NOT NULL AND [IdempotencyKey] IS NOT NULL AND [JobKind] = 1");
 
                     b.ToTable("PrintJobs");
                 });
@@ -5260,6 +5354,29 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTime?>("AcknowledgedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AcknowledgedBySubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("AcknowledgedJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("AcknowledgementExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AcknowledgementIdempotencyKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid?>("ActiveDispatchAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActiveJobId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("AutoDispatchState")
                         .HasColumnType("int");
 
@@ -5676,6 +5793,155 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique();
 
                     b.ToTable("PrinterStatisticsSet");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueueDispatchAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AcknowledgementIdempotencyKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("BackendAcceptedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("BackendJobId")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime>("ClaimedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("DispatchStateRowVersionAtClaim")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("ErrorCode")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("ErrorDetail")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<bool>("IsRetryable")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("JobRowVersionAtClaim")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<int>("Outcome")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("PrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("PrinterConfigRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("RequiresReconciliation")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("StartPathKind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrintJobId", "AttemptNumber")
+                        .HasDatabaseName("IX_QueueDispatchAttempts_Job_Attempt");
+
+                    b.HasIndex("PrinterId", "Outcome")
+                        .HasDatabaseName("IX_QueueDispatchAttempts_Printer_Outcome");
+
+                    b.ToTable("QueueDispatchAttempts");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueueDispatchOutbox", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AggregateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("AggregateRowVersion")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<string>("AggregateType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime?>("LastAttemptedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<long?>("PrinterConfigRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RetryAfterUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SchemaVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<long>("Sequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status", "RetryAfterUtc")
+                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
+
+                    b.ToTable("QueueDispatchOutbox");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>
@@ -7858,6 +8124,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Navigation("Printer");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueueDispatchAttempt", b =>
+                {
+                    b.HasOne("Farm.Infrastructure.Domain.PrintJob", "PrintJob")
+                        .WithMany("DispatchAttempts")
+                        .HasForeignKey("PrintJobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("PrintJob");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>
                 {
                     b.HasOne("Farm.Infrastructure.Domain.User", "User")
@@ -8224,6 +8501,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJob", b =>
                 {
+                    b.Navigation("DispatchAttempts");
+
                     b.Navigation("RetriesAsAttempt");
 
                     b.Navigation("RetriesAsOriginal");

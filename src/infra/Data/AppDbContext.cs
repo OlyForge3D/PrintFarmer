@@ -274,6 +274,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GcodePromotionCheckpoint> GcodePromotionCheckpoints =>
         Set<GcodePromotionCheckpoint>();
 
+    // =========================================================================
+    // Issue #900: Calibration queue dispatch durability
+    // =========================================================================
+
+    /// <summary>
+    /// Durable scheduling outbox events written in the same transaction as
+    /// queue state changes so events survive process crashes.
+    /// </summary>
+    public DbSet<QueueDispatchOutbox> QueueDispatchOutbox => Set<QueueDispatchOutbox>();
+
+    /// <summary>
+    /// Per-attempt record for each database-backed dispatch claim.
+    /// One row per start-path invocation; persists even for unknown outcomes
+    /// so reconciliation can identify orphaned Starting jobs.
+    /// </summary>
+    public DbSet<QueueDispatchAttempt> QueueDispatchAttempts => Set<QueueDispatchAttempt>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -283,6 +300,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
         ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
+        ConfigureQueueDispatchIndexes(modelBuilder);
 
         // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
         // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
@@ -332,6 +350,47 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 draft.DeviceLineageId,
             })
             .HasFilter(filter);
+    }
+
+    /// <summary>
+    /// Configures provider-specific filtered unique indexes for calibration queue dispatch.
+    /// The idempotency index only covers active (non-terminal) calibration jobs so that a
+    /// terminal job with the same key does not block a new attempt.
+    /// PrintJobStatus values: Queued=0, Assigned=1, Starting=2, Printing=3, Paused=4,
+    /// Completed=5, Failed=6, Cancelled=7 — we exclude 5/6/7 (terminal).
+    /// </summary>
+    private void ConfigureQueueDispatchIndexes(ModelBuilder modelBuilder)
+    {
+        // Filtered unique index on (IdempotencyScope, IdempotencyKey) for active calibration jobs.
+        string idempotencyFilter = Database.ProviderName switch
+        {
+            "Npgsql.EntityFrameworkCore.PostgreSQL" =>
+                "\"IdempotencyScope\" IS NOT NULL AND \"IdempotencyKey\" IS NOT NULL AND \"JobKind\" = 1",
+            "Microsoft.EntityFrameworkCore.SqlServer" =>
+                "[IdempotencyScope] IS NOT NULL AND [IdempotencyKey] IS NOT NULL AND [JobKind] = 1",
+            _ =>
+                "IdempotencyScope IS NOT NULL AND IdempotencyKey IS NOT NULL AND JobKind = 1",
+        };
+
+        _ = modelBuilder.Entity<PrintJob>()
+            .HasIndex(j => new { j.IdempotencyScope, j.IdempotencyKey })
+            .HasFilter(idempotencyFilter)
+            .IsUnique()
+            .HasDatabaseName("IX_PrintJobs_Idempotency_Calibration");
+
+        // Dispatch-attempt indexes.
+        _ = modelBuilder.Entity<QueueDispatchAttempt>()
+            .HasIndex(a => new { a.PrintJobId, a.AttemptNumber })
+            .HasDatabaseName("IX_QueueDispatchAttempts_Job_Attempt");
+
+        _ = modelBuilder.Entity<QueueDispatchAttempt>()
+            .HasIndex(a => new { a.PrinterId, a.Outcome })
+            .HasDatabaseName("IX_QueueDispatchAttempts_Printer_Outcome");
+
+        // Pending outbox events are polled frequently.
+        _ = modelBuilder.Entity<QueueDispatchOutbox>()
+            .HasIndex(o => new { o.Status, o.RetryAfterUtc })
+            .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)

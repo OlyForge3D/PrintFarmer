@@ -183,6 +183,11 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Issue #900: Durable dispatch claim and bed-clear acknowledgement services.
+        // IDispatchClaimService is the single shared atomic claim path used by every start path.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
+
         // Material equivalence clusters
         _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
 

@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,6 +29,7 @@ public class JobQueueController(
     IPrintJobCompletionService printJobCompletionService,
     IJobDispatchService jobDispatchService,
     IBatchDispatchService batchDispatchService,
+    IBedClearAcknowledgementService bedClearAcknowledgementService,
     IPrinterStatusCacheReader printerStatusCache,
     IPrintFarmerTelemetryService telemetryService,
     ILogger<JobQueueController> logger) : ControllerBase
@@ -480,4 +482,165 @@ public class JobQueueController(
             return Problem("An error occurred during batch dispatch", statusCode: 500);
         }
     }
+
+    /// <summary>
+    /// Acknowledge that the printer bed is clear for a specific job and authorize dispatch to start.
+    /// This is an exact-job, one-use, expiring acknowledgement: it binds to the specified job and
+    /// printer revision. Reorder, a higher-priority insertion, cancellation, changed compatibility
+    /// data, or expiry will invalidate it. A new acknowledgement is required after requeue/abort/rerun.
+    /// </summary>
+    /// <param name="jobId">The exact job being acknowledged.</param>
+    /// <param name="request">Acknowledgement request body with printer ID and idempotency key.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// 202 for new accepted asynchronous command;
+    /// 200 for exact replay or job already Starting/Printing;
+    /// 404 for unknown job;
+    /// 409 wrong_job / printer_busy / job_not_dispatchable / idempotency_payload_mismatch;
+    /// 412 dispatch_revision_conflict;
+    /// 428 precondition_required;
+    /// 422 calibration_job_incompatible / filament_check_failed;
+    /// 503 printer_offline_or_stale.
+    /// </returns>
+    [HttpPost("{jobId:guid}/acknowledge-bed-clear-and-start")]
+    [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(202)]
+    [ProducesResponseType(200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(401)]
+    [ProducesResponseType(403)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(412)]
+    [ProducesResponseType(422)]
+    [ProducesResponseType(428)]
+    [ProducesResponseType(503)]
+    public async Task<IActionResult> AcknowledgeBedClearAndStartAsync(
+        Guid jobId,
+        [FromBody] AcknowledgeBedClearRequestDto request,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return BadRequest(new { error = "Request body is required." });
+        }
+
+        // Require a stable idempotency key.
+        // Intentional: Idempotency-Key and If-Match are standard HTTP headers not modelled as action parameters.
+#pragma warning disable S6932 // Use model binding instead of accessing the raw request data
+        string? idempotencyKey = Request.Headers["Idempotency-Key"].FirstOrDefault()
+            ?? request.IdempotencyKey;
+
+        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = "A stable Idempotency-Key header is required for bed-clear acknowledgements." });
+        }
+
+        // Require If-Match for optimistic concurrency on the dispatch state.
+        string? ifMatchHeader = Request.Headers["If-Match"].FirstOrDefault();
+#pragma warning restore S6932
+        byte[]? ifMatchBytes = null;
+        if (!string.IsNullOrWhiteSpace(ifMatchHeader))
+        {
+            string etag = ifMatchHeader.Trim('"', ' ');
+            try
+            {
+                ifMatchBytes = Convert.FromBase64String(etag);
+            }
+            catch (FormatException)
+            {
+                return BadRequest(new { error = "If-Match header must be a base-64 encoded ETag." });
+            }
+        }
+
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            logger.LogWarning("AcknowledgeBedClear denied: unable to resolve user identity.");
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "Unable to verify user identity from claims." });
+        }
+
+        string actorSubject = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? userId.ToString();
+
+        var ackRequest = new AcknowledgeBedClearRequest(
+            JobId: jobId,
+            PrinterId: request.PrinterId,
+            ActorSubject: actorSubject,
+            IdempotencyKey: idempotencyKey,
+            IfMatchDispatchState: ifMatchBytes,
+            ExpectedPrinterConfigRevision: request.ExpectedPrinterConfigRevision);
+
+        try
+        {
+            AcknowledgeBedClearResult result = await bedClearAcknowledgementService.AcknowledgeAsync(ackRequest, ct);
+
+            return result.Outcome switch
+            {
+                BedClearAckOutcome.Accepted => StatusCode(
+                    StatusCodes.Status202Accepted,
+                    BuildAckResponse(result, "Bed-clear acknowledged; dispatch will start shortly.")),
+
+                BedClearAckOutcome.Replayed or BedClearAckOutcome.AlreadyStartingOrPrinting => Ok(
+                    BuildAckResponse(result, "Acknowledged (replayed or already starting).")),
+
+                BedClearAckOutcome.JobNotFound => NotFound(
+                    new { error = "job_not_found", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.WrongJob => Conflict(
+                    new { error = "wrong_job", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.PrinterBusy => Conflict(
+                    new { error = "printer_busy", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.JobNotDispatchable => Conflict(
+                    new { error = "job_not_dispatchable", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.IdempotencyMismatch => Conflict(
+                    new { error = "idempotency_payload_mismatch", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.DispatchRevisionConflict => StatusCode(
+                    StatusCodes.Status412PreconditionFailed,
+                    new { error = "dispatch_revision_conflict", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.PreconditionRequired => StatusCode(
+                    StatusCodes.Status428PreconditionRequired,
+                    new { error = "precondition_required", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.CalibrationJobIncompatible => UnprocessableEntity(
+                    new { error = "calibration_job_incompatible", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.FilamentCheckFailed => UnprocessableEntity(
+                    new { error = "filament_check_failed", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.PrinterOfflineOrStale => StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new { error = "printer_offline_or_stale", detail = result.ErrorDetail }),
+
+                BedClearAckOutcome.Forbidden => StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { error = "forbidden", detail = result.ErrorDetail }),
+
+                _ => Problem("Unexpected acknowledgement outcome.", statusCode: 500),
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error processing bed-clear acknowledgement for job {JobId}", jobId);
+            return Problem("An error occurred while processing the acknowledgement.", statusCode: 500);
+        }
+    }
+
+    /// <summary>Builds the acknowledge response body including ETag values.</summary>
+    private static object BuildAckResponse(AcknowledgeBedClearResult result, string message) =>
+        new
+        {
+            message,
+            jobETag = result.JobETag is not null ? Convert.ToBase64String(result.JobETag) : null,
+            dispatchStateETag = result.DispatchStateETag is not null ? Convert.ToBase64String(result.DispatchStateETag) : null,
+        };
 }

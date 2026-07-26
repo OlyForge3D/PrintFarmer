@@ -36,4 +36,55 @@ public class PrinterDispatchState
     /// </summary>
     [Timestamp]
     public byte[]? RowVersion { get; set; }
+
+    // =========================================================================
+    // Issue #900: Exact-job bed-clear acknowledgement (one-use, expiring)
+    // =========================================================================
+
+    /// <summary>
+    /// The exact print job this acknowledgement was issued for.
+    /// A new acknowledgement is required if the job changes, a different job is
+    /// inserted ahead, or the acknowledgement expires.
+    /// </summary>
+    public Guid? AcknowledgedJobId { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when the acknowledgement was persisted.
+    /// </summary>
+    public DateTime? AcknowledgedAtUtc { get; set; }
+
+    /// <summary>
+    /// Subject of the operator who issued the acknowledgement.
+    /// </summary>
+    [MaxLength(256)]
+    public string? AcknowledgedBySubject { get; set; }
+
+    /// <summary>
+    /// Stable caller-supplied idempotency key for the acknowledge request,
+    /// kept for exact-replay detection (returns 200 instead of re-consuming).
+    /// </summary>
+    [MaxLength(512)]
+    public string? AcknowledgementIdempotencyKey { get; set; }
+
+    /// <summary>
+    /// UTC timestamp after which this acknowledgement must not be consumed.
+    /// Computed at write time as a configurable offset from <see cref="AcknowledgedAtUtc"/>.
+    /// </summary>
+    public DateTime? AcknowledgementExpiresAtUtc { get; set; }
+
+    // =========================================================================
+    // Issue #900: Active job / dispatch-attempt tracking
+    // =========================================================================
+
+    /// <summary>
+    /// The print job currently Starting/Printing on this printer.
+    /// Written atomically by the dispatch claim transaction.
+    /// </summary>
+    public Guid? ActiveJobId { get; set; }
+
+    /// <summary>
+    /// The dispatch-attempt record for the currently active start.
+    /// Null when no job is Starting/Printing.
+    /// </summary>
+    public Guid? ActiveDispatchAttemptId { get; set; }
 }
