@@ -19,6 +19,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly IWorkerStateService _workerState;
     private readonly string _workingDirectory;
     private readonly string _orcaSlicerBinaryPath;
+    private readonly Uri _apiBaseUri;
 
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
     {
@@ -31,6 +32,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
+        string apiBaseUrl = configuration["SlicerApi:BaseUrl"]
+            ?? configuration["Worker:ApiBaseUrl"]
+            ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
+            ?? "http://localhost:5245";
+        if (!Uri.TryCreate(apiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? apiBaseUri))
+        {
+            throw new InvalidOperationException($"The slicer API base URL '{apiBaseUrl}' is not a valid absolute URI.");
+        }
+
+        _apiBaseUri = apiBaseUri;
         if (!Directory.Exists(_workingDirectory))
         {
             _ = Directory.CreateDirectory(_workingDirectory);
@@ -118,17 +129,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task<string> FetchStlFileAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
-        WorkerState workerState = _workerState.GetWorkerState();
-        Guid? serviceId = workerState.RegisteredServiceId;
-        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
-        {
-            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
-        }
-
-        using HttpRequestMessage request = new(HttpMethod.Get, job.ModelFileUrl);
-        request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-        request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
-        request.Headers.Add(WorkerClaimHeaders.ClaimToken, job.ClaimToken.ToString());
+        using HttpRequestMessage request =
+            CreateModelDownloadRequest(job.ModelFileUrl.ToString(), job.ClaimToken);
         HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         _ = response.EnsureSuccessStatusCode();
         string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
@@ -155,13 +157,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string workDir,
         CancellationToken cancellationToken)
     {
-        WorkerState workerState = _workerState.GetWorkerState();
-        Guid? serviceId = workerState.RegisteredServiceId;
-        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
-        {
-            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
-        }
-
         List<string> downloadedPaths = new(modelUrls.Count);
         for (int i = 0; i < modelUrls.Count; i++)
         {
@@ -194,10 +189,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
             }
 
-            using HttpRequestMessage request = new(HttpMethod.Get, url);
-            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
-            request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+            using HttpRequestMessage request = CreateModelDownloadRequest(url, claimToken);
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             _ = response.EnsureSuccessStatusCode();
             await using FileStream fileStream = File.Create(destPath);
@@ -207,6 +199,31 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return downloadedPaths;
+    }
+
+    internal HttpRequestMessage CreateModelDownloadRequest(string modelUrl, Guid claimToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelUrl);
+        if (claimToken == Guid.Empty)
+        {
+            throw new InvalidOperationException("A claim token is required to download a model.");
+        }
+
+        WorkerState workerState = _workerState.GetWorkerState();
+        Guid? serviceId = workerState.RegisteredServiceId;
+        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
+        {
+            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
+        }
+
+        Uri requestUri = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri)
+            ? absoluteUri
+            : new Uri(_apiBaseUri, modelUrl);
+        var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
+        request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+        return request;
     }
 
     private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
