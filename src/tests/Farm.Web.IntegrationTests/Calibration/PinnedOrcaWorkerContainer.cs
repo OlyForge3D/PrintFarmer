@@ -142,6 +142,7 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
             "--env", $"SlicerRegistry__ApiBaseUrl={apiBaseAddress}",
             "--env", $"Worker__ApiBaseUrl={apiBaseAddress}",
             "--env", $"Worker__StorageEndpoint={apiBaseAddress}",
+            "--env", "Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer",
             "--env", $"SlicerRegistry__Host={workerAddress}",
             "--env", $"SlicerRegistry__ServiceName={containerName}",
             "--env", $"SlicerRegistry__InstanceId={containerName}",
