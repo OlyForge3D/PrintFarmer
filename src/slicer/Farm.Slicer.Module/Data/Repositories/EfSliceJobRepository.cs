@@ -485,7 +485,9 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     /// <inheritdoc/>
     public async Task<bool> TryRecoverExpiredLeaseAsync(
         Guid jobId,
+        Guid? expectedWorkerId,
         Guid? expectedClaimToken,
+        DateTime expectedLeaseExpiresAt,
         int maxRetries,
         CancellationToken ct = default)
     {
@@ -493,9 +495,10 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         int updated = await _db.SliceJobs
             .Where(job =>
                 job.Id == jobId &&
+                job.WorkerId == expectedWorkerId &&
                 job.ClaimToken == expectedClaimToken &&
                 job.Status == SliceJobStatus.Processing &&
-                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt == expectedLeaseExpiresAt &&
                 job.LeaseExpiresAt < now)
             .ExecuteUpdateAsync(
                 setters => setters

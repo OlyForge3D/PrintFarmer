@@ -105,7 +105,9 @@ public interface ISliceJobRepository
     /// </summary>
     Task<bool> TryRecoverExpiredLeaseAsync(
         Guid jobId,
+        Guid? expectedWorkerId,
         Guid? expectedClaimToken,
+        DateTime expectedLeaseExpiresAt,
         int maxRetries,
         CancellationToken ct = default);
 

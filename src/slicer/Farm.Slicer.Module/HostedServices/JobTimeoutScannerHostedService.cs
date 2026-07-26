@@ -150,7 +150,9 @@ public class JobTimeoutScannerHostedService : BackgroundService
             {
                 bool recovered = await repo.TryRecoverExpiredLeaseAsync(
                     job.Id,
+                    job.WorkerId,
                     job.ClaimToken,
+                    job.LeaseExpiresAt!.Value,
                     _retrySettings.MaxAttempts,
                     ct);
                 if (!recovered)

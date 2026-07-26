@@ -145,12 +145,20 @@ public class StubSliceJobRepository : ISliceJobRepository
         j.UpdatedAt = now;
         return Task.FromResult(true);
     }
-    public Task<bool> TryRecoverExpiredLeaseAsync(Guid jobId, Guid? expectedClaimToken, int maxRetries, CancellationToken ct = default)
+    public Task<bool> TryRecoverExpiredLeaseAsync(
+        Guid jobId,
+        Guid? expectedWorkerId,
+        Guid? expectedClaimToken,
+        DateTime expectedLeaseExpiresAt,
+        int maxRetries,
+        CancellationToken ct = default)
     {
         SliceJob? job = Jobs.Find(candidate =>
             candidate.Id == jobId &&
+            candidate.WorkerId == expectedWorkerId &&
             candidate.ClaimToken == expectedClaimToken &&
             candidate.Status == SliceJobStatus.Processing &&
+            candidate.LeaseExpiresAt == expectedLeaseExpiresAt &&
             candidate.LeaseExpiresAt < DateTime.UtcNow);
         if (job is null)
         {
