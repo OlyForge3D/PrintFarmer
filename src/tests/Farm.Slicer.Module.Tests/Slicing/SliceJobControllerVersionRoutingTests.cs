@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using System.Text.Json;
 using Farm.Slicer.Module.Api.Controllers.Slicing;
 using Farm.Slicer.Module.Contracts;
