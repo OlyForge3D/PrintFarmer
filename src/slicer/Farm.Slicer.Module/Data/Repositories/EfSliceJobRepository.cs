@@ -225,12 +225,13 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 
         // Base query: queued or expired lease
         IQueryable<SliceJob> baseQuery = _db.SliceJobs
+            .AsNoTracking()
             .Where(j => j.Status == SliceJobStatus.Queued ||
                        (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
             .OrderBy(j => j.Priority)
             .ThenBy(j => j.QueuedAt);
 
-        SliceJob? job;
+        IQueryable<SliceJob> compatible = baseQuery;
         if (capabilities != null && capabilities.Length > 0)
         {
             // Issue #578 dual-engine: push the capability match to the database so
@@ -238,37 +239,45 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             // jobs pinned to version Y. Job matches when its capability list is
             // empty/legacy (null/[]) OR when any advertised worker capability tag
             // appears as a quoted JSON string token in RequiredCapabilitiesJson.
-            IQueryable<SliceJob> compatible = baseQuery.Where(j =>
+            compatible = baseQuery.Where(j =>
                 j.RequiredCapabilitiesJson == null ||
                 j.RequiredCapabilitiesJson == string.Empty ||
                 j.RequiredCapabilitiesJson == "[]" ||
                 capabilities.Any(cap => EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
-
-            job = await compatible.FirstOrDefaultAsync(ct);
-            if (job == null)
-            {
-                return null;
-            }
         }
-        else
+
+        Guid? jobId = await compatible
+            .Select(job => (Guid?)job.Id)
+            .FirstOrDefaultAsync(ct);
+        if (jobId is null)
         {
-            job = await baseQuery.FirstOrDefaultAsync(ct);
-            if (job == null)
-            {
-                return null;
-            }
+            return null;
         }
 
-        // Atomically claim the job
-        job.Status = SliceJobStatus.Processing;
-        job.WorkerId = workerId;
-        job.ClaimedAt = now;
-        job.LeaseExpiresAt = leaseExpiration;
-        job.StartedAt ??= now;
-        job.UpdatedAt = now;
+        int claimed = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId.Value &&
+                (job.Status == SliceJobStatus.Queued ||
+                 (job.Status == SliceJobStatus.Processing &&
+                  job.LeaseExpiresAt != null &&
+                  job.LeaseExpiresAt < now)))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.Status, SliceJobStatus.Processing)
+                    .SetProperty(job => job.WorkerId, workerId)
+                    .SetProperty(job => job.ClaimedAt, now)
+                    .SetProperty(job => job.LeaseExpiresAt, leaseExpiration)
+                    .SetProperty(job => job.StartedAt, job => job.StartedAt ?? now)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        if (claimed == 0)
+        {
+            return null;
+        }
 
-        await SaveChangesAsync(ct);
-        return job;
+        return await _db.SliceJobs
+            .AsNoTracking()
+            .SingleAsync(job => job.Id == jobId.Value, ct);
     }
 
     /// <inheritdoc/>
