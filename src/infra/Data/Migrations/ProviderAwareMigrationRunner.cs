@@ -273,7 +273,7 @@ public static class ProviderAwareMigrationRunner
                     NormalizeIndexCollations(index.Columns, storeObject, defaultCollation),
                     index.IsUnique,
                     NormalizeSql(index.Filter),
-                    false)),
+                    SqliteIndexSource.Explicit)),
                 .. relationalTable.UniqueConstraints
                     .Where(constraint => constraint != relationalTable.PrimaryKey)
                     .Select(constraint => new IndexContract(
@@ -283,7 +283,13 @@ public static class ProviderAwareMigrationRunner
                         NormalizeIndexCollations(constraint.Columns, storeObject, defaultCollation),
                         true,
                         null,
-                        true)),
+                        SqliteIndexSource.UniqueConstraint)),
+                .. provider.Kind == ProviderKind.Sqlite
+                    ? BuildExpectedSqlitePrimaryKeyIndexes(
+                        relationalTable,
+                        storeObject,
+                        defaultCollation)
+                    : [],
             ];
             HashSet<ForeignKeyContract> foreignKeys =
             [
@@ -303,6 +309,32 @@ public static class ProviderAwareMigrationRunner
         }
 
         return new SchemaContract(tables);
+    }
+
+    private static IEnumerable<IndexContract> BuildExpectedSqlitePrimaryKeyIndexes(
+        ITable table,
+        StoreObjectIdentifier storeObject,
+        string defaultCollation)
+    {
+        IUniqueConstraint? primaryKey = table.PrimaryKey;
+        if (primaryKey is null ||
+            (primaryKey.Columns.Count == 1 &&
+             NormalizeStoreType(primaryKey.Columns[0].StoreType) == "INTEGER"))
+        {
+            return [];
+        }
+
+        return
+        [
+            new IndexContract(
+                null,
+                NormalizeIdentifiers(primaryKey.Columns.Select(column => column.Name)),
+                NormalizeIndexSortOrders(primaryKey.Columns.Count, null),
+                NormalizeIndexCollations(primaryKey.Columns, storeObject, defaultCollation),
+                true,
+                null,
+                SqliteIndexSource.PrimaryKey),
+        ];
     }
 
     private static async Task ValidateSchemaAsync(
@@ -521,25 +553,30 @@ public static class ProviderAwareMigrationRunner
         TableIdentifier table,
         CancellationToken cancellationToken)
     {
-        var indexMetadata = new List<(string Name, bool IsUnique, bool IsConstraint)>();
+        var indexMetadata = new List<(string Name, bool IsUnique, SqliteIndexSource Source)>();
         await using (DbCommand command = connection.CreateCommand())
         {
             command.CommandText =
-                "SELECT name, \"unique\", origin FROM pragma_index_list(@tableName) WHERE origin <> 'pk'";
+                "SELECT name, \"unique\", origin FROM pragma_index_list(@tableName)";
             AddParameter(command, "@tableName", table.Name);
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
                 string name = reader.GetString(0);
+                string origin = reader.GetString(2);
                 indexMetadata.Add((
                     name,
                     reader.GetInt32(1) == 1,
-                    string.Equals(reader.GetString(2), "u", StringComparison.OrdinalIgnoreCase)));
+                    origin.Equals("pk", StringComparison.OrdinalIgnoreCase)
+                        ? SqliteIndexSource.PrimaryKey
+                        : origin.Equals("u", StringComparison.OrdinalIgnoreCase)
+                            ? SqliteIndexSource.UniqueConstraint
+                            : SqliteIndexSource.Explicit));
             }
         }
 
         var indexes = new HashSet<IndexContract>();
-        foreach ((string name, bool isUnique, bool isConstraint) in indexMetadata)
+        foreach ((string name, bool isUnique, SqliteIndexSource source) in indexMetadata)
         {
             string? filter = await ReadSqliteIndexFilterAsync(connection, name, cancellationToken);
             var columns = new List<string>();
@@ -565,13 +602,13 @@ public static class ProviderAwareMigrationRunner
             }
 
             _ = indexes.Add(new IndexContract(
-                isConstraint ? null : NormalizeIdentifier(name),
+                source == SqliteIndexSource.Explicit ? NormalizeIdentifier(name) : null,
                 NormalizeIdentifiers(columns),
                 NormalizeIdentifiers(sortOrders),
                 NormalizeIdentifiers(collations),
                 isUnique,
                 filter,
-                isConstraint));
+                source));
         }
 
         return indexes;
@@ -956,7 +993,12 @@ public static class ProviderAwareMigrationRunner
         string indexType = index.IsUnique ? "unique index" : "index";
         string prefix = unexpected ? $"unexpected {indexType}" : indexType;
         string name = index.Name ?? "<sqlite-autoindex>";
-        string source = index.IsConstraint ? "constraint" : "explicit";
+        string source = index.Source switch
+        {
+            SqliteIndexSource.PrimaryKey => "primary key",
+            SqliteIndexSource.UniqueConstraint => "unique constraint",
+            _ => "explicit",
+        };
         return $"{table.DisplayName} ({prefix}: {index.Columns}) " +
                $"(name: {name}; sort: {index.SortOrders}; collation: {index.Collations}; source: {source})";
     }
@@ -1046,6 +1088,13 @@ public static class ProviderAwareMigrationRunner
         SqlServer,
     }
 
+    private enum SqliteIndexSource
+    {
+        Explicit,
+        UniqueConstraint,
+        PrimaryKey,
+    }
+
     private sealed record SupportedProvider(
         ProviderKind Kind,
         string DisplayName,
@@ -1080,7 +1129,7 @@ public static class ProviderAwareMigrationRunner
         string Collations,
         bool IsUnique,
         string? Filter,
-        bool IsConstraint);
+        SqliteIndexSource Source);
 
     private sealed record ForeignKeyContract(
         string PrincipalTable,

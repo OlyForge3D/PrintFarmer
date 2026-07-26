@@ -60,12 +60,26 @@ public class StubSliceJobRepository : ISliceJobRepository
         { stuck = stuck.GetRange(0, Math.Min(limit.Value, stuck.Count)); }
         return Task.FromResult((IReadOnlyList<SliceJob>)stuck);
     }
-    public Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
+    public Task<bool> RenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        int leaseDurationSeconds,
+        CancellationToken ct = default)
     {
         SliceJob? j = Jobs.Find(x => x.Id == jobId);
-        if (j != null)
-        { j.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
-        return Task.CompletedTask;
+        DateTime now = DateTime.UtcNow;
+        if (j is null ||
+            j.WorkerId != workerId ||
+            j.Status != SliceJobStatus.Processing ||
+            j.LeaseExpiresAt is null ||
+            j.LeaseExpiresAt <= now)
+        {
+            return Task.FromResult(false);
+        }
+
+        j.LeaseExpiresAt = now.AddSeconds(leaseDurationSeconds);
+        j.UpdatedAt = now;
+        return Task.FromResult(true);
     }
     public Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default)
     {

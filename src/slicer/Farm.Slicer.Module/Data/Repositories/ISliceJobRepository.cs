@@ -55,8 +55,14 @@ public interface ISliceJobRepository
     /// <summary>Finds jobs that are stuck (processing but lease expired or long-running).</summary>
     Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default);
 
-    /// <summary>Renews the lease for a job (extends <c>LeaseExpiresAt</c>).</summary>
-    Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default);
+    /// <summary>
+    /// Renews an active, unexpired lease when it is still owned by the specified worker.
+    /// </summary>
+    Task<bool> RenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        int leaseDurationSeconds,
+        CancellationToken ct = default);
 
     /// <summary>Increments retry count and requeues or fails the job.</summary>
     Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);

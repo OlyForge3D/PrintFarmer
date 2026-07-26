@@ -318,18 +318,28 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
-    public async Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default)
+    public async Task<bool> RenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        int leaseDurationSeconds,
+        CancellationToken ct = default)
     {
         ValidateLeaseDuration(leaseDurationSeconds);
-        SliceJob? job = await GetByIdAsync(jobId, ct);
-        if (job == null)
-        {
-            return;
-        }
-
-        job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds);
-        job.UpdatedAt = DateTime.UtcNow;
-        await SaveChangesAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        DateTime leaseExpiresAt = now.AddSeconds(leaseDurationSeconds);
+        int updated = await _db.SliceJobs
+            .Where(job =>
+                job.Id == jobId &&
+                job.WorkerId == workerId &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(job => job.LeaseExpiresAt, leaseExpiresAt)
+                    .SetProperty(job => job.UpdatedAt, now),
+                ct);
+        return updated == 1;
     }
 
     private static void ValidateLeaseDuration(int leaseDurationSeconds)

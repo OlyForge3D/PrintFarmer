@@ -155,6 +155,28 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongPrimaryKeyDirectionWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY DESC"""),
+            "RetryPolicies (unique index: ID) " +
+            "(name: <sqlite-autoindex>; sort: ASC; collation: BINARY; source: primary key)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongPrimaryKeyCollationWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT COLLATE NOCASE NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY"""),
+            "RetryPolicies (unique index: ID) " +
+            "(name: <sqlite-autoindex>; sort: ASC; collation: BINARY; source: primary key)");
+    }
+
+    [Fact]
     public Task CoreMigration_RejectsLegacySchemaWithWrongColumnTypeWithoutRecordingHistory()
     {
         return AssertCorruptedLegacySchemaRejectedAsync(
@@ -574,12 +596,14 @@ public sealed class DatabaseMigrationTests
         (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
     }
 
-    private static string BuildRetryPoliciesReplacementSql(string maxRetriesDefinition)
+    private static string BuildRetryPoliciesReplacementSql(
+        string maxRetriesDefinition,
+        string idDefinition = """TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY""")
     {
         return $"""
             PRAGMA foreign_keys = OFF;
             CREATE TABLE "RetryPolicies_replacement" (
-                "Id" TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY,
+                "Id" {idDefinition},
                 "IsEnabled" INTEGER NOT NULL DEFAULT 1,
                 "MaxRetries" {maxRetriesDefinition},
                 "InitialDelaySeconds" INTEGER NOT NULL DEFAULT 60,

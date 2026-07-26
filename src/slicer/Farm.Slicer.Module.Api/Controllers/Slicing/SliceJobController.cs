@@ -538,20 +538,23 @@ public partial class SliceJobController(
             return SlicerApiProblems.AuthenticationRequired(this);
         }
 
+        bool renewed = await _jobRepository.RenewLeaseAsync(
+            id,
+            worker.Id,
+            request.LeaseDurationSeconds,
+            ct);
+        if (renewed)
+        {
+            return NoContent();
+        }
+
         SliceJob? job = await _jobRepository.GetByIdAsync(id, ct);
         if (job is null)
         {
             return NotFound();
         }
 
-        if (!CanWorkerAccess(job, worker))
-        {
-            return SlicerApiProblems.ResourceForbidden(this);
-        }
-
-        await _jobRepository.RenewLeaseAsync(id, request.LeaseDurationSeconds, ct);
-
-        return NoContent();
+        return SlicerApiProblems.ResourceForbidden(this);
     }
 
     /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>

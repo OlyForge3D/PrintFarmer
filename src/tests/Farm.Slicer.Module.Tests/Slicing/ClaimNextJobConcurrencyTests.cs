@@ -85,6 +85,48 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
             .Should().Be(2);
     }
 
+    [Fact]
+    public async Task RenewLeaseAsync_ConcurrentReassignment_PreviousWorkerCannotExtendLease()
+    {
+        string connectionString = $"Data Source={_databasePath};Cache=Shared;Default Timeout=10";
+        Guid originalWorker = Guid.NewGuid();
+        Guid newWorker = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        await using (SlicerDbContext setup = CreateContext(connectionString))
+        {
+            _ = await setup.Database.EnsureCreatedAsync();
+            _ = setup.SliceJobs.Add(new SliceJob
+            {
+                Id = jobId,
+                Status = SliceJobStatus.Processing,
+                WorkerId = originalWorker,
+                LeaseExpiresAt = DateTime.UtcNow.AddMinutes(1),
+            });
+            _ = await setup.SaveChangesAsync();
+        }
+
+        await using SlicerDbContext staleContext = CreateContext(connectionString);
+        var staleRepository = new EfSliceJobRepository(staleContext);
+        _ = await staleRepository.GetByIdAsync(jobId);
+        DateTime reassignedLease = DateTime.UtcNow.AddMinutes(5);
+        await using (SlicerDbContext reassignmentContext = CreateContext(connectionString))
+        {
+            _ = await reassignmentContext.SliceJobs
+                .Where(job => job.Id == jobId)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(job => job.WorkerId, newWorker)
+                    .SetProperty(job => job.LeaseExpiresAt, reassignedLease));
+        }
+
+        bool renewed = await staleRepository.RenewLeaseAsync(jobId, originalWorker, 300);
+
+        renewed.Should().BeFalse();
+        await using SlicerDbContext verification = CreateContext(connectionString);
+        SliceJob persisted = await verification.SliceJobs.AsNoTracking().SingleAsync();
+        persisted.WorkerId.Should().Be(newWorker);
+        persisted.LeaseExpiresAt.Should().BeCloseTo(reassignedLease, TimeSpan.FromMilliseconds(1));
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
