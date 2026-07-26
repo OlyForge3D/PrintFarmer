@@ -175,6 +175,7 @@ public sealed class DatabaseMigrationTests
                 "IsActive" INTEGER NOT NULL,
                 "CreatedAt" TEXT NOT NULL,
                 "UpdatedAt" TEXT NOT NULL
+                /* CHECK ("Code" = UPPER("Code")) */
             );
             DROP TABLE "Bins";
             ALTER TABLE "Bins_replacement" RENAME TO "Bins";

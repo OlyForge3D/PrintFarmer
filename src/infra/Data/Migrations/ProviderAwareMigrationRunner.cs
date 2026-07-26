@@ -1,5 +1,6 @@
 ﻿using System.Data;
 using System.Data.Common;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -619,6 +620,7 @@ public static class ProviderAwareMigrationRunner
     private static HashSet<CheckConstraintContract> ExtractSqliteCheckConstraints(
         string createTableSql)
     {
+        createTableSql = RemoveSqlComments(createTableSql);
         var constraints = new HashSet<CheckConstraintContract>();
         int index = 0;
         while (index <= createTableSql.Length - 5)
@@ -663,6 +665,76 @@ public static class ProviderAwareMigrationRunner
         }
 
         return constraints;
+    }
+
+    private static string RemoveSqlComments(string sql)
+    {
+        var result = new StringBuilder(sql.Length);
+        char closingQuote = '\0';
+        int index = 0;
+        while (index < sql.Length)
+        {
+            char character = sql[index];
+            if (closingQuote != '\0')
+            {
+                _ = result.Append(character);
+                if (character != closingQuote)
+                {
+                    index++;
+                    continue;
+                }
+
+                if (index + 1 < sql.Length && sql[index + 1] == closingQuote)
+                {
+                    _ = result.Append(sql[index + 1]);
+                    index += 2;
+                    continue;
+                }
+
+                closingQuote = '\0';
+                index++;
+                continue;
+            }
+
+            if (character == '-' && index + 1 < sql.Length && sql[index + 1] == '-')
+            {
+                _ = result.Append(' ');
+                index += 2;
+                while (index < sql.Length && sql[index] is not '\r' and not '\n')
+                {
+                    index++;
+                }
+
+                continue;
+            }
+
+            if (character == '/' && index + 1 < sql.Length && sql[index + 1] == '*')
+            {
+                _ = result.Append(' ');
+                index += 2;
+                while (index + 1 < sql.Length &&
+                       (sql[index] != '*' || sql[index + 1] != '/'))
+                {
+                    index++;
+                }
+
+                index = Math.Min(index + 2, sql.Length);
+                continue;
+            }
+
+            closingQuote = character switch
+            {
+                '\'' => '\'',
+                '"' => '"',
+                '`' => '`',
+                '[' => ']',
+                _ => '\0',
+            };
+            _ = result.Append(character);
+            index++;
+        }
+
+        return result.ToString();
     }
 
     private static int FindSqlClosingParenthesis(string sql, int openingParenthesis)
