@@ -105,9 +105,10 @@ jobs:
         if: steps.check.outputs.skip != 'true'
         run: |
           chmod +x scripts/verify-orcaslicer-worker.sh
-          docker run -d --name orca-test-${{ matrix.orca_version }} orcaslicer-worker:strict-${{ matrix.orca_version }}
-          sleep 6
-          scripts/verify-orcaslicer-worker.sh require-real
+          scripts/verify-orcaslicer-worker.sh \
+            require-real \
+            orcaslicer-worker:strict-${{ matrix.orca_version }} \
+            orca-test-${{ matrix.orca_version }}
 
       - name: Show logs on failure
         if: steps.check.outputs.skip != 'true' && failure()
