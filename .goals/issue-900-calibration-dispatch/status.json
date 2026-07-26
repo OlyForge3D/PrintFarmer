@@ -1,6 +1,6 @@
 {
   "goal_id": "issue-900-calibration-dispatch",
-  "status": "building",
+  "status": "inspecting",
   "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -24,6 +24,12 @@
       "iteration": 3,
       "verdict": "FAIL",
       "summary": "Coordinator and read-only audit found critical ack, dispatch, fencing, outbox, reconciliation, auth/audit, ETag and test gaps; Inspector PASS overridden."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Outbox BackendStartCommand fires background task fire-and-forget before completion, losing durable guarantees on crash. UTC.Ticks sequence not collision-free. Tests SQLite-only, not PostgreSQL/SQL Server. Reconciliation, auth immutability guard, authorization audit missing. 6 production-safety gaps require fixes.",
+      "timestamp": "2026-07-26T10:56:01.798-07:00"
     }
   ]
 }
