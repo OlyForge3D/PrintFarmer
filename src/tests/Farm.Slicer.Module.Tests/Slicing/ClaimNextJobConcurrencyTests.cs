@@ -51,6 +51,38 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         persisted.WorkerId.Should().Be(winner.WorkerId);
     }
 
+    [Fact]
+    public async Task ClaimNextJobAsync_TwoConcurrentWorkersAndTwoJobs_BothClaimDistinctJobs()
+    {
+        string connectionString = $"Data Source={_databasePath};Cache=Shared;Default Timeout=10";
+        await using (SlicerDbContext setup = CreateContext(connectionString))
+        {
+            _ = await setup.Database.EnsureCreatedAsync();
+            DateTime firstQueuedAt = DateTime.UtcNow.AddMinutes(-1);
+            _ = setup.SliceJobs.Add(CreateQueuedJob(firstQueuedAt));
+            _ = setup.SliceJobs.Add(CreateQueuedJob(firstQueuedAt.AddSeconds(1)));
+            _ = await setup.SaveChangesAsync();
+        }
+
+        var rendezvous = new SelectRendezvous();
+        await using SlicerDbContext firstContext =
+            CreateContext(connectionString, new CandidateSelectInterceptor(rendezvous));
+        await using SlicerDbContext secondContext =
+            CreateContext(connectionString, new CandidateSelectInterceptor(rendezvous));
+        var firstRepository = new EfSliceJobRepository(firstContext);
+        var secondRepository = new EfSliceJobRepository(secondContext);
+
+        SliceJob?[] claims = await Task.WhenAll(
+            firstRepository.ClaimNextJobAsync(Guid.NewGuid(), ["orcaslicer"], 30),
+            secondRepository.ClaimNextJobAsync(Guid.NewGuid(), ["orcaslicer"], 30));
+
+        claims.Should().OnlyContain(claim => claim != null);
+        claims.Select(claim => claim!.Id).Should().OnlyHaveUniqueItems();
+        await using SlicerDbContext verification = CreateContext(connectionString);
+        (await verification.SliceJobs.CountAsync(job => job.Status == SliceJobStatus.Processing))
+            .Should().Be(2);
+    }
+
     public ValueTask DisposeAsync()
     {
         SqliteConnection.ClearAllPools();
@@ -77,12 +109,12 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         return new SlicerDbContext(options.Options);
     }
 
-    private static SliceJob CreateQueuedJob() =>
+    private static SliceJob CreateQueuedJob(DateTime? queuedAt = null) =>
         new()
         {
             Id = Guid.NewGuid(),
             Status = SliceJobStatus.Queued,
-            QueuedAt = DateTime.UtcNow,
+            QueuedAt = queuedAt ?? DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             UserId = Guid.NewGuid(),
             ModelFileName = "model.stl",
