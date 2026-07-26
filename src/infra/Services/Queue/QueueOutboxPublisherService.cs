@@ -68,7 +68,7 @@ public sealed class QueueOutboxPublisherService(
 
         foreach (QueueDispatchOutbox evt in events)
         {
-            await ProcessSingleEventAsync(evt, db, ct);
+            await ProcessSingleEventAsync(evt, ct);
         }
 
         await db.SaveChangesAsync(ct);
