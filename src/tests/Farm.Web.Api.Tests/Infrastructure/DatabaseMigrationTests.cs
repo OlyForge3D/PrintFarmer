@@ -116,6 +116,45 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexNameWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_FileHealthAudits_AuditType";
+            CREATE INDEX "IX_FileHealthAudits_AuditType_Wrong"
+                ON "FileHealthAudits" ("AuditType");
+            """,
+            "FileHealthAudits (index: AUDITTYPE) " +
+            "(name: IX_FILEHEALTHAUDITS_AUDITTYPE; sort: ASC; collation: BINARY; source: explicit)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexDirectionWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_FileHealthAudits_AuditType_AuditDate";
+            CREATE INDEX "IX_FileHealthAudits_AuditType_AuditDate"
+                ON "FileHealthAudits" ("AuditType" ASC, "AuditDate" ASC);
+            """,
+            "FileHealthAudits (index: AUDITTYPE|AUDITDATE) " +
+            "(name: IX_FILEHEALTHAUDITS_AUDITTYPE_AUDITDATE; sort: ASC|DESC; " +
+            "collation: BINARY|BINARY; source: explicit)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexCollationWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_Bins_Code";
+            CREATE UNIQUE INDEX "IX_Bins_Code" ON "Bins" ("Code" COLLATE NOCASE);
+            """,
+            "Bins (unique index: CODE) " +
+            "(name: IX_BINS_CODE; sort: ASC; collation: BINARY; source: explicit)");
+    }
+
+    [Fact]
     public Task CoreMigration_RejectsLegacySchemaWithWrongColumnTypeWithoutRecordingHistory()
     {
         return AssertCorruptedLegacySchemaRejectedAsync(

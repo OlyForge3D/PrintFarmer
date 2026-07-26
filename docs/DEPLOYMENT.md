@@ -201,10 +201,10 @@ sqlcmd -S "$SQLSERVER_HOST" -Q \
 Previously supported SQLite databases created with `EnsureCreated` and without
 migration history are adopted only when the complete relational fingerprint
 matches the current model. Validation covers table and column names, store
-types, nullability, defaults, primary keys, unique and filtered indexes, foreign
-keys, foreign-key update and delete actions, and check constraints. The
-migration-history baseline is then recorded transactionally without rewriting
-application data.
+types, nullability, defaults, primary keys, index names, uniqueness, filters,
+sort order and collation, foreign keys, foreign-key update and delete actions,
+and check constraints. The migration-history baseline is then recorded
+transactionally without rewriting application data.
 
 No-history PostgreSQL and SQL Server databases are not adopted because a local
 fingerprint cannot safely establish their migration provenance. Restore a

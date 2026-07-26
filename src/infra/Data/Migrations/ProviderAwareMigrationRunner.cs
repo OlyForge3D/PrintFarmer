@@ -236,6 +236,7 @@ public static class ProviderAwareMigrationRunner
     private static SchemaContract BuildExpectedSchema(DbContext context, SupportedProvider provider)
     {
         IModel designTimeModel = context.GetService<IDesignTimeModel>().Model;
+        string defaultCollation = NormalizeCollation(designTimeModel.GetCollation());
         var tables = new Dictionary<TableIdentifier, TableContract>();
         foreach (ITable relationalTable in designTimeModel.GetRelationalModel().Tables)
         {
@@ -244,6 +245,8 @@ public static class ProviderAwareMigrationRunner
                 continue;
             }
 
+            StoreObjectIdentifier storeObject =
+                StoreObjectIdentifier.Table(relationalTable.Name, relationalTable.Schema);
             string? schema = provider.Kind == ProviderKind.Sqlite
                 ? null
                 : relationalTable.Schema ?? designTimeModel.GetDefaultSchema() ?? provider.DefaultSchema;
@@ -264,15 +267,23 @@ public static class ProviderAwareMigrationRunner
             HashSet<IndexContract> indexes =
             [
                 .. relationalTable.Indexes.Select(index => new IndexContract(
+                    NormalizeIdentifier(index.Name),
                     NormalizeIdentifiers(index.Columns.Select(column => column.Name)),
+                    NormalizeIndexSortOrders(index.Columns.Count, index.IsDescending),
+                    NormalizeIndexCollations(index.Columns, storeObject, defaultCollation),
                     index.IsUnique,
-                    NormalizeSql(index.Filter))),
+                    NormalizeSql(index.Filter),
+                    false)),
                 .. relationalTable.UniqueConstraints
                     .Where(constraint => constraint != relationalTable.PrimaryKey)
                     .Select(constraint => new IndexContract(
+                        null,
                         NormalizeIdentifiers(constraint.Columns.Select(column => column.Name)),
+                        NormalizeIndexSortOrders(constraint.Columns.Count, null),
+                        NormalizeIndexCollations(constraint.Columns, storeObject, defaultCollation),
                         true,
-                        null)),
+                        null,
+                        true)),
             ];
             HashSet<ForeignKeyContract> foreignKeys =
             [
@@ -510,7 +521,7 @@ public static class ProviderAwareMigrationRunner
         TableIdentifier table,
         CancellationToken cancellationToken)
     {
-        var indexMetadata = new List<(string Name, bool IsUnique)>();
+        var indexMetadata = new List<(string Name, bool IsUnique, bool IsConstraint)>();
         await using (DbCommand command = connection.CreateCommand())
         {
             command.CommandText =
@@ -520,28 +531,47 @@ public static class ProviderAwareMigrationRunner
             while (await reader.ReadAsync(cancellationToken))
             {
                 string name = reader.GetString(0);
-                indexMetadata.Add((name, reader.GetInt32(1) == 1));
+                indexMetadata.Add((
+                    name,
+                    reader.GetInt32(1) == 1,
+                    string.Equals(reader.GetString(2), "u", StringComparison.OrdinalIgnoreCase)));
             }
         }
 
         var indexes = new HashSet<IndexContract>();
-        foreach ((string name, bool isUnique) in indexMetadata)
+        foreach ((string name, bool isUnique, bool isConstraint) in indexMetadata)
         {
             string? filter = await ReadSqliteIndexFilterAsync(connection, name, cancellationToken);
             var columns = new List<string>();
+            var sortOrders = new List<string>();
+            var collations = new List<string>();
             await using DbCommand command = connection.CreateCommand();
-            command.CommandText = "SELECT name FROM pragma_index_info(@indexName) ORDER BY seqno";
+            command.CommandText =
+                """
+                SELECT name, "desc", coll
+                FROM pragma_index_xinfo(@indexName)
+                WHERE key = 1
+                ORDER BY seqno
+                """;
             AddParameter(command, "@indexName", name);
             await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                columns.Add(reader.GetString(0));
+                bool isExpression = await reader.IsDBNullAsync(0, cancellationToken);
+                bool hasCollation = !await reader.IsDBNullAsync(2, cancellationToken);
+                columns.Add(isExpression ? "<expression>" : reader.GetString(0));
+                sortOrders.Add(reader.GetInt32(1) == 1 ? "DESC" : "ASC");
+                collations.Add(NormalizeCollation(hasCollation ? reader.GetString(2) : null));
             }
 
             _ = indexes.Add(new IndexContract(
+                isConstraint ? null : NormalizeIdentifier(name),
                 NormalizeIdentifiers(columns),
+                NormalizeIdentifiers(sortOrders),
+                NormalizeIdentifiers(collations),
                 isUnique,
-                filter));
+                filter,
+                isConstraint));
         }
 
         return indexes;
@@ -847,19 +877,11 @@ public static class ProviderAwareMigrationRunner
         mismatches.AddRange(
             expected.Indexes
                 .Where(index => !actual.Indexes.Contains(index))
-                .Select(index => $"{table.DisplayName} ({index.IsUnique switch
-                {
-                    true => "unique index",
-                    false => "index",
-                }}: {index.Columns})"));
+                .Select(index => DescribeIndex(table, index, unexpected: false)));
         mismatches.AddRange(
             actual.Indexes
                 .Where(index => !expected.Indexes.Contains(index))
-                .Select(index => $"{table.DisplayName} (unexpected {index.IsUnique switch
-                {
-                    true => "unique index",
-                    false => "index",
-                }}: {index.Columns})"));
+                .Select(index => DescribeIndex(table, index, unexpected: true)));
         mismatches.AddRange(
             expected.ForeignKeys
                 .Where(foreignKey => !actual.ForeignKeys.Contains(foreignKey))
@@ -901,6 +923,43 @@ public static class ProviderAwareMigrationRunner
 
     private static string NormalizeIdentifiers(IEnumerable<string> identifiers) =>
         string.Join("|", identifiers.Select(NormalizeIdentifier));
+
+    private static string NormalizeIndexSortOrders(
+        int columnCount,
+        IReadOnlyList<bool>? isDescending) =>
+        string.Join(
+            "|",
+            Enumerable.Range(0, columnCount).Select(index =>
+                isDescending is not null &&
+                (isDescending.Count == 0 || isDescending[index])
+                    ? "DESC"
+                    : "ASC"));
+
+    private static string NormalizeIndexCollations(
+        IEnumerable<IColumn> columns,
+        StoreObjectIdentifier storeObject,
+        string defaultCollation) =>
+        NormalizeIdentifiers(columns.Select(column =>
+            column.PropertyMappings
+                .Select(mapping => mapping.Property.GetCollation(storeObject))
+                .FirstOrDefault(collation => !string.IsNullOrWhiteSpace(collation))
+            ?? defaultCollation));
+
+    private static string NormalizeCollation(string? collation) =>
+        NormalizeIdentifier(string.IsNullOrWhiteSpace(collation) ? "BINARY" : collation);
+
+    private static string DescribeIndex(
+        TableIdentifier table,
+        IndexContract index,
+        bool unexpected)
+    {
+        string indexType = index.IsUnique ? "unique index" : "index";
+        string prefix = unexpected ? $"unexpected {indexType}" : indexType;
+        string name = index.Name ?? "<sqlite-autoindex>";
+        string source = index.IsConstraint ? "constraint" : "explicit";
+        return $"{table.DisplayName} ({prefix}: {index.Columns}) " +
+               $"(name: {name}; sort: {index.SortOrders}; collation: {index.Collations}; source: {source})";
+    }
 
     private static string NormalizeStoreType(string storeType) =>
         string.Concat(storeType.Where(character => !char.IsWhiteSpace(character)))
@@ -1014,7 +1073,14 @@ public static class ProviderAwareMigrationRunner
         string? DefaultSql,
         int PrimaryKeyOrdinal);
 
-    private sealed record IndexContract(string Columns, bool IsUnique, string? Filter);
+    private sealed record IndexContract(
+        string? Name,
+        string Columns,
+        string SortOrders,
+        string Collations,
+        bool IsUnique,
+        string? Filter,
+        bool IsConstraint);
 
     private sealed record ForeignKeyContract(
         string PrincipalTable,
