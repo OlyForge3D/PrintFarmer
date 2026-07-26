@@ -61,11 +61,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     private static DispatchClaimService CreateClaimService(
         AppDbContext db,
         IPrinterStatusSnapshotReader? statusReader = null,
-        IOutboxSequenceAllocator? allocator = null)
+        IDbOutboxSequenceAllocator? allocator = null)
     {
         IPrinterStatusSnapshotReader reader = statusReader ?? Mock.Of<IPrinterStatusSnapshotReader>(
             r => r.GetStatusSnapshot(It.IsAny<Guid>()) == null);
-        allocator ??= new OutboxSequenceAllocator();
+        allocator ??= new DbOutboxSequenceAllocator();
         return new DispatchClaimService(db, reader, allocator, NullLogger<DispatchClaimService>.Instance);
     }
 
@@ -84,9 +84,9 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             r => r.GetStatusSnapshot(printerId) == snapshot);
     }
 
-    private static BedClearAcknowledgementService CreateAckService(AppDbContext db, IOutboxSequenceAllocator? allocator = null)
+    private static BedClearAcknowledgementService CreateAckService(AppDbContext db, IDbOutboxSequenceAllocator? allocator = null)
     {
-        allocator ??= new OutboxSequenceAllocator();
+        allocator ??= new DbOutboxSequenceAllocator();
         return new(db, allocator, NullLogger<BedClearAcknowledgementService>.Instance);
     }
 
@@ -653,25 +653,22 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     }
 
     // =========================================================================
-    // Test 10: Outbox Sequence is monotonically increasing from allocator
+    // Test 10: Outbox Sequence is monotonically increasing — DB-backed cross-process
     // =========================================================================
 
     [Fact]
     public async Task OutboxEvent_SequenceIsMonotonicallyIncreasing_AcrossMultipleWrites()
     {
-        // Arrange: calibration job with valid ack; use shared allocator to write
-        // two outbox events and verify they have distinct, ascending sequences.
+        // Arrange: calibration job with valid ack; the DB-backed allocator writes two
+        // outbox events that must have distinct, ascending sequences.
         await using AppDbContext seedCtx = CreateContext();
         (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx);
-
-        var sharedAllocator = new OutboxSequenceAllocator();
-        sharedAllocator.Seed(0); // Start from 0 explicitly.
 
         // Write first outbox event via ack (BackendStartCommand).
         await using AppDbContext ackCtx = CreateContext();
         PrinterDispatchState? ds1 = await ackCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        var ackSvc = CreateAckService(ackCtx, sharedAllocator);
+        var ackSvc = CreateAckService(ackCtx);
         AcknowledgeBedClearResult ack1 = await ackSvc.AcknowledgeAsync(
             new AcknowledgeBedClearRequest(jobId1, printerId, "actor", "mono-key-1", ds1!.RowVersion, null));
         ack1.Outcome.Should().Be(BedClearAckOutcome.Accepted);
@@ -686,7 +683,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         await ackPreCtx.SaveChangesAsync();
 
         await using AppDbContext claimCtx = CreateContext();
-        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId), sharedAllocator);
+        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
         await claimSvc.AcquireClaimAsync(
             new DispatchClaimRequest(jobId1, printerId, "actor", "BedClear", "claim-key-1", null, null));
 
@@ -770,6 +767,234 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         recovered!.Status.Should().Be(QueueOutboxEventStatus.Pending,
             "stale Processing events must be recovered to Pending by crash-recovery logic");
         recovered.LastError.Should().Contain("Recovered from stale lease");
+    }
+
+    // =========================================================================
+    // Test 12: DB-backed sequence allocator — two concurrent DbContexts cannot
+    //          produce duplicate sequence values (cross-process safety proof).
+    // =========================================================================
+
+    /// <summary>
+    /// Critical cross-process test: two separate <see cref="AppDbContext"/> instances
+    /// (simulating two API processes) both attempt to allocate a sequence and write
+    /// an outbox event concurrently. Only one transaction can commit the
+    /// <c>OutboxSequenceState</c> counter update; the other must receive a
+    /// <c>DbUpdateConcurrencyException</c> and roll back. This proves that the
+    /// DB-backed allocator prevents duplicate sequences across processes.
+    /// </summary>
+    [Fact]
+    public async Task DbSequenceAllocator_TwoConcurrentContexts_ProduceUniqueSequences()
+    {
+        // Arrange: seed a database with OutboxSequenceState + one calibration job.
+        await using AppDbContext seedCtx = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
+
+        // Verify the seed row exists.
+        OutboxSequenceState? seedState = await seedCtx.OutboxSequenceStates.SingleOrDefaultAsync();
+        seedState.Should().NotBeNull("OutboxSequenceState seed row must be created by EnsureCreated");
+        seedState!.NextSequence.Should().Be(0, "fresh database should start at 0");
+
+        // Arrange two separate DbContexts + allocators (simulating two API processes).
+        await using AppDbContext ctx1 = CreateContext();
+        await using AppDbContext ctx2 = CreateContext();
+
+        var alloc1 = new DbOutboxSequenceAllocator();
+        var alloc2 = new DbOutboxSequenceAllocator();
+
+        // Both allocate a sequence and build an outbox event (before any save).
+        long seq1 = await alloc1.AllocateAsync(ctx1);
+        long seq2 = await alloc2.AllocateAsync(ctx2);
+
+        // Both loaded the same counter row with NextSequence=0 → both increment to 1.
+        seq1.Should().Be(1, "first allocation from fresh counter should be 1");
+        seq2.Should().Be(1, "second context also starts from the same persisted value");
+
+        // Both try to write an outbox event with the same sequence → race condition.
+        ctx1.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = seq1,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            EventType = "PrintFarmer.Queue.Test.v1",
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        ctx2.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = seq2,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            EventType = "PrintFarmer.Queue.Test.v1",
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+
+        // Act: save both concurrently.
+        Task<int> t1 = ctx1.SaveChangesAsync();
+        Task<int> t2 = ctx2.SaveChangesAsync();
+
+        // One must succeed, the other must throw DbUpdateConcurrencyException.
+        Exception? exceptionFromLoser = null;
+        try
+        {
+            await Task.WhenAll(t1, t2);
+        }
+        catch (Exception ex)
+        {
+            exceptionFromLoser = ex;
+        }
+
+        int successCount = (t1.Status == TaskStatus.RanToCompletion ? 1 : 0)
+                         + (t2.Status == TaskStatus.RanToCompletion ? 1 : 0);
+
+        // Assert: exactly one succeeded, one failed with concurrency conflict.
+        // (In some rare cases, SQLite serializes the writes at the DB level and both
+        // could succeed IF the unique index on Sequence also enforces uniqueness.
+        // We treat either "one concurrency error" or "one unique constraint violation"
+        // as proof that duplicate sequences cannot be silently committed.)
+        using (new FluentAssertions.Execution.AssertionScope())
+        {
+            successCount.Should().Be(1, "exactly one concurrent allocator must win");
+            exceptionFromLoser.Should().NotBeNull("the losing context must throw an exception");
+        }
+
+        // The winner wrote exactly one event with sequence=1.
+        await using AppDbContext verifyCtx = CreateContext();
+        List<long> sequences = await verifyCtx.QueueDispatchOutbox.Select(e => e.Sequence).ToListAsync();
+        sequences.Should().HaveCount(1, "only one outbox event must be committed");
+        sequences[0].Should().Be(1, "the winner's event must have sequence=1");
+
+        // Counter is now at 1.
+        OutboxSequenceState? finalState = await verifyCtx.OutboxSequenceStates.SingleAsync();
+        finalState.NextSequence.Should().Be(1, "counter must reflect the one successful increment");
+    }
+
+    // =========================================================================
+    // Test 13: DB-backed sequence allocator — sequential allocations in one context
+    //          produce strictly increasing unique values.
+    // =========================================================================
+
+    [Fact]
+    public async Task DbSequenceAllocator_SequentialAllocations_ProduceStrictlyIncreasing()
+    {
+        await using AppDbContext seedCtx = CreateContext();
+        await seedCtx.Database.EnsureCreatedAsync();
+
+        var alloc = new DbOutboxSequenceAllocator();
+
+        // Allocate three values sequentially in the same context — each must be unique.
+        long seq1 = await alloc.AllocateAsync(seedCtx);
+        long seq2 = await alloc.AllocateAsync(seedCtx);
+        long seq3 = await alloc.AllocateAsync(seedCtx);
+
+        seq1.Should().Be(1);
+        seq2.Should().Be(2);
+        seq3.Should().Be(3, "in-context sequential allocations must increment the in-memory counter");
+    }
+
+    // =========================================================================
+    // Test 14: QueueDispatchOutbox RowVersion enables atomic lease acquisition —
+    //          two consumers cannot both claim the same event as Processing.
+    // =========================================================================
+
+    [Fact]
+    public async Task OutboxConsumer_ConcurrentLeaseClaim_OnlyOneSucceeds()
+    {
+        // Arrange: insert a Pending outbox event with a known RowVersion.
+        await using AppDbContext seedCtx = CreateContext();
+        (_, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
+
+        var pendingEvt = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = 999,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        seedCtx.QueueDispatchOutbox.Add(pendingEvt);
+        await seedCtx.SaveChangesAsync();
+
+        // Two consumers both load the same Pending event.
+        await using AppDbContext consumerCtx1 = CreateContext();
+        await using AppDbContext consumerCtx2 = CreateContext();
+
+        QueueDispatchOutbox? evt1 = await consumerCtx1.QueueDispatchOutbox.FindAsync(pendingEvt.Id);
+        QueueDispatchOutbox? evt2 = await consumerCtx2.QueueDispatchOutbox.FindAsync(pendingEvt.Id);
+
+        // Both try to claim (set Processing).
+        evt1!.Status = QueueOutboxEventStatus.Processing;
+        evt1.AttemptCount++;
+
+        evt2!.Status = QueueOutboxEventStatus.Processing;
+        evt2.AttemptCount++;
+
+        // Save concurrently — only one must succeed.
+        Task<int> save1 = consumerCtx1.SaveChangesAsync();
+        Task<int> save2 = consumerCtx2.SaveChangesAsync();
+
+        Exception? exceptionFromLoser = null;
+        try
+        {
+            await Task.WhenAll(save1, save2);
+        }
+        catch (Exception ex)
+        {
+            exceptionFromLoser = ex;
+        }
+
+        int successCount = (save1.Status == TaskStatus.RanToCompletion ? 1 : 0)
+                         + (save2.Status == TaskStatus.RanToCompletion ? 1 : 0);
+
+        // Assert: exactly one consumer wins the lease.
+        successCount.Should().Be(1, "exactly one consumer must win the Processing lease");
+        exceptionFromLoser.Should().NotBeNull("the losing consumer must receive a concurrency exception");
+
+        // Verify: one attempt recorded, event is Processing.
+        await using AppDbContext verifyCtx = CreateContext();
+        QueueDispatchOutbox? claimed = await verifyCtx.QueueDispatchOutbox.FindAsync(pendingEvt.Id);
+        claimed!.Status.Should().Be(QueueOutboxEventStatus.Processing, "winner claimed the event");
+        claimed.AttemptCount.Should().Be(1, "only one attempt was counted");
+    }
+
+    // =========================================================================
+    // Test 15: Migration snapshot validation — OutboxSequenceState seeded row
+    //          is accessible via EnsureCreated (validates HasData configuration).
+    // =========================================================================
+
+    [Fact]
+    public async Task Migration_OutboxSequenceState_SeedRowIsCreatedByEnsureCreated()
+    {
+        // Arrange: fresh SQLite database using EnsureCreated (same as test harness).
+        await using AppDbContext ctx = CreateContext();
+        await ctx.Database.EnsureCreatedAsync();
+
+        // Assert: exactly one row with Id=1, NextSequence=0.
+        OutboxSequenceState? state = await ctx.OutboxSequenceStates.SingleOrDefaultAsync();
+        state.Should().NotBeNull("HasData must seed the OutboxSequenceState row");
+        state!.Id.Should().Be(1, "the single row always has Id=1");
+        state.NextSequence.Should().Be(0, "initial sequence is 0");
+        state.RowVersion.Should().BeNull("row version is null before first write");
+
+        // After a write, RowVersion must be stamped (non-null).
+        state.NextSequence = 1;
+        await ctx.SaveChangesAsync();
+
+        await using AppDbContext verifyCtx = CreateContext();
+        OutboxSequenceState? updated = await verifyCtx.OutboxSequenceStates.SingleAsync();
+        updated.NextSequence.Should().Be(1);
+        updated.RowVersion.Should().NotBeNull("StampRowVersions must generate a non-null token after first write");
+        updated.RowVersion!.Length.Should().Be(16, "RowVersion is a 16-byte GUID-derived token");
     }
 }
 

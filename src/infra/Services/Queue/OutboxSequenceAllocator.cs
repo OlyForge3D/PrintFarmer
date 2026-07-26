@@ -1,90 +1,43 @@
 ﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
-/// Process-local transactionally fenced sequence allocator for the durable queue outbox.
+/// Database-backed cross-process monotonic sequence allocator.
 ///
-/// Seeded from <c>MAX(Sequence)</c> in <c>QueueDispatchOutbox</c> at startup via
-/// <see cref="OutboxSequenceSeedService"/>, then incremented atomically with
-/// <see cref="System.Threading.Interlocked.Increment(ref long)"/> for each new event.
+/// Each call to <see cref="AllocateAsync"/> loads the single <see cref="OutboxSequenceState"/>
+/// row via the caller's <see cref="AppDbContext"/>, increments <c>NextSequence</c> in-memory,
+/// and returns the new value. Because the entity is tracked by the same context, the increment
+/// is committed atomically when the caller calls <c>SaveChangesAsync()</c> — in the same
+/// database transaction as the outbox event insert.
 ///
-/// A unique database index on <c>Sequence</c> enforces correctness: any collision
-/// (e.g., from a multi-process deployment without shared state) surfaces as a constraint
-/// violation rather than silent duplicate ordering.
+/// The <c>RowVersion</c> optimistic concurrency token on <see cref="OutboxSequenceState"/>
+/// ensures that two concurrent writers race-detect each other: the loser's
+/// <c>SaveChangesAsync()</c> throws <c>DbUpdateConcurrencyException</c> and the caller's
+/// existing exception handler maps this to a typed conflict response.
+///
+/// This replaces the former process-local <c>Interlocked.Increment</c> approach which
+/// could produce duplicate sequences when multiple API instances observed the same
+/// database maximum on startup.
 /// </summary>
-public sealed class OutboxSequenceAllocator : IOutboxSequenceAllocator
+public sealed class DbOutboxSequenceAllocator : IDbOutboxSequenceAllocator
 {
-    private long _counter;
-    private bool _seeded;
-    private readonly object _seedLock = new();
-
     /// <inheritdoc />
-    public void Seed(long currentDatabaseMax)
+    public async Task<long> AllocateAsync(AppDbContext db, CancellationToken ct = default)
     {
-        lock (_seedLock)
-        {
-            if (_seeded)
-            {
-                return;
-            }
+        ArgumentNullException.ThrowIfNull(db);
 
-            // Start one above the current DB maximum so post-crash restarts
-            // never re-use a sequence value that was already persisted.
-            _counter = Math.Max(currentDatabaseMax, 0);
-            _seeded = true;
-        }
+        // Load the single counter row (Id = 1). If already tracked in this context
+        // (e.g., a second allocation in the same unit of work), EF Core returns the
+        // cached — already-incremented — entity, so each call within a transaction
+        // produces a unique monotonically increasing value.
+        OutboxSequenceState state = await db.OutboxSequenceStates.SingleAsync(ct);
+        state.NextSequence++;
+
+        // Return the new value; the actual DB commit happens when the caller calls
+        // SaveChangesAsync() — together with the outbox event write.
+        return state.NextSequence;
     }
-
-    /// <inheritdoc />
-    public long Next()
-    {
-        return System.Threading.Interlocked.Increment(ref _counter);
-    }
-}
-
-/// <summary>
-/// Startup service that seeds the <see cref="OutboxSequenceAllocator"/> singleton from the
-/// current database maximum before any outbox events are written.
-/// Runs exactly once as a hosted service at application start.
-/// </summary>
-public sealed class OutboxSequenceSeedService(
-    IOutboxSequenceAllocator allocator,
-    IServiceScopeFactory scopeFactory,
-    ILogger<OutboxSequenceSeedService> logger) : IHostedService
-{
-    public async Task StartAsync(CancellationToken cancellationToken)
-    {
-        try
-        {
-            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-            long maxSeq = await db.QueueDispatchOutbox
-                .AsNoTracking()
-                .MaxAsync(e => (long?)e.Sequence, cancellationToken) ?? 0L;
-
-            allocator.Seed(maxSeq);
-
-            logger.LogInformation(
-                "[OutboxSequence] Sequence allocator seeded from DB max={Max}; next will be {Next}",
-                maxSeq,
-                maxSeq + 1);
-        }
-        catch (Exception ex)
-        {
-            // If the DB is unavailable on startup (first run), seed from 0.
-            // The unique index will catch any collisions.
-            logger.LogWarning(
-                ex,
-                "[OutboxSequence] Could not query DB max sequence; seeding from 0. If this is a fresh database, this is expected.");
-            allocator.Seed(0);
-        }
-    }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

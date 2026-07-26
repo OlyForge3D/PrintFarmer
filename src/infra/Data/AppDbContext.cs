@@ -291,6 +291,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     /// </summary>
     public DbSet<QueueDispatchAttempt> QueueDispatchAttempts => Set<QueueDispatchAttempt>();
 
+    /// <summary>
+    /// Single-row cross-process monotonic sequence counter for the outbox.
+    /// Incremented atomically in the same transaction as each outbox event write.
+    /// </summary>
+    public DbSet<OutboxSequenceState> OutboxSequenceStates => Set<OutboxSequenceState>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -334,7 +340,36 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(16)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
+
+            // Outbox event RowVersion: application-managed on SQLite/PostgreSQL.
+            _ = modelBuilder.Entity<QueueDispatchOutbox>()
+                .Property(o => o.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+
+            // OutboxSequenceState RowVersion: application-managed on SQLite/PostgreSQL.
+            _ = modelBuilder.Entity<OutboxSequenceState>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
         }
+        else
+        {
+            // SQL Server: RowVersion is a native database-generated ROWVERSION column.
+            _ = modelBuilder.Entity<QueueDispatchOutbox>()
+                .Property(o => o.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<OutboxSequenceState>()
+                .Property(s => s.RowVersion)
+                .IsRowVersion();
+        }
+
+        // Seed the single OutboxSequenceState row (Id = 1, NextSequence = 0).
+        // This row must exist before any outbox event can be written.
+        _ = modelBuilder.Entity<OutboxSequenceState>()
+            .HasData(new OutboxSequenceState { Id = 1, NextSequence = 0 });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
@@ -755,6 +790,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             }
 
             foreach (EntityEntry<PrinterDispatchState> entry in ChangeTracker.Entries<PrinterDispatchState>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            // Outbox events: stamp on every write for atomic lease detection.
+            foreach (EntityEntry<QueueDispatchOutbox> entry in ChangeTracker.Entries<QueueDispatchOutbox>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            // Sequence counter: stamp on every write so the concurrency check fires.
+            foreach (EntityEntry<OutboxSequenceState> entry in ChangeTracker.Entries<OutboxSequenceState>())
             {
                 if (entry.State is EntityState.Added or EntityState.Modified)
                 {

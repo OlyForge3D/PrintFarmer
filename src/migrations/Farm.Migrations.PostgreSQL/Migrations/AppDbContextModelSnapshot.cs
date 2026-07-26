@@ -4012,6 +4012,34 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("ObicoServers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("bytea");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OutboxSequenceStates");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            NextSequence = 0L
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -4461,7 +4489,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("bytea");
 
                     b.Property<Guid?>("SourceArtifactId")
@@ -5380,7 +5408,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("bytea");
 
                     b.HasKey("PrinterId");
@@ -5919,6 +5947,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("RetryAfterUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("bytea");
+
                     b.Property<string>("SchemaVersion")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -5932,12 +5965,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status", "RetryAfterUtc")
-                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
-
                     b.HasIndex("Sequence")
                         .IsUnique()
                         .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
+                    b.HasIndex("Status", "RetryAfterUtc")
+                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
 
                     b.ToTable("QueueDispatchOutbox");
                 });

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Threading;
 using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -563,7 +564,7 @@ public class CalibrationQueueDispatchTests
         var mockReader = Mock.Of<IPrinterStatusSnapshotReader>(r =>
             r.GetStatusSnapshot(printerId) == freshSnapshot);
 
-        DispatchClaimService sut = new(db, mockReader, new OutboxSequenceAllocator(), Mock.Of<ILogger<DispatchClaimService>>());
+        DispatchClaimService sut = CreateDispatchClaimService(db, mockReader);
 
         // No ack key provided — calibration must reject with acknowledgement_required.
         DispatchClaimResult result = await sut.AcquireClaimAsync(
@@ -613,7 +614,7 @@ public class CalibrationQueueDispatchTests
         PrinterDispatchState dispatchState = await db.PrinterDispatchStates.AsNoTracking()
             .SingleAsync(s => s.PrinterId == printerId);
 
-        BedClearAcknowledgementService sut = new(db, new OutboxSequenceAllocator(), Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        BedClearAcknowledgementService sut = CreateBedClearService(db);
         AcknowledgeBedClearRequest request = new(
             job.Id,
             printerId,
@@ -716,12 +717,27 @@ public class CalibrationQueueDispatchTests
         _controller.ControllerContext.HttpContext.Request.Headers["Idempotency-Key"] = key;
     }
 
-    /// <summary>Creates a BedClearAcknowledgementService backed by an in-memory context.</summary>
-    private static BedClearAcknowledgementService CreateBedClearService()
+    private static DispatchClaimService CreateDispatchClaimService(AppDbContext db, IPrinterStatusSnapshotReader reader)
     {
-        AppDbContext db = CreateDbContext();
-        var allocator = new OutboxSequenceAllocator();
-        return new BedClearAcknowledgementService(db, allocator, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        // Use a mock allocator for unit tests — the allocator never needs DB access
+        // when testing failure paths (validation returns before reaching allocation).
+        Mock<IDbOutboxSequenceAllocator> allocMock = new();
+        long seq = 0;
+        allocMock.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref seq));
+        return new DispatchClaimService(db, reader, allocMock.Object, Mock.Of<ILogger<DispatchClaimService>>());
+    }
+
+    /// <summary>Creates a BedClearAcknowledgementService backed by an in-memory context.</summary>
+    private static BedClearAcknowledgementService CreateBedClearService(AppDbContext? db = null)
+    {
+        db ??= CreateDbContext();
+        // Use a mock allocator for unit tests that don't need real DB sequence generation.
+        Mock<IDbOutboxSequenceAllocator> allocMock = new();
+        long seq = 0;
+        allocMock.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => Interlocked.Increment(ref seq));
+        return new BedClearAcknowledgementService(db, allocMock.Object, Mock.Of<ILogger<BedClearAcknowledgementService>>());
     }
 
     private static AppDbContext CreateDbContext()

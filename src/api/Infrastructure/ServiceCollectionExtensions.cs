@@ -185,8 +185,10 @@ public static class ServiceCollectionExtensions
 
         // Issue #900: Durable dispatch claim and bed-clear acknowledgement services.
         // IDispatchClaimService is the single shared atomic claim path used by every start path.
-        // IOutboxSequenceAllocator is a singleton transactionally-fenced sequence generator.
-        _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.IOutboxSequenceAllocator, Farm.Infrastructure.Services.Queue.OutboxSequenceAllocator>();
+        // IDbOutboxSequenceAllocator is a scoped DB-backed cross-process monotonic allocator:
+        // it increments the OutboxSequenceState counter row in the same transaction as each
+        // outbox event write, ensuring no two API instances can produce the same sequence value.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IDbOutboxSequenceAllocator, Farm.Infrastructure.Services.Queue.DbOutboxSequenceAllocator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
@@ -763,9 +765,6 @@ public static class ServiceCollectionExtensions
             // Dedicated durable consumer for BackendStartCommand.v1 outbox events.
             // Drives atomic claim, awaited backend execution, crash recovery, and retry.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
-
-            // Seeds the outbox sequence allocator from the current DB max on startup.
-            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.OutboxSequenceSeedService>();
 
             // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();

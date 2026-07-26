@@ -16,7 +16,7 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 public sealed class DispatchClaimService(
     AppDbContext db,
     IPrinterStatusSnapshotReader statusReader,
-    IOutboxSequenceAllocator sequenceAllocator,
+    IDbOutboxSequenceAllocator sequenceAllocator,
     ILogger<DispatchClaimService> logger) : IDispatchClaimService
 {
     /// <summary>Maximum age of a telemetry snapshot for calibration dispatch.</summary>
@@ -24,7 +24,7 @@ public sealed class DispatchClaimService(
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
-    private readonly IOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
+    private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
     private readonly ILogger<DispatchClaimService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
@@ -304,7 +304,7 @@ public sealed class DispatchClaimService(
         var outboxEvent = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
-            Sequence = _sequenceAllocator.Next(), // Monotonic: process-local atomic counter seeded from DB max.
+            Sequence = await _sequenceAllocator.AllocateAsync(_db, ct),
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,

@@ -3,6 +3,35 @@
 namespace Farm.Infrastructure.Domain;
 
 /// <summary>
+/// Single-row sequence counter table for the durable outbox.
+/// Atomically incremented (within the same <c>AppDbContext</c> transaction as each
+/// outbox event insert) to provide a truly cross-process monotonic sequence.
+///
+/// The <see cref="RowVersion"/> optimistic concurrency token ensures that two concurrent
+/// API instances racing on the same sequence slot both cannot commit: the loser receives
+/// a <c>DbUpdateConcurrencyException</c> that rolls back its entire unit of work.
+/// There is always exactly one row in this table (Id = 1).
+/// </summary>
+public sealed class OutboxSequenceState
+{
+    /// <summary>Always 1 — there is exactly one row.</summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// The most recently allocated sequence number.
+    /// Incremented by 1 in the same transaction as each outbox event insert.
+    /// </summary>
+    public long NextSequence { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency token (application-managed on SQLite/PostgreSQL;
+    /// native ROWVERSION on SQL Server). Prevents two concurrent writers from
+    /// both succeeding with the same sequence value.
+    /// </summary>
+    public byte[]? RowVersion { get; set; }
+}
+
+/// <summary>
 /// Durable scheduling outbox event. Exactly one is written in the same
 /// <c>AppDbContext</c> transaction as the winning idempotency write so that
 /// neither the write nor the event can be lost across process crashes.
@@ -16,9 +45,17 @@ public sealed class QueueDispatchOutbox
 
     /// <summary>
     /// Monotonically increasing sequence used for ordered, gap-free cursor reads.
-    /// Assigned by the database (SEQUENCE in PostgreSQL/SQL Server, autoincrement in SQLite).
+    /// Allocated by <see cref="Farm.Infrastructure.Services.Queue.IDbOutboxSequenceAllocator"/>
+    /// within the same transaction as the outbox event write.
     /// </summary>
     public long Sequence { get; set; }
+
+    /// <summary>
+    /// Optimistic concurrency token used for atomic lease acquisition by the durable command
+    /// consumer. Prevents two concurrent consumer instances from double-executing the same event.
+    /// Application-managed on SQLite/PostgreSQL; native ROWVERSION on SQL Server.
+    /// </summary>
+    public byte[]? RowVersion { get; set; }
 
     /// <summary>Aggregate root type this event belongs to (e.g., <c>PrintJob</c>).</summary>
     [MaxLength(128)]

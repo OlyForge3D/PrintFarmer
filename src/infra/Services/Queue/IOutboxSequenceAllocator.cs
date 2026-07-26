@@ -1,33 +1,33 @@
-﻿namespace Farm.Infrastructure.Services.Queue;
+﻿using Farm.Infrastructure.Data;
+
+namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
 /// Allocates monotonically increasing sequence numbers for <c>QueueDispatchOutbox</c>
-/// events within the current process lifetime.
+/// events using a database-backed counter row committed atomically in the same transaction
+/// as the outbox event write.
 ///
-/// Provides a process-local transactionally fenced allocator: the counter is seeded
-/// from the database maximum on first use (so post-crash restarts continue after the
-/// last persisted value), and each subsequent call returns a strictly increasing value
-/// via <see cref="System.Threading.Interlocked.Increment(ref long)"/>.
-///
-/// This guarantees uniqueness within a single-process deployment (the typical PrintFarmer
-/// web-server configuration). A unique index on <c>QueueDispatchOutbox.Sequence</c> enforces
-/// database-level uniqueness and will surface any collision as a constraint violation.
+/// This is the authoritative cross-process allocator. Unlike a process-local Interlocked
+/// counter, this allocator uses a single <c>OutboxSequenceState</c> row protected by an
+/// optimistic concurrency token: only one concurrent writer can commit per sequence slot,
+/// ensuring uniqueness across multiple API instances without relying on application-level
+/// state or startup seeding.
 /// </summary>
-public interface IOutboxSequenceAllocator
+public interface IDbOutboxSequenceAllocator
 {
     /// <summary>
-    /// Seeds the allocator from the current database maximum sequence.
-    /// Must be called once during application startup before any events are written.
-    /// Safe to call multiple times — subsequent calls are no-ops if already initialized.
+    /// Increments the shared <c>OutboxSequenceState</c> counter row within
+    /// <paramref name="db"/> and returns the next sequence value.
+    ///
+    /// The increment is tracked by <paramref name="db"/> and MUST be committed by
+    /// the caller in the same <see cref="AppDbContext.SaveChangesAsync"/> call as
+    /// the outbox event insert. If two concurrent writers race on the same slot,
+    /// exactly one succeeds; the other receives a
+    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/>
+    /// which the caller's existing exception handler maps to a typed conflict result.
     /// </summary>
-    /// <param name="currentDatabaseMax">
-    /// The current maximum <c>Sequence</c> value in the outbox table (or <c>0</c> if empty).
-    /// </param>
-    void Seed(long currentDatabaseMax);
-
-    /// <summary>
-    /// Returns the next unique monotonically increasing sequence number.
-    /// Thread-safe; multiple concurrent callers each receive a distinct value.
-    /// </summary>
-    long Next();
+    /// <param name="db">The ambient DbContext whose transaction will commit the increment.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The next allocated sequence value.</returns>
+    Task<long> AllocateAsync(AppDbContext db, CancellationToken ct = default);
 }

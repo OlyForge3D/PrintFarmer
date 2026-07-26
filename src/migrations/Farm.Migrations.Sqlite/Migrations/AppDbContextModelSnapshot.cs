@@ -4001,6 +4001,32 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("ObicoServers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("BLOB");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OutboxSequenceStates");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            NextSequence = 0L
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PasswordPolicyEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -4444,7 +4470,7 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("BLOB");
 
                     b.Property<Guid?>("SourceArtifactId")
@@ -5363,7 +5389,7 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("BLOB");
 
                     b.HasKey("PrinterId");
@@ -5902,6 +5928,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("RetryAfterUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("BLOB");
+
                     b.Property<string>("SchemaVersion")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -5915,12 +5946,12 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Status", "RetryAfterUtc")
-                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
-
                     b.HasIndex("Sequence")
                         .IsUnique()
                         .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
+                    b.HasIndex("Status", "RetryAfterUtc")
+                        .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
 
                     b.ToTable("QueueDispatchOutbox");
                 });
