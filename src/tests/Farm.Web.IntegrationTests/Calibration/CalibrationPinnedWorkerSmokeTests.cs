@@ -170,7 +170,15 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
         //    container publishes, so the slicer receives its own documents back, hash verified.
         PinnedOrcaProfileSelection profiles =
             await PinnedOrcaProfileCatalog.SelectAsync(worker.BaseAddress, cancellationToken);
-        CalibrationGenerationFixture fixture = await SeedAsync(uploaded, profiles);
+        CalibrationGenerationFixture fixture = await SeedAsync(
+            uploaded,
+            profiles,
+            new CalibrationPinnedSlicerIdentity(
+                CalibrationContractConstants.SlicerVersion,
+                CalibrationContractConstants.SlicerDistribution,
+                containerDigest,
+                binaryDigest,
+                serviceId));
 
         // 6. The authenticated human caller starts the durable saga over the production route.
         using HttpClient caller = CreateCallerClient();
@@ -409,7 +417,8 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
 
     private async Task<CalibrationGenerationFixture> SeedAsync(
         UploadedModel uploaded,
-        PinnedOrcaProfileSelection profiles) =>
+        PinnedOrcaProfileSelection profiles,
+        CalibrationPinnedSlicerIdentity pinnedIdentity) =>
         await CalibrationGenerationSeed.SeedAsync(
             CreateSeedContext,
             CalibrationMethodNames.FinalVerification,
@@ -426,7 +435,8 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
                 CalibrationModelFormats.Stl,
                 "calibration-smoke-cube.stl",
                 uploaded.SizeBytes,
-                "uploaded"));
+                "uploaded"),
+            pinnedIdentity);
 
     private AppDbContext CreateSeedContext()
     {

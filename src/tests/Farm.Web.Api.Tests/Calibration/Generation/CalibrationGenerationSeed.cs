@@ -81,6 +81,7 @@ internal static class CalibrationGenerationSeed
     /// <param name="tamperSpecification">Stores a specification the recompile cannot reproduce.</param>
     /// <param name="profiles">Exact native profiles to store, or <see langword="null"/> for the canonical set.</param>
     /// <param name="importedAsset">Authoritative uploaded asset for final-verification attempts.</param>
+    /// <param name="pinnedIdentity">Exact worker identity to compile into the immutable specification.</param>
     /// <returns>The seeded fixture.</returns>
     public static async Task<CalibrationGenerationFixture> SeedAsync(
         Func<AppDbContext> coreFactory,
@@ -88,10 +89,17 @@ internal static class CalibrationGenerationSeed
         Guid ownerId,
         bool tamperSpecification,
         ProfileSet? profiles = null,
-        CalibrationModelReference? importedAsset = null)
+        CalibrationModelReference? importedAsset = null,
+        CalibrationPinnedSlicerIdentity? pinnedIdentity = null)
     {
         ArgumentNullException.ThrowIfNull(coreFactory);
         ProfileSet profileSet = profiles ?? ProfileSet.Canonical;
+        CalibrationPinnedSlicerIdentity pinned = pinnedIdentity ?? new(
+            CalibrationContractConstants.SlicerVersion,
+            CalibrationContractConstants.SlicerDistribution,
+            ContainerDigest,
+            BinaryDigest,
+            Guid.NewGuid());
 
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
@@ -184,7 +192,7 @@ internal static class CalibrationGenerationSeed
                 SlicerEngine = CalibrationContractConstants.SlicerEngine,
                 SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
                 SlicerVersion = CalibrationContractConstants.SlicerVersion,
-                SlicerContainerDigest = ContainerDigest,
+                SlicerContainerDigest = pinned.ContainerDigest,
                 MachineProfileId = machineProfileId,
                 ExactMachineProfileJson = profileSet.MachineJson,
                 MachineProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.MachineJson),
@@ -209,7 +217,8 @@ internal static class CalibrationGenerationSeed
             snapshotId,
             method,
             options,
-            importedAsset);
+            importedAsset,
+            pinned);
 
         await using (AppDbContext core = coreFactory())
         {
@@ -283,7 +292,8 @@ internal static class CalibrationGenerationSeed
         Guid snapshotId,
         string method,
         CalibrationMethodOptionsRequest options,
-        CalibrationModelReference? importedAsset)
+        CalibrationModelReference? importedAsset,
+        CalibrationPinnedSlicerIdentity pinned)
     {
         await using AppDbContext core = coreFactory();
         CalibrationProject project = await core.CalibrationProjects
@@ -311,12 +321,7 @@ internal static class CalibrationGenerationSeed
                 },
                 snapshot,
                 snapshot.PrinterConfigurationRevision,
-                new CalibrationPinnedSlicerIdentity(
-                    CalibrationContractConstants.SlicerVersion,
-                    CalibrationContractConstants.SlicerDistribution,
-                    ContainerDigest,
-                    BinaryDigest,
-                    Guid.NewGuid()),
+                pinned,
                 importedAsset);
         CalibrationGenerationResult<CalibrationSpecification> compiled =
             new CalibrationSpecificationCompiler(TimeProvider.System)
