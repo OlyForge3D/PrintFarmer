@@ -28,12 +28,12 @@ public interface ISlicerJobQueue
     /// <summary>
     /// Mark a job as failed.
     /// </summary>
-    Task FailJobAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default);
+    Task FailJobAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Update job progress.
     /// </summary>
-    Task UpdateProgressAsync(Guid jobId, int progress, string? currentStep = null, CancellationToken cancellationToken = default);
+    Task UpdateProgressAsync(DistributedSlicingJob job, int progress, string? currentStep = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get job status.

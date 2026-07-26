@@ -25,8 +25,7 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
     {
         if (!Guid.TryParse(workerId, out Guid wid))
         {
-            // WorkerId may be a GUID string in the shared model; try fallback
-            wid = Guid.NewGuid();
+            throw new ArgumentException("Worker ID must be a valid GUID.", nameof(workerId));
         }
 
         SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
@@ -44,14 +43,43 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         int? estPrint = result.EstimatedPrintTimeSeconds > 0 ? (int?)Convert.ToInt32(result.EstimatedPrintTimeSeconds) : null;
         decimal? filament = result.EstimatedFilamentUsageGrams > 0 ? (decimal?)Convert.ToDecimal(result.EstimatedFilamentUsageGrams) : null;
 
-        await _repo.MarkCompletedAsync(job.Id, resultUrl, estPrint, filament, cancellationToken);
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool completed = await _repo.TryCompleteForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            resultUrl,
+            [],
+            estPrint,
+            filament,
+            cancellationToken);
+        ThrowIfClaimLost(completed, job.Id);
     }
 
-    public Task FailJobAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default)
-        => _repo.MarkFailedAsync(jobId, errorMessage, cancellationToken);
+    public async Task FailJobAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
+    {
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool failed = await _repo.TryFailForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            errorMessage,
+            cancellationToken);
+        ThrowIfClaimLost(failed, job.Id);
+    }
 
-    public Task UpdateProgressAsync(Guid jobId, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
-        => _repo.UpdateProgressAsync(jobId, progress, currentStep ?? string.Empty, cancellationToken);
+    public async Task UpdateProgressAsync(DistributedSlicingJob job, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
+    {
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool updated = await _repo.TryUpdateProgressForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            progress,
+            currentStep ?? string.Empty,
+            cancellationToken);
+        ThrowIfClaimLost(updated, job.Id);
+    }
 
     public async Task<DistributedSlicingJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
@@ -143,6 +171,30 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         };
 
         return dsj;
+    }
+
+    private static (Guid WorkerId, Guid ClaimToken) GetClaimIdentity(DistributedSlicingJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        if (!Guid.TryParse(job.WorkerId, out Guid workerId) || workerId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Slicing job {job.Id} does not have a valid worker claim.");
+        }
+
+        if (job.ClaimToken == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Slicing job {job.Id} does not have a claim token.");
+        }
+
+        return (workerId, job.ClaimToken);
+    }
+
+    private static void ThrowIfClaimLost(bool operationSucceeded, Guid jobId)
+    {
+        if (!operationSucceeded)
+        {
+            throw new InvalidOperationException($"The active claim for slicing job {jobId} is no longer valid.");
+        }
     }
 
     private static SliceJob ToSliceJob(DistributedSlicingJob dj)
