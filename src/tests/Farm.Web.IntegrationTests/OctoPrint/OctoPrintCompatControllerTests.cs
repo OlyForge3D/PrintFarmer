@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Web.IntegrationTests;
 using Xunit;
@@ -42,7 +42,7 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;
@@ -55,10 +55,10 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
         // Verify field values
         Assert.Equal("0.1", apiProp.GetString());
         Assert.Equal("1.9.3", serverProp.GetString());
-        
+
         var textValue = textProp.GetString();
         Assert.NotNull(textValue);
-        
+
         // ⚠️ CRITICAL: Slicers check for "OctoPrint" keyword in text field
         Assert.Contains("OctoPrint", textValue, StringComparison.Ordinal);
     }
@@ -88,7 +88,7 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
 
         // Assert
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        
+
         var content = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(content);
         var root = doc.RootElement;

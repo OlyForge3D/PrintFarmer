@@ -43,6 +43,30 @@ internal static class CalibrationGenerationSeed
     public const string FilamentProfileJson =
         """{"name":"PF Filament","filament_type":["PLA"],"filament_flow_ratio":["1"],"nozzle_temperature":["220"],"filament_max_volumetric_speed":["18"]}""";
 
+    /// <summary>The exact native profile documents an immutable snapshot is seeded with.</summary>
+    /// <param name="MachineJson">Exact native machine document.</param>
+    /// <param name="ProcessJson">Exact native process document.</param>
+    /// <param name="FilamentJson">Exact native filament document.</param>
+    /// <param name="NozzleDiameterMillimeters">Nozzle the machine document declares.</param>
+    /// <remarks>
+    /// The pinned-worker smoke replaces the canonical documents with the ones the published container
+    /// actually publishes, so the slicer receives its own native profiles back. Every other caller keeps
+    /// <see cref="Canonical"/>, which is byte-identical to what this seed has always produced.
+    /// </remarks>
+    public sealed record ProfileSet(
+        string MachineJson,
+        string ProcessJson,
+        string FilamentJson,
+        double NozzleDiameterMillimeters)
+    {
+        /// <summary>The canonical documents every non-smoke generation test seeds with.</summary>
+        public static ProfileSet Canonical { get; } = new(
+            MachineProfileJson,
+            ProcessProfileJson,
+            FilamentProfileJson,
+            0.4);
+    }
+
     private static readonly JsonSerializerOptions SnapshotOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -55,14 +79,19 @@ internal static class CalibrationGenerationSeed
     /// <param name="method">Canonical calibration method name.</param>
     /// <param name="ownerId">The owning user.</param>
     /// <param name="tamperSpecification">Stores a specification the recompile cannot reproduce.</param>
+    /// <param name="profiles">Exact native profiles to store, or <see langword="null"/> for the canonical set.</param>
+    /// <param name="importedAsset">Authoritative uploaded asset for final-verification attempts.</param>
     /// <returns>The seeded fixture.</returns>
     public static async Task<CalibrationGenerationFixture> SeedAsync(
         Func<AppDbContext> coreFactory,
         string method,
         Guid ownerId,
-        bool tamperSpecification)
+        bool tamperSpecification,
+        ProfileSet? profiles = null,
+        CalibrationModelReference? importedAsset = null)
     {
         ArgumentNullException.ThrowIfNull(coreFactory);
+        ProfileSet profileSet = profiles ?? ProfileSet.Canonical;
 
         Guid projectId = Guid.NewGuid();
         Guid attemptId = Guid.NewGuid();
@@ -82,7 +111,8 @@ internal static class CalibrationGenerationSeed
             processProfileId,
             filamentProfileId,
             nowUtc,
-            snapshotSha256: string.Empty);
+            snapshotSha256: string.Empty,
+            profileSet);
         string snapshotSha256 = CalibrationCanonicalJson.ComputeSha256(document);
         document = BuildSnapshotDocument(
             printerId,
@@ -91,7 +121,8 @@ internal static class CalibrationGenerationSeed
             processProfileId,
             filamentProfileId,
             nowUtc,
-            snapshotSha256);
+            snapshotSha256,
+            profileSet);
 
         await using (AppDbContext core = coreFactory())
         {
@@ -155,21 +186,21 @@ internal static class CalibrationGenerationSeed
                 SlicerVersion = CalibrationContractConstants.SlicerVersion,
                 SlicerContainerDigest = ContainerDigest,
                 MachineProfileId = machineProfileId,
-                ExactMachineProfileJson = MachineProfileJson,
-                MachineProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(MachineProfileJson),
+                ExactMachineProfileJson = profileSet.MachineJson,
+                MachineProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.MachineJson),
                 ProcessProfileId = processProfileId,
-                ExactProcessProfileJson = ProcessProfileJson,
-                ProcessProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(ProcessProfileJson),
+                ExactProcessProfileJson = profileSet.ProcessJson,
+                ProcessProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.ProcessJson),
                 FilamentProfileId = filamentProfileId,
-                ExactFilamentProfileJson = FilamentProfileJson,
-                FilamentProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(FilamentProfileJson),
+                ExactFilamentProfileJson = profileSet.FilamentJson,
+                FilamentProfileSha256 = CalibrationCanonicalJson.ComputeTextSha256(profileSet.FilamentJson),
                 CapturedAtUtc = nowUtc,
                 CapturedBySubject = "seed",
             });
             _ = await core.SaveChangesAsync();
         }
 
-        CalibrationMethodOptionsRequest options = new();
+        CalibrationMethodOptionsRequest options = new() { Model3DId = importedAsset?.Model3DId };
         CalibrationSpecification specification = await CompileSpecificationAsync(
             coreFactory,
             projectId,
@@ -177,7 +208,8 @@ internal static class CalibrationGenerationSeed
             orchestrationId,
             snapshotId,
             method,
-            options);
+            options,
+            importedAsset);
 
         await using (AppDbContext core = coreFactory())
         {
@@ -250,7 +282,8 @@ internal static class CalibrationGenerationSeed
         Guid orchestrationId,
         Guid snapshotId,
         string method,
-        CalibrationMethodOptionsRequest options)
+        CalibrationMethodOptionsRequest options,
+        CalibrationModelReference? importedAsset)
     {
         await using AppDbContext core = coreFactory();
         CalibrationProject project = await core.CalibrationProjects
@@ -284,7 +317,7 @@ internal static class CalibrationGenerationSeed
                     ContainerDigest,
                     BinaryDigest,
                     Guid.NewGuid()),
-                importedAsset: null);
+                importedAsset);
         CalibrationGenerationResult<CalibrationSpecification> compiled =
             new CalibrationSpecificationCompiler(TimeProvider.System)
                 .Compile(context.Value!, bound.Value!);
@@ -300,7 +333,8 @@ internal static class CalibrationGenerationSeed
         Guid processProfileId,
         Guid filamentProfileId,
         DateTime capturedAtUtc,
-        string snapshotSha256) =>
+        string snapshotSha256,
+        ProfileSet profiles) =>
         new()
         {
             SchemaVersion = CalibrationContractConstants.SchemaVersion,
@@ -321,7 +355,7 @@ internal static class CalibrationGenerationSeed
                     "Primary",
                     true,
                     new CalibrationPoint3DDto(0, 0, 0),
-                    0.4,
+                    profiles.NozzleDiameterMillimeters,
                     "brass",
                     "brass",
                     300,
@@ -357,10 +391,17 @@ internal static class CalibrationGenerationSeed
                 CalibrationContractConstants.SlicerVersion,
                 CalibrationContractConstants.ProfileFormat),
             Profiles = new CalibrationProfileSetDto(
-                Profile(machineProfileId, "machine", "PF Machine", MachineProfileJson, capturedAtUtc),
-                Profile(processProfileId, "process", "PF Process", ProcessProfileJson, capturedAtUtc),
-                Profile(filamentProfileId, "filament", "PF Filament", FilamentProfileJson, capturedAtUtc)),
-            BaselineSettings = new CalibrationBaselineSettingsDto(0.4, 0.2, 15, 120, 220, 60, 18),
+                Profile(machineProfileId, "machine", "PF Machine", profiles.MachineJson, capturedAtUtc),
+                Profile(processProfileId, "process", "PF Process", profiles.ProcessJson, capturedAtUtc),
+                Profile(filamentProfileId, "filament", "PF Filament", profiles.FilamentJson, capturedAtUtc)),
+            BaselineSettings = new CalibrationBaselineSettingsDto(
+                profiles.NozzleDiameterMillimeters,
+                0.2,
+                15,
+                120,
+                220,
+                60,
+                18),
             RawEffectiveSettings = new CalibrationRawEffectiveSettingsDto(null, null, null),
             FilamentProducts =
             [
