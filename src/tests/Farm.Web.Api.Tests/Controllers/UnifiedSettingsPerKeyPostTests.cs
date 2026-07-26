@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Xunit;
 
@@ -31,6 +32,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// model-binding run at the pipeline level, not on direct method calls).
 /// </remarks>
 [Trait("Category", "Integration")]
+[Collection(IntegrationTestCollection.Name)]
 public class UnifiedSettingsPerKeyPostTests : IAsyncLifetime
 {
     private CustomWebApplicationFactory _factory = null!;
