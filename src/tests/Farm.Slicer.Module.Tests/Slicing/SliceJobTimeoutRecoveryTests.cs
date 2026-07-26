@@ -39,6 +39,7 @@ public class SliceJobTimeoutRecoveryTests
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
+    [InlineData(SliceJob.MinimumLeaseDurationSeconds - 1)]
     [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
     public async Task RenewLeaseAsync_InvalidDuration_Throws(int leaseDurationSeconds)
     {

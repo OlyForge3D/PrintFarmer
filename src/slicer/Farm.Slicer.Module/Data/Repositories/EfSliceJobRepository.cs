@@ -221,34 +221,33 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
     {
         ValidateLeaseDuration(leaseDurationSeconds);
-        DateTime now = DateTime.UtcNow;
-        DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
-
-        // Base query: queued or expired lease
-        IQueryable<SliceJob> baseQuery = _db.SliceJobs
-            .AsNoTracking()
-            .Where(j => j.Status == SliceJobStatus.Queued ||
-                       (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt != null && j.LeaseExpiresAt < now))
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuedAt);
-
-        IQueryable<SliceJob> compatible = baseQuery;
-        if (capabilities != null && capabilities.Length > 0)
-        {
-            // Issue #578 dual-engine: push the capability match to the database so
-            // a worker for engine version X is never starved by 50 head-of-queue
-            // jobs pinned to version Y. Job matches when its capability list is
-            // empty/legacy (null/[]) OR when any advertised worker capability tag
-            // appears as a quoted JSON string token in RequiredCapabilitiesJson.
-            compatible = baseQuery.Where(j =>
-                j.RequiredCapabilitiesJson == null ||
-                j.RequiredCapabilitiesJson == string.Empty ||
-                j.RequiredCapabilitiesJson == "[]" ||
-                capabilities.Any(cap => EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
-        }
-
         while (true)
         {
+            DateTime now = DateTime.UtcNow;
+            DateTime leaseExpiration = now.AddSeconds(leaseDurationSeconds);
+            IQueryable<SliceJob> compatible = _db.SliceJobs
+                .AsNoTracking()
+                .Where(j => j.Status == SliceJobStatus.Queued ||
+                           (j.Status == SliceJobStatus.Processing &&
+                            j.LeaseExpiresAt != null &&
+                            j.LeaseExpiresAt < now))
+                .OrderBy(j => j.Priority)
+                .ThenBy(j => j.QueuedAt);
+            if (capabilities != null && capabilities.Length > 0)
+            {
+                // Issue #578 dual-engine: push the capability match to the database so
+                // a worker for engine version X is never starved by 50 head-of-queue
+                // jobs pinned to version Y. Job matches when its capability list is
+                // empty/legacy (null/[]) OR when any advertised worker capability tag
+                // appears as a quoted JSON string token in RequiredCapabilitiesJson.
+                compatible = compatible.Where(j =>
+                    j.RequiredCapabilitiesJson == null ||
+                    j.RequiredCapabilitiesJson == string.Empty ||
+                    j.RequiredCapabilitiesJson == "[]" ||
+                    capabilities.Any(cap =>
+                        EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
+            }
+
             Guid? jobId = await compatible
                 .Select(job => (Guid?)job.Id)
                 .FirstOrDefaultAsync(ct);

@@ -88,6 +88,7 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
+    [InlineData(SliceJob.MinimumLeaseDurationSeconds - 1)]
     [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
     public async Task ClaimNextJobAsync_InvalidLeaseDuration_Throws(int leaseDurationSeconds)
     {
@@ -105,6 +106,7 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
+    [InlineData(SliceJob.MinimumLeaseDurationSeconds - 1)]
     [InlineData(SliceJob.MaximumLeaseDurationSeconds + 1)]
     public void LeaseRequests_InvalidDuration_FailModelValidation(int leaseDurationSeconds)
     {

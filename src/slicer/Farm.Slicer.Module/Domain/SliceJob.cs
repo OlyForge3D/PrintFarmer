@@ -8,7 +8,7 @@ namespace Farm.Slicer.Module.Domain;
 /// </summary>
 public class SliceJob
 {
-    public const int MinimumLeaseDurationSeconds = 1;
+    public const int MinimumLeaseDurationSeconds = 30;
     public const int MaximumLeaseDurationSeconds = 3600;
 
     [Key]
