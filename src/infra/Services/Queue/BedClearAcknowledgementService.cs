@@ -197,6 +197,10 @@ public sealed class BedClearAcknowledgementService(
         //
         // Crash recovery: the outbox publisher rediscovers Pending BackendStartCommand
         // events on its next poll cycle and re-invokes the adapter orchestrator.
+        //
+        // Bounded retry: if the only concurrency conflict is on the OutboxSequenceState
+        // row (sequence allocation contention), we reload the counter and retry up to
+        // MaxSequenceRetries times so every legitimate producer persists its own event.
         // =========================================================================
         DateTime now = DateTime.UtcNow;
 
@@ -213,7 +217,7 @@ public sealed class BedClearAcknowledgementService(
         var startCommand = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
-            Sequence = await _sequenceAllocator.AllocateAsync(_db, ct),
+            Sequence = 0, // Allocated inside the retry loop below.
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,
@@ -234,26 +238,59 @@ public sealed class BedClearAcknowledgementService(
 
         _db.QueueDispatchOutbox.Add(startCommand);
 
-        try
+        // Bounded retry loop: up to MaxSequenceRetries attempts on sequence-only conflicts.
+        // Any other conflict (e.g., the dispatch-state If-Match already caught above) surfaces
+        // as DispatchRevisionConflict without retrying.
+        const int MaxSequenceRetries = 5;
+        bool saved = false;
+        DbUpdateConcurrencyException? lastConflict = null;
+
+        for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !saved; seqRetry++)
         {
-            // Single SaveChangesAsync: ack fields + durable command in one transaction.
-            await _db.SaveChangesAsync(ct);
+            startCommand.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
 
-            _logger.LogInformation(
-                "Bed-clear acknowledged and durable backend-start command queued: " +
-                "Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Command={CommandId}",
-                request.JobId, request.PrinterId, request.ActorSubject,
-                request.IdempotencyKey, startCommand.Id);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                saved = true;
+                lastConflict = null;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                lastConflict = ex;
 
-            return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.Accepted,
-                job.RowVersion, dispatchState.RowVersion, null);
+                // Only retry when the sole conflicting entity is the sequence counter.
+                // A conflict on the dispatch state or job means a genuine race that the
+                // client must resolve by re-fetching.
+                bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
+                    ex.Entries.All(e => e.Entity is OutboxSequenceState);
+
+                if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
+                {
+                    // Give up — not a sequence conflict or max retries exhausted.
+                    break;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "[BedClearAck] Outbox sequence contention (retry {Retry}/{Max}); reloading counter for Job={JobId}",
+                    seqRetry + 1, MaxSequenceRetries, request.JobId);
+
+                // Reload the sequence-state row so the next AllocateAsync call sees
+                // the winner's committed NextSequence value and increments from there.
+                OutboxSequenceState? seqState = _db.OutboxSequenceStates.Local.SingleOrDefault();
+                if (seqState is not null)
+                {
+                    await _db.Entry(seqState).ReloadAsync(ct);
+                }
+            }
         }
-        catch (DbUpdateConcurrencyException ex)
+
+        if (!saved)
         {
             _logger.LogWarning(
-                ex,
-                "Concurrency conflict persisting bed-clear acknowledgement for Job={JobId}",
+                lastConflict,
+                "[BedClearAck] Concurrency conflict persisting bed-clear acknowledgement for Job={JobId}",
                 request.JobId);
 
             return new AcknowledgeBedClearResult(
@@ -261,6 +298,16 @@ public sealed class BedClearAcknowledgementService(
                 null, null,
                 "A concurrent operation modified the dispatch state. Re-fetch and retry.");
         }
+
+        _logger.LogInformation(
+            "Bed-clear acknowledged and durable backend-start command queued: " +
+            "Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Command={CommandId}",
+            request.JobId, request.PrinterId, request.ActorSubject,
+            request.IdempotencyKey, startCommand.Id);
+
+        return new AcknowledgeBedClearResult(
+            BedClearAckOutcome.Accepted,
+            job.RowVersion, dispatchState.RowVersion, null);
     }
 
     /// <inheritdoc />

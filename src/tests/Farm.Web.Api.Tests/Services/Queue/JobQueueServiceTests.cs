@@ -1235,7 +1235,7 @@ public class JobQueueServiceTests
             .WithPriority(0)
             .AsQueued()
             .Build();
-        var request = new UpdateJobPriorityDto { Priority = 10 };
+        var request = new UpdateJobPriorityDto { Priority = (int)PrintJobPriority.High }; // 2 = High
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1247,8 +1247,8 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be(10);
-        job.Priority.Should().Be(10);
+        result!.Priority.Should().Be((int)PrintJobPriority.High);
+        job.Priority.Should().Be((int)PrintJobPriority.High);
         job.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
         _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }

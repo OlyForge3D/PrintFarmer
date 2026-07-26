@@ -505,7 +505,7 @@ public class CalibrationQueueDispatchTests
     {
         AppDbContext db = CreateDbContext();
         Guid printerId = Guid.NewGuid();
-        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "dispatch.gcode", FileName = "dispatch.gcode" };
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "dispatch.gcode", FileName = "dispatch.gcode", FileHash = new string('a', 64) };
         PrintJob job = new()
         {
             Id = Guid.NewGuid(),
@@ -524,6 +524,16 @@ public class CalibrationQueueDispatchTests
             RequiredSlicerDistribution = "upstream",
             RequiredSlicerVersion = "2.3.0",
             PinnedPrinterConfigRevision = 1,
+            // Lineage and hash fields — required by the authoritative claim policy.
+            CalibrationProjectId = Guid.NewGuid(),
+            CalibrationAttemptId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationOrchestrationId = Guid.NewGuid(),
+            GcodeContentSha256 = new string('a', 64), // Matches gcode.FileHash
+            SpecificationSha256 = new string('b', 64),
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,

@@ -48,6 +48,7 @@ public class JobQueueService : IJobQueueService
     private readonly IPrinterGroupService? _printerGroupService;
     private readonly ISettingsService? _settingsService;
     private readonly AppDbContext? _db;
+    private readonly IDbOutboxSequenceAllocator? _sequenceAllocator;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -61,6 +62,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="printerGroupService">Optional printer group service for ACL checks on queue submission</param>
     /// <param name="settingsService">Optional app settings service for queue deadline policy enforcement</param>
     /// <param name="db">Optional database context used for atomic calibration job and outbox persistence</param>
+    /// <param name="sequenceAllocator">Optional outbox sequence allocator for cross-process monotonic ordering; required when <paramref name="db"/> is provided</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -71,7 +73,8 @@ public class JobQueueService : IJobQueueService
         IAutoDispatchService? autoDispatchService = null,
         IPrinterGroupService? printerGroupService = null,
         ISettingsService? settingsService = null,
-        AppDbContext? db = null)
+        AppDbContext? db = null,
+        IDbOutboxSequenceAllocator? sequenceAllocator = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -85,6 +88,7 @@ public class JobQueueService : IJobQueueService
         _printerGroupService = printerGroupService;
         _settingsService = settingsService;
         _db = db;
+        _sequenceAllocator = sequenceAllocator;
     }
 
     /// <summary>
@@ -475,6 +479,7 @@ public class JobQueueService : IJobQueueService
             QueueDispatchOutbox outboxEvent = new()
             {
                 Id = Guid.NewGuid(),
+                Sequence = 0, // Allocated in the retry loop below.
                 AggregateType = nameof(PrintJob),
                 AggregateId = job.Id,
                 AggregateRowVersion = job.RowVersion,
@@ -489,7 +494,75 @@ public class JobQueueService : IJobQueueService
 
             _db!.PrintJobs.Add(job);
             _db.QueueDispatchOutbox.Add(outboxEvent);
-            await _db.SaveChangesAsync(ct);
+
+            // Bounded retry: if only the OutboxSequenceState row had a conflict, reload
+            // the counter and retry so every concurrent calibration-queue producer persists
+            // its own event with a distinct, monotonically increasing sequence number.
+            const int MaxSequenceRetries = 5;
+            bool saved = false;
+            DbUpdateConcurrencyException? lastConflict = null;
+
+            for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !saved; seqRetry++)
+            {
+                if (_sequenceAllocator is not null)
+                {
+                    outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db!, ct);
+                }
+                else
+                {
+                    // Fallback when no allocator is injected (e.g., test environments that did not
+                    // wire IDbOutboxSequenceAllocator): directly increment the tracked counter row.
+                    // If the OutboxSequenceState row does not exist (e.g., InMemory DB without
+                    // HasData seed), skip allocation and leave Sequence at 0 — InMemory databases
+                    // do not enforce the unique index, so this is safe for unit tests.
+                    OutboxSequenceState? seqState = await _db!.OutboxSequenceStates.SingleOrDefaultAsync(ct);
+                    if (seqState is not null)
+                    {
+                        seqState.NextSequence++;
+                        outboxEvent.Sequence = seqState.NextSequence;
+                    }
+                }
+
+                try
+                {
+                    await _db!.SaveChangesAsync(ct);
+                    saved = true;
+                    lastConflict = null;
+                }
+                catch (DbUpdateConcurrencyException ex)
+                {
+                    lastConflict = ex;
+                    bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
+                        ex.Entries.All(e => e.Entity is OutboxSequenceState);
+
+                    if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
+                    {
+                        break;
+                    }
+
+                    _logger.LogWarning(
+                        ex,
+                        "[Queue] Calibration outbox sequence contention (retry {Retry}/{Max}); reloading counter",
+                        seqRetry + 1, MaxSequenceRetries);
+
+                    OutboxSequenceState? stateLocal = _db!.OutboxSequenceStates.Local.SingleOrDefault();
+                    if (stateLocal is not null)
+                    {
+                        await _db.Entry(stateLocal).ReloadAsync(ct);
+                    }
+                }
+            }
+
+            if (!saved)
+            {
+                if (lastConflict is not null)
+                {
+                    throw lastConflict;
+                }
+
+                // Should never reach here
+                await _db!.SaveChangesAsync(ct);
+            }
         }
         else
         {
@@ -609,6 +682,27 @@ public class JobQueueService : IJobQueueService
             return false;
         }
 
+        // Invalidate any pending bed-clear acknowledgement for this printer so the ack
+        // cannot be consumed for a different job after this one is removed.
+        if (job.AssignedPrinterId.HasValue && _db is not null)
+        {
+            PrinterDispatchState? ds = await _db.PrinterDispatchStates
+                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
+
+            if (ds is not null && ds.AcknowledgedJobId == id)
+            {
+                ds.AcknowledgedJobId = null;
+                ds.AcknowledgedAtUtc = null;
+                ds.AcknowledgedBySubject = null;
+                ds.AcknowledgementIdempotencyKey = null;
+                ds.AcknowledgementExpiresAtUtc = null;
+
+                _logger.LogInformation(
+                    "[Queue] Invalidated bed-clear ack for removed job {JobId} on printer {PrinterId}",
+                    id, job.AssignedPrinterId.Value);
+            }
+        }
+
         await _repo.RemoveAsync(job, ct);
         await _repo.SaveChangesAsync(ct);
         return true;
@@ -632,6 +726,36 @@ public class JobQueueService : IJobQueueService
         if (job == null)
         {
             return null;
+        }
+
+        // Reject undefined priority values — every mutation must use a valid semantic priority.
+        // PrintJobPriority enum: Low=0, Normal=1, High=2, Urgent=3; any other value is rejected.
+        if (!Enum.IsDefined(typeof(PrintJobPriority), (PrintJobPriority)request.Priority))
+        {
+            throw new ValidationException(
+                $"Priority value {request.Priority} is not a valid PrintJobPriority. " +
+                "Use Low (0), Normal (1), High (2), or Urgent (3).");
+        }
+
+        // Invalidate any pending bed-clear ack when priority changes — the ack was issued for a
+        // specific queue position and must be re-issued after reorder.
+        if (job.AssignedPrinterId.HasValue && _db is not null)
+        {
+            PrinterDispatchState? ds = await _db.PrinterDispatchStates
+                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
+
+            if (ds is not null && ds.AcknowledgedJobId == id)
+            {
+                ds.AcknowledgedJobId = null;
+                ds.AcknowledgedAtUtc = null;
+                ds.AcknowledgedBySubject = null;
+                ds.AcknowledgementIdempotencyKey = null;
+                ds.AcknowledgementExpiresAtUtc = null;
+
+                _logger.LogInformation(
+                    "[Queue] Invalidated bed-clear ack for priority-changed job {JobId} on printer {PrinterId}",
+                    id, job.AssignedPrinterId.Value);
+            }
         }
 
         job.Priority = request.Priority;

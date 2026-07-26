@@ -69,6 +69,13 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail("printer_in_maintenance", $"Printer {request.PrinterId} is in maintenance.");
         }
 
+        // IsAvailable is a hard gate — the printer may be explicitly marked unavailable
+        // by an operator even if it is enabled and not in formal maintenance.
+        if (!printer.IsAvailable)
+        {
+            return DispatchClaimResult.Fail("printer_unavailable", $"Printer {request.PrinterId} is not available.");
+        }
+
         if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
         {
             return DispatchClaimResult.Fail(
@@ -88,6 +95,18 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail(
                 "gcode_missing",
                 $"Job {request.JobId} is missing its G-code artifact.");
+        }
+
+        // Authoritative G-code hash: the job's pinned GcodeContentSha256 must match the
+        // actual file's FileHash to detect silent artifact replacement.
+        if (!string.IsNullOrWhiteSpace(job.GcodeContentSha256) &&
+            !string.IsNullOrWhiteSpace(job.GcodeFile.FileHash) &&
+            !string.Equals(job.GcodeContentSha256, job.GcodeFile.FileHash, StringComparison.OrdinalIgnoreCase))
+        {
+            string gcodeHashDetail =
+                $"Job {request.JobId}: GcodeContentSha256 does not match the authoritative G-code file hash. " +
+                "The artifact may have been replaced — a new job and idempotency key are required.";
+            return DispatchClaimResult.Fail("gcode_hash_mismatch", gcodeHashDetail);
         }
 
         if (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != request.JobId)
@@ -242,6 +261,34 @@ public sealed class DispatchClaimService(
                     $"Printer configuration revision {printer.ConfigurationRevision} does not match the pinned revision {job.PinnedPrinterConfigRevision}.");
             }
 
+            // Calibration lineage completeness: all provenance IDs must be non-null.
+            // Each is set at creation time and is immutable — null means the job was not
+            // created through the authoritative calibration path.
+            if (!job.CalibrationProjectId.HasValue ||
+                !job.CalibrationAttemptId.HasValue ||
+                !job.CalibrationConfigSnapshotId.HasValue ||
+                !job.CalibrationOrchestrationId.HasValue)
+            {
+                string lineageDetail =
+                    "Calibration job is missing required provenance IDs (project, attempt, snapshot, or orchestration). " +
+                    "The job must be created through the authoritative calibration creation path.";
+                return DispatchClaimResult.Fail("calibration_lineage_incomplete", lineageDetail);
+            }
+
+            // Specification and profile hashes must all be present for calibration jobs.
+            // These are part of the canonical hash that determines idempotency scope; absent
+            // hashes indicate the job was not created from a fully-resolved artifact.
+            if (string.IsNullOrWhiteSpace(job.SpecificationSha256) ||
+                string.IsNullOrWhiteSpace(job.MachineProfileSha256) ||
+                string.IsNullOrWhiteSpace(job.ProcessProfileSha256) ||
+                string.IsNullOrWhiteSpace(job.FilamentProfileSha256))
+            {
+                string hashDetail =
+                    "Calibration job is missing required specification or profile hashes. " +
+                    "All hashes must be provided at job creation time.";
+                return DispatchClaimResult.Fail("calibration_hashes_incomplete", hashDetail);
+            }
+
             // Ack key is required in the claim request.
             if (string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
             {
@@ -304,7 +351,7 @@ public sealed class DispatchClaimService(
         var outboxEvent = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
-            Sequence = await _sequenceAllocator.AllocateAsync(_db, ct),
+            Sequence = 0, // Allocated in the retry loop below.
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,
@@ -340,20 +387,51 @@ public sealed class DispatchClaimService(
         _db.QueueDispatchAttempts.Add(attempt);
         _db.QueueDispatchOutbox.Add(outboxEvent);
 
-        try
+        // Bounded retry: on sequence-only concurrency conflicts, reload the counter and retry.
+        // Conflicts on PrintJob or PrinterDispatchState are genuine races and surface immediately.
+        const int MaxSequenceRetries = 5;
+        bool claimed = false;
+        DbUpdateConcurrencyException? lastConflict = null;
+
+        for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !claimed; seqRetry++)
         {
-            await _db.SaveChangesAsync(ct);
+            outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
 
-            _logger.LogInformation(
-                "Dispatch claim acquired: Job={JobId} Printer={PrinterId} Attempt={AttemptId} StartPath={StartPath}",
-                request.JobId, request.PrinterId, attempt.Id, request.StartPathKind);
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                claimed = true;
+                lastConflict = null;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                lastConflict = ex;
 
-            return DispatchClaimResult.Ok(attempt);
+                bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
+                    ex.Entries.All(e => e.Entity is OutboxSequenceState);
+
+                if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
+                {
+                    break;
+                }
+
+                _logger.LogWarning(
+                    ex,
+                    "[Claim] Sequence contention (retry {Retry}/{Max}) for Job={JobId} Printer={PrinterId}",
+                    seqRetry + 1, MaxSequenceRetries, request.JobId, request.PrinterId);
+
+                OutboxSequenceState? seqState = _db.OutboxSequenceStates.Local.SingleOrDefault();
+                if (seqState is not null)
+                {
+                    await _db.Entry(seqState).ReloadAsync(ct);
+                }
+            }
         }
-        catch (DbUpdateConcurrencyException ex)
+
+        if (!claimed)
         {
             _logger.LogWarning(
-                ex,
+                lastConflict,
                 "Concurrency conflict acquiring dispatch claim for Job={JobId} Printer={PrinterId}",
                 request.JobId, request.PrinterId);
 
@@ -361,6 +439,12 @@ public sealed class DispatchClaimService(
                 "concurrency_conflict",
                 "A concurrent operation modified the job or dispatch state. Retry with the latest ETag.");
         }
+
+        _logger.LogInformation(
+            "Dispatch claim acquired: Job={JobId} Printer={PrinterId} Attempt={AttemptId} StartPath={StartPath}",
+            request.JobId, request.PrinterId, attempt.Id, request.StartPathKind);
+
+        return DispatchClaimResult.Ok(attempt);
     }
 
     /// <inheritdoc />
