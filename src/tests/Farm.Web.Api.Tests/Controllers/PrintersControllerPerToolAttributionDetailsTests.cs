@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Controllers;
@@ -19,6 +20,7 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// and (c) preserves the deterministic non-omitting shape #719 UI consumers depend on.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection(IntegrationTestCollection.Name)]
 public sealed class PrintersControllerPerToolAttributionDetailsTests
 {
     private static readonly JsonSerializerOptions ReadOptions = new()
