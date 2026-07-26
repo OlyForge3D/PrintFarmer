@@ -443,6 +443,19 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         _ = await core.SaveChangesAsync();
     }
 
+    /// <summary>Rewrites a registered worker's durable row, e.g. to simulate it claiming a job or going offline.</summary>
+    /// <param name="workerId">The worker identity.</param>
+    /// <param name="mutate">The mutation applied to the durable row.</param>
+    /// <returns>A task that completes when the row is rewritten.</returns>
+    public async Task MutateWorkerAsync(Guid workerId, Action<Worker> mutate)
+    {
+        ArgumentNullException.ThrowIfNull(mutate);
+        await using SlicerDbContext slicer = CreateSlicerContext();
+        Worker worker = await slicer.Workers.SingleAsync(candidate => candidate.Id == workerId);
+        mutate(worker);
+        _ = await slicer.SaveChangesAsync();
+    }
+
     public void Dispose()
     {
         try

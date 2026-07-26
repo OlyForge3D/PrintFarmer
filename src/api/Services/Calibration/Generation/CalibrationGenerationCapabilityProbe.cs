@@ -226,6 +226,12 @@ public sealed class CalibrationGenerationCapabilityProbe(
                 return null;
             }
 
+            // Identity/attestation selection answers "is there a worker in good standing that attests
+            // the pinned upstream slicer identity", not "is there free capacity right now". A worker
+            // claiming and actively running the very job this probe is being asked about is healthy,
+            // online, authenticated and correctly attested; it must stay pinned-available while busy.
+            // Whether a *new* attempt can be scheduled onto it is a queue/claim concern handled where
+            // slice jobs are submitted and dispatched, not here.
             List<WorkerAttestation> workers = await db.Workers
                 .AsNoTracking()
                 .Where(worker =>
@@ -234,8 +240,7 @@ public sealed class CalibrationGenerationCapabilityProbe(
                     worker.Status == WorkerStatus.Online &&
                     worker.LastHeartbeat >= heartbeatCutoff &&
                     worker.ApiKey != null &&
-                    worker.ApiKey != string.Empty &&
-                    worker.TotalSlots > worker.ActiveJobs)
+                    worker.ApiKey != string.Empty)
                 .Select(worker => new WorkerAttestation(
                     worker.Id,
                     worker.ServiceId,

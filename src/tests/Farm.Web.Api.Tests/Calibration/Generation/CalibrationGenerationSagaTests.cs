@@ -683,6 +683,39 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
     }
 
+    [Fact(DisplayName = "A worker that claimed the job and is busy is reconciled, not treated as unavailable")]
+    public async Task ResumeAsync_WithWorkerBusyOnClaimedJob_ReconcilesExistingJob()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-busy-worker");
+
+        // The only worker claims the job: this is what a real claim does to the durable worker row,
+        // and it must not make the same worker look "unavailable" to the pinned identity/attestation
+        // check the very next time the saga resumes.
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        await _harness.MutateWorkerAsync(workerId, worker => worker.ActiveJobs = worker.TotalSlots);
+
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration afterBusyResume = await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = afterBusyResume.CurrentStep.Should().Be(CalibrationGenerationSteps.AwaitingWorker);
+        _ = afterBusyResume.Status.Should().Be(CalibrationOrchestrationStatus.Running);
+        _ = afterBusyResume.LastErrorCode.Should().NotBe(CalibrationGenerationProblemCodes.PinnedWorkerUnavailable);
+
+        // Reconciling the same busy worker's job must not queue a second one behind it.
+        _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(1);
+
+        // Once the busy worker finishes the job it was already running, the run completes without
+        // ever requiring a free slot to open up first.
+        _ = await _harness.CompleteWorkerJobAsync(fixture.OrchestrationId, workerId);
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration completed = await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = completed.Status.Should().Be(CalibrationOrchestrationStatus.Completed);
+        _ = completed.LastErrorCode.Should().BeNull();
+    }
+
     [Fact(DisplayName = "A worker that never reports keeps the run waiting rather than failing it")]
     public async Task ResumeAsync_WhileWorkerHasNotReported_StaysRecoverable()
     {

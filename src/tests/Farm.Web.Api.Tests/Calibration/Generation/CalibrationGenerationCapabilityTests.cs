@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Calibration.Generation;
+﻿using Farm.Slicer.Module.Domain;
+using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Calibration.Generation;
@@ -224,6 +225,84 @@ public sealed class CalibrationGenerationCapabilityTests : IAsyncLifetime
         _ = capability.RecoveryHealthy.Should().BeFalse();
         _ = capability.Operational.Should().BeFalse();
         _ = capability.UnavailableCode.Should().Be("generation_recovery_unavailable");
+    }
+
+    [Fact(DisplayName = "A worker actively running the job it claimed stays pinned-available")]
+    public async Task GetCapabilityAsync_WithBusyWorker_StaysOperational()
+    {
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await _harness.MutateWorkerAsync(workerId, worker => worker.ActiveJobs = worker.TotalSlots);
+
+        CalibrationGenerationCapabilityDto capability = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .GetCapabilityAsync(CancellationToken.None);
+
+        // Capacity is a queue/claim concern, not an identity/attestation concern: a healthy, online,
+        // authenticated worker that attests the pinned build stays available while it is busy running
+        // the very job the saga is polling for. Otherwise every resume after a worker claims its job
+        // would see the worker as "unavailable" and fail the run it is actively completing.
+        _ = capability.PinnedWorkerAvailable.Should().BeTrue();
+        _ = capability.Operational.Should().BeTrue(capability.UnavailableCode);
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .FindPinnedWorkerAsync(CancellationToken.None);
+        _ = pinned.Should().NotBeNull();
+        _ = pinned!.WorkerId.Should().Be(workerId);
+    }
+
+    [Fact(DisplayName = "A disabled worker is never eligible even while it attests the pinned build")]
+    public async Task FindPinnedWorkerAsync_WithDisabledWorker_ReturnsNull()
+    {
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await _harness.MutateWorkerAsync(workerId, worker => worker.IsDisabled = true);
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "An offline worker is never eligible even while it attests the pinned build")]
+    public async Task FindPinnedWorkerAsync_WithOfflineWorker_ReturnsNull()
+    {
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await _harness.MutateWorkerAsync(workerId, worker => worker.Status = WorkerStatus.Offline);
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "A worker with a stale heartbeat is never eligible")]
+    public async Task FindPinnedWorkerAsync_WithStaleHeartbeat_ReturnsNull()
+    {
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await _harness.MutateWorkerAsync(
+            workerId,
+            worker => worker.LastHeartbeat = DateTime.UtcNow.AddMinutes(-10));
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
+    }
+
+    [Fact(DisplayName = "A worker without a registry-issued API key is never eligible")]
+    public async Task FindPinnedWorkerAsync_WithoutApiKey_ReturnsNull()
+    {
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await _harness.MutateWorkerAsync(workerId, worker => worker.ApiKey = null);
+
+        CalibrationPinnedSlicerIdentity? pinned = await _harness
+            .CreateCapabilityProbe(new CalibrationGenerationHarnessOptions())
+            .FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = pinned.Should().BeNull();
     }
 
     [Fact(DisplayName = "The attested identity comes from the worker registry, never from configuration")]
