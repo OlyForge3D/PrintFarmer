@@ -593,18 +593,35 @@ public sealed class CalibrationGenerationSaga(
         if (orchestration.PlanManifestSha256 is { Length: > 0 } pinnedPlan &&
             !CalibrationCanonicalJson.DigestsMatch(pinnedPlan, plan.ManifestSha256))
         {
-            await FailTerminallyAsync(
-                project,
-                orchestration,
-                CalibrationGenerationProblemCodes.PlanModelMismatch,
-                [
-                    new(
-                        CalibrationGenerationProblemCodes.PlanModelMismatch,
-                        "orchestration.planManifestSha256",
-                        "The recompiled plan no longer matches the plan this run was accepted with."),
-                ],
-                cancellationToken);
-            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+            // A trusted server upgrade that changed only how a plan manifest is written down is not
+            // drift: the plan body recompiles identically and only its serialized layout moved. Such
+            // a checkpoint is recognized by reproducing it from a superseded schema, and the run then
+            // keeps completing under the schema it was accepted with, so its already-submitted job,
+            // its composed program and its promotion stay byte-identical and nothing durable is
+            // rewritten. Anything no superseded schema explains is still a terminal mismatch.
+            OrcaCalibrationPlan? accepted =
+                OrcaCalibrationPlanManifestSchema.BindToCheckpoint(plan, pinnedPlan);
+            if (accepted is null)
+            {
+                await FailTerminallyAsync(
+                    project,
+                    orchestration,
+                    CalibrationGenerationProblemCodes.PlanModelMismatch,
+                    [
+                        new(
+                            CalibrationGenerationProblemCodes.PlanModelMismatch,
+                            "orchestration.planManifestSha256",
+                            "The recompiled plan no longer matches the plan this run was accepted with."),
+                    ],
+                    cancellationToken);
+                return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+            }
+
+            _logger.LogInformation(
+                "Calibration orchestration {OrchestrationId} continues under superseded plan manifest schema {SchemaVersion}",
+                orchestration.Id,
+                accepted.Manifest.SchemaVersion);
+            plan = accepted;
         }
 
         if (orchestration.CurrentStep == CalibrationGenerationSteps.CompilingPlan)
@@ -1014,12 +1031,16 @@ public sealed class CalibrationGenerationSaga(
                 MachineProfileId = plan.MachineProfile.Id,
                 ProcessProfileId = plan.ProcessProfile.Id,
                 FilamentProfileId = plan.FilamentProfile.Id,
-                MachineProfileJson = plan.MachineProfile.ExactJson,
-                ProcessProfileJson = plan.ProcessProfile.ExactJson,
-                FilamentProfileJson = plan.FilamentProfile.ExactJson,
-                MachineProfileSha256 = plan.MachineProfile.Sha256,
-                ProcessProfileSha256 = plan.ProcessProfile.Sha256,
-                FilamentProfileSha256 = plan.FilamentProfile.Sha256,
+
+                // The worker receives the effective documents, never the baselines: a forbidden
+                // command or notes value from an upstream profile is neutralized before it can
+                // reach the slicer, and the delivered digest is the digest of what it receives.
+                MachineProfileJson = plan.MachineProfile.EffectiveJson,
+                ProcessProfileJson = plan.ProcessProfile.EffectiveJson,
+                FilamentProfileJson = plan.FilamentProfile.EffectiveJson,
+                MachineProfileSha256 = plan.MachineProfile.EffectiveSha256,
+                ProcessProfileSha256 = plan.ProcessProfile.EffectiveSha256,
+                FilamentProfileSha256 = plan.FilamentProfile.EffectiveSha256,
                 SlicerDistribution = plan.Manifest.SlicerDistribution,
                 SlicerVersion = plan.Manifest.SlicerVersion,
                 SlicerContainerDigest = pinned.ContainerDigest,

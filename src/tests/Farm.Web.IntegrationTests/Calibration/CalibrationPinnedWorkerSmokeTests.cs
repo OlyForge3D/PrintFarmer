@@ -236,13 +236,33 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
             SliceJob job = await ReadSliceJobAsync(fixture.OrchestrationId, cancellationToken);
             _ = job.Status.Should().Be(SliceJobStatus.Completed);
             _ = job.WorkerId.Should().Be(serviceId.ToString());
-            _ = job.MachineProfileSha256.Should().Be(
-                CalibrationCanonicalJson.ComputeTextSha256(profiles.MachineJson));
-            _ = job.ProcessProfileSha256.Should().Be(
-                CalibrationCanonicalJson.ComputeTextSha256(profiles.ProcessJson));
-            _ = job.FilamentProfileSha256.Should().Be(
-                CalibrationCanonicalJson.ComputeTextSha256(profiles.FilamentJson));
+
+            // The worker receives, verifies and reports the effective documents: the exact upstream
+            // baselines with the forbidden command and notes keys neutralized by the plan compiler.
+            OrcaEffectiveProfileDocument machine =
+                OrcaEffectiveProfileFactory.Derive(profiles.MachineJson);
+            OrcaEffectiveProfileDocument process =
+                OrcaEffectiveProfileFactory.Derive(profiles.ProcessJson);
+            OrcaEffectiveProfileDocument filament =
+                OrcaEffectiveProfileFactory.Derive(profiles.FilamentJson);
+            _ = job.MachineProfileSha256.Should().Be(machine.Sha256);
+            _ = job.ProcessProfileSha256.Should().Be(process.Sha256);
+            _ = job.FilamentProfileSha256.Should().Be(filament.Sha256);
+            _ = job.MachineProfileJson.Should().Be(machine.Json);
             _ = job.SlicerContainerDigest.Should().Be(gate.Digest);
+
+            // The immutable snapshot still holds the untouched upstream documents and their digests.
+            PrinterConfigurationSnapshot snapshot = await core.PrinterConfigurationSnapshots
+                .AsNoTracking()
+                .SingleAsync(row => row.AttemptId == fixture.AttemptId, cancellationToken);
+            _ = snapshot.ExactMachineProfileJson.Should().Be(profiles.MachineJson);
+            _ = snapshot.MachineProfileSha256.Should()
+                .Be(CalibrationCanonicalJson.ComputeTextSha256(profiles.MachineJson));
+            _output.WriteLine(
+                "Neutralized machine profile keys: " +
+                (machine.NeutralizedKeys.Count == 0
+                    ? "(none)"
+                    : string.Join(", ", machine.NeutralizedKeys)));
         }
 
         _output.WriteLine(

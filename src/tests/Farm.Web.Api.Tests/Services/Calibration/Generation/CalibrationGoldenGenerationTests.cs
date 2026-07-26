@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Calibration.Generation;
+﻿using System.Text.Json;
+using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
@@ -374,8 +375,63 @@ public sealed class CalibrationGoldenGenerationTests
             .Be(CalibrationGenerationTestData.ContainerDigest);
         _ = run.Plan.Manifest.SlicerBinarySha256.Should()
             .Be(CalibrationGenerationTestData.BinaryDigest);
-        _ = run.Plan.MachineProfile.ExactJson.Should()
+        _ = run.Plan.MachineProfile.SourceExactJson.Should()
             .Be(run.Specification!.Document.Profiles.Machine!.ExactJson);
+    }
+
+    [Theory]
+    [MemberData(nameof(SupportedMethods))]
+    public void Plan_ForEverySupportedMethod_KeepsBaselinesExactAndDerivesCanonicalEffectiveDocuments(
+        CalibrationMethod method)
+    {
+        CalibrationGenerationPipeline.Result run =
+            CalibrationGenerationPipeline.Run(method, 0.4m, directDrive: true);
+        _ = run.Problems.Should().BeEmpty();
+
+        CalibrationProfileTriplet profiles = run.Specification!.Document.Profiles;
+        (OrcaPlanProfile Plan, CalibrationExactProfile? Source)[] pairs =
+        [
+            (run.Plan!.MachineProfile, profiles.Machine),
+            (run.Plan.ProcessProfile, profiles.Process),
+            (run.Plan.FilamentProfile, profiles.Filament),
+        ];
+
+        foreach ((OrcaPlanProfile plan, CalibrationExactProfile? source) in pairs)
+        {
+            _ = plan.SourceExactJson.Should().Be(source!.ExactJson);
+            _ = plan.SourceSha256.Should().Be(source.Sha256);
+            _ = plan.EffectiveSha256.Should()
+                .Be(CalibrationCanonicalJson.ComputeTextSha256(plan.EffectiveJson));
+
+            using JsonDocument effective = JsonDocument.Parse(plan.EffectiveJson);
+            foreach (JsonProperty property in effective.RootElement.EnumerateObject())
+            {
+                if (!OrcaProfileCommandKeys.IsForbidden(property.Name))
+                {
+                    continue;
+                }
+
+                _ = plan.NeutralizedKeys.Should().Contain(property.Name);
+                bool empty = property.Value.ValueKind switch
+                {
+                    JsonValueKind.String => property.Value.GetString()!.Length == 0,
+                    JsonValueKind.Array => property.Value.GetArrayLength() == 0,
+                    _ => false,
+                };
+                _ = empty.Should()
+                    .BeTrue($"{property.Name} must carry no value in the effective document");
+            }
+
+            // Every recorded name is a key the baseline really declared, and the rule really forbids.
+            using JsonDocument baseline = JsonDocument.Parse(plan.SourceExactJson);
+            foreach (string neutralized in plan.NeutralizedKeys)
+            {
+                _ = OrcaProfileCommandKeys.IsForbidden(neutralized).Should().BeTrue();
+                _ = baseline.RootElement.TryGetProperty(neutralized, out _).Should().BeTrue();
+            }
+
+            _ = plan.NeutralizedKeys.Should().BeInAscendingOrder(StringComparer.Ordinal);
+        }
     }
 
     [Fact]

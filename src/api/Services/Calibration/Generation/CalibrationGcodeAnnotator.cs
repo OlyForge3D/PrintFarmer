@@ -71,13 +71,18 @@ public sealed record CalibrationGcodeManifest
     /// <summary>Gets the model content digest.</summary>
     public required string ModelSha256 { get; init; }
 
-    /// <summary>Gets the machine profile digest.</summary>
+    /// <summary>Gets the immutable baseline machine profile digest.</summary>
+    /// <remarks>
+    /// The G-code manifest and header record baseline digests, so a printed program always points
+    /// back at the upstream documents the authoritative snapshot stored. The effective documents the
+    /// worker sliced with are recorded, with their digests, in the plan manifest.
+    /// </remarks>
     public required string MachineProfileSha256 { get; init; }
 
-    /// <summary>Gets the process profile digest.</summary>
+    /// <summary>Gets the immutable baseline process profile digest.</summary>
     public required string ProcessProfileSha256 { get; init; }
 
-    /// <summary>Gets the filament profile digest.</summary>
+    /// <summary>Gets the immutable baseline filament profile digest.</summary>
     public required string FilamentProfileSha256 { get; init; }
 
     /// <summary>Gets the printer configuration snapshot digest.</summary>
@@ -240,9 +245,9 @@ public sealed class CalibrationGcodeAnnotator : ICalibrationGcodeAnnotator
             PlanManifestSha256 = plan.ManifestSha256,
             Model3DId = model.Model3DId,
             ModelSha256 = model.Sha256,
-            MachineProfileSha256 = plan.MachineProfile.Sha256,
-            ProcessProfileSha256 = plan.ProcessProfile.Sha256,
-            FilamentProfileSha256 = plan.FilamentProfile.Sha256,
+            MachineProfileSha256 = plan.MachineProfile.SourceSha256,
+            ProcessProfileSha256 = plan.ProcessProfile.SourceSha256,
+            FilamentProfileSha256 = plan.FilamentProfile.SourceSha256,
             PrinterConfigurationSnapshotSha256 = document.PrinterConfigurationSnapshotSha256,
             GeneratorName = document.Generator.Name,
             GeneratorVersion = document.Generator.Version,
@@ -289,9 +294,9 @@ public sealed class CalibrationGcodeAnnotator : ICalibrationGcodeAnnotator
         Meta(builder, "planManifestSha256", plan.ManifestSha256);
         Meta(builder, "model3dId", model.Model3DId.ToString());
         Meta(builder, "modelSha256", model.Sha256);
-        Meta(builder, "machineProfileSha256", plan.MachineProfile.Sha256);
-        Meta(builder, "processProfileSha256", plan.ProcessProfile.Sha256);
-        Meta(builder, "filamentProfileSha256", plan.FilamentProfile.Sha256);
+        Meta(builder, "machineProfileSha256", plan.MachineProfile.SourceSha256);
+        Meta(builder, "processProfileSha256", plan.ProcessProfile.SourceSha256);
+        Meta(builder, "filamentProfileSha256", plan.FilamentProfile.SourceSha256);
         Meta(
             builder,
             "printerConfigurationSnapshotSha256",

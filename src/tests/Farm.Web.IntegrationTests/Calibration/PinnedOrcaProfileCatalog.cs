@@ -14,27 +14,19 @@ namespace Farm.Web.IntegrationTests.Calibration;
 /// here already carry every inherited setting. The only key removed is the now-satisfied
 /// <c>inherits</c> marker, which the production plan compiler refuses precisely because an unresolved
 /// parent reference would make the document non-self-contained. The resulting document is the single
-/// exact artefact that is hashed, stored on the immutable snapshot, delivered on the claim and written
-/// to disk by the slicer.
+/// exact artefact that is hashed and stored on the immutable snapshot.
 /// </para>
 /// <para>
-/// No profile is invented, edited or trimmed beyond that marker.
+/// Official upstream profiles legitimately carry command and notes fields such as
+/// <c>machine_start_gcode</c> or <c>printer_notes</c>. Nothing here filters those out or strips them:
+/// neutralizing them is the production plan compiler's job, and this catalogue deliberately hands it
+/// unmodified upstream documents so the smoke exercises that path. Selection is therefore purely
+/// functional — a machine that declares a nozzle diameter, a process that declares a layer height and
+/// a filament that declares a filament type.
 /// </para>
 /// </remarks>
 internal static class PinnedOrcaProfileCatalog
 {
-    private static readonly string[] ForbiddenProfileKeys =
-    [
-        "post_process",
-        "machine_start_gcode",
-        "machine_end_gcode",
-        "before_layer_change_gcode",
-        "layer_change_gcode",
-        "change_filament_gcode",
-        "template_custom_gcode",
-        "printer_notes",
-    ];
-
     /// <summary>
     /// Selects a machine, process and filament document the pinned worker publishes.
     /// </summary>
@@ -73,22 +65,21 @@ internal static class PinnedOrcaProfileCatalog
         IReadOnlyList<JsonObject> filaments = ReadSettings(document.RootElement, "filamentProfiles");
 
         JsonObject machine = machines
-            .Where(IsSafeProfile)
             .Where(candidate => TryReadNozzleDiameter(candidate, out _))
             .OrderBy(candidate => NozzleDistanceFromPreferred(candidate))
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no command-free machine profile that declares a nozzle diameter.");
+                "The pinned worker publishes no machine profile that declares a nozzle diameter.");
         _ = TryReadNozzleDiameter(machine, out double nozzleDiameter);
 
         JsonObject process = processes.FirstOrDefault(
-            candidate => IsSafeProfile(candidate) && candidate.ContainsKey("layer_height"))
+            candidate => candidate.ContainsKey("layer_height"))
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no command-free process profile that declares a layer height.");
+                "The pinned worker publishes no process profile that declares a layer height.");
         JsonObject filament = filaments.FirstOrDefault(
-            candidate => IsSafeProfile(candidate) && candidate.ContainsKey("filament_type"))
+            candidate => candidate.ContainsKey("filament_type"))
             ?? throw new InvalidOperationException(
-                "The pinned worker publishes no command-free filament profile that declares a filament type.");
+                "The pinned worker publishes no filament profile that declares a filament type.");
 
         return new PinnedOrcaProfileSelection(
             Canonicalize(machine),
@@ -152,19 +143,6 @@ internal static class PinnedOrcaProfileCatalog
 
     private static double NozzleDistanceFromPreferred(JsonObject machine) =>
         TryReadNozzleDiameter(machine, out double diameter) ? Math.Abs(diameter - 0.4) : double.MaxValue;
-
-    private static bool IsSafeProfile(JsonObject profile) =>
-        ForbiddenProfileKeys.All(key =>
-            !profile.TryGetPropertyValue(key, out JsonNode? value) || !HasContent(value));
-
-    private static bool HasContent(JsonNode? value) => value switch
-    {
-        null => false,
-        JsonValue scalar => !string.IsNullOrWhiteSpace(scalar.ToString()),
-        JsonArray array => array.Any(HasContent),
-        JsonObject properties => properties.Count > 0,
-        _ => true,
-    };
 
     private static bool TryReadNozzleDiameter(JsonObject machine, out double diameter)
     {

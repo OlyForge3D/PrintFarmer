@@ -191,19 +191,21 @@ public sealed class CalibrationGcodeSafetyValidator : ICalibrationGcodeSafetyVal
                 "The manifest references a different plan."));
         }
 
+        // The annotated program records baseline provenance digests, so they are what the manifest
+        // must agree with; the effective documents are the worker's contract, not the program's.
         CompareDigest(
             request.Manifest.MachineProfileSha256,
-            request.Plan.MachineProfile.Sha256,
+            request.Plan.MachineProfile.SourceSha256,
             "manifest.machineProfileSha256",
             problems);
         CompareDigest(
             request.Manifest.ProcessProfileSha256,
-            request.Plan.ProcessProfile.Sha256,
+            request.Plan.ProcessProfile.SourceSha256,
             "manifest.processProfileSha256",
             problems);
         CompareDigest(
             request.Manifest.FilamentProfileSha256,
-            request.Plan.FilamentProfile.Sha256,
+            request.Plan.FilamentProfile.SourceSha256,
             "manifest.filamentProfileSha256",
             problems);
 

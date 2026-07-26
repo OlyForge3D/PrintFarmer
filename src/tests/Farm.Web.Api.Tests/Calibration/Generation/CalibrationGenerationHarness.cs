@@ -143,7 +143,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
             CreateProjectService(core),
             new CalibrationSpecificationCompiler(TimeProvider.System),
             new CalibrationModelValidator(),
-            new OrcaCalibrationPlanCompiler(),
+            resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(),
             new KlipperCalibrationGcodeGenerator(),
             new CalibrationGcodeAnnotator(),
             new CalibrationGcodeSafetyValidator(),
@@ -197,19 +197,23 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     }
 
     /// <summary>Seeds a complete, generation-ready calibration project and attempt.</summary>
-    /// <param name=""method"">The canonical calibration method.</param>
-    /// <param name=""ownerId"">Optional explicit owner.</param>
-    /// <param name=""tamperSpecification"">Stores a specification the recompile cannot reproduce.</param>
+    /// <param name="method">The canonical calibration method.</param>
+    /// <param name="ownerId">Optional explicit owner.</param>
+    /// <param name="tamperSpecification">Stores a specification the recompile cannot reproduce.</param>
+    /// <param name="profiles">Exact native profiles to store, or <see langword="null"/> for the canonical set.</param>
     /// <returns>The seeded fixture.</returns>
     public Task<CalibrationGenerationFixture> SeedAttemptAsync(
         string method = CalibrationMethodNames.Temperature,
         Guid? ownerId = null,
-        bool tamperSpecification = false) =>
+        bool tamperSpecification = false,
+        CalibrationGenerationSeed.ProfileSet? profiles = null) =>
         CalibrationGenerationSeed.SeedAsync(
             CreateCoreContext,
             method,
             ownerId ?? Guid.NewGuid(),
-            tamperSpecification);
+            tamperSpecification,
+            profiles);
+
     /// <summary>Registers an online worker that attests the pinned upstream build identity.</summary>
     /// <param name="containerDigest">Container digest published by the worker's service.</param>
     /// <param name="binaryDigest">Binary digest published by the worker's service.</param>
@@ -599,6 +603,15 @@ internal sealed record CalibrationGenerationHarnessOptions
 
     /// <summary>Deployment topology reported by configuration.</summary>
     public string DeploymentMode { get; init; } = "monolith";
+
+    /// <summary>
+    /// The plan compiler the saga is built with, or <see langword="null"/> for the production one.
+    /// </summary>
+    /// <remarks>
+    /// Only a decorator over the production compiler belongs here: it lets a test observe the plan
+    /// a real pass compiled without changing what the saga does with it.
+    /// </remarks>
+    public IOrcaCalibrationPlanCompiler? PlanCompiler { get; init; }
 }
 
 // CalibrationGenerationFixture lives in CalibrationGenerationFixture.cs so the pinned-worker smoke

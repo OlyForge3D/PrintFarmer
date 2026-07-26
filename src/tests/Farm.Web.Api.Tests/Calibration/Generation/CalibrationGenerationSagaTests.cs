@@ -330,10 +330,174 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = job.MachineProfileJson.Should().NotBeNullOrWhiteSpace();
         _ = job.ProcessProfileJson.Should().NotBeNullOrWhiteSpace();
         _ = job.FilamentProfileJson.Should().NotBeNullOrWhiteSpace();
-        _ = job.MachineProfileSha256.Should().NotBeNullOrWhiteSpace();
+
+        // The worker receives the effective documents and the digests of those documents, never the
+        // untouched upstream baselines the immutable snapshot keeps as provenance.
+        OrcaEffectiveProfileDocument machine =
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.MachineProfileJson);
+        OrcaEffectiveProfileDocument process =
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.ProcessProfileJson);
+        OrcaEffectiveProfileDocument filament =
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.FilamentProfileJson);
+        _ = job.MachineProfileJson.Should().Be(machine.Json);
+        _ = job.ProcessProfileJson.Should().Be(process.Json);
+        _ = job.FilamentProfileJson.Should().Be(filament.Json);
+        _ = job.MachineProfileSha256.Should().Be(machine.Sha256);
+        _ = job.ProcessProfileSha256.Should().Be(process.Sha256);
+        _ = job.FilamentProfileSha256.Should().Be(filament.Sha256);
         _ = job.Model3DId.Should().NotBeNull();
         _ = job.ModelFileUrl.Should().Be($"/api/slice/{job.Id}/model");
         _ = job.ModelFileUrl.Should().NotContain(_harness.ModelRoot);
+    }
+
+    [Fact(DisplayName = "An upstream profile's command fields are neutralized before the worker sees them")]
+    public async Task ResumeAsync_WithUpstreamCommandFields_DeliversNeutralizedProfilesOnly()
+    {
+        const string machineJson =
+            """{"name":"Upstream Machine","nozzle_diameter":["0.4"],"printable_area":["0x0","235x0","235x235","0x235"],"machine_start_gcode":"G28 ; home\nM104 S200","machine_end_gcode":"M104 S0","printer_notes":"PRINTER_MODEL_UPSTREAM","post_process":[]}""";
+        const string processJson =
+            """{"name":"Upstream Process","layer_height":"0.2","line_width":"0.45","wall_loops":"2","before_layer_change_gcode":";BEFORE_LAYER_CHANGE","layer_change_gcode":";AFTER_LAYER_CHANGE"}""";
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync(
+            profiles: new CalibrationGenerationSeed.ProfileSet(
+                machineJson,
+                processJson,
+                CalibrationGenerationSeed.FilamentProfileJson,
+                0.4));
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-neutralized");
+
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        SliceJob job = (await _harness.FindSliceJobAsync(fixture.OrchestrationId))!;
+        _ = job.MachineProfileJson.Should().NotContain("G28");
+        _ = job.MachineProfileJson.Should().NotContain("M104");
+        _ = job.MachineProfileJson.Should().NotContain("PRINTER_MODEL_UPSTREAM");
+        _ = job.MachineProfileJson.Should().Contain("\"nozzle_diameter\":[\"0.4\"]");
+        _ = job.ProcessProfileJson.Should().NotContain("LAYER_CHANGE");
+        _ = job.ProcessProfileJson.Should().Contain("\"layer_height\":\"0.2\"");
+
+        OrcaEffectiveProfileDocument machine = OrcaEffectiveProfileFactory.Derive(machineJson);
+        _ = machine.NeutralizedKeys.Should().Equal(
+            "machine_end_gcode",
+            "machine_start_gcode",
+            "post_process",
+            "printer_notes");
+        _ = job.MachineProfileJson.Should().Be(machine.Json);
+        _ = job.MachineProfileSha256.Should().Be(machine.Sha256);
+
+        // The immutable snapshot still holds the untouched upstream baseline and its digest.
+        await using Farm.Infrastructure.Data.AppDbContext core = _harness.CreateCoreContext();
+        PrinterConfigurationSnapshot snapshot = await Microsoft.EntityFrameworkCore
+            .EntityFrameworkQueryableExtensions
+            .SingleAsync(core.PrinterConfigurationSnapshots, row => row.AttemptId == fixture.AttemptId);
+        _ = snapshot.ExactMachineProfileJson.Should().Be(machineJson);
+        _ = snapshot.MachineProfileSha256.Should()
+            .Be(CalibrationCanonicalJson.ComputeTextSha256(machineJson));
+        _ = snapshot.MachineProfileSha256.Should().NotBe(job.MachineProfileSha256);
+    }
+
+    [Fact(DisplayName = "A run accepted under a superseded plan manifest schema resumes under it")]
+    public async Task ResumeAsync_WithSupersededPlanManifestSchemaCheckpoint_CompletesWithoutFailing()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-superseded-schema");
+
+        CapturingPlanCompiler capture = new();
+        _ = await _harness
+            .CreateSaga(new CalibrationGenerationHarnessOptions { PlanCompiler = capture })
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        OrcaCalibrationPlan plan = capture.Compiled!;
+
+        // Reproduces a run that a build writing the 1.0 plan manifest accepted and submitted: only
+        // the durable digest differs, because only the way the manifest is written down changed.
+        string legacyDigest = CalibrationCanonicalJson.ComputeTextSha256(
+            OrcaCalibrationPlanManifestSchema.Serialize(
+                plan.Manifest,
+                OrcaCalibrationPlanManifestSchema.SingleProfileDigest));
+        _ = legacyDigest.Should().NotBe(plan.ManifestSha256);
+        await _harness.MutateOrchestrationAsync(
+            fixture.OrchestrationId,
+            orchestration => orchestration.PlanManifestSha256 = legacyDigest);
+
+        _ = await _harness.CompleteWorkerJobAsync(fixture.OrchestrationId, workerId);
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration completed =
+            await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = completed.Status.Should().Be(CalibrationOrchestrationStatus.Completed);
+        _ = completed.LastErrorCode.Should().BeNull();
+        _ = completed.GcodeFileId.Should().NotBeNull();
+
+        // The trusted upgrade rewrites nothing durable, and the promoted program still names the
+        // plan digest this run was accepted with.
+        _ = completed.PlanManifestSha256.Should().Be(legacyDigest);
+        string promoted = Encoding.UTF8.GetString(
+            await ReadArtifactBytesAsync(completed.FinalArtifactId!.Value));
+        _ = promoted.Should().Contain($"planManifestSha256={legacyDigest}");
+        _ = promoted.Should().NotContain(plan.ManifestSha256);
+        _ = (await _harness.CountSliceJobsAsync(fixture.OrchestrationId)).Should().Be(1);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "A resume after a superseded-schema restart is still exactly once")]
+    public async Task ResumeAsync_AfterSupersededSchemaRestart_DoesNotDuplicateAnyEffect()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        Guid workerId = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-superseded-restart");
+
+        CapturingPlanCompiler capture = new();
+        _ = await _harness
+            .CreateSaga(new CalibrationGenerationHarnessOptions { PlanCompiler = capture })
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        string legacyDigest = CalibrationCanonicalJson.ComputeTextSha256(
+            OrcaCalibrationPlanManifestSchema.Serialize(
+                capture.Compiled!.Manifest,
+                OrcaCalibrationPlanManifestSchema.SingleProfileDigest));
+        await _harness.MutateOrchestrationAsync(
+            fixture.OrchestrationId,
+            orchestration => orchestration.PlanManifestSha256 = legacyDigest);
+        _ = await _harness.CompleteWorkerJobAsync(fixture.OrchestrationId, workerId);
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        Guid promotedFileId =
+            (await _harness.GetOrchestrationAsync(fixture.OrchestrationId)).GcodeFileId!.Value;
+        int artifactCount = (await _harness.ListArtifactsAsync(fixture.OrchestrationId)).Count;
+
+        await _harness.RewindToStepAsync(fixture.OrchestrationId, CalibrationGenerationSteps.ComposingGcode);
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration resumed =
+            await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = resumed.Status.Should().Be(CalibrationOrchestrationStatus.Completed);
+        _ = resumed.GcodeFileId.Should().Be(promotedFileId);
+        _ = resumed.PlanManifestSha256.Should().Be(legacyDigest);
+        _ = (await _harness.ListArtifactsAsync(fixture.OrchestrationId)).Count.Should().Be(artifactCount);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(1);
+    }
+
+    [Fact(DisplayName = "A plan digest no schema explains is still a terminal mismatch")]
+    public async Task ResumeAsync_WithUnexplainedPlanManifestDigest_FailsDurably()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-plan-drift");
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        await _harness.MutateOrchestrationAsync(
+            fixture.OrchestrationId,
+            orchestration => orchestration.PlanManifestSha256 = new string('a', 64));
+
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration orchestration =
+            await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = orchestration.Status.Should().Be(CalibrationOrchestrationStatus.Failed);
+        _ = orchestration.LastErrorCode.Should()
+            .Be(CalibrationGenerationProblemCodes.PlanModelMismatch);
+        _ = (await _harness.CountGcodeFilesAsync()).Should().Be(0);
     }
 
     [Fact(DisplayName = "An unattributed hash-matched model is not adopted; a new owned model is stored instead")]
@@ -852,4 +1016,31 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
             orchestration.LeaseOwner = null;
             orchestration.LeaseExpiresAtUtc = null;
         });
+
+    /// <summary>
+    /// The production plan compiler, with the plan a real pass compiled kept for inspection.
+    /// </summary>
+    /// <remarks>
+    /// The saga's behaviour is unchanged: the plan is compiled by the production compiler and
+    /// returned untouched. Recording it is the only way a test can compute what a superseded
+    /// manifest schema would have written for the very same plan.
+    /// </remarks>
+    private sealed class CapturingPlanCompiler : IOrcaCalibrationPlanCompiler
+    {
+        private readonly OrcaCalibrationPlanCompiler _inner = new();
+
+        /// <summary>Gets the last plan a pass compiled successfully.</summary>
+        public OrcaCalibrationPlan? Compiled { get; private set; }
+
+        /// <inheritdoc/>
+        public CalibrationGenerationResult<OrcaCalibrationPlan> Compile(
+            CalibrationSpecification specification,
+            CalibrationValidatedModel model)
+        {
+            CalibrationGenerationResult<OrcaCalibrationPlan> result =
+                _inner.Compile(specification, model);
+            Compiled = result.Value ?? Compiled;
+            return result;
+        }
+    }
 }

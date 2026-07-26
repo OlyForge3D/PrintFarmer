@@ -280,7 +280,7 @@ durable orchestration that drives them is documented under
 |---|---|
 | `ICalibrationSpecificationCompiler` | Compiles typed method options plus an authoritative context into a canonical specification and its SHA-256, and re-verifies an existing specification against the current context. |
 | `ICalibrationModelValidator` | Validates trusted generated geometry and linked `Model3D` assets by identity, digest and provenance; parses canonical STL/3MF safely and checks the build volume, printable polygon and excluded regions. |
-| `IOrcaCalibrationPlanCompiler` | Verifies the exact native upstream-Orca machine/process/filament documents and emits allowlisted overrides, the pinned version plus both digests, and a complete plan manifest. |
+| `IOrcaCalibrationPlanCompiler` | Verifies the exact native upstream-Orca machine/process/filament documents, derives the effective documents the worker receives, and emits allowlisted overrides, the pinned version plus both digests, and a complete plan manifest. |
 | `IKlipperCalibrationGcodeGenerator` | Emits deterministic invariant-culture Klipper G-code from an allowlisted command set, with explicit initialization, segment transitions and a safe final reset. `TUNING_TOWER` is never emitted. |
 | `ICalibrationGcodeAnnotator` | Prepends `;PF_META` provenance markers and produces the segment manifest with method/value/unit/layer/Z, line and byte offsets, transition and reset commands, and the final G-code SHA-256. |
 | `ICalibrationGcodeSafetyValidator` | Reject-only static validation. Interprets the emitted program statefully and checks thermal, geometric, motion, extrusion, retraction, pressure advance and volumetric limits plus tuple, version, profile, specification and freshness identity. It is reusable before artifact completion, promotion, queueing and start. |
@@ -293,6 +293,58 @@ family `Klipper` **and** G-code dialect `Klipper` **and** slicer engine
 Nothing is inferred from manufacturer, printer model, backend kind, aliases or a
 Moonraker response, and a missing digest is returned as an explicit dependency
 error rather than synthesized.
+
+#### Baseline and effective native profiles
+
+Official upstream vendor profiles legitimately populate command and notes keys,
+so a calibration plan carries **two** documents per profile:
+
+- the **baseline**: the exact upstream JSON the authoritative snapshot stored,
+  byte for byte, with its original SHA-256. It is immutable provenance and is
+  never sent to a worker, written into a slice job, logged or emitted into
+  G-code. The annotated program's `;PF_META` header and G-code manifest record
+  baseline digests.
+- the **effective** document: the baseline with only the server-owned command and
+  notes keys neutralized. The rule is stated by shape rather than by a list,
+  because upstream adds custom G-code hooks release by release: **every key whose
+  native name ends in `_gcode`** carries commands by construction, so a hook this
+  build has never heard of is neutralized on sight, plus the two command-bearing
+  keys that do not carry the suffix, `post_process` and `printer_notes`. Text
+  becomes `""`, a list becomes `[]`, and any other shape is dropped. Nothing else
+  is added, removed or rewritten. The result is canonicalized (object members
+  ordered ordinally at every depth) and hashed, so the same baseline always
+  yields the same document and digest; numbers are copied as the exact JSON
+  tokens the vendor wrote rather than re-formatted through a runtime numeric
+  type, so no magnitude, precision or spelling is lost. This document and its
+  digest are what the slice job carries, what the worker verifies before writing
+  the file, and what the worker reports back on completion.
+
+The plan manifest records, per profile, the baseline digest, the effective
+digest and the neutralized key names in ordinal order — never their values — so
+the transformation is auditable end to end. The rule is fixed in the build: it is
+never supplied, extended or narrowed by a request, a profile or any other caller
+input. Everything else still fails closed and is a rejection, not a
+neutralization: an unknown field carrying a credential, a private URL, an
+absolute path or a host command, a non-empty `post_process` script, malformed
+JSON, an unresolved `inherits` reference, a profile digest mismatch and a nozzle
+that does not match the authoritative toolhead. Safety runs over the baseline
+before anything is neutralized, so unsafe content inside a command key is refused
+rather than quietly emptied.
+
+#### Plan manifest schema versions
+
+The plan manifest digest a run is accepted with is a durable checkpoint: every
+later pass recompiles the plan and must reproduce it, and a difference is drift.
+Upgrading the server can also change that digest without changing the plan, when
+a release changes only how a manifest is written down — `1.1` replaced the single
+per-profile `sha256` with `sourceSha256`, `effectiveSha256` and
+`neutralizedKeys`. That is a trusted change, not tampering, so the build still
+writes every superseded layout and recognizes a checkpoint by reproducing it. A
+recognized run keeps completing under the schema it was accepted with, so its
+already-submitted slice job, its composed program and its promotion stay
+byte-identical and no durable value is rewritten; newly accepted runs are always
+compiled under the current schema. A digest no superseded layout reproduces is
+still a terminal `plan_model_mismatch`.
 
 Worker images verify the upstream AppImage against `ORCASLICER_SHA256` at build
 time. Deployments inject the resolved immutable image digest as

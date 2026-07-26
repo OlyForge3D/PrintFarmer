@@ -91,9 +91,14 @@ public sealed class CalibrationGenerationIntegrationTests : IAsyncLifetime
         _ = claimed.SlicerVersion.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = claimed.SlicerDistribution.Should().Be(CalibrationContractConstants.SlicerDistribution);
         _ = claimed.SlicerContainerDigest.Should().Be(CalibrationGenerationSeed.ContainerDigest);
-        _ = claimed.MachineProfileJson.Should().Be(CalibrationGenerationSeed.MachineProfileJson);
-        _ = claimed.ProcessProfileJson.Should().Be(CalibrationGenerationSeed.ProcessProfileJson);
-        _ = claimed.FilamentProfileJson.Should().Be(CalibrationGenerationSeed.FilamentProfileJson);
+        // The claim delivers the effective documents: the exact upstream baselines with every
+        // forbidden command or notes key neutralized, and nothing else changed.
+        _ = claimed.MachineProfileJson.Should().Be(
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.MachineProfileJson).Json);
+        _ = claimed.ProcessProfileJson.Should().Be(
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.ProcessProfileJson).Json);
+        _ = claimed.FilamentProfileJson.Should().Be(
+            OrcaEffectiveProfileFactory.Derive(CalibrationGenerationSeed.FilamentProfileJson).Json);
         _ = claimed.ModelFileUrl.Should().Be($"/api/slice/{job.Id}/model");
 
         // 4. The worker downloads the stored model over the authenticated route and verifies its hash.
