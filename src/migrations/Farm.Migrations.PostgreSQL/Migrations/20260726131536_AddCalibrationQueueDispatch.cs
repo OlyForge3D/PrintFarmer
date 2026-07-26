@@ -308,6 +308,12 @@ public partial class AddCalibrationQueueDispatch : Migration
             name: "IX_QueueDispatchOutbox_Status_RetryAfterUtc",
             table: "QueueDispatchOutbox",
             columns: new[] { "Status", "RetryAfterUtc" });
+
+        migrationBuilder.CreateIndex(
+            name: "UX_QueueDispatchOutbox_Sequence",
+            table: "QueueDispatchOutbox",
+            column: "Sequence",
+            unique: true);
     }
 
     /// <inheritdoc />

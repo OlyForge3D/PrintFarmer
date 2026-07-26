@@ -185,6 +185,8 @@ public static class ServiceCollectionExtensions
 
         // Issue #900: Durable dispatch claim and bed-clear acknowledgement services.
         // IDispatchClaimService is the single shared atomic claim path used by every start path.
+        // IOutboxSequenceAllocator is a singleton transactionally-fenced sequence generator.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Queue.IOutboxSequenceAllocator, Farm.Infrastructure.Services.Queue.OutboxSequenceAllocator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
@@ -755,8 +757,15 @@ public static class ServiceCollectionExtensions
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
 
-            // Durable queue outbox publisher for calibration queue-dispatch events.
+            // Durable queue outbox publisher for calibration queue-dispatch events (SignalR hints only).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();
+
+            // Dedicated durable consumer for BackendStartCommand.v1 outbox events.
+            // Drives atomic claim, awaited backend execution, crash recovery, and retry.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
+
+            // Seeds the outbox sequence allocator from the current DB max on startup.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.OutboxSequenceSeedService>();
 
             // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();

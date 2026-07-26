@@ -1,0 +1,308 @@
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.Queue;
+
+/// <summary>
+/// Dedicated durable hosted consumer for <c>BackendStartCommand.v1</c> outbox events.
+///
+/// Each event corresponds to a persisted bed-clear acknowledgement whose execution must
+/// be crash-safe. The consumer:
+/// <list type="bullet">
+///   <item>Atomically acquires a row lease (sets <see cref="QueueOutboxEventStatus.Processing"/>)
+///         before any network I/O so concurrent instances cannot double-execute.</item>
+///   <item>Awaits <c>DispatchJobWithAckAsync</c> synchronously within the processor loop
+///         (not fire-and-forget) so a process crash during upload leaves the event in
+///         <see cref="QueueOutboxEventStatus.Processing"/>, recovered on restart.</item>
+///   <item>Applies exponential back-off retries up to <see cref="MaxAttempts"/> before
+///         dead-lettering.</item>
+///   <item>On startup, resets stale <see cref="QueueOutboxEventStatus.Processing"/> events
+///         older than <see cref="StaleLeaseAge"/> back to
+///         <see cref="QueueOutboxEventStatus.Pending"/> for re-execution.</item>
+/// </list>
+///
+/// The <see cref="QueueOutboxPublisherService"/> is SignalR-hints only and skips
+/// <c>BackendStartCommand.v1</c> events entirely — this service owns them end-to-end.
+/// </summary>
+public sealed class BackendStartCommandConsumerService(
+    IServiceScopeFactory scopeFactory,
+    ILogger<BackendStartCommandConsumerService> logger) : BackgroundService
+{
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
+    private const int MaxAttempts = 10;
+    private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer started");
+
+        // Recover any stale Processing events from a previous crashed process.
+        await RecoverStaleLeasesAsync(stoppingToken);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await ProcessPendingCommandsAsync(stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "[BackendStartConsumer] Error processing backend-start commands");
+            }
+
+            await Task.Delay(PollInterval, stoppingToken);
+        }
+
+        logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer stopped");
+    }
+
+    /// <summary>
+    /// On startup, reset any <see cref="QueueOutboxEventStatus.Processing"/> events that are
+    /// older than <see cref="StaleLeaseAge"/>. These were claimed by a process that crashed
+    /// mid-execution and must be retried.
+    /// </summary>
+    private async Task RecoverStaleLeasesAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+
+            List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
+                .Where(e =>
+                    e.EventType == CommandEventType &&
+                    e.Status == QueueOutboxEventStatus.Processing &&
+                    e.LastAttemptedAtUtc < staleCutoff)
+                .ToListAsync(ct);
+
+            if (stale.Count > 0)
+            {
+                logger.LogWarning(
+                    "[BackendStartConsumer] Recovering {Count} stale Processing lease(s) from previous process",
+                    stale.Count);
+
+                foreach (QueueDispatchOutbox evt in stale)
+                {
+                    evt.Status = QueueOutboxEventStatus.Pending;
+                    evt.LastError = "Recovered from stale lease (previous process crash).";
+                    evt.RetryAfterUtc = DateTime.UtcNow; // Retry immediately on recovery.
+
+                    logger.LogWarning(
+                        "[BackendStartConsumer] Stale lease recovered: EventId={EventId} Job={JobId} AttemptCount={Count}",
+                        evt.Id,
+                        evt.AggregateId,
+                        evt.AttemptCount);
+                }
+
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[BackendStartConsumer] Error recovering stale leases on startup");
+        }
+    }
+
+    private async Task ProcessPendingCommandsAsync(CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        DateTime now = DateTime.UtcNow;
+        List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
+            .Where(e =>
+                e.EventType == CommandEventType &&
+                e.Status == QueueOutboxEventStatus.Pending &&
+                (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
+            .OrderBy(e => e.Sequence)
+            .Take(10)
+            .ToListAsync(ct);
+
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        foreach (QueueDispatchOutbox evt in pending)
+        {
+            await ProcessSingleCommandAsync(scope, db, evt, ct);
+        }
+    }
+
+    private async Task ProcessSingleCommandAsync(
+        AsyncServiceScope scope,
+        AppDbContext db,
+        QueueDispatchOutbox evt,
+        CancellationToken ct)
+    {
+        // ===================================================================
+        // Step 1: Deserialize payload. Dead-letter on corrupt payload.
+        // ===================================================================
+        BackendStartPayload? payload;
+        try
+        {
+            payload = JsonSerializer.Deserialize<BackendStartPayload>(evt.PayloadJson);
+        }
+        catch (JsonException jsonEx)
+        {
+            logger.LogError(
+                jsonEx,
+                "[BackendStartConsumer] Cannot deserialize payload for event {EventId} — dead-lettering",
+                evt.Id);
+            evt.Status = QueueOutboxEventStatus.DeadLettered;
+            evt.LastError = $"Invalid payload JSON: {jsonEx.Message}"[..Math.Min(jsonEx.Message.Length + 24, 2047)];
+            evt.CompletedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        if (payload is null || payload.JobId == Guid.Empty || string.IsNullOrWhiteSpace(payload.AcknowledgementKey))
+        {
+            evt.Status = QueueOutboxEventStatus.DeadLettered;
+            evt.LastError = "BackendStartCommand payload is missing required fields (jobId, acknowledgementKey).";
+            evt.CompletedAtUtc = DateTime.UtcNow;
+            logger.LogError(
+                "[BackendStartConsumer] Event {EventId} has incomplete payload — dead-lettered",
+                evt.Id);
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        // ===================================================================
+        // Step 2: Atomically acquire the row lease (Pending → Processing).
+        // This prevents concurrent consumer instances from double-executing.
+        // We save before the network call so a crash after save leaves the
+        // event in Processing, which is recovered by RecoverStaleLeasesAsync.
+        // ===================================================================
+        evt.Status = QueueOutboxEventStatus.Processing;
+        evt.AttemptCount++;
+        evt.LastAttemptedAtUtc = DateTime.UtcNow;
+        evt.LastError = null;
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another consumer instance claimed this event first — skip it.
+            logger.LogDebug(
+                "[BackendStartConsumer] Concurrency conflict claiming event {EventId} — skipped (other consumer won)",
+                evt.Id);
+            return;
+        }
+
+        logger.LogInformation(
+            "[BackendStartConsumer] Executing backend start: EventId={EventId} Job={JobId} Actor={Actor} AckKey={Key}",
+            evt.Id,
+            payload.JobId,
+            payload.ActorSubject ?? "system",
+            payload.AcknowledgementKey);
+
+        // ===================================================================
+        // Step 3: Awaited backend execution (NOT fire-and-forget).
+        // The event remains in Processing until success/failure is recorded.
+        // A crash here leaves the event in Processing; RecoverStaleLeasesAsync
+        // resets it to Pending on the next process start.
+        // ===================================================================
+        try
+        {
+            IPrintJobManagementService mgmt = scope.ServiceProvider.GetRequiredService<IPrintJobManagementService>();
+            await mgmt.DispatchJobWithAckAsync(
+                payload.JobId.ToString(),
+                payload.ActorSubject ?? "system",
+                payload.AcknowledgementKey,
+                ct);
+
+            // ===============================================================
+            // Step 4: Mark Published only AFTER successful execution.
+            // ===============================================================
+            await using AsyncServiceScope successScope = scopeFactory.CreateAsyncScope();
+            AppDbContext successDb = successScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            QueueDispatchOutbox? completed = await successDb.QueueDispatchOutbox
+                .FirstOrDefaultAsync(e => e.Id == evt.Id, ct);
+
+            if (completed is not null)
+            {
+                completed.Status = QueueOutboxEventStatus.Published;
+                completed.CompletedAtUtc = DateTime.UtcNow;
+                await successDb.SaveChangesAsync(ct);
+            }
+
+            logger.LogInformation(
+                "[BackendStartConsumer] Backend start completed successfully: EventId={EventId} Job={JobId}",
+                evt.Id,
+                payload.JobId);
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown — leave event in Processing for recovery on next start.
+            logger.LogInformation(
+                "[BackendStartConsumer] Execution cancelled (shutdown) for EventId={EventId} — will recover on restart",
+                evt.Id);
+            throw; // Propagate cancellation to stop the loop.
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "[BackendStartConsumer] Backend start failed for EventId={EventId} Job={JobId} (attempt {Count})",
+                evt.Id,
+                payload.JobId,
+                evt.AttemptCount);
+
+            // ===============================================================
+            // Step 5: Record failure and schedule retry or dead-letter.
+            // ===============================================================
+            await using AsyncServiceScope failScope = scopeFactory.CreateAsyncScope();
+            AppDbContext failDb = failScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            QueueDispatchOutbox? failedEvt = await failDb.QueueDispatchOutbox
+                .FirstOrDefaultAsync(e => e.Id == evt.Id, ct);
+
+            if (failedEvt is not null)
+            {
+                failedEvt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
+
+                if (failedEvt.AttemptCount >= MaxAttempts)
+                {
+                    failedEvt.Status = QueueOutboxEventStatus.DeadLettered;
+                    failedEvt.CompletedAtUtc = DateTime.UtcNow;
+                    logger.LogError(
+                        "[BackendStartConsumer] Event {EventId} dead-lettered after {Max} attempts",
+                        evt.Id, MaxAttempts);
+                }
+                else
+                {
+                    double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, failedEvt.AttemptCount - 1);
+                    failedEvt.Status = QueueOutboxEventStatus.Pending;
+                    failedEvt.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
+                }
+
+                await failDb.SaveChangesAsync(ct);
+            }
+        }
+    }
+
+    /// <summary>Payload shape for <c>BackendStartCommand.v1</c> outbox events.</summary>
+    private sealed record BackendStartPayload(
+        Guid JobId,
+        Guid PrinterId,
+        string? ActorSubject,
+        string AcknowledgementKey);
+}

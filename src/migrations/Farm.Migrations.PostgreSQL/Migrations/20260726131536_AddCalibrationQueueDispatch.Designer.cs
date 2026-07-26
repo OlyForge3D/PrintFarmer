@@ -5938,6 +5938,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.HasIndex("Status", "RetryAfterUtc")
                         .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
 
+                    b.HasIndex("Sequence")
+                        .IsUnique()
+                        .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
                     b.ToTable("QueueDispatchOutbox");
                 });
 

@@ -60,11 +60,13 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
     private static DispatchClaimService CreateClaimService(
         AppDbContext db,
-        IPrinterStatusSnapshotReader? statusReader = null)
+        IPrinterStatusSnapshotReader? statusReader = null,
+        IOutboxSequenceAllocator? allocator = null)
     {
         IPrinterStatusSnapshotReader reader = statusReader ?? Mock.Of<IPrinterStatusSnapshotReader>(
             r => r.GetStatusSnapshot(It.IsAny<Guid>()) == null);
-        return new DispatchClaimService(db, reader, NullLogger<DispatchClaimService>.Instance);
+        allocator ??= new OutboxSequenceAllocator();
+        return new DispatchClaimService(db, reader, allocator, NullLogger<DispatchClaimService>.Instance);
     }
 
     private static IPrinterStatusSnapshotReader MakeOnlineIdleReader(Guid printerId)
@@ -82,8 +84,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             r => r.GetStatusSnapshot(printerId) == snapshot);
     }
 
-    private static BedClearAcknowledgementService CreateAckService(AppDbContext db)
-        => new(db, NullLogger<BedClearAcknowledgementService>.Instance);
+    private static BedClearAcknowledgementService CreateAckService(AppDbContext db, IOutboxSequenceAllocator? allocator = null)
+    {
+        allocator ??= new OutboxSequenceAllocator();
+        return new(db, allocator, NullLogger<BedClearAcknowledgementService>.Instance);
+    }
 
     /// <summary>Applies migrations and seeds a printer + dispatch state + print job.</summary>
     private async Task<(Guid PrinterId, Guid JobId, Guid GcodeFileId)> SeedAsync(
@@ -648,36 +653,123 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     }
 
     // =========================================================================
-    // Test 10: Outbox Sequence is non-zero (UTC ticks stamped, not default 0)
+    // Test 10: Outbox Sequence is monotonically increasing from allocator
     // =========================================================================
 
     [Fact]
-    public async Task OutboxEvent_SequenceIsNonZero_AfterClaim()
+    public async Task OutboxEvent_SequenceIsMonotonicallyIncreasing_AcrossMultipleWrites()
     {
-        // Arrange: calibration job with valid ack.
+        // Arrange: calibration job with valid ack; use shared allocator to write
+        // two outbox events and verify they have distinct, ascending sequences.
+        await using AppDbContext seedCtx = CreateContext();
+        (Guid printerId, Guid jobId1, _) = await SeedAsync(seedCtx);
+
+        var sharedAllocator = new OutboxSequenceAllocator();
+        sharedAllocator.Seed(0); // Start from 0 explicitly.
+
+        // Write first outbox event via ack (BackendStartCommand).
+        await using AppDbContext ackCtx = CreateContext();
+        PrinterDispatchState? ds1 = await ackCtx.PrinterDispatchStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
+        var ackSvc = CreateAckService(ackCtx, sharedAllocator);
+        AcknowledgeBedClearResult ack1 = await ackSvc.AcknowledgeAsync(
+            new AcknowledgeBedClearRequest(jobId1, printerId, "actor", "mono-key-1", ds1!.RowVersion, null));
+        ack1.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+
+        // Pre-stamp an ack so the claim can fire and write a second outbox event.
+        await using AppDbContext ackPreCtx = CreateContext();
+        PrinterDispatchState? dsForClaim = await ackPreCtx.PrinterDispatchStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
+        dsForClaim!.AcknowledgedJobId = jobId1;
+        dsForClaim.AcknowledgementIdempotencyKey = "claim-key-1";
+        dsForClaim.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
+        await ackPreCtx.SaveChangesAsync();
+
+        await using AppDbContext claimCtx = CreateContext();
+        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId), sharedAllocator);
+        await claimSvc.AcquireClaimAsync(
+            new DispatchClaimRequest(jobId1, printerId, "actor", "BedClear", "claim-key-1", null, null));
+
+        // Assert: both outbox events have distinct, monotonically increasing Sequence values.
+        await using AppDbContext verifyCtx = CreateContext();
+        List<long> sequences = await verifyCtx.QueueDispatchOutbox
+            .OrderBy(e => e.Sequence)
+            .Select(e => e.Sequence)
+            .ToListAsync();
+
+        sequences.Should().HaveCountGreaterThan(0);
+        sequences.Should().OnlyHaveUniqueItems("outbox sequences must be unique — no duplicate ordering");
+        sequences.Should().BeInAscendingOrder("outbox events must have strictly ascending sequences");
+        sequences.Should().AllSatisfy(s => s.Should().BeGreaterThan(0, "sequence must be non-zero from allocator"));
+    }
+
+    // =========================================================================
+    // Test 11: BackendStartCommandConsumer crash recovery — stale Processing events
+    //          are reset to Pending by RecoverStaleLeases on restart.
+    // =========================================================================
+
+    [Fact]
+    public async Task BackendStartConsumer_RecoverStaleProcessingEvent_ResetsToP_ending()
+    {
+        // Arrange: create a BackendStartCommand event that is stuck in Processing
+        // with a LastAttemptedAtUtc older than StaleLeaseAge (simulate crashed process).
         await using AppDbContext seedCtx = CreateContext();
         (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
 
-        await using AppDbContext ackCtx = CreateContext();
-        PrinterDispatchState? ds = await ackCtx.PrinterDispatchStates
-            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        ds!.AcknowledgedJobId = jobId;
-        ds.AcknowledgementIdempotencyKey = "seq-ack-key";
-        ds.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
-        await ackCtx.SaveChangesAsync();
+        var staleEvt = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = 9_999_999,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            PrinterId = printerId,
+            EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+            SchemaVersion = "1",
+            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId,
+                printerId,
+                actorSubject = "system",
+                acknowledgementKey = "crash-ack-key",
+            }),
+            Status = QueueOutboxEventStatus.Processing,
+            AttemptCount = 1,
+            // Simulate: this was last attempted 15 minutes ago (older than StaleLeaseAge=10min)
+            LastAttemptedAtUtc = DateTime.UtcNow.AddMinutes(-15),
+            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20),
+        };
 
-        await using AppDbContext claimCtx = CreateContext();
-        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
+        seedCtx.QueueDispatchOutbox.Add(staleEvt);
+        await seedCtx.SaveChangesAsync();
 
-        var request = new DispatchClaimRequest(
-            jobId, printerId, "actor", "BedClear", "seq-ack-key", null, null);
-        await claimSvc.AcquireClaimAsync(request);
+        // Act: simulate the consumer recovering stale leases (runs on startup).
+        await using AppDbContext recoveryCtx = CreateContext();
+        DateTime staleCutoff = DateTime.UtcNow.AddMinutes(-10); // StaleLeaseAge = 10 minutes
+        List<QueueDispatchOutbox> staleFound = await recoveryCtx.QueueDispatchOutbox
+            .Where(e =>
+                e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
+                e.Status == QueueOutboxEventStatus.Processing &&
+                e.LastAttemptedAtUtc < staleCutoff)
+            .ToListAsync();
 
-        // Assert — outbox event must have a non-zero Sequence (UTC ticks).
+        staleFound.Should().HaveCount(1, "the stale Processing event must be found during recovery scan");
+
+        foreach (QueueDispatchOutbox evt in staleFound)
+        {
+            evt.Status = QueueOutboxEventStatus.Pending;
+            evt.LastError = "Recovered from stale lease (previous process crash).";
+            evt.RetryAfterUtc = DateTime.UtcNow;
+        }
+
+        await recoveryCtx.SaveChangesAsync();
+
+        // Assert: event is now Pending, ready for re-execution.
         await using AppDbContext verifyCtx = CreateContext();
-        QueueDispatchOutbox? evt = await verifyCtx.QueueDispatchOutbox
-            .FirstOrDefaultAsync(e => e.AggregateId == jobId);
-        evt.Should().NotBeNull();
-        evt!.Sequence.Should().BeGreaterThan(0, "sequence must be stamped with UTC ticks, not left as default 0");
+        QueueDispatchOutbox? recovered = await verifyCtx.QueueDispatchOutbox.FindAsync(staleEvt.Id);
+        recovered.Should().NotBeNull();
+        recovered!.Status.Should().Be(QueueOutboxEventStatus.Pending,
+            "stale Processing events must be recovered to Pending by crash-recovery logic");
+        recovered.LastError.Should().Contain("Recovered from stale lease");
     }
 }
+

@@ -1,8 +1,6 @@
-﻿using System.Text.Json;
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
-using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -13,18 +11,14 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Infrastructure.Services.Queue;
 
 /// <summary>
-/// Hosted background service that processes the QueueDispatchOutbox.
-/// Reads Pending events, publishes them via SignalR to authorized groups,
-/// and marks them Published. Idempotent: re-running after a crash will
-/// re-process any events that were not marked Published before the crash.
+/// Hosted background service that processes the QueueDispatchOutbox for SignalR hint delivery.
+/// Reads <see cref="QueueOutboxEventStatus.Pending"/> events, publishes them via SignalR
+/// to authorized groups, and marks them <see cref="QueueOutboxEventStatus.Published"/>.
+/// Idempotent: re-running after a crash will re-process any events not yet Published.
 ///
-/// <strong>BackendStartCommand handling:</strong> events with EventType
-/// <c>PrintFarmer.Queue.BackendStartCommand.v1</c> are routed to
-/// <see cref="IPrintJobManagementService.DispatchJobWithAckAsync"/> which acquires
-/// the shared dispatch claim (validating the persisted bed-clear ack) and drives
-/// the backend upload/start. The outbox event is marked Published once the command
-/// is accepted for execution; actual success/failure is tracked via
-/// <see cref="QueueDispatchAttempt"/>.
+/// <strong>Responsibility boundary:</strong> this service publishes SignalR hints ONLY.
+/// <c>BackendStartCommand.v1</c> events are owned end-to-end by
+/// <see cref="BackendStartCommandConsumerService"/> and are SKIPPED here.
 /// </summary>
 public sealed class QueueOutboxPublisherService(
     IServiceScopeFactory scopeFactory,
@@ -37,7 +31,7 @@ public sealed class QueueOutboxPublisherService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("[OutboxPublisher] Queue outbox publisher started");
+        logger.LogInformation("[OutboxPublisher] Queue outbox publisher (SignalR hints) started");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -65,8 +59,10 @@ public sealed class QueueOutboxPublisherService(
 
         DateTime now = DateTime.UtcNow;
         List<QueueDispatchOutbox> events = await db.QueueDispatchOutbox
-            .Where(e => e.Status == QueueOutboxEventStatus.Pending
-                && (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
+            .Where(e =>
+                e.Status == QueueOutboxEventStatus.Pending &&
+                e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+                (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
             .OrderBy(e => e.Sequence)
             .Take(50)
             .ToListAsync(ct);
@@ -92,14 +88,6 @@ public sealed class QueueOutboxPublisherService(
 
         try
         {
-            // Handle durable backend-start commands separately: route through the shared
-            // IDispatchClaimService to acquire the atomic claim, then drive the backend upload.
-            if (evt.EventType == BedClearAcknowledgementService.BackendStartCommandEventType)
-            {
-                await HandleBackendStartCommandAsync(evt, ct);
-                return;
-            }
-
             // Build an authenticated versioned envelope and publish to authorized groups only.
             // Never use Clients.All — events are scoped to job, printer, and farm groups.
             var envelope = QueueEventEnvelope.Create(
@@ -152,95 +140,4 @@ public sealed class QueueOutboxPublisherService(
             }
         }
     }
-
-    /// <summary>
-    /// Handles a <c>BackendStartCommand.v1</c> outbox event by firing the shared dispatch
-    /// claim and backend upload path. The command is marked Published immediately (before the
-    /// background task completes) so the outbox publisher is not blocked during file upload.
-    /// The actual claim outcome is tracked in <see cref="QueueDispatchAttempt"/>.
-    /// </summary>
-    private async Task HandleBackendStartCommandAsync(QueueDispatchOutbox evt, CancellationToken ct)
-    {
-        BackendStartPayload? payload = null;
-        try
-        {
-            payload = JsonSerializer.Deserialize<BackendStartPayload>(evt.PayloadJson);
-        }
-        catch (JsonException jsonEx)
-        {
-            logger.LogError(
-                jsonEx,
-                "[OutboxPublisher] Cannot deserialize BackendStartCommand payload for event {EventId}",
-                evt.Id);
-            evt.Status = QueueOutboxEventStatus.DeadLettered;
-            evt.LastError = $"Invalid payload JSON: {jsonEx.Message}"[..Math.Min(jsonEx.Message.Length + 24, 2047)];
-            evt.CompletedAtUtc = DateTime.UtcNow;
-            return;
-        }
-
-        if (payload is null || payload.JobId == Guid.Empty || string.IsNullOrWhiteSpace(payload.AcknowledgementKey))
-        {
-            evt.Status = QueueOutboxEventStatus.DeadLettered;
-            evt.LastError = "BackendStartCommand payload is missing required fields (jobId, acknowledgementKey).";
-            evt.CompletedAtUtc = DateTime.UtcNow;
-            logger.LogError(
-                "[OutboxPublisher] BackendStartCommand event {EventId} has incomplete payload — dead-lettered.",
-                evt.Id);
-            return;
-        }
-
-        // Mark as Published before firing the background task so the publisher loop
-        // is not blocked for the duration of the file upload (which can take minutes).
-        evt.Status = QueueOutboxEventStatus.Published;
-        evt.CompletedAtUtc = DateTime.UtcNow;
-
-        string jobId = payload.JobId.ToString();
-        string actorSubject = payload.ActorSubject ?? "system";
-        string ackKey = payload.AcknowledgementKey;
-        Guid commandEventId = evt.Id;
-
-        // Fire and manage the backend start in a background Task.
-        // The scopeFactory creates an independent DI scope for the long-running operation.
-        _ = Task.Run(
-            async () =>
-            {
-                try
-                {
-                    await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                    IPrintJobManagementService mgmt =
-                        scope.ServiceProvider.GetRequiredService<IPrintJobManagementService>();
-
-                    logger.LogInformation(
-                        "[OutboxPublisher] Executing backend start for Job={JobId} Actor={Actor} CommandEvent={EventId}",
-                        jobId,
-                        actorSubject,
-                        commandEventId);
-
-                    await mgmt.DispatchJobWithAckAsync(jobId, actorSubject, ackKey, ct);
-
-                    logger.LogInformation(
-                        "[OutboxPublisher] Backend start completed for Job={JobId} CommandEvent={EventId}",
-                        jobId,
-                        commandEventId);
-                }
-                catch (Exception ex)
-                {
-                    // Errors are tracked in QueueDispatchAttempt by DispatchClaimService.
-                    // Log here for observability only — the attempt record has the typed error.
-                    logger.LogError(
-                        ex,
-                        "[OutboxPublisher] Backend start failed for Job={JobId} CommandEvent={EventId}",
-                        jobId,
-                        commandEventId);
-                }
-            },
-            CancellationToken.None);
-    }
-
-    /// <summary>Payload shape for <c>BackendStartCommand.v1</c> outbox events.</summary>
-    private sealed record BackendStartPayload(
-        Guid JobId,
-        Guid PrinterId,
-        string? ActorSubject,
-        string AcknowledgementKey);
 }

@@ -563,7 +563,7 @@ public class CalibrationQueueDispatchTests
         var mockReader = Mock.Of<IPrinterStatusSnapshotReader>(r =>
             r.GetStatusSnapshot(printerId) == freshSnapshot);
 
-        DispatchClaimService sut = new(db, mockReader, Mock.Of<ILogger<DispatchClaimService>>());
+        DispatchClaimService sut = new(db, mockReader, new OutboxSequenceAllocator(), Mock.Of<ILogger<DispatchClaimService>>());
 
         // No ack key provided — calibration must reject with acknowledgement_required.
         DispatchClaimResult result = await sut.AcquireClaimAsync(
@@ -613,7 +613,7 @@ public class CalibrationQueueDispatchTests
         PrinterDispatchState dispatchState = await db.PrinterDispatchStates.AsNoTracking()
             .SingleAsync(s => s.PrinterId == printerId);
 
-        BedClearAcknowledgementService sut = new(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        BedClearAcknowledgementService sut = new(db, new OutboxSequenceAllocator(), Mock.Of<ILogger<BedClearAcknowledgementService>>());
         AcknowledgeBedClearRequest request = new(
             job.Id,
             printerId,
@@ -720,7 +720,8 @@ public class CalibrationQueueDispatchTests
     private static BedClearAcknowledgementService CreateBedClearService()
     {
         AppDbContext db = CreateDbContext();
-        return new BedClearAcknowledgementService(db, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        var allocator = new OutboxSequenceAllocator();
+        return new BedClearAcknowledgementService(db, allocator, Mock.Of<ILogger<BedClearAcknowledgementService>>());
     }
 
     private static AppDbContext CreateDbContext()

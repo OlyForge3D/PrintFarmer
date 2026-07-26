@@ -22,6 +22,7 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class BedClearAcknowledgementService(
     AppDbContext db,
+    IOutboxSequenceAllocator sequenceAllocator,
     ILogger<BedClearAcknowledgementService> logger) : IBedClearAcknowledgementService
 {
     /// <summary>
@@ -34,6 +35,7 @@ public sealed class BedClearAcknowledgementService(
     internal const string BackendStartCommandEventType = "PrintFarmer.Queue.BackendStartCommand.v1";
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+    private readonly IOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -211,7 +213,7 @@ public sealed class BedClearAcknowledgementService(
         var startCommand = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
-            Sequence = now.Ticks,
+            Sequence = _sequenceAllocator.Next(),
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
             AggregateRowVersion = job.RowVersion,

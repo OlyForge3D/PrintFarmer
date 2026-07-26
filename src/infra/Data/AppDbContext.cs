@@ -410,11 +410,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<QueueDispatchOutbox>()
             .HasIndex(o => new { o.Status, o.RetryAfterUtc })
             .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
+
+        // Unique monotonic sequence: enforces per-process allocator uniqueness at the DB level.
+        // Catches any collision (e.g., multi-process deployment) as a constraint violation.
+        _ = modelBuilder.Entity<QueueDispatchOutbox>()
+            .HasIndex(o => o.Sequence)
+            .IsUnique()
+            .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureCalibrationHistoryIsImmutable();
+        EnsureCalibrationJobFieldsAreImmutable();
         EnsureCalibrationPrintersTracked();
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
@@ -425,6 +433,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         EnsureCalibrationHistoryIsImmutable();
+        EnsureCalibrationJobFieldsAreImmutable();
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
@@ -442,6 +451,67 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         EnsureImmutable<GeneratedProfileRevision>();
         EnsureImmutable<GeneratedProfileRevisionOperation>();
         EnsureImmutable<CalibrationChange>();
+    }
+
+    /// <summary>
+    /// Prevents mutation of immutable calibration/provenance/idempotency/compatibility
+    /// fields on <see cref="PrintJob"/> after creation. These fields are stamped once at
+    /// job creation time and must never change; changing them would invalidate the
+    /// canonical idempotency hash and break replay semantics.
+    /// </summary>
+    private void EnsureCalibrationJobFieldsAreImmutable()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            // Only calibration jobs have the immutability constraint.
+            // Standard jobs (JobKind == null or Standard) are not subject to this guard.
+            object? rawKind = entry.CurrentValues[nameof(PrintJob.JobKind)];
+            if (rawKind is not JobKind.FilamentCalibration)
+            {
+                continue;
+            }
+
+            // The following fields are immutable once a calibration PrintJob is created.
+            CheckImmutableField(entry, nameof(PrintJob.JobKind));
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyScope));
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyKey));
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyRequestSha256));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationProjectId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationAttemptId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationOrchestrationId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationConfigSnapshotId));
+            CheckImmutableField(entry, nameof(PrintJob.SourceArtifactId));
+            CheckImmutableField(entry, nameof(PrintJob.CreatorSubject));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredFirmwareFamily));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredGcodeDialect));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerEngine));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerDistribution));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerVersion));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerContainerDigest));
+            CheckImmutableField(entry, nameof(PrintJob.GcodeContentSha256));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.MachineProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.ProcessProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.SpecificationSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PrinterConfigSnapshotSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedPrinterConfigRevision));
+        }
+    }
+
+    private static void CheckImmutableField(EntityEntry<PrintJob> entry, string propertyName)
+    {
+        PropertyEntry? prop = entry.Properties.FirstOrDefault(p => p.Metadata.Name == propertyName);
+        if (prop is { IsModified: true })
+        {
+            throw new InvalidOperationException(
+                $"PrintJob.{propertyName} is an immutable calibration provenance field and cannot be modified after creation. " +
+                "Changed immutable input requires a new job and idempotency key.");
+        }
     }
 
     private void EnsureImmutable<TEntity>()
