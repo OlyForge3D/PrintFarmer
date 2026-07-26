@@ -797,15 +797,19 @@ public partial class SliceJobController(
             return BadRequest(new { error = $"Only failed or cancelled jobs can be retried. Current status: {job.Status}" });
         }
 
-        await _jobRepository.RetryJobAsync(id, ct);
-
-        job = await _jobRepository.GetByIdAsync(id, ct);
-        if (job is not null)
+        SliceJob? retriedJob = await _jobRepository.TryRetryJobAsync(
+            id,
+            userId,
+            job.Status,
+            job.UpdatedAt,
+            ct);
+        if (retriedJob is null)
         {
-            await _eventService.NotifyJobQueuedAsync(job, ct);
+            return Conflict(new { error = "The job changed before it could be retried. Refresh and try again." });
         }
 
-        return Ok(job is not null ? MapToPublicStatusResponse(job) : null);
+        await _eventService.NotifyJobQueuedAsync(retriedJob, ct);
+        return Ok(MapToPublicStatusResponse(retriedJob));
     }
 
     /// <summary>

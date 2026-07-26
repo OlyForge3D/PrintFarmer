@@ -127,12 +127,16 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         return _repo.SaveChangesAsync(cancellationToken);
     }
 
-    public Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
+    public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(job);
-
-        // Bump retry and set status back to queued via repository
-        return _repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3, ct: cancellationToken);
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool requeued = await _repo.TryRequeueForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            maxRetries: 3,
+            cancellationToken);
+        ThrowIfClaimLost(requeued, job.Id);
     }
 
     public async Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)

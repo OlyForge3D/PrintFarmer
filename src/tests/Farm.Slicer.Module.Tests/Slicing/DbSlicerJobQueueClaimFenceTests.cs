@@ -41,6 +41,7 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
 
         Func<Task> progress = () => queue.UpdateProgressAsync(staleJob, 45);
         Func<Task> failure = () => queue.FailJobAsync(staleJob, "stale failure");
+        Func<Task> requeue = () => queue.RequeueJobAsync(staleJob);
         Func<Task> completion = () => queue.CompleteJobAsync(
             staleJob,
             new SlicingResult
@@ -53,6 +54,7 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
 
         await progress.Should().ThrowAsync<InvalidOperationException>();
         await failure.Should().ThrowAsync<InvalidOperationException>();
+        await requeue.Should().ThrowAsync<InvalidOperationException>();
         await completion.Should().ThrowAsync<InvalidOperationException>();
 
         await using SlicerDbContext verification = CreateContext(connectionString);
@@ -69,6 +71,7 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
     [InlineData("progress")]
     [InlineData("failure")]
     [InlineData("completion")]
+    [InlineData("requeue")]
     public async Task WorkerMutation_ActiveClaim_Succeeds(string operation)
     {
         string connectionString = $"Data Source={_databasePath}";
@@ -110,6 +113,9 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
                         EstimatedFilamentUsageGrams = 1,
                     });
                 break;
+            case "requeue":
+                await queue.RequeueJobAsync(activeJob);
+                break;
         }
 
         await using SlicerDbContext verification = CreateContext(connectionString);
@@ -124,6 +130,13 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
         {
             persisted.Status.Should().Be(SliceJobStatus.Failed);
             persisted.ErrorMessage.Should().Be("worker failure");
+        }
+        else if (operation == "requeue")
+        {
+            persisted.Status.Should().Be(SliceJobStatus.Queued);
+            persisted.RetryCount.Should().Be(1);
+            persisted.WorkerId.Should().BeNull();
+            persisted.ClaimToken.Should().BeNull();
         }
         else
         {

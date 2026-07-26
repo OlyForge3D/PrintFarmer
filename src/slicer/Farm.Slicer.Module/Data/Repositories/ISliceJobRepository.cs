@@ -114,14 +114,27 @@ public interface ISliceJobRepository
     /// <summary>Increments retry count and requeues or fails the job.</summary>
     Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);
 
+    /// <summary>Requeues or fails a job only while the worker still owns an active lease.</summary>
+    Task<bool> TryRequeueForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        int maxRetries,
+        CancellationToken ct = default);
+
     /// <summary>Returns the total count of jobs, optionally filtered by status.</summary>
     Task<int> CountAsync(string? status = null, CancellationToken ct = default);
 
     /// <summary>Returns a paged list of jobs with sorting and optional status filter.</summary>
     Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default);
 
-    /// <summary>Requeues a single failed job for retry (user-initiated).</summary>
-    Task RetryJobAsync(Guid jobId, CancellationToken ct = default);
+    /// <summary>Requeues an owner-visible terminal job only if its observed version is unchanged.</summary>
+    Task<SliceJob?> TryRetryJobAsync(
+        Guid jobId,
+        Guid expectedUserId,
+        string expectedStatus,
+        DateTime expectedUpdatedAt,
+        CancellationToken ct = default);
 
     /// <summary>Saves pending changes to the database.</summary>
     Task SaveChangesAsync(CancellationToken ct = default);

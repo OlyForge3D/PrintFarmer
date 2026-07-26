@@ -192,6 +192,28 @@ public class StubSliceJobRepository : ISliceJobRepository
         { j.Status = SliceJobStatus.Queued; j.QueuedAt = DateTime.UtcNow; }
         return Task.CompletedTask;
     }
+    public Task<bool> TryRequeueForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        int maxRetries,
+        CancellationToken ct = default)
+    {
+        SliceJob? job = GetActiveLeaseJob(jobId, workerId, claimToken);
+        if (job is null)
+        {
+            return Task.FromResult(false);
+        }
+
+        job.RetryCount++;
+        job.WorkerId = null;
+        job.ClaimedAt = null;
+        job.ClaimToken = null;
+        job.LeaseExpiresAt = null;
+        job.Status = job.RetryCount > maxRetries ? SliceJobStatus.Failed : SliceJobStatus.Queued;
+        job.UpdatedAt = DateTime.UtcNow;
+        return Task.FromResult(true);
+    }
     public Task SaveChangesAsync(CancellationToken ct = default) => Task.CompletedTask;
 
     private SliceJob? GetActiveLeaseJob(Guid jobId, Guid workerId, Guid claimToken)
@@ -216,11 +238,36 @@ public class StubSliceJobRepository : ISliceJobRepository
     }
     public Task<int> CountAsync(string? status = null, CancellationToken ct = default) => Task.FromResult(Jobs.Count(j => status is null || j.Status == status));
     public Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.Where(j => status is null || j.Status == status).Skip((page - 1) * pageSize).Take(pageSize).ToList());
-    public Task RetryJobAsync(Guid jobId, CancellationToken ct = default)
+    public Task<SliceJob?> TryRetryJobAsync(
+        Guid jobId,
+        Guid expectedUserId,
+        string expectedStatus,
+        DateTime expectedUpdatedAt,
+        CancellationToken ct = default)
     {
-        SliceJob? j = Jobs.Find(x => x.Id == jobId);
-        if (j is not null)
-        { j.Status = SliceJobStatus.Queued; j.RetryCount += 1; }
-        return Task.CompletedTask;
+        SliceJob? job = Jobs.Find(candidate =>
+            candidate.Id == jobId &&
+            candidate.UserId == expectedUserId &&
+            candidate.Status == expectedStatus &&
+            candidate.UpdatedAt == expectedUpdatedAt);
+        if (job is null || expectedStatus is not SliceJobStatus.Failed and not SliceJobStatus.Cancelled)
+        {
+            return Task.FromResult<SliceJob?>(null);
+        }
+
+        job.Status = SliceJobStatus.Queued;
+        job.QueuedAt = DateTime.UtcNow;
+        job.WorkerId = null;
+        job.ClaimedAt = null;
+        job.ClaimToken = null;
+        job.LeaseExpiresAt = null;
+        job.ErrorMessage = null;
+        job.StartedAt = null;
+        job.CompletedAt = null;
+        job.ProgressPercent = 0;
+        job.ProgressMessage = null;
+        job.RetryCount = 0;
+        job.UpdatedAt = DateTime.UtcNow;
+        return Task.FromResult<SliceJob?>(job);
     }
 }
