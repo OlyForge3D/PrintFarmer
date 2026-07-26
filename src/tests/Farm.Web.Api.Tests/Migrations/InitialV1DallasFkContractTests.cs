@@ -105,6 +105,10 @@ public sealed class InitialV1DallasFkContractTests
     /// <c>Restrict</c>/<c>NoAction</c> on-delete, regardless of which migration introduced
     /// or last modified it. Used for FKs whose baseline lives in a post-InitialV1 migration
     /// (e.g. <c>CameraSnapshots</c>, <c>PartOutputMappings</c>).
+    ///
+    /// F5c hardening — asserts the FK exists BEFORE checking its behavior so a missing/
+    /// renamed FK cannot silently default-pass as <c>NoAction</c> (which is the default value
+    /// of <see cref="ReferentialAction"/> when a <c>GetValueOrDefault</c> lookup misses).
     /// </summary>
     private static void AssertMigrationChainFkOnDeleteIsRestrict(
         Assembly migrationAssembly,
@@ -175,9 +179,19 @@ public sealed class InitialV1DallasFkContractTests
             }
         }
 
-        Dictionary<string, (string, ReferentialAction)> tableFks = graph.GetValueOrDefault(table)
-            ?? throw new InvalidOperationException($"Table {table} not present in final graph.");
-        (string _, ReferentialAction onDelete) = tableFks.GetValueOrDefault(fkName);
+        // F5c — assert the table and FK actually exist in the final graph BEFORE checking
+        // the on-delete behavior. Without this, a missing FK would fall through to
+        // GetValueOrDefault which returns default(ValueTuple<string, ReferentialAction>) —
+        // i.e., OnDelete == NoAction — and the assertion below would silently pass.
+        graph.ContainsKey(table).Should().BeTrue(
+            $"Table '{table}' must exist in the final migration graph — a missing or renamed table "
+            + "cannot default-pass the FK contract test.");
+        Dictionary<string, (string, ReferentialAction)> tableFks = graph[table];
+        tableFks.ContainsKey(fkName).Should().BeTrue(
+            $"FK '{fkName}' must exist on table '{table}' in the final migration graph — a missing "
+            + "or renamed FK cannot default-pass the FK contract test.");
+
+        (string _, ReferentialAction onDelete) = tableFks[fkName];
 
         onDelete.Should().BeOneOf(
             [ReferentialAction.Restrict, ReferentialAction.NoAction],

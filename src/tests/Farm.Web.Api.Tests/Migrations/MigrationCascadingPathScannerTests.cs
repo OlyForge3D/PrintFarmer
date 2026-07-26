@@ -255,25 +255,30 @@ public sealed class MigrationCascadingPathScannerTests
     private static IEnumerable<(string Ancestor, string Descendant, List<string> Paths)> EnumerateMultiCascadingPaths(
         Dictionary<string, Dictionary<string, (string Referenced, ReferentialAction OnDelete)>> graph)
     {
-        // Build ancestor → list of (descendant, edgeOnDelete) pairs for cascading edges only.
-        // Intermediate hop: OnDelete must be Cascade. Terminal hop: OnDelete may be Cascade OR SetNull.
-        Dictionary<string, List<(string Child, ReferentialAction OnDelete)>> childrenOf = new();
+        // Build ancestor → list of (descendant, edgeOnDelete, fkName) tuples for cascading
+        // edges only. Intermediate hop: OnDelete must be Cascade. Terminal hop: OnDelete may
+        // be Cascade OR SetNull.
+        //
+        // F5a hardening — include the FK name in the edge tuple so parallel FKs between the
+        // same two tables (distinct columns) are enumerated as distinct paths rather than
+        // dedup'd by table-string alone.
+        Dictionary<string, List<(string Child, ReferentialAction OnDelete, string FkName)>> childrenOf = new();
         foreach ((string child, Dictionary<string, (string, ReferentialAction)> fks) in graph)
         {
-            foreach ((string referenced, ReferentialAction onDelete) in fks.Values)
+            foreach ((string fkName, (string referenced, ReferentialAction onDelete)) in fks)
             {
                 if (onDelete != ReferentialAction.Cascade && onDelete != ReferentialAction.SetNull)
                 {
                     continue;
                 }
 
-                if (!childrenOf.TryGetValue(referenced, out List<(string, ReferentialAction)>? bucket))
+                if (!childrenOf.TryGetValue(referenced, out List<(string, ReferentialAction, string)>? bucket))
                 {
-                    bucket = new List<(string, ReferentialAction)>();
+                    bucket = new List<(string, ReferentialAction, string)>();
                     childrenOf[referenced] = bucket;
                 }
 
-                bucket.Add((child, onDelete));
+                bucket.Add((child, onDelete, fkName));
             }
         }
 
@@ -281,7 +286,7 @@ public sealed class MigrationCascadingPathScannerTests
         foreach (string ancestor in childrenOf.Keys)
         {
             Dictionary<string, HashSet<string>> pathsTo = new();
-            Walk(ancestor, new List<string> { ancestor }, new HashSet<string> { ancestor }, childrenOf, pathsTo);
+            Walk(ancestor, ancestor, new HashSet<string> { ancestor }, childrenOf, pathsTo);
             foreach ((string descendant, HashSet<string> paths) in pathsTo)
             {
                 if (paths.Count >= 2)
@@ -298,34 +303,39 @@ public sealed class MigrationCascadingPathScannerTests
     /// Walks the graph from <paramref name="current"/> to descendants via cascading edges.
     /// A terminal edge (Cascade OR SetNull) records the descendant as a target. Only Cascade
     /// edges recurse further; SetNull terminates propagation at that hop.
+    ///
+    /// F5a hardening — the walked path is a formatted string that embeds the FK edge label
+    /// at each hop, e.g. <c>Printers --[FK_A_Printers_Id]--&gt; A --[FK_B_A_Id]--&gt; B</c>.
+    /// Two distinct FKs between the same tables therefore produce distinct paths and are
+    /// not dedup'd by <c>HashSet&lt;string&gt;</c> membership.
     /// </summary>
     private static void Walk(
         string current,
-        List<string> path,
+        string currentPath,
         HashSet<string> visited,
-        Dictionary<string, List<(string Child, ReferentialAction OnDelete)>> childrenOf,
+        Dictionary<string, List<(string Child, ReferentialAction OnDelete, string FkName)>> childrenOf,
         Dictionary<string, HashSet<string>> pathsTo)
     {
-        if (!childrenOf.TryGetValue(current, out List<(string Child, ReferentialAction OnDelete)>? children))
+        if (!childrenOf.TryGetValue(current, out List<(string Child, ReferentialAction OnDelete, string FkName)>? children))
         {
             return;
         }
 
-        foreach ((string child, ReferentialAction onDelete) in children)
+        foreach ((string child, ReferentialAction onDelete, string fkName) in children)
         {
             if (visited.Contains(child))
             {
                 continue;
             }
 
-            List<string> newPath = new(path) { child };
+            string newPath = $"{currentPath} --[{fkName}]--> {child}";
             if (!pathsTo.TryGetValue(child, out HashSet<string>? paths))
             {
                 paths = new HashSet<string>();
                 pathsTo[child] = paths;
             }
 
-            _ = paths.Add(string.Join(" → ", newPath));
+            _ = paths.Add(newPath);
 
             // Only Cascade edges continue propagation. SetNull terminates at this hop.
             if (onDelete == ReferentialAction.Cascade)
@@ -335,5 +345,104 @@ public sealed class MigrationCascadingPathScannerTests
                 _ = visited.Remove(child);
             }
         }
+    }
+
+    // -----------------------------------------------------------------------------------
+    // F5b hardening — positive synthetic known-bad graph fixture that exercises the
+    // scanner's internal enumeration logic on a hand-built topology. Ensures the scanner
+    // detects a 1785-shaped multi-cascading-path from an ancestor to a descendant that
+    // is reachable via BOTH a direct Cascade FK AND an indirect Cascade-chain FK — the
+    // same shape as the real CameraSnapshots / PartOutputMappings bugs Dallas fixed.
+    // -----------------------------------------------------------------------------------
+
+    [Fact]
+    public void PositiveFixture_SyntheticKnownBad1785Topology_IsDetectedByEnumeration()
+    {
+        // Graph: Ancestor → Middle (Cascade via FK_M_A); Ancestor → Descendant (Cascade via FK_D_A_direct);
+        //        Middle → Descendant (Cascade via FK_D_M).
+        // Expected: Ancestor ⇒ Descendant reachable via 2 distinct cascade paths — must be flagged.
+        Dictionary<string, Dictionary<string, (string Referenced, ReferentialAction OnDelete)>> graph = new()
+        {
+            ["Middle"] = new()
+            {
+                ["FK_M_A"] = ("Ancestor", ReferentialAction.Cascade),
+            },
+            ["Descendant"] = new()
+            {
+                ["FK_D_A_direct"] = ("Ancestor", ReferentialAction.Cascade),
+                ["FK_D_M"] = ("Middle", ReferentialAction.Cascade),
+            },
+        };
+
+        List<(string Ancestor, string Descendant, List<string> Paths)> violations =
+            EnumerateMultiCascadingPaths(graph).ToList();
+
+        violations.Should().ContainSingle(
+            v => v.Ancestor == "Ancestor" && v.Descendant == "Descendant",
+            "Ancestor⇒Descendant is a 1785 topology (direct + via Middle, both Cascade) — must be detected.");
+        (string _, string _, List<string> paths) = violations.Single(v => v.Ancestor == "Ancestor" && v.Descendant == "Descendant");
+        paths.Should().HaveCount(2, "both direct and indirect paths must appear as distinct entries");
+        paths.Should().Contain(p => p.Contains("FK_D_A_direct", StringComparison.Ordinal),
+            "direct edge must be present in one path");
+        paths.Should().Contain(p => p.Contains("FK_D_M", StringComparison.Ordinal),
+            "indirect edge (via Middle) must be present in another path");
+    }
+
+    [Fact]
+    public void PositiveFixture_SetNullTerminatesPropagation_IsNotFlagged()
+    {
+        // Graph: Ancestor → Middle (SetNull); Middle → Descendant (Cascade).
+        // Per SQL Server's 1785 rule, SetNull at Middle terminates propagation — Descendant
+        // is not a cascade target of Ancestor via this chain. The direct Ancestor→Descendant
+        // path is the only one that counts.
+        Dictionary<string, Dictionary<string, (string Referenced, ReferentialAction OnDelete)>> graph = new()
+        {
+            ["Middle"] = new()
+            {
+                ["FK_M_A"] = ("Ancestor", ReferentialAction.SetNull),
+            },
+            ["Descendant"] = new()
+            {
+                ["FK_D_M"] = ("Middle", ReferentialAction.Cascade),
+            },
+        };
+
+        List<(string Ancestor, string Descendant, List<string> Paths)> violations =
+            EnumerateMultiCascadingPaths(graph).ToList();
+
+        violations.Should().NotContain(
+            v => v.Ancestor == "Ancestor" && v.Descendant == "Descendant",
+            "SetNull at Middle terminates propagation — no cascading path from Ancestor to Descendant.");
+    }
+
+    [Fact]
+    public void PositiveFixture_ParallelFksBetweenSameTables_ProduceDistinctPaths()
+    {
+        // Graph: A has two distinct FKs pointing at B (col1 Cascade, col2 Cascade).
+        // Under a naïve path-by-tables-only scanner, both would produce the same "B → A"
+        // string and be dedup'd. F5a hardening ensures they produce two distinct paths.
+        Dictionary<string, Dictionary<string, (string Referenced, ReferentialAction OnDelete)>> graph = new()
+        {
+            ["Ancestor"] = new(),
+            ["Middle"] = new()
+            {
+                ["FK_M_A_col1"] = ("Ancestor", ReferentialAction.Cascade),
+                ["FK_M_A_col2"] = ("Ancestor", ReferentialAction.Cascade),
+            },
+            ["Descendant"] = new()
+            {
+                ["FK_D_M"] = ("Middle", ReferentialAction.Cascade),
+            },
+        };
+
+        List<(string Ancestor, string Descendant, List<string> Paths)> violations =
+            EnumerateMultiCascadingPaths(graph).ToList();
+
+        (string _, string _, List<string> descendantPaths) = violations.Single(
+            v => v.Ancestor == "Ancestor" && v.Descendant == "Descendant");
+        descendantPaths.Should().HaveCount(2,
+            "two parallel FKs between the same tables must produce two distinct paths (dedup by table alone is a bug — F5a).");
+        descendantPaths.Should().Contain(p => p.Contains("FK_M_A_col1", StringComparison.Ordinal));
+        descendantPaths.Should().Contain(p => p.Contains("FK_M_A_col2", StringComparison.Ordinal));
     }
 }

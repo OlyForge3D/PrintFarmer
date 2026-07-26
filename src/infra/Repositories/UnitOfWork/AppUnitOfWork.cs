@@ -13,6 +13,8 @@ using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Security;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Infrastructure.Repositories.UnitOfWork;
 
@@ -127,6 +129,17 @@ public class AppUnitOfWork : IUnitOfWork
         _printersRepository?.EncryptSensitiveFieldsOnTrackedEntities();
 
         return await _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IDbContextTransaction?> BeginOwnedTransactionAsync(CancellationToken ct)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+        {
+            return null;
+        }
+
+        return await _db.Database.BeginTransactionAsync(ct);
     }
 
     /// <summary>

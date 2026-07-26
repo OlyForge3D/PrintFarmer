@@ -214,6 +214,165 @@ public sealed class EfPrintersRepositoryRemoveAsyncCascadeTests
         }
     }
 
+    [Fact]
+    public async Task RemoveAsync_WithPartOutputMappingsForSourceGcodeFiles_DeletesDirectMappingsThenGcodeFilesThenPrinter()
+    {
+        // F2 — regression against a real relational provider that would FK-fail without the
+        // compensating direct-mapping delete. Seeds a printer, a source-attributed GcodeFile,
+        // and a PartOutputMapping directly referencing that GcodeFile. The Restrict FK on
+        // PartOutputMappings.GcodeFileId would abort the bulk GcodeFiles delete inside
+        // RemoveAsync if the mapping weren't cleared first.
+        await using SqliteConnection connection =
+            new("Data Source=file:printer-remove-partoutput?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(connection);
+        DbContextOptions<AppDbContext> options = OptionsFor(connection);
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid folderId = Guid.NewGuid();
+        Guid sourceGcodeFileId = Guid.NewGuid();
+        Guid partInventoryId = Guid.NewGuid();
+        Guid directMappingId = Guid.NewGuid();
+
+        await using (AppDbContext seed = new(options))
+        {
+            _ = await seed.Database.EnsureCreatedAsync();
+            await EnableSqliteForeignKeysAsync(seed.Database.GetDbConnection());
+
+            _ = seed.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "M" });
+            _ = seed.PrinterModels.Add(new PrinterModel { Id = modelId, Name = "PM", ManufacturerId = manufacturerId });
+            _ = seed.Printers.Add(new Printer
+            {
+                Id = printerId,
+                Name = "P",
+                ServerUrl = "http://p",
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+            });
+            _ = seed.Set<FolderNode>().Add(new FolderNode { Id = folderId, Path = "/", FolderType = "gcode" });
+            _ = seed.GcodeFiles.Add(new GcodeFile
+            {
+                Id = sourceGcodeFileId,
+                Name = "source.gcode",
+                FileName = "source.gcode",
+                FilePath = "/tmp",
+                FileHash = new string('c', 64),
+                FileSizeBytes = 1,
+                FolderId = folderId,
+                SourcePrinterId = printerId,
+                UploadedAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = seed.PartInventories.Add(new PartInventory { Id = partInventoryId, Sku = "SKU", Name = "P" });
+            _ = seed.PartOutputMappings.Add(new PartOutputMapping
+            {
+                Id = directMappingId,
+                GcodeFileId = sourceGcodeFileId,
+                PrintProjectFileId = null,
+                PartInventoryId = partInventoryId,
+                Quantity = 1,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await seed.SaveChangesAsync();
+        }
+
+        await using (AppDbContext act = new(options))
+        {
+            await EnableSqliteForeignKeysAsync(act.Database.GetDbConnection());
+            var repository = new EfPrintersRepository(act, NullSensitiveDataProtector.Instance);
+            await repository.RemoveAsync(new Printer { Id = printerId }, CancellationToken.None);
+        }
+
+        await using (AppDbContext assert = new(options))
+        {
+            await EnableSqliteForeignKeysAsync(assert.Database.GetDbConnection());
+
+            (await assert.PartOutputMappings.CountAsync(m => m.Id == directMappingId)).Should().Be(0,
+                "the direct PartOutputMapping must be deleted BEFORE the source GcodeFile bulk delete — without this, the Restrict FK on PartOutputMappings.GcodeFileId would abort the whole removal");
+            (await assert.GcodeFiles.CountAsync(g => g.Id == sourceGcodeFileId)).Should().Be(0,
+                "the source-attributed GcodeFile must be bulk-deleted");
+            (await assert.Printers.CountAsync(p => p.Id == printerId)).Should().Be(0,
+                "the printer must be removed at the end");
+        }
+    }
+
+    [Fact]
+    public async Task RemoveAsync_WhenLaterStepFails_RollsBackEarlierCompensatingDeletes()
+    {
+        // F4 — failure-injection test. Uses a DbContext.SavingChanges interceptor to throw
+        // at the FINAL Printers.Remove SaveChanges. Prior ExecuteDeleteAsync writes
+        // (schedules, direct mappings, gcode files, print jobs, harvest ops) must all
+        // roll back because the entire sequence runs inside a single IDbContextTransaction.
+        await using SqliteConnection connection =
+            new("Data Source=file:printer-remove-rollback?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(connection);
+        DbContextOptions<AppDbContext> options = OptionsFor(connection);
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        Guid planId = Guid.NewGuid();
+        Guid scheduleId = Guid.NewGuid();
+
+        await using (AppDbContext seed = new(options))
+        {
+            _ = await seed.Database.EnsureCreatedAsync();
+            await EnableSqliteForeignKeysAsync(seed.Database.GetDbConnection());
+
+            _ = seed.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "M" });
+            _ = seed.PrinterModels.Add(new PrinterModel { Id = modelId, Name = "PM", ManufacturerId = manufacturerId });
+            _ = seed.Printers.Add(new Printer
+            {
+                Id = printerId,
+                Name = "P",
+                ServerUrl = "http://p",
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+            });
+            _ = seed.MaintenancePlans.Add(new MaintenancePlan { Id = planId, Name = "Plan" });
+            _ = seed.PrinterMaintenanceSchedules.Add(new PrinterMaintenanceSchedule
+            {
+                Id = scheduleId,
+                MaintenancePlanId = planId,
+                PrinterId = printerId,
+            });
+            _ = await seed.SaveChangesAsync();
+        }
+
+        // Act — trigger failure on the final Printers SaveChanges via a SavingChanges hook.
+        await using (AppDbContext act = new(options))
+        {
+            await EnableSqliteForeignKeysAsync(act.Database.GetDbConnection());
+            act.SavingChanges += (sender, args) =>
+            {
+                DbContext ctx = (DbContext)sender!;
+                if (ctx.ChangeTracker.Entries<Printer>().Any(e => e.State == EntityState.Deleted))
+                {
+                    throw new InvalidOperationException("simulated late failure on Printers.Remove SaveChanges");
+                }
+            };
+            var repository = new EfPrintersRepository(act, NullSensitiveDataProtector.Instance);
+            Func<Task> action = async () => await repository.RemoveAsync(new Printer { Id = printerId }, CancellationToken.None);
+            _ = await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("simulated late failure*");
+        }
+
+        // Assert — schedule + printer both still present (rollback preserved the world).
+        await using (AppDbContext assert = new(options))
+        {
+            await EnableSqliteForeignKeysAsync(assert.Database.GetDbConnection());
+            (await assert.PrinterMaintenanceSchedules.CountAsync(s => s.Id == scheduleId)).Should().Be(1,
+                "the schedule ExecuteDeleteAsync must have rolled back when the final Printers.Remove SaveChanges failed");
+            (await assert.Printers.CountAsync(p => p.Id == printerId)).Should().Be(1,
+                "the printer must remain because its Remove SaveChanges failed and the transaction rolled back");
+        }
+    }
+
     private static DbContextOptions<AppDbContext> OptionsFor(SqliteConnection connection)
         => new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
 
