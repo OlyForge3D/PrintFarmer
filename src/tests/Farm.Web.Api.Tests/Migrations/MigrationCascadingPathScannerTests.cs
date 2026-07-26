@@ -337,4 +337,3 @@ public sealed class MigrationCascadingPathScannerTests
         }
     }
 }
-
