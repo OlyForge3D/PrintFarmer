@@ -439,4 +439,22 @@
   .pf-settings-surface input[type='number'] {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Highlight applied briefly when the command palette deep-links to a
+     specific settings row. Fades to nothing after ~2s (managed in JS) so it
+     serves as a visual "you asked for this one" cue without demanding a
+     click. Respects prefers-reduced-motion by disabling the box-shadow
+     transition for those users. */
+  .pf-setting-focus {
+    outline: 2px solid var(--pf-accent);
+    outline-offset: 4px;
+    border-radius: 6px;
+    transition: outline-color 0.6s ease, box-shadow 0.6s ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pf-setting-focus {
+      transition: none;
+    }
+  }
 }

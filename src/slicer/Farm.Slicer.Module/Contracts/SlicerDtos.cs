@@ -44,9 +44,9 @@ public class HeartbeatDto
 }
 
 /// <summary>
-/// Redacted slicer worker registration response for read endpoints.
+/// Redacted status for a registered slicer service.
 /// </summary>
-public class SlicerServiceResponseDto
+public sealed class SlicerServiceResponse
 {
     public Guid Id { get; set; }
 
@@ -56,25 +56,15 @@ public class SlicerServiceResponseDto
 
     public string? Version { get; set; }
 
-    public string? Host { get; set; }
-
-    public string? UiManifestUrl { get; set; }
-
-    public string? CapabilitiesJson { get; set; }
-
     public int MaxConcurrentJobs { get; set; }
 
     public string? Status { get; set; }
 
     public DateTime LastSeen { get; set; }
 
-    public DateTime? ApiKeyRotatedAt { get; set; }
-
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
 
     public string? Tags { get; set; }
-
-    public string? InstanceId { get; set; }
 }

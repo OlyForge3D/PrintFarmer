@@ -1869,6 +1869,16 @@ export interface Model3DUploadResultDto {
   fileType: string;
   uploadedAt: string;
   url: string;
+  thumbnailUrl?: string;
+  wasExisting: boolean;
+  clientUploadId?: string;
+  etag: string;
+}
+
+export interface Model3DThumbnailUpdateResultDto {
+  id: string;
+  thumbnailUrl: string;
+  etag: string;
 }
 
 // G-code library runtime settings
@@ -1952,9 +1962,9 @@ export interface ApiError {
   details?: string;
   statusCode: number;
   /**
-   * Raw response body preserved from `AxiosError.response.data`. Carries the
-   * canonical `application/problem+json` payload (e.g. `{ code, detail, ... }`)
-   * so callers can inspect structured error details that the flattened
+   * Raw response body preserved from `AxiosError.response.data`. Carries
+   * canonical `application/problem+json` and structured conflict payloads
+   * (for example, `{ code, detail }` or revision details) that the flattened
    * `message`/`details` fields cannot represent. Optional so existing
    * consumers are unaffected.
    */
@@ -2064,13 +2074,18 @@ export enum DiscoveryStatus {
 
 export interface StartDiscoveryRequest {
   backends?: PrinterBackend[];
-  autoRegister?: boolean;
+}
+
+export interface RegisterDiscoveredPrinterRequest {
+  discoveryId: string;
+  manufacturerId?: string;
+  modelId?: string;
+  newManufacturerName?: string;
+  newModelName?: string;
 }
 
 export interface DiscoveryProgressDto {
   sessionId: string;
-  currentNetwork: string;
-  currentIp: string;
   totalIps: number;
   scannedIps: number;
   printersFound: number;
@@ -2078,22 +2093,30 @@ export interface DiscoveryProgressDto {
   progressPercentage: number;
   status: DiscoveryStatus;
   message?: string;
-  networkRanges?: string[];
   autoDetectedNetworks?: boolean;
+}
+
+export interface DiscoveredPrinterSummaryDto {
+  discoveryId: string;
+  name: string;
+  backend: PrinterBackend;
+  manufacturer?: string;
+  model?: string;
+  discoveredAt: string;
+  isReachable: boolean;
 }
 
 export interface DiscoveryPrinterFoundDto {
   sessionId: string;
-  printer: DiscoveredPrinterDto;
+  printer: DiscoveredPrinterSummaryDto;
 }
 
 export interface DiscoveryCompletedDto {
   sessionId: string;
   totalPrintersFound: number;
   totalPrintersExcluded: number;
-  duration: number; // milliseconds
+  duration: string;
   wasCancelled?: boolean;
-  networkRanges?: string[];
   autoDetectedNetworks?: boolean;
 }
 
@@ -3569,6 +3592,9 @@ export interface SystemCapabilities {
   modelFilesEnabled: boolean;
   thumbnailGenerationEnabled: boolean;
   gcodeUploadEnabled: boolean;
+  clientThumbnailUploadEnabled: boolean;
+  idempotentModelUploadEnabled: boolean;
+  modelThumbnailReplacementEnabled: boolean;
   platformNote?: string;
   /**
    * Operator feature flags — populated once #711/#725 ship. Older API builds
@@ -3699,7 +3725,7 @@ export enum NotificationPreferenceEventType {
 }
 
 /**
- * Capability probe response from `GET /notifications/capabilities` (introduced
+ * Capability probe response from `GET /notifications/preferences/capabilities` (introduced
  * by #708). Legacy servers respond 404, which the client treats as
  * "supportedEventTypes = the classic four job tokens only" so that unknown
  * operator strings are never sent back on `PUT /notifications/preferences`.

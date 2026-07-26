@@ -103,7 +103,23 @@ _(append new learnings below this line)_
 
 Participated in multi-round trio review cycle. Key learnings:
 
-1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+1. **Multi-reviewer consensus:** Three independent reviewers with fresh hands prevents fatigue. (The author-lockout rule that once accompanied this has been RESCINDED by the repo owner — authors fix their own rejected work; nobody is ever locked out of an artifact.)
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
+
+## Learnings — 2026-07-25 — Issue #941 final merge gate (epic #931)
+
+Independent read-only review of `origin/development...feature/admin-console-redesign` (74 files, +9658/-1140). Verdict: **APPROVE** with follow-ups. No critical/blocking defects found by reading the diff.
+
+Verified against code (not briefs):
+- **Bare-property-name sweep (the epic's recurring root cause):** No third instance. The deep-link contract is section-scoped on BOTH ends — `SettingsPagelet.tsx:287` emits `data-setting-property={`${metadata.key}.${prop.name}`}` and `SettingsPage.tsx:442-444` matches it exactly for dotted params (bare-name suffix match kept only as a legacy fallback). Palette item ids (`setting.${section.key}.${property.name}`) and DOM `id`/`htmlFor` (`${metadata.key}.${prop.name}`) are all section-scoped. `fieldErrors[prop.name]` is within-section (parent passes `fieldErrors[meta.key]`). `essential-manifest` lookups are `(sectionKey, propertyName)` — section-scoped. Clean.
+- **Authorization:** All `/admin/*` (incl. redirect targets `/admin/manage`, `/admin/settings`) nest under one `<ProtectedRoute requiredRole="farm_admin">` Outlet (App.tsx:310). Every one of the ~28 legacy redirects lands equal-or-more protected; top-level demotions (`/admin/printers`→`/printers`) are duplicates of already-authenticated pages, not admin-only content. `adminDestinations` default `requiredRole='farm_admin'`; **no** destination uses `requiredRole:null`. `SettingsShell` `routeScope` constrains `availableScopes`, and a requested scope not in that set falls back (so `/settings?scope=admin` can't reach admin scope). Palette gates setting-field items behind `isFarmAdmin`.
+- **Blocklist on new metadata surfaces:** Search + Ctrl+K palette both source fields from `/api/settings/metadata`, which filters `_settingsBlocklist` server-side (`UnifiedSettingsController.cs:246`). HomeAssistant/Telegram never enumerate. Honored.
+- **Seams:** #932 primitives genuinely REUSED, not forked — AdminControlCenterPage, LoginAuditPage, and SettingsPage all import AdminLoading/AdminError/AdminEmpty (+ SettingsPage: AdminSaveBar/useDirtyState/adminToast). The "five loading/five error" problem is actually consolidated.
+- **Left-behind:** No `alert()`/`window.confirm`/`eslint-disable`/`TODO` added in the diff (palette confirm uses in-app `ConfirmationModal`; the only `window.confirm` hits are in out-of-scope slicer files). Deleted `SettingsSearch` has zero dangling refs; barrels export only existing symbols.
+- **Contract:** New `AdminOverviewController` is `[Authorize(Roles="farm_admin")]`; DTO enums string-serialized; TS `types/adminOverview.ts` mirrors camelCase + string enums with forward-compat guards. Attention sort is correct (Error→Warning→Info, descending ordinal). No SignalR events added.
+
+Follow-ups (non-blocking): (1) 3× `ActionRoute="/admin/system"` in AdminOverviewService take a redirect hop — point at canonical `/admin/manage?tab=operations&sub=status`. (2) `saveAllSettings` orphaned (API wrapper + tests only) — remove or wire. (3) The Job-Queue "guard" test only asserts 4 hardcoded keys exist; it does NOT dynamically cross-check `allowedGroups`↔`SETTINGS_GROUP_TO_LOCATION`, so it won't catch a FUTURE missing mapping — the two-sources-of-truth gap is still open. (4) `essential-manifest` silent-demotion on backend rename has no build-time guard.
+
+Process learning: a fully-green suite again hid nothing critical here, but the weak guard test (#3) is the clearest example this epic of a test that "passes" without actually enforcing the invariant it claims to protect. Read what the assertion binds to, not just that it's green.

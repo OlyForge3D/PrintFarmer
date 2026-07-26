@@ -127,8 +127,7 @@ public class SignalRSlicerProgressNotifierTests
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 ((SlicingCompletionNotification)args[0]).Success &&
-                ((SlicingCompletionNotification)args[0]).ResultFileUrl != null &&
-                ((SlicingCompletionNotification)args[0]).ResultFileUrl!.ToString() == result.ResultFileUrl!.ToString()
+                ((SlicingCompletionNotification)args[0]).ArtifactsRoute == $"/api/artifacts/job/{job.Id}"
             ),
             It.IsAny<CancellationToken>()
         ), Times.AtLeast(2)); // Once for user group, once for monitors
@@ -161,7 +160,7 @@ public class SignalRSlicerProgressNotifierTests
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingCompletionNotification)args[0]).JobId == job.Id &&
                 !((SlicingCompletionNotification)args[0]).Success &&
-                ((SlicingCompletionNotification)args[0]).ErrorMessage == result.Error
+                ((SlicingCompletionNotification)args[0]).ErrorMessage == "Slicing failed."
             ),
             It.IsAny<CancellationToken>()
         ), Times.AtLeast(2));
@@ -215,7 +214,7 @@ public class SignalRSlicerProgressNotifierTests
             "slicingfailed",
             It.Is<object[]>(args => args.Length == 1 &&
                 ((SlicingFailureNotification)args[0]).JobId == job.Id &&
-                ((SlicingFailureNotification)args[0]).ErrorMessage == errorMessage
+                ((SlicingFailureNotification)args[0]).ErrorMessage == "Slicing failed."
             ),
             It.IsAny<CancellationToken>()
         ), Times.AtLeast(2));

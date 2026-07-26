@@ -78,6 +78,45 @@ public class Toolhead
     /// </summary>
     public ToolheadType ToolheadType { get; set; } = ToolheadType.Physical;
 
+    /// <summary>Tool offset on the X axis in millimeters.</summary>
+    public double? OffsetX { get; set; }
+
+    /// <summary>Tool offset on the Y axis in millimeters.</summary>
+    public double? OffsetY { get; set; }
+
+    /// <summary>Tool offset on the Z axis in millimeters.</summary>
+    public double? OffsetZ { get; set; }
+
+    /// <summary>Explicit installed nozzle diameter in millimeters.</summary>
+    public double? NozzleDiameter { get; set; }
+
+    /// <summary>Explicit installed nozzle type.</summary>
+    public NozzleType? NozzleType { get; set; }
+
+    /// <summary>Explicit installed nozzle material.</summary>
+    public string? NozzleMaterial { get; set; }
+
+    /// <summary>Maximum temperature rating of the installed nozzle.</summary>
+    public int? NozzleMaxTemperature { get; set; }
+
+    /// <summary>Whether the installed nozzle is hardened.</summary>
+    public bool? NozzleIsHardened { get; set; }
+
+    /// <summary>Maximum temperature rating of the installed hotend.</summary>
+    public int? HotendMaxTemperature { get; set; }
+
+    /// <summary>Maximum volumetric flow in cubic millimeters per second.</summary>
+    public double? MaxVolumetricFlow { get; set; }
+
+    /// <summary>Explicit extruder drive type, such as direct or Bowden.</summary>
+    public string? DriveType { get; set; }
+
+    /// <summary>Whether the installed extruder is direct drive.</summary>
+    public bool? IsDirectDrive { get; set; }
+
+    /// <summary>Explicit extruder gear ratio.</summary>
+    public string? ExtruderGearRatio { get; set; }
+
     /// <summary>
     /// Spoolman spool ID currently loaded on this toolhead or MMU gate.
     /// Null when no spool is assigned or Spoolman integration is not configured.

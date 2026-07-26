@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/services/api";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { adminToast } from '@/common/components/admin';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
 
 const DEFAULT_COLUMNS: Record<LogColumnKey, { label: string; default: boolean }> = {
@@ -93,7 +94,7 @@ export function SystemLogsContent() {
       setLogs(logsData as unknown as SystemLog[]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch logs';
-      alert(message);
+      adminToast.error(message);
     }
     setLoading(false);
   };
@@ -117,7 +118,7 @@ export function SystemLogsContent() {
       link.remove();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to export logs';
-      alert(message);
+      adminToast.error(message);
     }
   };
 

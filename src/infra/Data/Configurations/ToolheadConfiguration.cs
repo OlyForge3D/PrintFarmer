@@ -28,6 +28,10 @@ public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
             .HasDefaultValue(ToolheadType.Physical);
         builder.Property(t => t.CurrentMaterial).HasMaxLength(64);
         builder.Property(t => t.CurrentFilamentColor).HasMaxLength(32);
+        builder.Property(t => t.NozzleType).HasConversion<int?>();
+        builder.Property(t => t.NozzleMaterial).HasMaxLength(64);
+        builder.Property(t => t.DriveType).HasMaxLength(64);
+        builder.Property(t => t.ExtruderGearRatio).HasMaxLength(64);
 
         // JSON array properties
         builder.Property(t => t.SupportedMaterials)

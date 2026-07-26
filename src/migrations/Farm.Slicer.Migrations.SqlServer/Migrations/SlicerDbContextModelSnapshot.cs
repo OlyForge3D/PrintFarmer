@@ -136,11 +136,17 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<int>("PrintSpeed")
                         .HasColumnType("int");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");
@@ -287,11 +293,17 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("RawJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");
@@ -330,6 +342,13 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClientUploadHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid?>("ClientUploadId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
@@ -420,6 +439,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UploadedAt")
@@ -449,6 +469,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.HasIndex("UploadedAt");
 
                     b.HasIndex("UploadedByUserId");
+
+                    b.HasIndex("UploadedByUserId", "ClientUploadId")
+                        .IsUnique()
+                        .HasFilter("[UploadedByUserId] IS NOT NULL AND [ClientUploadId] IS NOT NULL");
 
                     b.ToTable("Models3D", "slicer");
                 });
@@ -510,6 +534,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterModelId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ProfileFormat")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int>("Quality")
                         .HasColumnType("int");
 
@@ -518,6 +545,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<string>("SettingsJson")
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("SlicerDistribution")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("SlicerType")
                         .HasColumnType("int");

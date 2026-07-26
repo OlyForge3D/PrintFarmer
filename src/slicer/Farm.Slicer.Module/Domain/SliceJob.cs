@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
 
 namespace Farm.Slicer.Module.Domain;
 
@@ -25,6 +26,7 @@ public class SliceJob
     /// </summary>
     [Required]
     [MaxLength(2048)]
+    [JsonIgnore]
     public string ModelFileUrl { get; set; } = string.Empty;
 
     /// <summary>
@@ -53,6 +55,7 @@ public class SliceJob
     /// <summary>
     /// Serialized slicer profile/settings (JSON).
     /// </summary>
+    [JsonIgnore]
     public string? SlicerProfileJson { get; set; }
 
     /// <summary>
@@ -62,12 +65,14 @@ public class SliceJob
     /// </summary>
     public Guid? SlicerProfileId { get; set; }
 
+    [JsonIgnore]
     public ProcessProfile? SlicerProfile { get; set; }
 
     /// <summary>
     /// Required capabilities for this job (JSON array).
     /// Workers must match these capabilities to claim the job.
     /// </summary>
+    [JsonIgnore]
     public string? RequiredCapabilitiesJson { get; set; }
 
     /// <summary>
@@ -96,6 +101,7 @@ public class SliceJob
     /// Optional checksum/hash for idempotency and deduplication.
     /// </summary>
     [MaxLength(128)]
+    [JsonIgnore]
     public string? Checksum { get; set; }
 
     /// <summary>
@@ -112,11 +118,13 @@ public class SliceJob
     /// URL to the resulting G-code file (populated on success).
     /// </summary>
     [MaxLength(2048)]
+    [JsonIgnore]
     public string? ResultFileUrl { get; set; }
 
     /// <summary>
     /// Error message if job failed.
     /// </summary>
+    [JsonIgnore]
     public string? ErrorMessage { get; set; }
 
     /// <summary>

@@ -169,10 +169,10 @@ public class PrinterWithCapabilitiesDto
     public string? Notes { get; set; }
 
     // Connection
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ServerUrl { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? IpAddress { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -182,19 +182,19 @@ public class PrinterWithCapabilitiesDto
     public int? FrontendPort { get; set; }
 
     // Credentials
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ApiKey { get; set; }
 
     /// <summary>
     /// Username for HTTP Digest authentication (primarily for PrusaLink).
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for HTTP Digest authentication.
     /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Password { get; set; }
 
     // Capabilities (unique to export DTO)

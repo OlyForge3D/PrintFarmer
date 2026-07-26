@@ -1212,7 +1212,9 @@ EOF
     env_content=$(cat "$env_file")
 
     # Verify API keys are generated and present in the env file
+    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and workers with a shared worker key"
     assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include primary SlicerRegistry__ApiKey for worker registration"
+    assert_contains "$env_content" "DISCOVERY_SHARED_API_KEY=" "Should configure authenticated discovery event ingestion"
     
     # For scaled workers (count > 1), verify individual worker keys are generated
     assert_contains "$env_content" "SlicerRegistry__ApiKey__orcaslicer_worker" "Should include individual API keys for scaled workers"
@@ -1222,8 +1224,18 @@ EOF
     key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
     local key_value
     key_value=$(echo "$key_line" | cut -d'=' -f2-)
+    local shared_key_line
+    shared_key_line=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1)
+    local shared_key_value
+    shared_key_value=$(echo "$shared_key_line" | cut -d'=' -f2-)
+    local discovery_key_line
+    discovery_key_line=$(grep "^DISCOVERY_SHARED_API_KEY=" "$env_file" | head -1)
+    local discovery_key_value
+    discovery_key_value=$(echo "$discovery_key_line" | cut -d'=' -f2-)
     
     assert_not_equals "$key_value" "" "API key value should not be empty"
+    assert_equals "$shared_key_value" "$key_value" "Registry and worker authentication should use the generated shared key"
+    assert_not_equals "$discovery_key_value" "" "Discovery service key should not be empty"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true
@@ -1260,6 +1272,7 @@ EOF
     env_content=$(cat "$env_file")
 
     # Verify API key is present for single worker
+    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and worker with a shared worker key"
     assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include SlicerRegistry__ApiKey for single worker"
 
     # Verify the key has actual content (not just the key name)
@@ -1267,8 +1280,13 @@ EOF
     key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
     local key_value
     key_value=$(echo "$key_line" | cut -d'=' -f2-)
+    local shared_key_line
+    shared_key_line=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1)
+    local shared_key_value
+    shared_key_value=$(echo "$shared_key_line" | cut -d'=' -f2-)
     
     assert_not_equals "$key_value" "" "API key value should not be empty"
+    assert_equals "$shared_key_value" "$key_value" "Registry and worker authentication should use the generated shared key"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true

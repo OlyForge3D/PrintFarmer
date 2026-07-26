@@ -28,6 +28,11 @@ services:
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
         GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_VERSION: ${BUILD_VERSION:-development}
+        VCS_REF: ${VCS_REF:-unknown}
+        SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+        SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+        SBOM_URL: ${SBOM_URL:-}
     image: printfarmer-printer-discovery
     container_name: printfarmer-printer-discovery
     restart: unless-stopped
@@ -37,6 +42,7 @@ services:
       - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
       - ASPNETCORE_URLS=http://+:5247
       - Discovery__ApiBaseUrl=${DISCOVERY__API_BASE_URL:-http://api:5245}
+      - Discovery__SharedKey=${DISCOVERY_SHARED_API_KEY:-}
       - DB_STARTUP_TIMEOUT=${DB_STARTUP_TIMEOUT:-120}
       - DB_CONNECTION_RETRY_COUNT=${DB_CONNECTION_RETRY_COUNT:-3}
       - DB_CONNECTION_RETRY_DELAY=${DB_CONNECTION_RETRY_DELAY:-2}

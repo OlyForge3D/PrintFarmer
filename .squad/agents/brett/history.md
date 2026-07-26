@@ -3,9 +3,9 @@
 Brett is the researcher and follow-up validator on multi-round review cycles.
 
 ## 2026-05-31: Trio Review Cycle #355, #371, #405
-Participated in follow-up validation on merged stack (round 8). Strict reviewer-lockout protocol with fresh-hand rotation proved effective. Key learnings:
+Participated in follow-up validation on merged stack (round 8). Multi-reviewer consensus with fresh-hand rotation proved effective. Key learnings:
 1. **Surgical-fix pattern:** Kane's narrow corrections across three branches demonstrated cost efficiency
-2. **Reviewer-lockout protocol:** Prevents fatigue in multi-round consensus cycles
+2. **Multi-reviewer consensus:** Three independent reviewers with fresh hands prevents fatigue. (The author-lockout rule that once accompanied this has been RESCINDED by the repo owner — authors fix their own rejected work; nobody is ever locked out of an artifact.)
 3. **Session-end report validation:** Must verify trio drops match current commit SHA
 4. **PR auto-close gap:** Manual close required for development branch merges
 

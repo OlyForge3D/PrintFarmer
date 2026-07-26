@@ -33,53 +33,6 @@ public abstract class HttpJobPollerService(
     private readonly ILogger<HttpJobPollerService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IWorkerStateService _workerState = workerState ?? throw new ArgumentNullException(nameof(workerState));
     private readonly IConfiguration _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-    private readonly Guid _workerId = ResolveWorkerId(configuration);
-    private readonly string? _workerApiKey = configuration["WorkerAuth:SharedApiKey"]
-                                              ?? configuration["WorkerAuth:SharedKey"]
-                                              ?? Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY");
-
-    private static Guid ResolveWorkerId(IConfiguration configuration)
-    {
-        string? instanceId = configuration["Worker:InstanceId"];
-        if (!string.IsNullOrWhiteSpace(instanceId) && Guid.TryParse(instanceId, out Guid parsed))
-        {
-            // For multi-worker deployments: combine instance ID with hostname
-            // so replicas sharing the same config get unique but deterministic IDs.
-            string hostname = Environment.MachineName;
-            string? workerId = configuration["Worker:WorkerId"];
-            if (!string.IsNullOrWhiteSpace(workerId) && workerId != "orcaslicer-worker-1")
-            {
-                // Worker has a distinct WorkerId — derive a unique GUID from base + discriminator
-                return DeriveGuid(parsed, workerId);
-            }
-
-            // Single worker or first replica — suffix with hostname for safety
-            string containerHostname = hostname ?? string.Empty;
-            if (!string.IsNullOrEmpty(containerHostname) && containerHostname.Length >= 8)
-            {
-                return DeriveGuid(parsed, containerHostname);
-            }
-
-            return parsed;
-        }
-
-        return Guid.NewGuid();
-    }
-
-    /// <summary>
-    /// Creates a deterministic GUID by hashing the base GUID with a discriminator string.
-    /// Ensures each replica gets a unique but stable ID across restarts.
-    /// </summary>
-    private static Guid DeriveGuid(Guid baseId, string discriminator)
-    {
-        byte[] input = [.. baseId.ToByteArray(), .. System.Text.Encoding.UTF8.GetBytes(discriminator)];
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(input);
-
-        // Use first 16 bytes of SHA256 as a v4-like GUID
-        hash[6] = (byte)((hash[6] & 0x0F) | 0x40); // version 4
-        hash[8] = (byte)((hash[8] & 0x3F) | 0x80); // variant 1
-        return new Guid(hash.AsSpan(0, 16));
-    }
 
     /// <summary>
     /// Derived classes implement this to execute the slicing pipeline.
@@ -108,26 +61,32 @@ public abstract class HttpJobPollerService(
         int pollIntervalSeconds = int.Parse(_configuration["Worker:PollIntervalSeconds"] ?? "5");
         int leaseDurationSeconds = int.Parse(_configuration["Worker:LeaseDurationSeconds"] ?? "300"); // 5 minutes default
 
-        _logger.LogInformation("Worker {WorkerId} HTTP job poller starting. API={ApiBaseUrl} PollInterval={PollIntervalSeconds}s Lease={LeaseDurationSeconds}s", _workerId, apiBaseUrl, pollIntervalSeconds, leaseDurationSeconds);
+        _logger.LogInformation("HTTP job poller starting. API={ApiBaseUrl} PollInterval={PollIntervalSeconds}s Lease={LeaseDurationSeconds}s", apiBaseUrl, pollIntervalSeconds, leaseDurationSeconds);
         _logger.LogInformation("Worker capabilities: {Value0}", string.Join(", ", GetWorkerCapabilities()));
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                WorkerState currentWorkerState = _workerState.GetWorkerState();
+                Guid? registeredServiceId = currentWorkerState.RegisteredServiceId;
+                if (registeredServiceId is null ||
+                    string.IsNullOrWhiteSpace(currentWorkerState.RegisteredServiceApiKey))
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), stoppingToken);
+                    continue;
+                }
+
                 using HttpClient httpClient = _httpClientFactory.CreateClient();
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
                 httpClient.Timeout = TimeSpan.FromSeconds(30);
-
-                if (!string.IsNullOrWhiteSpace(_workerApiKey))
-                {
-                    httpClient.DefaultRequestHeaders.Add("X-Worker-Key", _workerApiKey);
-                }
+                httpClient.DefaultRequestHeaders.Add("X-Worker-Key", currentWorkerState.RegisteredServiceApiKey);
+                httpClient.DefaultRequestHeaders.Add("X-Worker-Id", registeredServiceId.Value.ToString());
 
                 // Attempt to claim a job
                 ClaimJobRequest claimRequest = new ClaimJobRequest
                 {
-                    WorkerId = _workerId,
+                    WorkerId = registeredServiceId.Value,
                     Capabilities = GetWorkerCapabilities(),
                     LeaseDurationSeconds = leaseDurationSeconds
                 };
@@ -148,7 +107,8 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                SliceJobStatusResponse? jobStatus = await claimResponse.Content.ReadFromJsonAsync<SliceJobStatusResponse>(stoppingToken);
+                WorkerSliceJobResponse? jobStatus =
+                    await claimResponse.Content.ReadFromJsonAsync<WorkerSliceJobResponse>(stoppingToken);
                 if (jobStatus == null)
                 {
                     _logger.LogWarning("Claimed job but received null response");
@@ -156,14 +116,14 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                // Convert SliceJobStatusResponse to DistributedSlicingJob for pipeline
+                // Convert the worker-only claim contract to the pipeline model.
                 // Map claimed job to DistributedSlicingJob (feed actual metadata to pipeline)
                 SlicerEngineType engineEnum = (SlicerEngineType)jobStatus.SlicerEngine;
                 DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
-                    WorkerId = _workerId.ToString(),
-                    ModelFileUrl = Uri.TryCreate(jobStatus.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? tmp) ? tmp : new Uri("about:blank", UriKind.RelativeOrAbsolute),
+                    WorkerId = registeredServiceId.Value.ToString(),
+                    ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
                     ModelFileName = jobStatus.ModelFileName,
                     EngineType = engineEnum,
                     SlicerEngine = engineEnum.ToString(),
@@ -197,13 +157,14 @@ public abstract class HttpJobPollerService(
             }
         }
 
-        _logger.LogInformation("Worker {WorkerId} HTTP job poller stopped", _workerId);
+        _logger.LogInformation("HTTP job poller stopped");
     }
 
     private async Task HandleJobAsync(DistributedSlicingJob job, HttpClient httpClient, CancellationToken ct)
     {
         DateTime start = DateTime.UtcNow;
         CancellationTokenSource? localLinkedCts = null;
+        SlicingResult? result = null;
         try
         {
             using IServiceScope scope = _serviceProvider.CreateScope();
@@ -223,7 +184,7 @@ public abstract class HttpJobPollerService(
                         try
                         {
                             RenewLeaseRequest renewReq = new RenewLeaseRequest { LeaseDurationSeconds = leaseDurationSeconds };
-                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew", renewReq, localLinkedCts.Token);
+                            HttpResponseMessage resp = await httpClient.PostAsJsonAsync($"/api/slice/{job.Id}/renew-lease", renewReq, localLinkedCts.Token);
                             if (!resp.IsSuccessStatusCode)
                             {
                                 _logger.LogDebug("Lease renew for job {JobId} returned {RespStatusCode}", job.Id, resp.StatusCode);
@@ -250,7 +211,7 @@ public abstract class HttpJobPollerService(
             }
 
             // Execute the slicing pipeline (downloads STL, runs slicer, generates G-code)
-            SlicingResult result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
+            result = await ExecutePipelineAsync(job, scope.ServiceProvider, ct);
             if (!result.Success)
             {
                 throw new InvalidOperationException("Slicing pipeline reported failure");
@@ -313,6 +274,7 @@ public abstract class HttpJobPollerService(
             {
             }
 
+            TryCleanupLocalResult(job.Id, result);
             _workerState.DecrementActiveJobs();
         }
     }
@@ -388,16 +350,15 @@ public abstract class HttpJobPollerService(
 
         _logger.LogInformation("Uploading G-code artifact from {GcodeFilePath}", gcodeFilePath);
 
-        // Upload the primary G-code file
+        // Upload the primary G-code file without buffering the full artifact in memory.
+        await using FileStream gcodeStream = OpenArtifactFileStream(gcodeFilePath);
         using MultipartFormDataContent gcodeContent = new MultipartFormDataContent();
-        gcodeContent.Add(new StringContent(job.Id.ToString()), "jobId");
-        gcodeContent.Add(new StringContent("gcode"), "kind");
-        gcodeContent.Add(new StringContent(_workerId.ToString()), "workerId");
+        StreamContent gcodeFileContent = new StreamContent(gcodeStream);
+        gcodeFileContent.Headers.ContentLength = gcodeStream.Length;
+        gcodeContent.Add(gcodeFileContent, "file", Path.GetFileName(gcodeFilePath));
 
-        byte[] gcodeBytes = await File.ReadAllBytesAsync(gcodeFilePath, ct);
-        gcodeContent.Add(new ByteArrayContent(gcodeBytes), "file", Path.GetFileName(gcodeFilePath));
-
-        HttpResponseMessage uploadResponse = await httpClient.PostAsync("/api/artifacts", gcodeContent, ct);
+        using HttpResponseMessage uploadResponse =
+            await httpClient.PostAsync($"/api/slice/{job.Id}/artifacts", gcodeContent, ct);
 
         if (!uploadResponse.IsSuccessStatusCode)
         {
@@ -412,12 +373,26 @@ public abstract class HttpJobPollerService(
         }
 
         artifactIds.Add(artifactResponse.Id);
-        _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeBytes.Length);
+        _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeStream.Length);
 
         // Phase 3E: Upload additional artifacts (thumbnails, metadata) from result.Metadata
         // Requires ArtifactsController endpoint and SlicingArtifactKeys conventions.
         // See .squad/decisions/inbox/dallas-blocked-items-architecture.md for design.
         return artifactIds;
+    }
+
+    /// <summary>
+    /// Opens an artifact for asynchronous sequential upload without materializing it in memory.
+    /// </summary>
+    internal static FileStream OpenArtifactFileStream(string filePath)
+    {
+        return new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
     }
 
     /// <summary>
@@ -651,6 +626,33 @@ public abstract class HttpJobPollerService(
                 clone.Settings["filament_colour"] = new List<string> { colour };
                 profile.FilamentProfile = clone;
             }
+        }
+    }
+
+    private void TryCleanupLocalResult(Guid jobId, SlicingResult? result)
+    {
+        if (result?.ResultFileUrl is not { IsAbsoluteUri: true, IsFile: true } resultUri)
+        {
+            return;
+        }
+
+        try
+        {
+            string filePath = resultUri.LocalPath;
+            string? directory = Path.GetDirectoryName(filePath);
+            if (directory is not null &&
+                string.Equals(Path.GetFileName(directory), jobId.ToString(), StringComparison.Ordinal))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+            else if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
         }
     }
 }

@@ -1,0 +1,1864 @@
+﻿using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
+using Farm.Infrastructure.Services.Printers;
+using Microsoft.EntityFrameworkCore;
+
+namespace Farm.Web.Api.Services.Calibration;
+
+public interface IPrinterCalibrationContextService
+{
+    Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken);
+
+    Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
+        Guid printerId,
+        long? configurationRevision,
+        string capturedBySubject,
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken);
+}
+
+public sealed record CalibrationServiceResult<T>(
+    T? Value,
+    string? ErrorCode = null,
+    long? CurrentConfigurationRevision = null)
+    where T : class;
+
+public sealed class PrinterCalibrationContextService(
+    AppDbContext dbContext,
+    IPrinterStatusSnapshotReader statusReader,
+    IBackendCapabilityFactory capabilityFactory,
+    IConfiguration configuration,
+    TimeProvider timeProvider,
+    ICalibrationProfileResolver? profileResolver = null)
+    : IPrinterCalibrationContextService
+{
+    private const double NumericTolerance = 0.001;
+    private readonly int _statusStaleAfterSeconds =
+        Math.Max(1, configuration.GetValue("Calibration:StatusStaleAfterSeconds", 30));
+
+    private readonly int _firmwareStaleAfterSeconds =
+        Math.Max(1, configuration.GetValue("Calibration:FirmwareMetadataStaleAfterSeconds", 86_400));
+
+    private readonly int _hardwareStaleAfterSeconds =
+        Math.Max(1, configuration.GetValue("Calibration:HardwareMetadataStaleAfterSeconds", 2_592_000));
+
+    private readonly TimeProvider _timeProvider = timeProvider;
+
+    public async Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken)
+    {
+        if (profileResolver is null ||
+            !await profileResolver.IsAvailableAsync(cancellationToken))
+        {
+            return new(null, "profile_service_unavailable");
+        }
+
+        List<Printer> printers = await dbContext.Printers
+            .AsNoTracking()
+            .Where(printer => printer.IsEnabled)
+            .Include(printer => printer.Location)
+            .Include(printer => printer.Toolheads)
+            .OrderBy(printer => printer.Name)
+            .ThenBy(printer => printer.Id)
+            .ToListAsync(cancellationToken);
+
+        List<CalibrationCandidateDto> candidates = new(printers.Count);
+        foreach (Printer printer in printers)
+        {
+            CalibrationEvaluation evaluation;
+            try
+            {
+                evaluation =
+                    await EvaluateAsync(printer, profileAccessScope, cancellationToken);
+            }
+            catch (CalibrationProfileResolverUnavailableException)
+            {
+                return new(null, "profile_service_unavailable");
+            }
+
+            candidates.Add(evaluation.Candidate);
+        }
+
+        return new(candidates);
+    }
+
+    public async Task<CalibrationServiceResult<CalibrationContextDto>> GetContextAsync(
+        Guid printerId,
+        long? configurationRevision,
+        string capturedBySubject,
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken)
+    {
+        if (profileResolver is null ||
+            !await profileResolver.IsAvailableAsync(cancellationToken))
+        {
+            return new(null, "profile_service_unavailable");
+        }
+
+        Printer? printer = await dbContext.Printers
+            .AsNoTracking()
+            .Where(candidate => candidate.Id == printerId && candidate.IsEnabled)
+            .Include(candidate => candidate.Location)
+            .Include(candidate => candidate.Toolheads)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (printer is null)
+        {
+            return new(null, "printer_not_found");
+        }
+
+        if (configurationRevision.HasValue &&
+            configurationRevision.Value != printer.ConfigurationRevision)
+        {
+            return new(
+                null,
+                "printer_configuration_changed",
+                printer.ConfigurationRevision);
+        }
+
+        CalibrationEvaluation evaluation;
+        try
+        {
+            evaluation =
+                await EvaluateAsync(printer, profileAccessScope, cancellationToken);
+        }
+        catch (CalibrationProfileResolverUnavailableException)
+        {
+            return new(null, "profile_service_unavailable");
+        }
+
+        DateTime capturedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        List<Spool> spools = await dbContext.Spools
+            .AsNoTracking()
+            .Where(spool =>
+                spool.AssignedPrinterId == null ||
+                spool.AssignedPrinterId == printer.Id)
+            .OrderBy(spool => spool.Material)
+            .ThenBy(spool => spool.Id)
+            .ToListAsync(cancellationToken);
+
+        IReadOnlyList<CalibrationSpoolChoiceDto> spoolChoices = spools
+            .Select(spool => new CalibrationSpoolChoiceDto(
+                spool.Id,
+                spool.Material,
+                spool.ColorHex,
+                spool.WeightGrams,
+                spool.InUse,
+                spool.AssignedPrinterId))
+            .ToArray();
+
+        IReadOnlyList<string> methods = GetSupportedCalibrationMethods(printer);
+        CalibrationGeneratorCompatibilityDto generatorCompatibility = new(
+            CalibrationContractConstants.ApiVersion,
+            CalibrationContractConstants.SchemaVersion,
+            CalibrationContractConstants.SlicerEngine,
+            CalibrationContractConstants.SlicerDistribution,
+            CalibrationContractConstants.SlicerVersion,
+            methods);
+
+        object hashInput = new
+        {
+            schemaVersion = CalibrationContractConstants.SchemaVersion,
+            printerId = printer.Id,
+            configurationRevision = printer.ConfigurationRevision,
+            buildVolume = evaluation.Candidate.BuildVolume,
+            bedOrigin = evaluation.Candidate.BedOrigin,
+            printablePolygon = evaluation.Candidate.PrintablePolygon,
+            excludedRegions = evaluation.Candidate.ExcludedRegions,
+            motionType = evaluation.Candidate.MotionType,
+            maxPrintSpeed = evaluation.Candidate.MaxPrintSpeed,
+            maxTravelSpeed = evaluation.Candidate.MaxTravelSpeed,
+            maxAcceleration = evaluation.Candidate.MaxAcceleration,
+            maxTravelAcceleration = evaluation.Candidate.MaxTravelAcceleration,
+            toolheads = evaluation.Candidate.Toolheads,
+            activeToolheadIndex = evaluation.Candidate.ActiveToolheadIndex,
+            hasHeatedBed = evaluation.Candidate.HasHeatedBed,
+            maxBedTemperature = evaluation.Candidate.MaxBedTemperature,
+            hasEnclosure = evaluation.Candidate.HasEnclosure,
+            hasHeatedChamber = evaluation.Candidate.HasHeatedChamber,
+            maxChamberTemperature = evaluation.Candidate.MaxChamberTemperature,
+            firmware = evaluation.Candidate.Firmware,
+            backendVersion = printer.BackendVersion,
+            backendApiVersion = printer.BackendApiVersion,
+            slicer = evaluation.Candidate.Slicer,
+            profiles = new
+            {
+                machine = CreateProfileHashInput(
+                    evaluation.Profiles.Machine,
+                    evaluation.RawEffectiveSettings.Machine),
+                process = CreateProfileHashInput(
+                    evaluation.Profiles.Process,
+                    evaluation.RawEffectiveSettings.Process),
+                filament = CreateProfileHashInput(
+                    evaluation.Profiles.Filament,
+                    evaluation.RawEffectiveSettings.Filament),
+            },
+            baselineSettings = evaluation.BaselineSettings,
+            supportsPressureAdvance = printer.SupportsPressureAdvance,
+            supportsFirmwareRetraction = printer.SupportsFirmwareRetraction,
+        };
+        string snapshotSha256 = CalibrationSnapshotBuilder.ComputeSha256(hashInput);
+
+        PrinterConfigurationSnapshotDto snapshot = new()
+        {
+            PrinterId = printer.Id,
+            ConfigurationRevision = printer.ConfigurationRevision,
+            CapturedAtUtc = capturedAtUtc,
+            CapturedBySubject = capturedBySubject,
+            BuildVolume = evaluation.Candidate.BuildVolume,
+            BedOrigin = evaluation.Candidate.BedOrigin,
+            PrintablePolygon = evaluation.Candidate.PrintablePolygon,
+            ExcludedRegions = evaluation.Candidate.ExcludedRegions,
+            MotionType = evaluation.Candidate.MotionType,
+            Toolheads = evaluation.Candidate.Toolheads,
+            HasHeatedBed = evaluation.Candidate.HasHeatedBed,
+            MaxBedTemperature = evaluation.Candidate.MaxBedTemperature,
+            HasEnclosure = evaluation.Candidate.HasEnclosure,
+            HasHeatedChamber = evaluation.Candidate.HasHeatedChamber,
+            MaxChamberTemperature = evaluation.Candidate.MaxChamberTemperature,
+            MaxPrintSpeed = evaluation.Candidate.MaxPrintSpeed,
+            MaxTravelSpeed = evaluation.Candidate.MaxTravelSpeed,
+            MaxAcceleration = evaluation.Candidate.MaxAcceleration,
+            MaxTravelAcceleration = evaluation.Candidate.MaxTravelAcceleration,
+            Firmware = evaluation.Candidate.Firmware,
+            BackendVersion = printer.BackendVersion,
+            BackendApiVersion = printer.BackendApiVersion,
+            Slicer = evaluation.Candidate.Slicer,
+            Profiles = evaluation.Profiles,
+            BaselineSettings = evaluation.BaselineSettings,
+            RawEffectiveSettings = evaluation.RawEffectiveSettings,
+            FilamentProducts = evaluation.FilamentProducts,
+            PhysicalSpools = spoolChoices,
+            GeneratorCompatibility = generatorCompatibility,
+            SnapshotSha256 = snapshotSha256,
+        };
+
+        CalibrationContextDto context = new(evaluation.Candidate)
+        {
+            SnapshotSha256 = snapshotSha256,
+            CapturedAtUtc = capturedAtUtc,
+            CapturedBySubject = capturedBySubject,
+            SupportsPressureAdvance = printer.SupportsPressureAdvance,
+            SupportsFirmwareRetraction = printer.SupportsFirmwareRetraction,
+            Snapshot = snapshot,
+        };
+        return new(context);
+    }
+
+    private async Task<CalibrationEvaluation> EvaluateAsync(
+        Printer printer,
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken)
+    {
+        List<CalibrationRejectionReasonDto> reasons = [];
+        HashSet<string> missingInputs = new(StringComparer.Ordinal);
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
+        BackendCapabilities backendCapabilities =
+            capabilityFactory.GetSupportedCapabilities((PrinterBackend)printer.Backend);
+        bool supportsStatus =
+            backendCapabilities.HasFlag(BackendCapabilities.Status);
+        bool supportsFileUpload =
+            backendCapabilities.HasFlag(BackendCapabilities.FileUpload);
+        bool supportsStartPrint =
+            backendCapabilities.HasFlag(BackendCapabilities.StartPrint);
+        bool supportsUploadAndPrint =
+            backendCapabilities.HasFlag(BackendCapabilities.UploadAndPrint);
+        bool supportsDirectCommand =
+            backendCapabilities.HasFlag(BackendCapabilities.DirectCommand);
+        const bool supportsMultiExtruderStatus = false;
+
+        PrinterStatusSnapshot? status = statusReader.GetStatusSnapshot(printer.Id);
+        bool isStale = supportsStatus &&
+            (status?.ObservedAtUtc is not DateTime observedAtUtc ||
+                nowUtc - observedAtUtc >
+                TimeSpan.FromSeconds(_statusStaleAfterSeconds));
+        string reachability = !supportsStatus
+            ? "unsupported"
+            : status is null
+                ? "unknown"
+                : status.Status.IsOnline
+                    ? "online"
+                    : "offline";
+        string operationalState = NormalizeOperationalState(status?.Status);
+        string statusSource = !supportsStatus
+            ? "unsupported"
+            : status?.Source ?? "unknown";
+
+        if (!supportsStatus)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "status_unsupported",
+                "statusSupported",
+                "The configured adapter does not declare status support.");
+        }
+        else if (status?.ObservedAtUtc is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "status_unknown",
+                "observedAtUtc",
+                "No authoritative status observation is available.");
+        }
+        else if (isStale)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "status_stale",
+                "observedAtUtc",
+                "The latest status observation is stale.");
+        }
+        else if (!status.Status.IsOnline)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "printer_offline",
+                "reachability",
+                "The latest fresh observation reports the printer offline.");
+        }
+
+        if (!supportsUploadAndPrint && !(supportsFileUpload && supportsStartPrint))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "required_operations_unsupported",
+                "executionCapabilities",
+                "The configured adapter must support upload and start-print operations.");
+        }
+
+        if (printer.InMaintenance)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "printer_in_maintenance",
+                "inMaintenance",
+                "The printer is in maintenance mode.");
+        }
+
+        ValidateFirmware(printer, nowUtc, reasons, missingInputs);
+        ValidateSlicerIdentity(printer, reasons, missingInputs);
+
+        IReadOnlyList<CalibrationPointDto>? printablePolygon =
+            ParseJsonList<CalibrationPointDto>(
+                printer.PrintablePolygonJson,
+                "printablePolygon",
+                reasons,
+                missingInputs);
+        IReadOnlyList<CalibrationExcludedRegionDto>? excludedRegions =
+            ParseJsonList<CalibrationExcludedRegionDto>(
+                printer.ExcludedRegionsJson,
+                "excludedRegions",
+                reasons,
+                missingInputs);
+        if (printablePolygon is { Count: < 3 })
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "printable_polygon_invalid",
+                "printablePolygon",
+                "The printable polygon must contain at least three points.");
+        }
+
+        List<Toolhead> physicalToolheads = printer.Toolheads
+            .Where(toolhead => toolhead.ToolheadType == ToolheadType.Physical)
+            .OrderBy(toolhead => toolhead.Index)
+            .ThenBy(toolhead => toolhead.Id)
+            .ToList();
+        CalibrationToolheadDto[] toolheads = physicalToolheads
+            .Select(MapToolhead)
+            .ToArray();
+
+        ValidateHardware(
+            printer,
+            physicalToolheads,
+            printablePolygon,
+            excludedRegions,
+            supportsMultiExtruderStatus,
+            nowUtc,
+            reasons,
+            missingInputs);
+
+        CalibrationProfileEvaluation profileEvaluation =
+            await EvaluateProfilesAsync(
+                printer,
+                physicalToolheads,
+                reasons,
+                missingInputs,
+                profileAccessScope,
+                cancellationToken);
+
+        CalibrationCandidateDto candidate = new()
+        {
+            Id = printer.Id,
+            Name = printer.Name,
+            Enabled = printer.IsEnabled,
+            InMaintenance = printer.InMaintenance,
+            Backend = (PrinterBackend)printer.Backend,
+            Location = printer.Location is null
+                ? null
+                : new CalibrationLocationDto(printer.Location.Id, printer.Location.Name),
+            ConfigurationRevision = printer.ConfigurationRevision,
+            Reachability = reachability,
+            OperationalState = operationalState,
+            StatusSource = statusSource,
+            ObservedAtUtc = status?.ObservedAtUtc,
+            LastSeenAtUtc = status?.LastSeenAtUtc,
+            IsStale = isStale,
+            StaleAfterSeconds = _statusStaleAfterSeconds,
+            StatusSupported = supportsStatus,
+            SupportsStatus = supportsStatus,
+            SupportsFileUpload = supportsFileUpload,
+            SupportsStartPrint = supportsStartPrint,
+            SupportsUploadAndPrint = supportsUploadAndPrint,
+            SupportsDirectCommand = supportsDirectCommand,
+            SupportsMultiExtruderStatus = supportsMultiExtruderStatus,
+            BuildVolume = new(
+                printer.MaxBuildVolumeX,
+                printer.MaxBuildVolumeY,
+                printer.MaxBuildVolumeZ),
+            BedOrigin = new(printer.BedOriginX, printer.BedOriginY),
+            PrintablePolygon = printablePolygon,
+            ExcludedRegions = excludedRegions,
+            MotionType = printer.CalibrationMotionType?.ToString(),
+            MaxPrintSpeed = printer.MaxPrintSpeed,
+            MaxTravelSpeed = printer.MaxTravelSpeed,
+            MaxAcceleration = printer.MaxAcceleration,
+            MaxTravelAcceleration = printer.MaxTravelAcceleration,
+            PhysicalToolheadCount = physicalToolheads.Count,
+            ActiveToolheadIndex = printer.ActiveToolheadIndex,
+            Toolheads = toolheads,
+            HasHeatedBed = printer.CalibrationHasHeatedBed,
+            MaxBedTemperature = printer.MaxBedTemp,
+            HasEnclosure = printer.CalibrationHasEnclosure,
+            HasHeatedChamber = printer.HasHeatedChamber,
+            MaxChamberTemperature = printer.MaxChamberTemp,
+            Firmware = MapFirmware(printer),
+            Slicer = MapSlicer(printer),
+            Eligible = reasons.Count == 0,
+            MissingInputs = missingInputs.Order(StringComparer.Ordinal).ToArray(),
+            RejectionReasons = reasons
+                .OrderBy(reason => reason.Code, StringComparer.Ordinal)
+                .ThenBy(reason => reason.Field, StringComparer.Ordinal)
+                .ToArray(),
+        };
+
+        return new(
+            candidate,
+            profileEvaluation.Profiles,
+            profileEvaluation.BaselineSettings,
+            profileEvaluation.RawEffectiveSettings,
+            profileEvaluation.FilamentProducts);
+    }
+
+    private async Task<CalibrationProfileEvaluation> EvaluateProfilesAsync(
+        Printer printer,
+        List<Toolhead> physicalToolheads,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs,
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken)
+    {
+        if (!printer.CalibrationMachineProfileId.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "machine_profile_missing",
+                "slicer.machineProfileId",
+                "An explicit upstream OrcaSlicer machine profile is required.");
+        }
+
+        if (!printer.CalibrationProcessProfileId.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "process_profile_missing",
+                "slicer.processProfileId",
+                "An explicit upstream OrcaSlicer process profile is required.");
+        }
+
+        if (!printer.CalibrationFilamentProfileId.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "filament_profile_missing",
+                "slicer.filamentProfileId",
+                "An explicit upstream OrcaSlicer filament profile is required.");
+        }
+
+        if (!printer.CalibrationMachineProfileId.HasValue ||
+            !printer.CalibrationProcessProfileId.HasValue ||
+            !printer.CalibrationFilamentProfileId.HasValue)
+        {
+            return CalibrationProfileEvaluation.Empty;
+        }
+
+        ResolvedCalibrationProfiles resolved = await profileResolver!.ResolveAsync(
+            printer.CalibrationMachineProfileId.Value,
+            printer.CalibrationProcessProfileId.Value,
+            printer.CalibrationFilamentProfileId.Value,
+            profileAccessScope,
+            cancellationToken);
+
+        if (resolved.Machine is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "machine_profile_not_found",
+                "slicer.machineProfileId",
+                "The selected machine profile was not found.");
+        }
+
+        if (resolved.Process is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "process_profile_not_found",
+                "slicer.processProfileId",
+                "The selected process profile was not found.");
+        }
+
+        if (resolved.Filament is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "filament_profile_not_found",
+                "slicer.filamentProfileId",
+                "The selected filament profile was not found.");
+        }
+
+        ProfileState machine = ValidateProfile(
+            resolved.Machine,
+            "profiles.machine",
+            printer,
+            reasons,
+            missingInputs);
+        ProfileState process = ValidateProfile(
+            resolved.Process,
+            "profiles.process",
+            printer,
+            reasons,
+            missingInputs);
+        ProfileState filament = ValidateProfile(
+            resolved.Filament,
+            "profiles.filament",
+            printer,
+            reasons,
+            missingInputs);
+
+        if (resolved.Machine is not null)
+        {
+            ValidateMachineProfile(
+                machine.Json,
+                physicalToolheads,
+                reasons,
+                missingInputs);
+        }
+
+        if (resolved.Machine is not null && resolved.Process is not null)
+        {
+            ValidateCompatiblePrinter(
+                resolved.Process,
+                resolved.Machine.Name,
+                "profiles.process.compatiblePrinters",
+                reasons,
+                missingInputs);
+        }
+
+        if (resolved.Machine is not null && resolved.Filament is not null)
+        {
+            ValidateCompatiblePrinter(
+                resolved.Filament,
+                resolved.Machine.Name,
+                "profiles.filament.compatiblePrinters",
+                reasons,
+                missingInputs);
+        }
+
+        Toolhead? activeToolhead = physicalToolheads
+            .SingleOrDefault(toolhead => toolhead.Index == printer.ActiveToolheadIndex);
+        if (resolved.Filament is not null && activeToolhead is not null)
+        {
+            ValidateFilamentSafety(
+                resolved.Filament,
+                filament.Json,
+                activeToolhead,
+                printer,
+                reasons,
+                missingInputs);
+        }
+
+        double? maxVolumetricFlow = activeToolhead?.MaxVolumetricFlow ??
+            GetFirstNumber(filament.Json, "filament_max_volumetric_speed");
+        CalibrationBaselineSettingsDto baseline = new(
+            activeToolhead?.NozzleDiameter,
+            resolved.Process?.LayerHeight,
+            resolved.Process?.InfillPercentage,
+            resolved.Process?.PrintSpeed,
+            resolved.Filament?.NozzleTemperature,
+            resolved.Filament?.BedTemperature,
+            maxVolumetricFlow);
+
+        CalibrationProfileSetDto profiles = new(
+            MapProfile(resolved.Machine, machine),
+            MapProfile(resolved.Process, process),
+            MapProfile(resolved.Filament, filament));
+        CalibrationRawEffectiveSettingsDto rawSettings = new(
+            machine.Json,
+            process.Json,
+            filament.Json);
+        IReadOnlyList<CalibrationFilamentProductChoiceDto> products =
+            resolved.Filament is null
+                ? []
+                :
+                [
+                    new(
+                        resolved.Filament.Id,
+                        resolved.Filament.Name,
+                        resolved.Filament.Material ?? string.Empty,
+                        resolved.Filament.Manufacturer,
+                        resolved.Filament.Sku),
+                ];
+
+        return new(profiles, baseline, rawSettings, products);
+    }
+
+    private ProfileState ValidateProfile(
+        ResolvedCalibrationProfile? profile,
+        string field,
+        Printer printer,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (profile is null)
+        {
+            return ProfileState.Empty;
+        }
+
+        if (!string.Equals(
+            profile.SlicerType,
+            CalibrationContractConstants.SlicerEngine,
+            StringComparison.Ordinal))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_slicer_mismatch",
+                $"{field}.slicerType",
+                "The selected profile is not an OrcaSlicer profile.");
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.SlicerDistribution))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_distribution_missing",
+                $"{field}.slicerDistribution",
+                "The selected profile has no explicit slicer distribution.");
+        }
+        else if (!string.Equals(
+            profile.SlicerDistribution,
+            CalibrationContractConstants.SlicerDistribution,
+            StringComparison.Ordinal) ||
+            !string.Equals(
+                profile.SlicerDistribution,
+                printer.CalibrationSlicerDistribution,
+                StringComparison.Ordinal))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_distribution_unsupported",
+                $"{field}.slicerDistribution",
+                "The selected profile is not from the supported upstream distribution.");
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.SlicerVersion))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_version_missing",
+                $"{field}.slicerVersion",
+                "The selected profile has no pinned slicer version.");
+        }
+        else if (!CalibrationContractConstants.IsSupportedSlicerVersion(
+            profile.SlicerVersion))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_version_mismatch",
+                $"{field}.slicerVersion",
+                "The profile version does not match the pinned supported OrcaSlicer version.");
+        }
+
+        if (string.IsNullOrWhiteSpace(profile.ProfileFormat))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_format_missing",
+                $"{field}.profileFormat",
+                "The selected profile has no explicit profile format.");
+        }
+        else if (!string.Equals(
+            profile.ProfileFormat,
+            CalibrationContractConstants.ProfileFormat,
+            StringComparison.Ordinal) ||
+            !string.Equals(
+                profile.ProfileFormat,
+                printer.CalibrationProfileFormat,
+                StringComparison.Ordinal))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_format_unsupported",
+                $"{field}.profileFormat",
+                "The selected profile format is not supported.");
+        }
+
+        if (!profile.UpdatedAtUtc.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_revision_missing",
+                $"{field}.updatedAtUtc",
+                "The selected profile has no authoritative revision timestamp.");
+        }
+
+        CalibrationProfileSafetyResult safety =
+            CalibrationProfileSafetyValidator.Validate(profile.RawJson, $"{field}.exactJson");
+        if (!safety.IsSafe)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                safety.Code!,
+                safety.Field!,
+                safety.Message!);
+            return ProfileState.Empty;
+        }
+
+        string exactSha256 = ComputeSha256(profile.RawJson!);
+        if (!string.IsNullOrWhiteSpace(profile.StoredSha256) &&
+            !string.Equals(
+                exactSha256,
+                profile.StoredSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_hash_mismatch",
+                $"{field}.sha256",
+                "The persisted profile hash does not match the exact UTF-8 JSON.");
+        }
+
+        if (profile.PrinterModelId.HasValue &&
+            profile.PrinterModelId.Value != printer.ModelId)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_printer_model_mismatch",
+                $"{field}.printerModelId",
+                "The selected profile targets a different explicit printer model identifier.");
+        }
+
+        if (profile.SpecificPrinterId.HasValue &&
+            profile.SpecificPrinterId.Value != printer.Id)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_printer_mismatch",
+                $"{field}.specificPrinterId",
+                "The selected profile targets a different printer.");
+        }
+
+        return new(safety.Json, exactSha256);
+    }
+
+    private static void ValidateMachineProfile(
+        JsonElement? json,
+        List<Toolhead> physicalToolheads,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (!json.HasValue)
+        {
+            return;
+        }
+
+        string[] flavors = GetStrings(json, "gcode_flavor");
+        if (flavors.Length == 0)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_gcode_dialect_missing",
+                "profiles.machine.exactJson.gcode_flavor",
+                "The machine profile does not declare a G-code dialect.");
+        }
+        else if (!flavors.Any(flavor =>
+            string.Equals(flavor, "klipper", StringComparison.OrdinalIgnoreCase)))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_gcode_dialect_mismatch",
+                "profiles.machine.exactJson.gcode_flavor",
+                "The machine profile is not configured for Klipper G-code.");
+        }
+
+        List<double> profileNozzles = GetNumbers(json, "nozzle_diameter");
+        if (profileNozzles.Count == 0)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_nozzle_data_missing",
+                "profiles.machine.exactJson.nozzle_diameter",
+                "The machine profile does not declare nozzle diameters.");
+            return;
+        }
+
+        double[] installedNozzles = physicalToolheads
+            .Where(toolhead => toolhead.NozzleDiameter.HasValue)
+            .Select(toolhead => toolhead.NozzleDiameter!.Value)
+            .Order()
+            .ToArray();
+        double[] selectedNozzles = profileNozzles.Order().ToArray();
+        if (installedNozzles.Length != physicalToolheads.Count ||
+            selectedNozzles.Length != installedNozzles.Length ||
+            selectedNozzles.Where((diameter, index) =>
+                Math.Abs(diameter - installedNozzles[index]) > NumericTolerance).Any())
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_nozzle_mismatch",
+                "profiles.machine.exactJson.nozzle_diameter",
+                "The machine profile nozzle layout does not match every physical toolhead.");
+        }
+    }
+
+    private static void ValidateCompatiblePrinter(
+        ResolvedCalibrationProfile profile,
+        string machineProfileName,
+        string field,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (string.IsNullOrWhiteSpace(profile.CompatiblePrinters))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "profile_compatibility_missing",
+                field,
+                "The selected profile has no explicit compatible machine profiles.");
+            return;
+        }
+
+        bool compatible = profile.CompatiblePrinters
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(name => string.Equals(
+                name,
+                machineProfileName,
+                StringComparison.Ordinal));
+        if (!compatible)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_machine_mismatch",
+                field,
+                "The selected profile does not explicitly reference the selected machine profile.");
+        }
+    }
+
+    private static void ValidateFilamentSafety(
+        ResolvedCalibrationProfile filament,
+        JsonElement? json,
+        Toolhead activeToolhead,
+        Printer printer,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (string.IsNullOrWhiteSpace(filament.Material))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "filament_material_missing",
+                "profiles.filament.material",
+                "The selected filament profile has no explicit material.");
+        }
+        else if (activeToolhead.SupportedMaterials is not null &&
+            !activeToolhead.SupportedMaterials.Any(material =>
+                string.Equals(
+                    material,
+                    filament.Material,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "filament_material_unsupported",
+                "profiles.filament.material",
+                "The active toolhead does not declare support for the selected filament material.");
+        }
+
+        if (filament.NozzleTemperature.HasValue &&
+            activeToolhead.HotendMaxTemperature.HasValue &&
+            filament.NozzleTemperature.Value > activeToolhead.HotendMaxTemperature.Value)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "filament_hotend_temperature_exceeds_limit",
+                "profiles.filament.nozzleTemperature",
+                "The filament profile temperature exceeds the installed hotend limit.");
+        }
+
+        if (filament.BedTemperature > 0 &&
+            printer.CalibrationHasHeatedBed == false)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "filament_bed_temperature_requires_heated_bed",
+                "profiles.filament.bedTemperature",
+                "The filament profile requires a heated bed that the printer does not have.");
+        }
+        else if (filament.BedTemperature.HasValue &&
+            printer.CalibrationHasHeatedBed == true &&
+            printer.MaxBedTemp.HasValue &&
+            filament.BedTemperature.Value > printer.MaxBedTemp.Value)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "filament_bed_temperature_exceeds_limit",
+                "profiles.filament.bedTemperature",
+                "The filament profile temperature exceeds the verified bed limit.");
+        }
+
+        double? requiredHrc = GetFirstNumber(json, "required_nozzle_HRC");
+        if (requiredHrc > 0 && activeToolhead.NozzleIsHardened != true)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "profile_nozzle_material_mismatch",
+                "profiles.filament.exactJson.required_nozzle_HRC",
+                "The filament profile requires a hardened nozzle.");
+        }
+    }
+
+    private void ValidateFirmware(
+        Printer printer,
+        DateTime nowUtc,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (printer.FirmwareFamily == PrinterFirmwareFamily.Unknown)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "firmware_family_unknown",
+                "firmware.family",
+                "Firmware family has not been explicitly identified.");
+        }
+        else if (printer.FirmwareFamily != PrinterFirmwareFamily.Klipper)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "firmware_family_not_klipper",
+                "firmware.family",
+                "Printer Calibration currently requires Klipper firmware.");
+        }
+
+        if (printer.GcodeDialect == PrinterGcodeDialect.Unknown)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "gcode_dialect_unknown",
+                "firmware.gcodeDialect",
+                "G-code dialect has not been explicitly identified.");
+        }
+        else if (printer.GcodeDialect != PrinterGcodeDialect.Klipper)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "gcode_dialect_not_klipper",
+                "firmware.gcodeDialect",
+                "Printer Calibration currently requires the Klipper G-code dialect.");
+        }
+
+        if (printer.FirmwareDetectionSource == FirmwareDetectionSource.Unknown)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "firmware_detection_source_unknown",
+                "firmware.detectionSource",
+                "Firmware detection source is unknown.");
+        }
+
+        RequireString(
+            printer.FirmwareVersion,
+            "firmware_version_missing",
+            "firmware.version",
+            "Firmware version is required.",
+            reasons,
+            missingInputs);
+        RequireString(
+            printer.FirmwareDetectionVersion,
+            "firmware_detection_version_missing",
+            "firmware.detectionVersion",
+            "Firmware detector or configuration version is required.",
+            reasons,
+            missingInputs);
+
+        if (!printer.FirmwareDetectionConfidence.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "firmware_detection_confidence_missing",
+                "firmware.detectionConfidence",
+                "Firmware detection confidence is required.");
+        }
+        else if (printer.FirmwareDetectionConfidence is < 0 or > 1)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "firmware_detection_confidence_invalid",
+                "firmware.detectionConfidence",
+                "Firmware detection confidence must be between zero and one.");
+        }
+
+        if (!printer.FirmwareIdentityVerified)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "firmware_identity_unverified",
+                "firmware.verified",
+                "Firmware identity has not been verified.");
+        }
+
+        if (!printer.FirmwareDetectedAtUtc.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "firmware_detection_time_missing",
+                "firmware.detectedAtUtc",
+                "Firmware detection time is required.");
+        }
+        else if (nowUtc - NormalizeUtc(printer.FirmwareDetectedAtUtc.Value) >
+            TimeSpan.FromSeconds(_firmwareStaleAfterSeconds))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "firmware_metadata_stale",
+                "firmware.detectedAtUtc",
+                "Firmware identity metadata is stale.");
+        }
+    }
+
+    private static void ValidateSlicerIdentity(
+        Printer printer,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        ValidateIdentityValue(
+            printer.CalibrationSlicerEngine,
+            CalibrationContractConstants.SlicerEngine,
+            "slicer_engine_missing",
+            "slicer_engine_unsupported",
+            "slicer.engine",
+            reasons,
+            missingInputs);
+        ValidateIdentityValue(
+            printer.CalibrationSlicerDistribution,
+            CalibrationContractConstants.SlicerDistribution,
+            "slicer_distribution_missing",
+            "slicer_distribution_unsupported",
+            "slicer.distribution",
+            reasons,
+            missingInputs);
+        ValidateIdentityValue(
+            printer.CalibrationSlicerVersion,
+            CalibrationContractConstants.SlicerVersion,
+            "slicer_version_missing",
+            "slicer_version_unsupported",
+            "slicer.version",
+            reasons,
+            missingInputs);
+        ValidateIdentityValue(
+            printer.CalibrationProfileFormat,
+            CalibrationContractConstants.ProfileFormat,
+            "profile_format_missing",
+            "profile_format_unsupported",
+            "slicer.profileFormat",
+            reasons,
+            missingInputs);
+    }
+
+    private void ValidateHardware(
+        Printer printer,
+        List<Toolhead> physicalToolheads,
+        IReadOnlyList<CalibrationPointDto>? printablePolygon,
+        IReadOnlyList<CalibrationExcludedRegionDto>? excludedRegions,
+        bool supportsMultiExtruderStatus,
+        DateTime nowUtc,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        RequirePositive(
+            printer.MaxBuildVolumeX,
+            "build_volume_x_missing",
+            "buildVolume.x",
+            reasons,
+            missingInputs);
+        RequirePositive(
+            printer.MaxBuildVolumeY,
+            "build_volume_y_missing",
+            "buildVolume.y",
+            reasons,
+            missingInputs);
+        RequirePositive(
+            printer.MaxBuildVolumeZ,
+            "build_volume_z_missing",
+            "buildVolume.z",
+            reasons,
+            missingInputs);
+        RequireValue(
+            printer.BedOriginX,
+            "bed_origin_x_missing",
+            "bedOrigin.x",
+            reasons,
+            missingInputs);
+        RequireValue(
+            printer.BedOriginY,
+            "bed_origin_y_missing",
+            "bedOrigin.y",
+            reasons,
+            missingInputs);
+        if (printablePolygon is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "printable_polygon_missing",
+                "printablePolygon",
+                "Printable polygon is required.");
+        }
+
+        if (excludedRegions is null)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "excluded_regions_missing",
+                "excludedRegions",
+                "Excluded regions must be explicitly supplied, including an empty list.");
+        }
+
+        if (!printer.CalibrationMotionType.HasValue ||
+            printer.CalibrationMotionType ==
+                Farm.Infrastructure.Domain.CalibrationMotionType.Unknown)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "motion_type_missing",
+                "motionType",
+                "Motion type is required.");
+        }
+
+        RequirePositive(
+            printer.MaxPrintSpeed,
+            "max_print_speed_missing",
+            "maxPrintSpeed",
+            reasons,
+            missingInputs);
+        RequirePositive(
+            printer.MaxTravelSpeed,
+            "max_travel_speed_missing",
+            "maxTravelSpeed",
+            reasons,
+            missingInputs);
+        RequirePositive(
+            printer.MaxAcceleration,
+            "max_acceleration_missing",
+            "maxAcceleration",
+            reasons,
+            missingInputs);
+        RequirePositive(
+            printer.MaxTravelAcceleration,
+            "max_travel_acceleration_missing",
+            "maxTravelAcceleration",
+            reasons,
+            missingInputs);
+
+        RequireValue(
+            printer.CalibrationHasHeatedBed,
+            "heated_bed_state_missing",
+            "hasHeatedBed",
+            reasons,
+            missingInputs);
+        if (printer.CalibrationHasHeatedBed == true)
+        {
+            RequirePositive(
+                printer.MaxBedTemp,
+                "max_bed_temperature_missing",
+                "maxBedTemperature",
+                reasons,
+                missingInputs);
+        }
+
+        RequireValue(
+            printer.CalibrationHasEnclosure,
+            "enclosure_state_missing",
+            "hasEnclosure",
+            reasons,
+            missingInputs);
+        RequireValue(
+            printer.HasHeatedChamber,
+            "heated_chamber_state_missing",
+            "hasHeatedChamber",
+            reasons,
+            missingInputs);
+        if (printer.HasHeatedChamber == true)
+        {
+            RequirePositive(
+                printer.MaxChamberTemp,
+                "max_chamber_temperature_missing",
+                "maxChamberTemperature",
+                reasons,
+                missingInputs);
+        }
+
+        RequireValue(
+            printer.SupportsPressureAdvance,
+            "pressure_advance_capability_missing",
+            "supportsPressureAdvance",
+            reasons,
+            missingInputs);
+        RequireValue(
+            printer.SupportsFirmwareRetraction,
+            "firmware_retraction_capability_missing",
+            "supportsFirmwareRetraction",
+            reasons,
+            missingInputs);
+
+        if (!printer.CalibrationHardwareVerifiedAtUtc.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "hardware_verification_time_missing",
+                "calibrationHardwareVerifiedAtUtc",
+                "Hardware and safety metadata verification time is required.");
+        }
+        else if (nowUtc - NormalizeUtc(printer.CalibrationHardwareVerifiedAtUtc.Value) >
+            TimeSpan.FromSeconds(_hardwareStaleAfterSeconds))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "hardware_metadata_stale",
+                "calibrationHardwareVerifiedAtUtc",
+                "Hardware and safety metadata is stale.");
+        }
+
+        if (physicalToolheads.Count == 0)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "physical_toolhead_missing",
+                "toolheads",
+                "At least one physical toolhead is required.");
+        }
+
+        if (!printer.ActiveToolheadIndex.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "active_toolhead_missing",
+                "activeToolheadIndex",
+                "Active physical toolhead index is required.");
+        }
+        else if (!physicalToolheads.Any(toolhead =>
+            toolhead.Index == printer.ActiveToolheadIndex.Value))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "active_toolhead_invalid",
+                "activeToolheadIndex",
+                "Active toolhead index does not identify a physical toolhead.");
+        }
+
+        if (physicalToolheads.Count > 1 && !supportsMultiExtruderStatus)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "multi_extruder_status_unsupported",
+                "supportsMultiExtruderStatus",
+                "Multi-tool calibration requires explicit multi-extruder status support.");
+        }
+
+        foreach (Toolhead toolhead in physicalToolheads)
+        {
+            string field = $"toolheads[{toolhead.Index}]";
+            RequireValue(
+                toolhead.OffsetX,
+                "toolhead_offset_x_missing",
+                $"{field}.offset.x",
+                reasons,
+                missingInputs);
+            RequireValue(
+                toolhead.OffsetY,
+                "toolhead_offset_y_missing",
+                $"{field}.offset.y",
+                reasons,
+                missingInputs);
+            RequireValue(
+                toolhead.OffsetZ,
+                "toolhead_offset_z_missing",
+                $"{field}.offset.z",
+                reasons,
+                missingInputs);
+            RequirePositive(
+                toolhead.NozzleDiameter,
+                "nozzle_diameter_missing",
+                $"{field}.nozzleDiameter",
+                reasons,
+                missingInputs);
+            RequireValue(
+                toolhead.NozzleType,
+                "nozzle_type_missing",
+                $"{field}.nozzleType",
+                reasons,
+                missingInputs);
+            RequireString(
+                toolhead.NozzleMaterial,
+                "nozzle_material_missing",
+                $"{field}.nozzleMaterial",
+                "Nozzle material is required.",
+                reasons,
+                missingInputs);
+            RequirePositive(
+                toolhead.NozzleMaxTemperature,
+                "nozzle_max_temperature_missing",
+                $"{field}.nozzleMaxTemperature",
+                reasons,
+                missingInputs);
+            RequireValue(
+                toolhead.NozzleIsHardened,
+                "nozzle_hardness_missing",
+                $"{field}.nozzleIsHardened",
+                reasons,
+                missingInputs);
+            RequirePositive(
+                toolhead.HotendMaxTemperature,
+                "hotend_max_temperature_missing",
+                $"{field}.hotendMaxTemperature",
+                reasons,
+                missingInputs);
+            RequirePositive(
+                toolhead.MaxVolumetricFlow,
+                "max_volumetric_flow_missing",
+                $"{field}.maxVolumetricFlow",
+                reasons,
+                missingInputs);
+            RequireString(
+                toolhead.DriveType,
+                "drive_type_missing",
+                $"{field}.driveType",
+                "Extruder drive type is required.",
+                reasons,
+                missingInputs);
+            RequireValue(
+                toolhead.IsDirectDrive,
+                "direct_drive_state_missing",
+                $"{field}.isDirectDrive",
+                reasons,
+                missingInputs);
+            RequireString(
+                toolhead.ExtruderGearRatio,
+                "extruder_gear_ratio_missing",
+                $"{field}.extruderGearRatio",
+                "Extruder gear ratio is required.",
+                reasons,
+                missingInputs);
+            if (toolhead.SupportedMaterials is null ||
+                toolhead.SupportedMaterials.Length == 0)
+            {
+                RejectMissing(
+                    reasons,
+                    missingInputs,
+                    "supported_materials_missing",
+                    $"{field}.supportedMaterials",
+                    "Supported materials are required.");
+            }
+        }
+    }
+
+    private static CalibrationToolheadDto MapToolhead(Toolhead toolhead) =>
+        new(
+            toolhead.Id,
+            toolhead.Index,
+            toolhead.Name,
+            toolhead.IsPrimary,
+            new(toolhead.OffsetX, toolhead.OffsetY, toolhead.OffsetZ),
+            toolhead.NozzleDiameter,
+            toolhead.NozzleType?.ToString(),
+            toolhead.NozzleMaterial,
+            toolhead.NozzleMaxTemperature,
+            toolhead.NozzleIsHardened,
+            toolhead.HotendMaxTemperature,
+            toolhead.MaxVolumetricFlow,
+            toolhead.DriveType,
+            toolhead.IsDirectDrive,
+            toolhead.ExtruderGearRatio,
+            toolhead.SupportedMaterials);
+
+    private static CalibrationFirmwareIdentityDto MapFirmware(Printer printer)
+    {
+        string detectionSource = printer.FirmwareDetectionSource switch
+        {
+            FirmwareDetectionSource.Printer => "printer",
+            FirmwareDetectionSource.Configured => "configured",
+            _ => "unknown",
+        };
+        return new(
+            printer.FirmwareFamily.ToString(),
+            printer.GcodeDialect.ToString(),
+            detectionSource,
+            printer.FirmwareVersion,
+            printer.FirmwareDetectionVersion,
+            printer.FirmwareDetectionConfidence,
+            printer.FirmwareDetectedAtUtc,
+            printer.FirmwareIdentityVerified);
+    }
+
+    private static CalibrationSlicerIdentityDto MapSlicer(Printer printer) =>
+        new(
+            printer.CalibrationSlicerEngine,
+            printer.CalibrationSlicerDistribution,
+            printer.CalibrationSlicerVersion,
+            printer.CalibrationProfileFormat);
+
+    private static CalibrationProfileDto? MapProfile(
+        ResolvedCalibrationProfile? profile,
+        ProfileState state)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        string revision = profile.UpdatedAtUtc?.Ticks.ToString(
+            CultureInfo.InvariantCulture) ?? "unknown";
+        return new(
+            profile.Id,
+            profile.Kind,
+            profile.Name,
+            profile.SlicerType,
+            profile.SlicerDistribution,
+            profile.SlicerVersion,
+            profile.ProfileFormat,
+            revision,
+            profile.UpdatedAtUtc,
+            state.Json.HasValue ? profile.RawJson : null,
+            state.ExactSha256);
+    }
+
+    private static CalibrationProfileHashInput? CreateProfileHashInput(
+        CalibrationProfileDto? profile,
+        JsonElement? effectiveSettings) =>
+        profile is null
+            ? null
+            : new(
+                profile.Id,
+                profile.Kind,
+                profile.Name,
+                profile.SlicerType,
+                profile.SlicerDistribution,
+                profile.SlicerVersion,
+                profile.ProfileFormat,
+                profile.ProfileRevision,
+                profile.UpdatedAtUtc,
+                effectiveSettings);
+
+    private static List<string> GetSupportedCalibrationMethods(Printer printer)
+    {
+        List<string> methods =
+        [
+            "temperature",
+            "flow_rate",
+            "max_volumetric_speed",
+            "vfa",
+        ];
+        if (printer.SupportsPressureAdvance == true)
+        {
+            methods.Add("pressure_advance");
+        }
+
+        if (printer.SupportsFirmwareRetraction == true)
+        {
+            methods.Add("retraction");
+        }
+
+        return methods;
+    }
+
+    private static string NormalizeOperationalState(PrinterStatusDto? status)
+    {
+        if (status is null)
+        {
+            return "unknown";
+        }
+
+        if (!status.IsOnline)
+        {
+            return "offline";
+        }
+
+        string state = status.State?.Trim().ToLowerInvariant() ?? string.Empty;
+        return state switch
+        {
+            "idle" or "ready" or "standby" or "operational" => "idle",
+            "printing" or "running" => "printing",
+            "paused" => "paused",
+            "error" or "shutdown" or "fault" => "error",
+            "" or "unknown" => "unknown",
+            _ => "busy",
+        };
+    }
+
+    private static T[]? ParseJsonList<T>(
+        string? rawJson,
+        string field,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (rawJson is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<T[]>(rawJson);
+        }
+        catch (JsonException)
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "geometry_json_invalid",
+                field,
+                "Stored geometry JSON is invalid.");
+            return null;
+        }
+    }
+
+    private static string[] GetStrings(
+        JsonElement? root,
+        string propertyName)
+    {
+        if (!TryGetProperty(root, propertyName, out JsonElement value))
+        {
+            return [];
+        }
+
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            return value.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!)
+                .ToArray();
+        }
+
+        return value.ValueKind == JsonValueKind.String
+            ? [value.GetString()!]
+            : [];
+    }
+
+    private static List<double> GetNumbers(
+        JsonElement? root,
+        string propertyName)
+    {
+        if (!TryGetProperty(root, propertyName, out JsonElement value))
+        {
+            return [];
+        }
+
+        IEnumerable<JsonElement> values = value.ValueKind == JsonValueKind.Array
+            ? value.EnumerateArray()
+            : [value];
+        List<double> numbers = [];
+        foreach (JsonElement item in values)
+        {
+            if (TryReadNumber(item, out double number))
+            {
+                numbers.Add(number);
+            }
+        }
+
+        return numbers;
+    }
+
+    private static bool TryReadNumber(JsonElement item, out double number)
+    {
+        if (item.ValueKind == JsonValueKind.Number)
+        {
+            return item.TryGetDouble(out number);
+        }
+
+        if (item.ValueKind == JsonValueKind.String)
+        {
+            return double.TryParse(
+                item.GetString(),
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out number);
+        }
+
+        number = 0;
+        return false;
+    }
+
+    private static double? GetFirstNumber(
+        JsonElement? root,
+        string propertyName)
+    {
+        List<double> numbers = GetNumbers(root, propertyName);
+        return numbers.Count > 0 && numbers[0] > 0 ? numbers[0] : null;
+    }
+
+    private static bool TryGetProperty(
+        JsonElement? root,
+        string propertyName,
+        out JsonElement value)
+    {
+        if (root is { ValueKind: JsonValueKind.Object })
+        {
+            foreach (JsonProperty property in root.Value.EnumerateObject())
+            {
+                if (string.Equals(
+                    property.Name,
+                    propertyName,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string ComputeSha256(string value)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static void ValidateIdentityValue(
+        string? actual,
+        string expected,
+        string missingCode,
+        string mismatchCode,
+        string field,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                missingCode,
+                field,
+                $"{field} is required.");
+        }
+        else if (!string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                mismatchCode,
+                field,
+                $"{field} must be '{expected}'.");
+        }
+    }
+
+    private static void RequireString(
+        string? value,
+        string code,
+        string field,
+        string message,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            RejectMissing(reasons, missingInputs, code, field, message);
+        }
+    }
+
+    private static void RequirePositive<T>(
+        T? value,
+        string code,
+        string field,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+        where T : struct, IComparable<T>
+    {
+        if (!value.HasValue || value.Value.CompareTo(default) <= 0)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                code,
+                field,
+                $"{field} must be explicitly supplied and greater than zero.");
+        }
+    }
+
+    private static void RequireValue<T>(
+        T? value,
+        string code,
+        string field,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+        where T : struct
+    {
+        if (!value.HasValue)
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                code,
+                field,
+                $"{field} must be explicitly supplied.");
+        }
+    }
+
+    private static void RejectMissing(
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs,
+        string code,
+        string field,
+        string message)
+    {
+        _ = missingInputs.Add(field);
+        Reject(reasons, missingInputs, code, field, message);
+    }
+
+    private static void Reject(
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs,
+        string code,
+        string field,
+        string message)
+    {
+        ArgumentNullException.ThrowIfNull(missingInputs);
+        if (!reasons.Any(reason =>
+            string.Equals(reason.Code, code, StringComparison.Ordinal) &&
+            string.Equals(reason.Field, field, StringComparison.Ordinal)))
+        {
+            reasons.Add(new(code, field, message));
+        }
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private sealed record CalibrationEvaluation(
+        CalibrationCandidateDto Candidate,
+        CalibrationProfileSetDto Profiles,
+        CalibrationBaselineSettingsDto BaselineSettings,
+        CalibrationRawEffectiveSettingsDto RawEffectiveSettings,
+        IReadOnlyList<CalibrationFilamentProductChoiceDto> FilamentProducts);
+
+    private sealed record CalibrationProfileEvaluation(
+        CalibrationProfileSetDto Profiles,
+        CalibrationBaselineSettingsDto BaselineSettings,
+        CalibrationRawEffectiveSettingsDto RawEffectiveSettings,
+        IReadOnlyList<CalibrationFilamentProductChoiceDto> FilamentProducts)
+    {
+        public static CalibrationProfileEvaluation Empty { get; } = new(
+            new(null, null, null),
+            new(null, null, null, null, null, null, null),
+            new(null, null, null),
+            []);
+    }
+
+    private sealed record ProfileState(JsonElement? Json, string? ExactSha256)
+    {
+        public static ProfileState Empty { get; } = new(null, null);
+    }
+
+    private sealed record CalibrationProfileHashInput(
+        Guid Id,
+        string Kind,
+        string Name,
+        string SlicerType,
+        string? SlicerDistribution,
+        string? SlicerVersion,
+        string? ProfileFormat,
+        string ProfileRevision,
+        DateTime? UpdatedAtUtc,
+        JsonElement? EffectiveSettings);
+}

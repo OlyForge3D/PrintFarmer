@@ -365,12 +365,12 @@ public class MaintenanceAlertEngine(
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
 
-        // Legacy MaintenanceHub notification remains gated on the operator toggle.
+        // SignalR notification remains gated on the operator toggle.
         if (settings.EnableSignalRNotifications)
         {
             try
             {
-                await _hubContext.Clients.All.SendAsync(
+                await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
                     MaintenanceHubEvents.AlertCreated,
                     new
                     {
@@ -509,12 +509,12 @@ public class MaintenanceAlertEngine(
     {
         MaintenanceAlertSettings settings = _settingsMonitor.CurrentValue;
 
-        // Legacy MaintenanceHub notification remains gated on the operator toggle.
+        // SignalR notification remains gated on the operator toggle.
         if (settings.EnableSignalRNotifications)
         {
             try
             {
-                await _hubContext.Clients.All.SendAsync(
+                await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm).SendAsync(
                     MaintenanceHubEvents.AlertStatusChanged,
                     new
                     {

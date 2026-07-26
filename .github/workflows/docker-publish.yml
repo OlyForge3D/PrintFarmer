@@ -14,8 +14,19 @@ on:
   push:
     branches:
       - release
+    # Tag globs use GitHub Actions filter-pattern syntax (not regex): `+` means
+    # one-or-more of the preceding character, `.` is literal, `*` is zero-or-more
+    # of any non-`/` character. The three patterns below must match — and only
+    # match — the release-tag set accepted by consolidated-release.yml's
+    # validator (^v[0-9]+\.[0-9]+\.[0-9]+(-beta\.[0-9]+|-rc\.[0-9]+)?$).
+    # consolidated-release.yml polls this workflow for the exact tag; missing
+    # prerelease coverage causes its "Wait for exact-tag Docker workflow" step
+    # to time out for `-beta.N` / `-rc.N` releases. See regression guard at
+    # scripts/ci/tests/test-release-tag-triggers.mjs.
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+'
   workflow_dispatch:
     inputs:
       tag_suffix:
@@ -32,6 +43,7 @@ env:
 
 permissions:
   contents: read
+  id-token: write
   packages: write
 
 jobs:
@@ -45,9 +57,43 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Resolve source metadata
+        id: source
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+          fi
+          [[ "$VERSION" == v* ]] || VERSION="v$VERSION"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify repository version metadata
+        env:
+          RELEASE_VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          bash scripts/sync-monorepo-version.sh --check
+          REQUESTED_BASE="${RELEASE_VERSION#v}"
+          REQUESTED_BASE="${REQUESTED_BASE%%-*}"
+          REPOSITORY_VERSION="$(tr -d '[:space:]' < VERSION)"
+          REPOSITORY_VERSION="${REPOSITORY_VERSION#v}"
+          if [[ "$REQUESTED_BASE" != "$REPOSITORY_VERSION" ]]; then
+            echo "Release version $RELEASE_VERSION does not match repository version $REPOSITORY_VERSION"
+            exit 1
+          fi
 
       - name: Cache NuGet packages
         uses: actions/cache@v6
@@ -62,6 +108,16 @@ jobs:
 
       - name: Build all projects
         run: dotnet build src/farm-web.sln -c Release --no-restore
+
+      - name: Validate dependency licenses
+        run: node scripts/compliance/validate-compliance.mjs
+
+      - name: Create reviewed license inventory
+        run: |
+          node scripts/compliance/create-license-inventory.mjs \
+            --output publish/compliance/license-inventory.json \
+            --version "${{ steps.source.outputs.version }}" \
+            --revision "$GITHUB_SHA"
 
       - name: Publish API
         run: dotnet publish src/api/Farm.Web.Api.csproj -c Release -o ./publish/api --no-build
@@ -93,6 +149,14 @@ jobs:
           path: ./publish/printer-discovery
           retention-days: 1
 
+      - name: Upload reviewed license inventory
+        uses: actions/upload-artifact@v7
+        with:
+          name: license-inventory
+          path: ./publish/compliance/license-inventory.json
+          if-no-files-found: error
+          retention-days: 1
+
   # ====================
   # JOB 2: Build React frontend natively
   # ====================
@@ -103,7 +167,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -116,6 +180,9 @@ jobs:
       - name: Build React app
         working-directory: src/Web/ReactApp
         run: npm run build
+
+      - name: Bundle production npm license texts
+        run: node scripts/compliance/create-npm-notices.mjs
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v7
@@ -132,6 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
       packages: write
     outputs:
       base_image: ${{ steps.output.outputs.base_image }}
@@ -209,6 +277,7 @@ jobs:
     needs: [build-dotnet, build-frontend, ensure-orca-base]
     permissions:
       contents: read
+      id-token: write
       packages: write
     strategy:
       fail-fast: false
@@ -233,11 +302,42 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Resolve source metadata
+        id: source
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+          fi
+          [[ "$VERSION" == v* ]] || VERSION="v$VERSION"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            exit 1
+          fi
+          SOURCE_ARCHIVE_URL=""
+          SBOM_URL=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            RELEASE_BASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}"
+            SOURCE_ARCHIVE_URL="${RELEASE_BASE_URL}/PrintFarmer-${VERSION}-source.tar.gz"
+            SBOM_URL="${RELEASE_BASE_URL}/printfarmer-${{ matrix.image }}-${VERSION}.spdx.json"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "container_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "source_archive_url=$SOURCE_ARCHIVE_URL" >> "$GITHUB_OUTPUT"
+          echo "sbom_url=$SBOM_URL" >> "$GITHUB_OUTPUT"
+
       - name: Download artifact
         uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: ./artifact
+
+      - name: Download reviewed license inventory
+        uses: actions/download-artifact@v8
+        with:
+          name: license-inventory
+          path: ./compliance-artifacts
 
       - name: Set up QEMU
         if: contains(matrix.platforms, 'arm64')
@@ -261,9 +361,27 @@ jobs:
             api)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
           FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+          ARG BUILD_VERSION
+          ARG VCS_REF
+          ARG SOURCE_REPOSITORY
+          ARG SOURCE_ARCHIVE_URL
+          ARG SBOM_URL
           WORKDIR /app
+          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
+                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+                org.opencontainers.image.revision="${VCS_REF}" \
+                org.opencontainers.image.version="${BUILD_VERSION}" \
+                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+                org.printfarmer.sbom="${SBOM_URL}"
           COPY artifact/ ./
+          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           ENV ASPNETCORE_URLS=http://+:5245
+          ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
+          ENV PFARM__SourceInfo__Revision=${VCS_REF}
+          ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
+          ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
+          ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
           EXPOSE 5245
           ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
           EOF
@@ -272,8 +390,22 @@ jobs:
             frontend)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
           FROM nginx:alpine
+          ARG BUILD_VERSION
+          ARG VCS_REF
+          ARG SOURCE_REPOSITORY
+          ARG SOURCE_ARCHIVE_URL
+          ARG SBOM_URL
+          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
+                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+                org.opencontainers.image.revision="${VCS_REF}" \
+                org.opencontainers.image.version="${BUILD_VERSION}" \
+                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+                org.printfarmer.sbom="${SBOM_URL}"
           COPY artifact/ /usr/share/nginx/html
           COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
+          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
+          COPY artifact/THIRD-PARTY-LICENSES.npm.txt /usr/share/licenses/printfarmer/THIRD-PARTY-LICENSES.npm.txt
           EXPOSE 80
           CMD ["nginx", "-g", "daemon off;"]
           EOF
@@ -282,8 +414,21 @@ jobs:
             printer-discovery)
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
           FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
+          ARG BUILD_VERSION
+          ARG VCS_REF
+          ARG SOURCE_REPOSITORY
+          ARG SOURCE_ARCHIVE_URL
+          ARG SBOM_URL
           WORKDIR /app
+          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
+                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+                org.opencontainers.image.revision="${VCS_REF}" \
+                org.opencontainers.image.version="${BUILD_VERSION}" \
+                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+                org.printfarmer.sbom="${SBOM_URL}"
           COPY artifact/ ./
+          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           EXPOSE 8080
           ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
           EOF
@@ -293,6 +438,17 @@ jobs:
               cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'DOCKERFILE'
           # Use OrcaSlicer base image with pre-extracted binaries
           FROM ${{ needs.ensure-orca-base.outputs.base_image }}
+          ARG BUILD_VERSION
+          ARG VCS_REF
+          ARG SOURCE_REPOSITORY
+          ARG SOURCE_ARCHIVE_URL
+          ARG SBOM_URL
+          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
+                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+                org.opencontainers.image.revision="${VCS_REF}" \
+                org.opencontainers.image.version="${BUILD_VERSION}" \
+                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+                org.printfarmer.sbom="${SBOM_URL}"
           
           # Install .NET runtime
           RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -308,6 +464,8 @@ jobs:
           
           WORKDIR /app
           COPY artifact/ ./
+          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           
           ENV ASPNETCORE_URLS=http://+:8080
           ENV ORCASLICER_PATH=/opt/orcaslicer
@@ -324,10 +482,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -337,28 +495,95 @@ jobs:
             org.opencontainers.image.vendor=PrintFarmer
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
-            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.source.outputs.version }}
+            org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
+            org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
 
-      - name: Build and push
+      - name: Build and push immutable digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: .github/dockerfiles/${{ matrix.dockerfile }}
-          push: ${{ github.event_name != 'pull_request' }}
           platforms: ${{ matrix.platforms }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            BUILD_VERSION=${{ steps.source.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            SOURCE_ARCHIVE_URL=${{ steps.source.outputs.source_archive_url }}
+            SBOM_URL=${{ steps.source.outputs.sbom_url }}
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Generate and validate image SPDX SBOM
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          SBOM_FILE: release-artifacts/printfarmer-${{ matrix.image }}-${{ steps.source.outputs.version }}.spdx.json
+        run: |
+          mkdir -p release-artifacts
+          syft "registry:$IMAGE" -o "spdx-json=$SBOM_FILE"
+          EXTRA_ARGS=()
+          if [[ "${{ matrix.image }}" == "frontend" ]]; then
+            EXTRA_ARGS+=(--include-npm)
+          fi
+          node scripts/compliance/enrich-sbom.mjs \
+            --sbom "$SBOM_FILE" \
+            --inventory compliance-artifacts/license-inventory.json \
+            --version "${{ steps.source.outputs.version }}" \
+            --revision "$GITHUB_SHA" \
+            "${EXTRA_ARGS[@]}"
+
+      - name: Attest SBOM and sign validated image digest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}@${{ steps.build.outputs.digest }}
+          SBOM_FILE: release-artifacts/printfarmer-${{ matrix.image }}-${{ steps.source.outputs.version }}.spdx.json
+        run: |
+          cosign attest --yes --type spdxjson --predicate "$SBOM_FILE" "$IMAGE"
+          cosign sign --yes "$IMAGE"
+
+      - name: Record image digest
+        run: |
+          printf '%s\n' '${{ steps.build.outputs.digest }}' \
+            > 'release-artifacts/digest-${{ matrix.image }}.txt'
+
+      - name: Upload image SPDX SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-${{ matrix.image }}
+          path: release-artifacts/*.spdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload image digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.image }}
+          path: release-artifacts/digest-*.txt
+          if-no-files-found: error
+          retention-days: 30
+
   # ====================
-  # JOB 5: Build monolith via Dockerfile.multistage (runs in parallel with native builds)
+  # JOB 5: Build monolith via Dockerfile.multistage after the reviewed inventory is ready
   # ====================
   build-monolith:
     name: Build monolith container
     runs-on: ubuntu-latest
+    needs: build-dotnet
     permissions:
       contents: read
+      id-token: write
       packages: write
     steps:
       - name: Checkout code
@@ -367,6 +592,37 @@ jobs:
       - name: Compute short SHA
         id: gitsha
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Download reviewed license inventory
+        uses: actions/download-artifact@v8
+        with:
+          name: license-inventory
+          path: ./compliance-artifacts
+
+      - name: Resolve source metadata
+        id: source
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="$GITHUB_REF_NAME"
+          else
+            VERSION="$(tr -d '[:space:]' < VERSION)"
+          fi
+          [[ "$VERSION" == v* ]] || VERSION="v$VERSION"
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $VERSION"
+            exit 1
+          fi
+          SOURCE_ARCHIVE_URL=""
+          SBOM_URL=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            RELEASE_BASE_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}"
+            SOURCE_ARCHIVE_URL="${RELEASE_BASE_URL}/PrintFarmer-${VERSION}-source.tar.gz"
+            SBOM_URL="${RELEASE_BASE_URL}/printfarmer-${VERSION}.spdx.json"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "container_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "source_archive_url=$SOURCE_ARCHIVE_URL" >> "$GITHUB_OUTPUT"
+          echo "sbom_url=$SBOM_URL" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU for multi-arch builds
         uses: docker/setup-qemu-action@v4
@@ -392,10 +648,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/release' || startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{major}},value=${{ steps.source.outputs.version }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-') }}
             type=raw,value=release,enable=${{ github.ref == 'refs/heads/release' }}
             type=sha,format=short,prefix=release-sha-,enable=${{ github.ref == 'refs/heads/release' }}
             type=raw,value=manual-{{sha}},enable=${{ github.event_name == 'workflow_dispatch' }}
@@ -405,18 +661,24 @@ jobs:
             org.opencontainers.image.vendor=PrintFarmer
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
-            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.source.outputs.version }}
+            org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
+            org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
 
-      - name: Build and push monolith image
+      - name: Build and push immutable monolith digest
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: scripts/docker/dockerfiles/Dockerfile.multistage
           target: monolith-runtime
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith,push-by-digest=true,name-canonical=true,push=true
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
@@ -427,31 +689,175 @@ jobs:
             UBUNTU_TAG=24.04
             GIT_SHA=${{ steps.gitsha.outputs.short }}
             VITE_GIT_SHA=${{ steps.gitsha.outputs.short }}
+            BUILD_VERSION=${{ steps.source.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            SOURCE_ARCHIVE_URL=${{ steps.source.outputs.source_archive_url }}
+            SBOM_URL=${{ steps.source.outputs.sbom_url }}
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0.24.0
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Generate and validate canonical SPDX SBOM
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith@${{ steps.build.outputs.digest }}
+          SBOM_FILE: release-artifacts/printfarmer-${{ steps.source.outputs.version }}.spdx.json
+        run: |
+          mkdir -p release-artifacts
+          syft "registry:$IMAGE" -o "spdx-json=$SBOM_FILE"
+          node scripts/compliance/enrich-sbom.mjs \
+            --sbom "$SBOM_FILE" \
+            --inventory compliance-artifacts/license-inventory.json \
+            --version "${{ steps.source.outputs.version }}" \
+            --revision "$GITHUB_SHA" \
+            --include-npm
+
+      - name: Attest SBOM and sign validated monolith digest
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith@${{ steps.build.outputs.digest }}
+          SBOM_FILE: release-artifacts/printfarmer-${{ steps.source.outputs.version }}.spdx.json
+        run: |
+          cosign attest --yes --type spdxjson --predicate "$SBOM_FILE" "$IMAGE"
+          cosign sign --yes "$IMAGE"
+
+      - name: Record monolith image digest
+        run: |
+          printf '%s\n' '${{ steps.build.outputs.digest }}' \
+            > release-artifacts/digest-monolith.txt
+
+      - name: Upload canonical SPDX SBOM
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-monolith
+          path: release-artifacts/*.spdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload monolith image digest
+        uses: actions/upload-artifact@v7
+        with:
+          name: digest-monolith
+          path: release-artifacts/digest-monolith.txt
+          if-no-files-found: error
+          retention-days: 30
 
   # ====================
-  # JOB 6: ARM64 Smoke Test
+  # JOB 6: Verify the complete artifact set and promote immutable digests
   # ====================
-  arm64-smoke-test:
-    name: ARM64 Smoke Test
+  promote-images:
+    name: Promote validated image set
     runs-on: ubuntu-latest
-    needs: [build-containers]
-    if: needs.build-containers.result == 'success'
+    needs: [build-containers, build-monolith]
+    permissions:
+      contents: write
+      packages: write
+    outputs:
+      smoke_tag: ${{ steps.tags.outputs.smoke_tag }}
     steps:
-      - name: Determine image tag
-        id: tag
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download image digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: digest-*
+          path: artifacts
+
+      - name: Download image SPDX SBOMs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sbom-*
+          path: artifacts
+
+      - name: Require and revalidate all image artifacts
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAG="${GITHUB_REF#refs/tags/v}"
-          elif [[ "${{ github.ref }}" == "refs/heads/release" ]]; then
-            TAG="release-sha-${GITHUB_SHA::7}"
+          set -euo pipefail
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest_file="artifacts/digest-${image}/digest-${image}.txt"
+            if [[ ! -s "$digest_file" ]]; then
+              echo "Missing digest artifact for $image"
+              exit 1
+            fi
+            digest="$(tr -d '[:space:]' < "$digest_file")"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid digest artifact for $image: $digest"
+              exit 1
+            fi
+            mapfile -d '' sboms < <(
+              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
+            )
+            if [[ "${#sboms[@]}" -ne 1 ]]; then
+              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
+              exit 1
+            fi
+            node scripts/compliance/validate-compliance.mjs \
+              --skip-dependencies \
+              --sbom "${sboms[0]}"
+          done
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify image signatures and SPDX attestations
+        run: |
+          set -euo pipefail
+          CERTIFICATE_IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/docker-publish.yml@${GITHUB_REF}"
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            reference="${REGISTRY}/${IMAGE_OWNER}/printfarmer-${image}@${digest}"
+            cosign verify "$reference" \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            cosign verify-attestation "$reference" \
+              --type spdxjson \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          done
+
+      - name: Resolve promotion tags
+        id: tags
+        env:
+          TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
+        run: |
+          set -euo pipefail
+          TAGS=()
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            TAGS+=("$VERSION")
+            if [[ "$VERSION" != *-* ]]; then
+              IFS='.' read -r major minor patch <<< "$VERSION"
+              TAGS+=("${major}.${minor}" "$major" latest)
+            fi
+            SMOKE_TAG="$VERSION"
+          elif [[ "$GITHUB_REF" == "refs/heads/release" ]]; then
+            SMOKE_TAG="release-sha-${GITHUB_SHA::7}"
+            TAGS+=(release "$SMOKE_TAG")
           else
-            TAG="manual-${GITHUB_SHA::7}"
+            if [[ ! "${TAG_SUFFIX:-}" =~ ^[-._A-Za-z0-9]*$ ]]; then
+              echo "Invalid manual tag suffix: $TAG_SUFFIX"
+              exit 1
+            fi
+            SMOKE_TAG="manual-${GITHUB_SHA::7}${TAG_SUFFIX:-}"
+            TAGS+=("$SMOKE_TAG")
           fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "Using image tag: $TAG"
+          printf '%s\n' "${TAGS[@]}" > "$RUNNER_TEMP/promotion-tags.txt"
+          echo "smoke_tag=$SMOKE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -460,33 +866,186 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify API image starts on ARM64
+      - name: Smoke test ARM64 image digests
         run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:${{ steps.tag.outputs.tag }}"
-          echo "Testing ARM64 startup: $IMAGE"
-          docker run --rm --platform linux/arm64 \
-            -e ASPNETCORE_URLS=http://+:5000 \
-            -e DB_PROVIDER=sqlite \
-            "$IMAGE" dotnet Farm.Web.Api.dll --help 2>&1 | head -20
-          echo "✅ API image runs on ARM64"
+          set -euo pipefail
+          api_digest="$(tr -d '[:space:]' < artifacts/digest-api/digest-api.txt)"
+          frontend_digest="$(tr -d '[:space:]' < artifacts/digest-frontend/digest-frontend.txt)"
+          discovery_digest="$(tr -d '[:space:]' < artifacts/digest-printer-discovery/digest-printer-discovery.txt)"
+          monolith_digest="$(tr -d '[:space:]' < artifacts/digest-monolith/digest-monolith.txt)"
 
-      - name: Verify frontend image starts on ARM64
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:${{ steps.tag.outputs.tag }}"
-          echo "Testing ARM64 startup: $IMAGE"
-          docker run --rm --platform linux/arm64 -d --name frontend-test "$IMAGE"
+          docker run --rm --platform linux/arm64 \
+            --entrypoint /bin/sh \
+            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-api@${api_digest}" \
+            -c 'test -f /app/Farm.Web.Api.dll && dotnet --info >/dev/null'
+
+          docker run --rm --platform linux/arm64 -d \
+            --name printfarmer-frontend-smoke \
+            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-frontend@${frontend_digest}"
+          trap 'docker rm -f printfarmer-frontend-smoke >/dev/null 2>&1 || true' EXIT
           sleep 3
-          docker logs frontend-test 2>&1 | head -10
-          docker stop frontend-test || true
-          echo "✅ Frontend image runs on ARM64"
+          docker exec printfarmer-frontend-smoke nginx -t
+          docker rm -f printfarmer-frontend-smoke
+          trap - EXIT
 
-      - name: Verify printer-discovery image starts on ARM64
-        run: |
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:${{ steps.tag.outputs.tag }}"
-          echo "Testing ARM64 startup: $IMAGE"
           docker run --rm --platform linux/arm64 \
-            "$IMAGE" dotnet PrinterDiscoveryService.dll --help 2>&1 | head -20
-          echo "✅ Printer Discovery image runs on ARM64"
+            --entrypoint /bin/sh \
+            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-printer-discovery@${discovery_digest}" \
+            -c 'test -f /app/PrinterDiscoveryService.dll && dotnet --info >/dev/null'
+
+          docker run --rm --platform linux/arm64 \
+            --entrypoint /bin/sh \
+            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-monolith@${monolith_digest}" \
+            -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
+
+      - name: Publish and verify public corresponding-source assets
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          node scripts/compliance/create-source-bundle.mjs \
+            --revision "$GITHUB_SHA" \
+            --version "$VERSION" \
+            --output release-assets
+          cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
+
+          mapfile -d '' sbom_files < <(
+            find artifacts -type f -name '*.spdx.json' -print0 | sort -z
+          )
+          mapfile -d '' digest_files < <(
+            find artifacts -type f -name 'digest-*.txt' -print0 | sort -z
+          )
+          if [[ "${#sbom_files[@]}" -ne 5 || "${#digest_files[@]}" -ne 5 ]]; then
+            echo "Expected five SPDX SBOMs and five digest records before release publication"
+            exit 1
+          fi
+          cp "${sbom_files[@]}" "${digest_files[@]}" release-assets/
+
+          expected_assets=(
+            "PrintFarmer-${VERSION}-source.tar.gz"
+            "PrintFarmer-${VERSION}-source.json"
+            LICENSE
+            THIRD-PARTY-NOTICES.md
+            "printfarmer-${VERSION}.spdx.json"
+            "printfarmer-api-${VERSION}.spdx.json"
+            "printfarmer-frontend-${VERSION}.spdx.json"
+            "printfarmer-printer-discovery-${VERSION}.spdx.json"
+            "printfarmer-orcaslicer-worker-${VERSION}.spdx.json"
+            digest-api.txt
+            digest-frontend.txt
+            digest-printer-discovery.txt
+            digest-orcaslicer-worker.txt
+            digest-monolith.txt
+          )
+          for asset_name in "${expected_assets[@]}"; do
+            if [[ ! -s "release-assets/$asset_name" ]]; then
+              echo "Missing required release asset: $asset_name"
+              exit 1
+            fi
+          done
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; verifying assets before publication"
+          else
+            notes_file="$RUNNER_TEMP/source-first-release-notes.md"
+            printf '%s\n' \
+              "Automated source-first release for $VERSION." \
+              "" \
+              "Validated corresponding source, notices, SPDX SBOMs, and image digest records are published before container tags." \
+              > "$notes_file"
+            create_args=(
+              release create "$VERSION"
+              --draft
+              --verify-tag
+              --title "$VERSION"
+              --notes-file "$notes_file"
+            )
+            if [[ "$VERSION" == *-* ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh "${create_args[@]}"
+          fi
+
+          existing_assets="$(
+            gh release view "$VERSION" --json assets --jq '.assets[].name'
+          )"
+          upload_files=()
+          while IFS= read -r -d '' asset_file; do
+            asset_name="$(basename "$asset_file")"
+            if grep -Fxq "$asset_name" <<< "$existing_assets"; then
+              existing_dir="$RUNNER_TEMP/existing-release-assets/$asset_name"
+              mkdir -p "$existing_dir"
+              gh release download "$VERSION" \
+                --pattern "$asset_name" \
+                --dir "$existing_dir"
+              if ! cmp -s "$asset_file" "$existing_dir/$asset_name"; then
+                echo "Published release asset differs from the validated build: $asset_name"
+                exit 1
+              fi
+            else
+              upload_files+=("$asset_file")
+            fi
+          done < <(find release-assets -maxdepth 1 -type f -print0 | sort -z)
+
+          if [[ "${#upload_files[@]}" -gt 0 ]]; then
+            gh release upload "$VERSION" "${upload_files[@]}"
+          fi
+
+          expected_prerelease=false
+          [[ "$VERSION" == *-* ]] && expected_prerelease=true
+          release_is_draft="$(
+            gh release view "$VERSION" --json isDraft --jq '.isDraft'
+          )"
+          release_is_prerelease="$(
+            gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease'
+          )"
+          if [[ "$release_is_draft" == "true" || "$release_is_prerelease" != "$expected_prerelease" ]]; then
+            gh release edit "$VERSION" \
+              --draft=false \
+              --prerelease="$expected_prerelease"
+          fi
+
+          release_state="$(
+            gh release view "$VERSION" \
+              --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv'
+          )"
+          expected_state="$(printf 'false\t%s' "$expected_prerelease")"
+          if [[ "$release_state" != "$expected_state" ]]; then
+            echo "Release visibility or prerelease state is invalid for $VERSION: $release_state"
+            exit 1
+          fi
+          published_assets="$(
+            gh release view "$VERSION" --json assets --jq '.assets[].name'
+          )"
+          for asset_name in "${expected_assets[@]}"; do
+            if ! grep -Fxq "$asset_name" <<< "$published_assets"; then
+              echo "Required public release asset is missing: $asset_name"
+              exit 1
+            fi
+            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset_name}"
+            curl --fail --silent --show-error --location --head \
+              --retry 6 --retry-delay 5 --retry-all-errors \
+              "$asset_url" >/dev/null
+          done
+
+      - name: Promote validated digests
+        run: |
+          set -euo pipefail
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            source="${REGISTRY}/${IMAGE_OWNER}/printfarmer-${image}@${digest}"
+            command=(docker buildx imagetools create)
+            while IFS= read -r tag; do
+              [[ -n "$tag" ]] && command+=(--tag "${REGISTRY}/${IMAGE_OWNER}/printfarmer-${image}:${tag}")
+            done < "$RUNNER_TEMP/promotion-tags.txt"
+            command+=("$source")
+            "${command[@]}"
+          done
 
   # ====================
   # JOB 7: Summary
@@ -494,7 +1053,7 @@ jobs:
   summary:
     name: Build Summary
     runs-on: ubuntu-latest
-    needs: [build-containers, build-monolith, arm64-smoke-test]
+    needs: [build-containers, build-monolith, promote-images]
     if: always()
     steps:
       - name: Generate summary
@@ -504,34 +1063,34 @@ jobs:
 
           CONTAINERS="${{ needs.build-containers.result }}"
           MONOLITH="${{ needs.build-monolith.result }}"
-          SMOKE="${{ needs.arm64-smoke-test.result }}"
+          PROMOTION="${{ needs.promote-images.result }}"
 
-          if [ "$CONTAINERS" == "success" ] && [ "$MONOLITH" == "success" ]; then
-            echo "### ✅ All Images Built Successfully" >> $GITHUB_STEP_SUMMARY
+          if [[ "$CONTAINERS" == "success" && "$MONOLITH" == "success" && "$PROMOTION" == "success" ]]; then
+            echo "### ✅ All Images Validated and Promoted" >> $GITHUB_STEP_SUMMARY
           else
-            echo "### ⚠️ Some Builds Had Issues" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Image Publication Had Issues" >> $GITHUB_STEP_SUMMARY
           fi
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Image | Build | Platforms |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|-----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | $( [ '$CONTAINERS' == 'success' ] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | $( [ '$CONTAINERS' == 'success' ] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Printer Discovery | $( [ '$CONTAINERS' == 'success' ] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| OrcaSlicer Worker | $( [ '$CONTAINERS' == 'success' ] && echo '✅' || echo '❌' ) | amd64 only |" >> $GITHUB_STEP_SUMMARY
-          echo "| Monolith | $( [ '$MONOLITH' == 'success' ] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| API | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Frontend | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| Printer Discovery | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
+          echo "| OrcaSlicer Worker | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64 only |" >> $GITHUB_STEP_SUMMARY
+          echo "| Monolith | $( [[ "$MONOLITH" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ARM64 Smoke Test" >> $GITHUB_STEP_SUMMARY
-          echo "Status: $( [ '$SMOKE' == 'success' ] && echo '✅ Passed' || ( [ '$SMOKE' == 'skipped' ] && echo '⏭️ Skipped' || echo '❌ Failed' ) )" >> $GITHUB_STEP_SUMMARY
+          echo "### Complete-set validation, signing, ARM64 smoke test, and promotion" >> $GITHUB_STEP_SUMMARY
+          echo "Status: $( [[ "$PROMOTION" == "success" ]] && echo '✅ Passed' || ( [[ "$PROMOTION" == "skipped" ]] && echo '⏭️ Skipped' || echo '❌ Failed' ) )" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Registry" >> $GITHUB_STEP_SUMMARY
           echo "\`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-orcaslicer-worker:latest" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-orcaslicer-worker:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

@@ -110,3 +110,53 @@ Older entries archived to history-archive.md for size management.
 
 **Files touched:** 2 migrations + 3 infra source (`IdempotencyKeyUtilities`, `ReservedOperationKeyPrefixAttribute`, `PartInventoryService`) + 3 test files. No push, no PR (per instructions).
 
+### 2025 — #941 gate frontend fixes (rejected PR, six defects across new admin/settings surface)
+
+**Core lesson: bare property names are not identifiers.** In this epic the same
+mistake produced four separate defects — command-palette deep links, DOM ids,
+form `name` attributes, and error-section attribution. Any lookup keyed on a
+raw property name from metadata is a bug in a metadata-driven UI. When
+metadata declares a `{key, properties: [{ name }]}` shape, the *only* safe
+identifier is `` `${key}.${name}` ``. Every future settings feature: check
+this before merging.
+
+**The wire format is the wire format.** `prop.name` in settings metadata is
+the *camelCase JSON name*, not the .NET property name. `GET /api/settings/{key}`
+returns raw wire JSON (no normalization on the client — see
+`services/api.ts:384-389`). Indexing a values object with a PascalCase key
+silently returns `undefined`. The rejected per-engine slicer editor never
+rendered once because it read `values['PerEngine']`. Always cross-reference
+the `[JsonPropertyName]` attribute on the backend model.
+
+**A green test suite is not evidence.** Six agents in this epic shipped a
+passing lint/build/test run that still contained real defects visible in the
+diff. The single agent who ran a deliberate-break proof (revert a fix, confirm
+the matching test fails, restore) was the only one who shipped a genuinely
+clean submission. Doing this yourself for every fix takes minutes and would
+have saved this epic weeks. From now on: pair every new test with a proof
+that reverting the fix makes it fail.
+
+**Test guards are worthless if they only assert one direction.** The old
+Job-Queue-guard test just checked that four hardcoded keys existed in
+`SETTINGS_GROUP_TO_LOCATION`. It did not cross-check against each tab's
+`allowedGroups`, so a group could vanish from either the tab or the map
+without the test noticing — which is exactly how Job Queue disappeared.
+Real cross-guard tests must assert **both directions**: every declared
+`allowedGroups` entry has a location, and every mapped location is reachable
+from some tab.
+
+**Extract, don't export.** Given `allowedGroups` needed to be introspected by
+tests, I moved it to a plain `subpage-groups.ts` module rather than exporting
+it from `SettingsShell.tsx`. Importing the shell into a test drags in
+`react-router`, lazy admin pages, hooks, etc. A test-visible constant with
+zero side effects is cleaner and does not slow the suite.
+
+**Selectors: use data attributes, not layout classes.** My first pass at the
+bare-error attribution test tried `.closest('.settings-pagelet')` to find
+section boundaries; that class only exists when the pagelet renders in
+non-compact mode. `SettingsPagelet` emits `data-setting-property="{key}.{name}"`
+on every row (line 287) — that is the reliable, mode-invariant selector for
+tests that care about which section owns which field.
+
+**Delivered:** 6/6 defects fixed. 2900/275 tests passing (baseline 2894/273).
+Lint 0/0. Build clean. Deliberate-break proofs run on Defects 1 and 3.

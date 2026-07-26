@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
@@ -241,7 +242,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var readyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
 
             // Trigger immediate dispatch
             dispatchTrigger?.NotifyJobQueued(printerId);
@@ -257,7 +258,7 @@ public class AutoDispatchService(
 
         // Broadcast state change via SignalR
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue(AutoDispatchPendingWebhookEventName, new { printerId, printerName = printer.Name });
     }
@@ -302,7 +303,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
 
             return new AutoDispatchReadyResult
             {
@@ -322,7 +323,7 @@ public class AutoDispatchService(
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         logger.LogInformation(
             ReadyGateLogPrefix + " Printer {PrinterId} marked Ready. Next job: {JobName} (filament sufficient: {Sufficient})",
@@ -391,7 +392,7 @@ public class AutoDispatchService(
         }
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
@@ -410,7 +411,7 @@ public class AutoDispatchService(
         logger.LogInformation(ReadyGateLogPrefix + " Auto-dispatch ready gate cancelled for printer {PrinterId} ({Name})", printerId, printer.Name);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
@@ -454,7 +455,7 @@ public class AutoDispatchService(
         }
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.All.SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
 

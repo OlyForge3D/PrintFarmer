@@ -1,5 +1,5 @@
 import { apiClient } from '@/services/api';
-import type { SettingMetadata } from '@/components/SettingsPagelet';
+import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 
 /**
  * Settings API - delegated to apiClient singleton
@@ -25,10 +25,6 @@ export async function fetchSettingsGroups(): Promise<SettingGroupMetadata[]> {
 
 export async function fetchSettingsUnified(): Promise<Record<string, unknown>> {
   return apiClient.getAllSettings();
-}
-
-export async function saveAllSettings(values: Record<string, unknown>): Promise<void> {
-  return apiClient.saveAllSettings(values);
 }
 
 export async function fetchSettingsValues(keyName: string): Promise<Record<string, unknown>> {

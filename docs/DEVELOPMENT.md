@@ -59,7 +59,7 @@ src/Web/ReactApp/
   - UPPER_CASE for constants
 
 - **Formatting**:
-  - Run `dotnet format` before committing
+  - Run `dotnet format` before pushing — the `pre-push` git hook enforces this on every push and CI does **not** run `dotnet format` any more. Install the hook once with `./.githooks/setup.sh`. The hook is the local formatting authority and verifies the exact outgoing tree; it is not server-enforceable, `git push --no-verify` is Git's standard emergency bypass, and branch protection does not enforce formatting. See [docs/CI.md](./CI.md) for details.
   - Max line length: 120 characters
   - Use var for obvious types
 
@@ -353,7 +353,7 @@ npm test
 npm run test:run
 
 # Run tests with coverage
-npm test -- --coverage
+npm run test:coverage
 
 # Run specific test file
 npm test -- PrinterCard.test.tsx
@@ -362,7 +362,7 @@ npm test -- PrinterCard.test.tsx
 **Test Framework**: Vitest with React Testing Library
 
 **Key Points:**
-- Use `npm run test:run` for CI/CD pipelines (exits after tests complete)
+- CI runs `npm run test:coverage`; use `npm run test:run` for a faster local non-interactive run
 - Use `npm test` for interactive development (watch mode, requires 'q' to exit)
 - Focus on user behavior, not implementation details
 - Mock external services (API calls, WebSocket)

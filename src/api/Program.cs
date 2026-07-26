@@ -19,9 +19,11 @@ using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Capabilities;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -95,6 +97,12 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
+
+// Forwarded headers (X-Forwarded-For / -Proto / -Host) — bind config + options.
+// Disabled by default; operators behind a reverse proxy must set
+// ForwardedHeaders:Enabled=true and populate KnownProxies / KnownNetworks.
+// See docs/DEPLOYMENT.md and the ForwardedHeaders section in appsettings.json.
+builder.Services.AddPrintFarmerForwardedHeaders(builder.Configuration);
 
 // Feature flag service for phased rollout control
 builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
@@ -205,7 +213,13 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 });
 
 // .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
+    options.AddOperationTransformer<AuthorizationOperationTransformer>();
+});
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.MaxDepth = 256);
 
 // CORS configuration for API access
 builder.Services.AddPrintFarmerCors();
@@ -224,6 +238,30 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
+builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
+    Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
+builder.Services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
+    .Bind(builder.Configuration.GetSection(
+        Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
+    .Validate(
+        options =>
+            !string.IsNullOrWhiteSpace(options.RootPath) &&
+            options.MaxBytes > 0 &&
+            options.MaxWidth > 0 &&
+            options.MaxHeight > 0 &&
+            options.MaxPixels > 0,
+        "Calibration blob storage requires a private root and positive limits.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    Farm.Web.Api.Services.Calibration.ICalibrationBlobStore,
+    Farm.Web.Api.Services.Calibration.CalibrationBlobStore>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.ICalibrationProjectService,
+    Farm.Web.Api.Services.Calibration.CalibrationProjectService>();
+builder.Services.AddHostedService<
+    Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
@@ -239,8 +277,7 @@ builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Env
 // result in "server has not been started" errors in CreateClient().
 try
 {
-    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    if (!builder.Environment.IsEnvironment("Testing"))
     {
         _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
     }
@@ -270,8 +307,8 @@ catch (Exception ex)
 {
     try
     {
-        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (builder.Environment.IsEnvironment("Testing")
+            || string.Equals(builder.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: Build() threw during test startup:");
@@ -314,6 +351,15 @@ app.Logger.LogInformation(
     slicerEnabled,
     slicerModuleEnabled,
     modelFilesEnabled);
+
+// Forwarded headers must be the FIRST middleware in the pipeline so that
+// Connection.RemoteIpAddress is rewritten (or intentionally left as the direct
+// peer) before ANY other middleware — including runtime-discovered slicer plugin
+// modules — has a chance to read it. Registering here (before UseSlicerIntegration)
+// guarantees that even if a plugin module calls app.Use(...) in its Configure()
+// hook, it cannot register middleware ahead of the trust gate. No-op unless
+// ForwardedHeaders:Enabled=true and trusted proxies are configured. (#862)
+app.UsePrintFarmerForwardedHeaders();
 
 // Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
 if (slicerModuleEnabled)
@@ -371,6 +417,9 @@ catch
 }
 
 // === MIDDLEWARE PIPELINE ===
+// NOTE: UsePrintFarmerForwardedHeaders is registered earlier (before slicer
+// integration) so that plugin-registered middleware cannot precede the trust
+// gate. See the #862 comment above.
 
 // Global exception handling
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -391,6 +440,7 @@ app.UseCors("Default");
 // When DEPLOYMENT_MODE=monolith, the API serves the React frontend directly from wwwroot
 // When DEPLOYMENT_MODE=microservices (or unset), frontend is served by separate nginx-proxy container
 string? deploymentMode = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+    ?? builder.Configuration.GetValue<string>("Deployment:Mode")
     ?? Environment.GetEnvironmentVariable("DEPLOYMENT_MODE");
 bool isMonolithMode = string.Equals(deploymentMode, "monolith", StringComparison.OrdinalIgnoreCase);
 
@@ -434,10 +484,10 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 
-// Hub authentication tightening is tracked separately; current React clients connect without tokens.
-app.MapHub<PrinterHub>("/hubs/printers").AllowAnonymous();
-app.MapHub<HarvestHub>("/hubs/harvest").AllowAnonymous();
-app.MapHub<MaintenanceHub>("/hubs/maintenance").AllowAnonymous();
+// Public farm hubs require authenticated clients; NFC retains its existing anonymous contract.
+app.MapHub<PrinterHub>("/hubs/printers");
+app.MapHub<HarvestHub>("/hubs/harvest");
+app.MapHub<MaintenanceHub>("/hubs/maintenance");
 app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
@@ -738,7 +788,8 @@ catch (Exception ex)
     // Emit diagnostic details in Testing environment but still surface the failure to the test host.
     try
     {
-        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (app.Environment.IsEnvironment("Testing")
+            || string.Equals(app.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");

@@ -33,11 +33,11 @@
     </PackageReference>
     <PackageReference Include="FluentAssertions" Version="8.9.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
-    <PackageReference Include="coverlet.msbuild" Version="10.0.0">
+    <PackageReference Include="coverlet.collector" Version="10.0.0">
       <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
@@ -46,6 +46,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\api\Farm.Web.Api.csproj" />
+    <ProjectReference Include="..\..\migrations\Farm.Slicer.Migrations.Sqlite\Farm.Slicer.Migrations.Sqlite.csproj" />
   </ItemGroup>
 
 </Project>

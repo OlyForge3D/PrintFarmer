@@ -11,6 +11,13 @@
 ## Learnings
 
 _(append new learnings below this line)_
+### 2026-07-25 — Issue #941 final epic gate review
+
+- **Verdict:** ❌ REQUEST_CHANGES for admin-console-redesign before PR to development.
+- **Critical security/correctness issue:** the new per-group settings UI uses `POST /api/settings/{keyName}` as the canonical save path, but that endpoint is only class-level `[Authorize]`, unlike bulk `POST /api/settings` which is `[Authorize(Roles = "farm_admin")]`. Any authenticated non-admin can POST arbitrary non-blocklisted app settings by key.
+- **Critical validation issue:** the same per-key save path deserializes and calls `ISettingsService.Save<T>` without running `IValidatableSetting.Validate()`. Bulk save validates; per-group save bypasses invariants on SlicerSettings, NetworkDiscoverySettings, GcodeUploadSettings, etc.
+- **Warning:** the Slicer per-engine custom renderer reads/writes `PerEngine` while metadata/value JSON uses `perEngine`, so the intended editor is absent and editing the fallback field can corrupt/fail the save.
+- **Reviewer lesson:** green frontend/backend tests did not exercise raw API role authorization or backend custom validators on the new per-section save path. For metadata-driven admin forms, test the exact production endpoint, not only frontend-required/min/max validation.
 
 ### 2025-11-24: Round 19 — PR #14 APPROVE + PR #318 REQUEST_CHANGES
 
@@ -96,7 +103,7 @@ _(append new learnings below this line)_
 
 Participated in multi-round trio review cycle. Key learnings:
 
-1. **Reviewer-lockout protocol:** Strict three-reviewer consensus with rotation of fresh hands prevents fatigue.
+1. **Multi-reviewer consensus:** Three independent reviewers with fresh hands prevents fatigue. (The author-lockout rule that once accompanied this has been RESCINDED by the repo owner — authors fix their own rejected work; nobody is ever locked out of an artifact.)
 2. **Kane surgical-fix MVP:** Small, scoped corrections across all three branches proved cost-effective.
 3. **Session-end report validation:** Coordinator must verify trio drops match current commit SHA.
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.

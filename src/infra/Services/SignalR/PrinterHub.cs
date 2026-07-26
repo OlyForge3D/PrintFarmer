@@ -1,6 +1,8 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
-using Farm.Infrastructure.Services.Webhooks;
+using Farm.Infrastructure.Services.Discovery;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -11,39 +13,48 @@ namespace Farm.Infrastructure.Services.SignalR;
 /// This is a marker hub that servers use to send messages to connected clients.
 /// Client groups are managed externally by services like PrinterDiscoveryService and MoonrakerSubscriptionService.
 /// </summary>
+[Authorize]
 public class PrinterHub(
     IDiscoveryProgressCache progressCache,
     ILogger<PrinterHub> logger,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
-    IWebhookService? webhookService = null) : Hub
+    IDiscoverySessionRegistry discoverySessions) : Hub
 {
     // Marker hub for broadcasting printer updates and discovery progress.
 
     /// <summary>
-    /// SignalR group that receives maintenance-sourced task broadcasts. Only
+    /// SignalR group reserved for administrator-only task broadcasts. Only
     /// connections whose authenticated principal holds the <c>farm_admin</c> role
-    /// join this group (issue #713 Fix C), so maintenance alert content is never
-    /// pushed to non-admin clients — mirroring the REST gate on
-    /// <c>GET /api/tasks</c>.
+    /// join this group.
     /// </summary>
     public const string AdminTaskGroup = "farm_admin";
 
     /// <summary>
-    /// Replays the cached printer statuses to a newly connected client so its UI is
-    /// immediately current instead of waiting for the next backend broadcast.
-    /// Also runs on automatic reconnects (each reconnect is a new connection),
-    /// covering any updates missed while disconnected.
+    /// Adds the connection to its authorized SignalR groups, then replays the cached
+    /// printer statuses to the newly connected client so its UI is immediately current
+    /// instead of waiting for the next backend broadcast. Also runs on automatic
+    /// reconnects (each reconnect is a new connection), covering any updates missed
+    /// while disconnected.
     /// </summary>
     public override async Task OnConnectedAsync()
     {
-        await base.OnConnectedAsync();
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm);
 
-        // Fix C: admin connections join the maintenance broadcast group. Anonymous or
-        // non-admin connections never join, so they cannot receive maintenance DTOs.
-        if (Context.User?.IsInRole(AdminTaskGroup) == true)
+        if (PrintFarmerPermissions.TryGetUserId(Context.User!, out Guid userId))
         {
-            await Groups.AddToGroupAsync(Context.ConnectionId, AdminTaskGroup, Context.ConnectionAborted);
+            await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.User(userId));
         }
+
+        if (PrintFarmerPermissions.IsFarmAdmin(Context.User!))
+        {
+            await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Administrators);
+            await Groups.AddToGroupAsync(
+                Context.ConnectionId,
+                AdminTaskGroup,
+                Context.ConnectionAborted);
+        }
+
+        await base.OnConnectedAsync();
 
         foreach (PrinterStatusDto status in statusCache.GetAllStatuses().Values)
         {
@@ -80,6 +91,30 @@ public class PrinterHub(
     /// <param name="sessionId">The discovery session ID to join.</param>
     public async Task JoinDiscoveryGroupAsync(string sessionId)
     {
+        if (!PrintFarmerPermissions.TryGetUserId(Context.User!, out Guid userId))
+        {
+            throw new HubException("authentication_required");
+        }
+
+        bool isOwner = discoverySessions.IsSessionOwner(sessionId, userId);
+        bool isFarmAdmin = PrintFarmerPermissions.IsFarmAdmin(Context.User!);
+        if (!discoverySessions.SessionExists(sessionId) || (!isOwner && !isFarmAdmin))
+        {
+            logger.LogWarning(
+                "Denied discovery group subscription by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+            throw new HubException("resource_forbidden");
+        }
+
+        if (!isOwner)
+        {
+            logger.LogInformation(
+                "Audited farm-admin discovery session bypass by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+        }
+
         logger.LogInformation(
             "[PrinterHub] Client {ConnectionId} joining discovery group for session {SessionId}",
             Context.ConnectionId,
@@ -120,68 +155,5 @@ public class PrinterHub(
             sessionId);
 
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, $"discovery-{sessionId}");
-    }
-
-    /// <summary>
-    /// Called by the printer-discovery microservice to broadcast progress to clients.
-    /// </summary>
-    /// <param name="progress">The discovery progress data to broadcast.</param>
-    public async Task BroadcastDiscoveryProgressAsync(DiscoveryProgressDto progress)
-    {
-        logger.LogDebug(
-            "[PrinterHub] Broadcasting progress for session {SessionId}: {Percentage}%",
-            progress.SessionId,
-            progress.ProgressPercentage);
-
-        // Cache the progress for late-joining clients
-        progressCache.Set(progress.SessionId, progress);
-
-        // Broadcast to all clients in the discovery session group
-        await Clients.Group($"discovery-{progress.SessionId}").SendAsync("discoveryprogress", progress);
-    }
-
-    /// <summary>
-    /// Called by the printer-discovery microservice to broadcast when a printer is found.
-    /// </summary>
-    /// <param name="found">The discovered printer data to broadcast.</param>
-    public async Task BroadcastDiscoveryPrinterFoundAsync(DiscoveryPrinterFoundDto found)
-    {
-        logger.LogInformation(
-            "[PrinterHub] Broadcasting printer found for session {SessionId}: {Name}",
-            found.SessionId,
-            found.Printer.Name);
-
-        // Broadcast to all clients in the discovery session group
-        await Clients.Group($"discovery-{found.SessionId}").SendAsync("discoveryprinterfound", found);
-
-        webhookService?.Enqueue("discovery.printer_found", new
-        {
-            sessionId = found.SessionId,
-            printerName = found.Printer.Name,
-            printerIp = found.Printer.ServerUrl
-        });
-    }
-
-    /// <summary>
-    /// Called by the printer-discovery microservice to broadcast completion to clients.
-    /// </summary>
-    /// <param name="completed">The discovery completion data to broadcast.</param>
-    public async Task BroadcastDiscoveryCompletedAsync(DiscoveryCompletedDto completed)
-    {
-        logger.LogInformation(
-            "[PrinterHub] Broadcasting completion for session {SessionId}: {Found} printers found",
-            completed.SessionId,
-            completed.TotalPrintersFound);
-
-        // Broadcast to all clients in the discovery session group
-        await Clients.Group($"discovery-{completed.SessionId}").SendAsync("discoverycompleted", completed);
-
-        webhookService?.Enqueue("discovery.completed", new
-        {
-            sessionId = completed.SessionId,
-            totalPrintersFound = completed.TotalPrintersFound,
-            totalPrintersExcluded = completed.TotalPrintersExcluded,
-            wasCancelled = completed.WasCancelled
-        });
     }
 }

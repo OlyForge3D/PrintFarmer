@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  On-demand .NET code coverage via the coverlet data collector (coverlet.collector).
+
+  Usage (from src/): run `dotnet test ./farm-web.sln` and pass the
+  "XPlat Code Coverage" collector together with this settings file
+  (the collect and settings command-line options).
+
+  Coverage reports (cobertura + lcov) are written under each project's
+  TestResults/<guid>/ directory. Coverage is intentionally opt-in and is NOT run
+  during the standard CI `dotnet test` leg: the previous coverlet.msbuild setup
+  read back a hit file after the test host exited, and a truncated process-exit
+  flush under runner contention crashed that read and failed jobs whose tests all
+  passed (issue #965). The collector flushes during the test host's controlled
+  session-end, so it is not subject to that race.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat Code Coverage">
+        <Configuration>
+          <Format>cobertura,lcov</Format>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

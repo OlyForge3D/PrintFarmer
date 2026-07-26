@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
 using Farm.Infrastructure.Domain;
@@ -21,16 +22,21 @@ public class Printer
     public string Name { get; set; } = string.Empty;
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use ServerUri for typed access")]
+    [JsonIgnore]
     public string ServerUrl { get; set; } = string.Empty; // e.g., http://printer:7125 or PrusaLink base URL (IP-resolved)
 
     [SuppressMessage("Design", "CA1056:URI-like properties should not be strings", Justification = "Persisted as text for EF/DTO; use OriginalServerUri for typed access")]
+    [JsonIgnore]
     public string? OriginalServerUrl { get; set; } // Original URL/host (for re-resolving if IP changes)
 
+    [JsonIgnore]
     public int BackendPort { get; set; } // Port for backend connection: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). ALWAYS SET BY DISCOVERY PROBES - NEVER DEFAULT!
 
+    [JsonIgnore]
     public int? FrontendPort { get; set; } // null for non-Moonraker, 80 for Moonraker by default
 
     [NotMapped]
+    [JsonIgnore]
     public Uri? ServerUri
     {
         get => Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? u) ? u : null;
@@ -38,6 +44,7 @@ public class Printer
     }
 
     [NotMapped]
+    [JsonIgnore]
     public Uri? OriginalServerUri
     {
         get => string.IsNullOrWhiteSpace(OriginalServerUrl) ? null : (Uri.TryCreate(OriginalServerUrl, UriKind.Absolute, out Uri? u) ? u : null);
@@ -49,6 +56,7 @@ public class Printer
     /// Omits port if it's a default port (80 for HTTP, 443 for HTTPS).
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public string BackendUrl
     {
         get
@@ -85,6 +93,7 @@ public class Printer
     /// Returns BackendUrl if FrontendPort is not set.
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public string FrontendUrl
     {
         get
@@ -124,18 +133,60 @@ public class Printer
 
     public int Backend { get; set; } // Stored as int: cast to PrinterBackend enum (0=Unknown, 1=Moonraker, 2=PrusaLink, 3=SDCP, 4=OctoPrint)
 
+    /// <summary>
+    /// Application-managed revision of calibration-relevant configuration.
+    /// Transient status updates do not change this value.
+    /// </summary>
+    public long ConfigurationRevision { get; set; } = 1;
+
+    /// <summary>When calibration-relevant configuration last changed.</summary>
+    public DateTime? CalibrationConfigurationUpdatedAtUtc { get; set; }
+
+    /// <summary>Explicit firmware family; never inferred from backend or catalog metadata.</summary>
+    public PrinterFirmwareFamily FirmwareFamily { get; set; } = PrinterFirmwareFamily.Unknown;
+
+    /// <summary>Explicit G-code dialect; never inferred from backend or catalog metadata.</summary>
+    public PrinterGcodeDialect GcodeDialect { get; set; } = PrinterGcodeDialect.Unknown;
+
+    /// <summary>Authoritative source that supplied the firmware identity.</summary>
+    public FirmwareDetectionSource FirmwareDetectionSource { get; set; } = FirmwareDetectionSource.Unknown;
+
+    /// <summary>Observed or configured firmware version.</summary>
+    public string? FirmwareVersion { get; set; }
+
+    /// <summary>Version of the detector or configuration contract that asserted firmware identity.</summary>
+    public string? FirmwareDetectionVersion { get; set; }
+
+    /// <summary>Detection confidence from zero to one, when supplied by the authoritative source.</summary>
+    public decimal? FirmwareDetectionConfidence { get; set; }
+
+    /// <summary>When firmware identity was observed or explicitly configured.</summary>
+    public DateTime? FirmwareDetectedAtUtc { get; set; }
+
+    /// <summary>Whether the firmware identity has been explicitly verified.</summary>
+    public bool FirmwareIdentityVerified { get; set; }
+
+    /// <summary>Backend implementation version captured without connection details.</summary>
+    public string? BackendVersion { get; set; }
+
+    /// <summary>Backend API version captured without connection details.</summary>
+    public string? BackendApiVersion { get; set; }
+
+    [JsonIgnore]
     public string? ApiKey { get; set; } // For PrusaLink/OctoPrint
 
     /// <summary>
     /// Username for HTTP Digest Authentication (used by PrusaLink for privileged API access).
     /// Combined with Password, enables access to additional endpoints not available with API key alone.
     /// </summary>
+    [JsonIgnore]
     public string? Username { get; set; }
 
     /// <summary>
     /// Password for HTTP Digest Authentication (used by PrusaLink for privileged API access).
     /// Stored encrypted in the database. Combined with Username for full API access.
     /// </summary>
+    [JsonIgnore]
     public string? Password { get; set; }
 
     /// <summary>
@@ -144,6 +195,7 @@ public class Printer
     /// Contains ApiKey, Username, and Password - backend clients use whatever they need.
     /// </summary>
     [NotMapped]
+    [JsonIgnore]
     public PrinterCredential? Credential { get; set; }
 
     /// <summary>
@@ -156,6 +208,7 @@ public class Printer
     /// Cameras attached to this printer.
     /// Cameras are discovered from Moonraker, PrusaLink, OctoPrint, etc. or manually configured.
     /// </summary>
+    [JsonIgnore]
     public ICollection<Camera> Cameras { get; set; } = new List<Camera>();
 
     public Guid ManufacturerId { get; set; } // No longer nullable - uses default "Unknown" manufacturer
@@ -221,6 +274,79 @@ public class Printer
     public bool SupportsPerToolAttribution { get; set; }
 
     public int? MaxPrintSpeed { get; set; }
+
+    /// <summary>Explicit calibration bed-origin X coordinate in millimeters.</summary>
+    public double? BedOriginX { get; set; }
+
+    /// <summary>Explicit calibration bed-origin Y coordinate in millimeters.</summary>
+    public double? BedOriginY { get; set; }
+
+    /// <summary>Exact printable polygon JSON supplied by an authoritative configuration source.</summary>
+    public string? PrintablePolygonJson { get; set; }
+
+    /// <summary>Exact excluded-region JSON supplied by an authoritative configuration source.</summary>
+    public string? ExcludedRegionsJson { get; set; }
+
+    /// <summary>Explicit motion system for calibration; null means unknown.</summary>
+    public CalibrationMotionType? CalibrationMotionType { get; set; }
+
+    /// <summary>Maximum travel speed in millimeters per second.</summary>
+    public int? MaxTravelSpeed { get; set; }
+
+    /// <summary>Maximum print acceleration in millimeters per second squared.</summary>
+    public int? MaxAcceleration { get; set; }
+
+    /// <summary>Maximum travel acceleration in millimeters per second squared.</summary>
+    public int? MaxTravelAcceleration { get; set; }
+
+    /// <summary>
+    /// Explicit heated-bed value for calibration. This is separate from legacy catalog defaults.
+    /// </summary>
+    public bool? CalibrationHasHeatedBed { get; set; }
+
+    /// <summary>
+    /// Explicit enclosure value for calibration. This is separate from legacy catalog defaults.
+    /// </summary>
+    public bool? CalibrationHasEnclosure { get; set; }
+
+    /// <summary>Whether the printer has an actively heated chamber.</summary>
+    public bool? HasHeatedChamber { get; set; }
+
+    /// <summary>Maximum chamber temperature in degrees Celsius.</summary>
+    public int? MaxChamberTemp { get; set; }
+
+    /// <summary>Zero-based active physical toolhead index.</summary>
+    public int? ActiveToolheadIndex { get; set; }
+
+    /// <summary>Whether Klipper pressure-advance semantics were verified.</summary>
+    public bool? SupportsPressureAdvance { get; set; }
+
+    /// <summary>Whether Klipper firmware-retraction semantics were verified.</summary>
+    public bool? SupportsFirmwareRetraction { get; set; }
+
+    /// <summary>When the complete calibration hardware metadata was verified.</summary>
+    public DateTime? CalibrationHardwareVerifiedAtUtc { get; set; }
+
+    /// <summary>Explicit slicer engine identity selected for calibration.</summary>
+    public string? CalibrationSlicerEngine { get; set; }
+
+    /// <summary>Explicit slicer distribution identity selected for calibration.</summary>
+    public string? CalibrationSlicerDistribution { get; set; }
+
+    /// <summary>Explicit pinned slicer version selected for calibration.</summary>
+    public string? CalibrationSlicerVersion { get; set; }
+
+    /// <summary>Explicit slicer profile-format identity selected for calibration.</summary>
+    public string? CalibrationProfileFormat { get; set; }
+
+    /// <summary>Explicit upstream OrcaSlicer machine profile soft reference.</summary>
+    public Guid? CalibrationMachineProfileId { get; set; }
+
+    /// <summary>Explicit upstream OrcaSlicer process profile soft reference.</summary>
+    public Guid? CalibrationProcessProfileId { get; set; }
+
+    /// <summary>Explicit upstream OrcaSlicer filament profile soft reference.</summary>
+    public Guid? CalibrationFilamentProfileId { get; set; }
 
     // Bed temperature ranges
     public int? MaxBedTemp { get; set; }

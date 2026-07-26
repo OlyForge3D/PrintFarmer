@@ -5,6 +5,7 @@ using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Idempotency;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
@@ -15,6 +16,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.PartsInventory;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -49,7 +51,7 @@ public class JobQueueController(
     /// <param name="nozzle">Optional required nozzle diameter in mm (e.g., 0.4)</param>
     /// <param name="material">Optional required material type (e.g., "PLA", "PCTG")</param>
     [HttpGet]
-    [AllowAnonymous]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(IEnumerable<QueueOverviewDto>), 200)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<QueueOverviewDto>>> GetQueueAsync(
@@ -74,6 +76,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="request">The print job request containing G-code file ID and optional settings.</param>
     [HttpPost]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -133,7 +136,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job to retrieve.</param>
     [HttpGet("{id:guid}")]
-    [AllowAnonymous]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -157,6 +160,7 @@ public class JobQueueController(
     /// <param name="id">The unique identifier of the job to update.</param>
     /// <param name="request">The update request containing new status, priority, or assignment.</param>
     [HttpPut("{id:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -197,6 +201,7 @@ public class JobQueueController(
     /// <param name="id">The unique identifier of the job to dispatch.</param>
     /// <returns>The updated job with Starting/Printing status.</returns>
     [HttpPost("{id:guid}/dispatch")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -230,6 +235,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job to cancel.</param>
     [HttpPost("{id:guid}/cancel")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -263,6 +269,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job whose current print to abort.</param>
     [HttpPost("{id:guid}/abort-print")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -295,6 +302,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the completed job to rerun.</param>
     [HttpPost("{id:guid}/rerun")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -381,6 +389,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The unique identifier of the job to delete.</param>
     [HttpDelete("{id:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -406,7 +415,7 @@ public class JobQueueController(
     /// </summary>
     /// <returns>The number of jobs that were synchronized.</returns>
     [HttpPost("sync-orphaned")]
-    [AllowAnonymous]
+    [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> SyncOrphanedJobsAsync()
@@ -441,6 +450,7 @@ public class JobQueueController(
     /// </summary>
     /// <param name="id">The print job ID to find candidates for.</param>
     [HttpGet("{id:guid}/candidates")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<DispatchCandidateDto>), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -470,6 +480,7 @@ public class JobQueueController(
     /// <param name="id">The print job ID to dispatch.</param>
     /// <param name="request">The dispatch request containing the target printer ID.</param>
     [HttpPost("{id:guid}/dispatch-to")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -506,6 +517,7 @@ public class JobQueueController(
     /// <param name="request">Batch dispatch parameters.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("batch-dispatch")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(BatchDispatchResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]

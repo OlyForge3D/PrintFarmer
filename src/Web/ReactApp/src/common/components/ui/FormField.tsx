@@ -10,6 +10,10 @@ export interface FormFieldProps {
   required?: boolean;
   className?: string;
   inline?: boolean;
+  /** Optional id applied to the rendered helper text, for aria-describedby wiring. */
+  helperId?: string;
+  /** Optional id applied to the rendered error text, for aria-describedby wiring. */
+  errorId?: string;
 }
 
 export const FormField: React.FC<FormFieldProps> = ({
@@ -20,7 +24,9 @@ export const FormField: React.FC<FormFieldProps> = ({
   children,
   required = false,
   className,
-  inline = false
+  inline = false,
+  helperId,
+  errorId
 }) => {
   return (
     <div className={clsx('flex flex-col gap-1', inline && 'md:flex-row md:items-center', className)}>
@@ -35,10 +41,10 @@ export const FormField: React.FC<FormFieldProps> = ({
       <div className={clsx('flex flex-col gap-1', inline && 'flex-1')}>
         {children}
         {helper && !error && (
-          <div className="text-xs text-pf-text-muted leading-relaxed">{helper}</div>
+          <div id={helperId} className="text-xs text-pf-text-muted leading-relaxed">{helper}</div>
         )}
         {error && (
-          <div className="text-xs text-pf-error-text" role="alert">{error}</div>
+          <div id={errorId} className="text-xs text-pf-error-text" role="alert">{error}</div>
         )}
       </div>
     </div>

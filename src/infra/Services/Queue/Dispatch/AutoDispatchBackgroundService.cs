@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -459,7 +460,7 @@ public sealed class AutoDispatchBackgroundService(
                     "[AutoDispatch] No compatible jobs above threshold ({Threshold}) for printer {PrinterId}",
                     settings.MinimumScoreThreshold,
                     plan.PrinterId);
-                await hub.Clients.All.SendAsync(
+                await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
                     "dispatchfailed",
                     new DispatchFailedEvent
                     {
@@ -502,7 +503,7 @@ public sealed class AutoDispatchBackgroundService(
             CreatedAtUtc = DateTime.UtcNow,
         });
         await db.SaveChangesAsync(ct);
-        await hub.Clients.All.SendAsync(
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
             "dispatchsuggestion",
             new DispatchSuggestionEvent
             {
@@ -559,7 +560,7 @@ public sealed class AutoDispatchBackgroundService(
                 plan.JobName,
                 plan.PrinterName,
                 score.TotalScore);
-            await hub.Clients.All.SendAsync(
+            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
                 "jobautodispatched",
                 new JobAutoDispatchedEvent
                 {
@@ -617,7 +618,7 @@ public sealed class AutoDispatchBackgroundService(
                 "[AutoDispatch] Failed to save dispatch failure log");
         }
 
-        await hub.Clients.All.SendAsync(
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
             "dispatchfailed",
             new DispatchFailedEvent
             {

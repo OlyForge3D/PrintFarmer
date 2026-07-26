@@ -33,6 +33,20 @@ public interface IPrinterStatusCacheReader
     IReadOnlyDictionary<Guid, PrinterStatusDto> GetAllStatuses();
 }
 
+/// <summary>Reads freshness-aware status snapshots for safety-sensitive operations.</summary>
+public interface IPrinterStatusSnapshotReader
+{
+    /// <summary>Gets the latest status observation and last-seen timestamp for a printer.</summary>
+    PrinterStatusSnapshot? GetStatusSnapshot(Guid printerId);
+}
+
+/// <summary>Freshness metadata attached when a backend status update reaches the server.</summary>
+public sealed record PrinterStatusSnapshot(
+    PrinterStatusDto Status,
+    DateTime? ObservedAtUtc,
+    DateTime? LastSeenAtUtc,
+    string Source);
+
 /// <summary>
 /// Optional cache-reader capability for atomic fleet snapshots with provenance.
 /// </summary>
@@ -50,7 +64,9 @@ public interface IPrinterStatusCacheProvenanceReader
 public sealed record PrinterStatusCacheSnapshot(
     PrinterStatusDto Status,
     DateTime UpdatedAtUtc,
-    long? OriginWatermark = null);
+    long? OriginWatermark = null,
+    DateTime? LastSeenAtUtc = null,
+    string Source = "backend");
 
 /// <summary>
 /// Shared freshness policy for decisions that require live printer telemetry.
@@ -86,6 +102,7 @@ public static class PrinterStatusFreshness
 public class PrinterStatusCache :
     IPrinterStatusCacheReader,
     IPrinterStatusCacheProvenanceReader,
+    IPrinterStatusSnapshotReader,
     IPrinterStatusCacheWriter
 {
     private readonly Dictionary<Guid, PrinterStatusCacheSnapshot> _cache = new();
@@ -135,6 +152,20 @@ public class PrinterStatusCache :
         }
     }
 
+    public PrinterStatusSnapshot? GetStatusSnapshot(Guid printerId)
+    {
+        lock (_lockObj)
+        {
+            return _cache.TryGetValue(printerId, out PrinterStatusCacheSnapshot? snapshot)
+                ? new PrinterStatusSnapshot(
+                    snapshot.Status,
+                    snapshot.UpdatedAtUtc,
+                    snapshot.LastSeenAtUtc,
+                    snapshot.Source)
+                : null;
+        }
+    }
+
     public IReadOnlyDictionary<Guid, PrinterStatusCacheSnapshot> GetAllSnapshots()
     {
         lock (_lockObj)
@@ -150,12 +181,16 @@ public class PrinterStatusCache :
         {
             _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
             PrinterStatusDto? existing = existingSnapshot?.Status;
+            DateTime observedAtUtc = DateTime.UtcNow;
+            PrinterStatusDto normalized = status.WithNormalizedFileName();
             _cache[status.Id] = new PrinterStatusCacheSnapshot(
-                status.WithNormalizedFileName(),
-                DateTime.UtcNow,
-                originWatermark);
-            LogTransitionIfChanged(status.Id, existing, status);
-            transition = DetectOfflineTransition(existing, status);
+                normalized,
+                observedAtUtc,
+                originWatermark,
+                normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
+                "backend");
+            LogTransitionIfChanged(status.Id, existing, normalized);
+            transition = DetectOfflineTransition(existing, normalized);
         }
 
         EmitOfflineTransition(status.Id, transition);
@@ -175,12 +210,16 @@ public class PrinterStatusCache :
             {
                 _cache.TryGetValue(status.Id, out PrinterStatusCacheSnapshot? existingSnapshot);
                 PrinterStatusDto? existing = existingSnapshot?.Status;
+                DateTime observedAtUtc = DateTime.UtcNow;
+                PrinterStatusDto normalized = status.WithNormalizedFileName();
                 _cache[status.Id] = new PrinterStatusCacheSnapshot(
-                    status.WithNormalizedFileName(),
-                    DateTime.UtcNow,
-                    originWatermark);
-                LogTransitionIfChanged(status.Id, existing, status);
-                if (DetectOfflineTransition(existing, status) is AttentionChangeKind kind)
+                    normalized,
+                    observedAtUtc,
+                    originWatermark,
+                    normalized.IsOnline ? observedAtUtc : existingSnapshot?.LastSeenAtUtc,
+                    "backend");
+                LogTransitionIfChanged(status.Id, existing, normalized);
+                if (DetectOfflineTransition(existing, normalized) is AttentionChangeKind kind)
                 {
                     (transitions ??= new()).Add((status.Id, kind));
                 }
@@ -205,7 +244,12 @@ public class PrinterStatusCache :
                 with
             { SpoolInfo = spoolInfo };
             _cache[printerId] = existingSnapshot is null
-                ? new PrinterStatusCacheSnapshot(updated, DateTime.UtcNow, OriginWatermark: null)
+                ? new PrinterStatusCacheSnapshot(
+                    updated,
+                    DateTime.UtcNow,
+                    OriginWatermark: null,
+                    LastSeenAtUtc: null,
+                    Source: "unknown")
                 : existingSnapshot with { Status = updated };
 
             return updated;

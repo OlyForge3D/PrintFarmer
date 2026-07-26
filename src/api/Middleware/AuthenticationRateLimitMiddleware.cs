@@ -1,15 +1,25 @@
-﻿using Farm.Infrastructure.Services.RateLimiting;
+﻿using System.Net;
+using Farm.Infrastructure.Services.RateLimiting;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Primitives;
 
 namespace Farm.Web.Api.Middleware;
 
 /// <summary>
-/// Middleware that enforces rate limiting on authentication endpoints (login and register).
-/// Limits are applied per IP address to prevent brute force attacks.
+/// Middleware that enforces rate limiting on authentication endpoints (login, register,
+/// and Desktop API-key exchange). Limits are applied per client IP address to prevent
+/// brute force attacks and key enumeration.
+///
+/// The client IP is always sourced from <see cref="HttpContext.Connection"/>. Callers
+/// must NOT parse <c>X-Forwarded-For</c> here — that is the job of the framework's
+/// forwarded-headers middleware (see <see cref="Farm.Web.Api.Infrastructure.ForwardedHeadersConfiguration"/>),
+/// which only rewrites <c>Connection.RemoteIpAddress</c> when the immediate connection
+/// is from an operator-declared trusted proxy. Trusting the header directly would let a
+/// caller rotate the header value on each request and bypass the per-IP limit
+/// (security issue #862).
 /// </summary>
 public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<AuthenticationRateLimitMiddleware> logger)
 {
+    private const string UnknownIpKey = "unknown";
     private readonly RequestDelegate _next = next;
     private readonly ILogger<AuthenticationRateLimitMiddleware> _logger = logger;
 
@@ -42,34 +52,24 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
             return;
         }
 
-        // Check if this is a login or register endpoint
+        // Check if this is a login, register, or Desktop API-key exchange endpoint
         bool isLogin = path.EndsWith("/api/auth/login");
         bool isRegister = path.EndsWith("/api/auth/register");
+        bool isApiKeyExchange = path.EndsWith("/api/auth/api-key/exchange");
 
-        if (!isLogin && !isRegister)
+        if (!isLogin && !isRegister && !isApiKeyExchange)
         {
             await _next(context);
             return;
         }
 
-        // Get client IP address. Prefer X-Forwarded-For if present (tests and proxies
-        // can set this). Fall back to connection remote address or "unknown".
-        string ipAddress = "unknown";
-        try
-        {
-            if (context.Request.Headers.TryGetValue("X-Forwarded-For", out StringValues headerVal) && !string.IsNullOrEmpty(headerVal))
-            {
-                ipAddress = headerVal.ToString();
-            }
-            else
-            {
-                ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            }
-        }
-        catch
-        {
-            ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        }
+        // Source the client IP strictly from Connection.RemoteIpAddress. When the app
+        // sits behind a properly configured reverse proxy, the framework's
+        // UseForwardedHeaders middleware (enabled via ForwardedHeaders:Enabled + trusted
+        // KnownProxies / KnownNetworks) has already rewritten this to the forwarded
+        // client IP; otherwise it is the direct TCP peer. Either way, an untrusted caller
+        // cannot influence the value via a raw X-Forwarded-For header.
+        string ipAddress = ResolveClientIp(context);
 
         // Check rate limit based on endpoint type
         RateLimitResult rateLimitResult;
@@ -77,10 +77,14 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         {
             rateLimitResult = await rateLimitService.CheckLoginLimitAsync(ipAddress);
         }
+        else if (isRegister)
+        {
+            rateLimitResult = await rateLimitService.CheckRegisterLimitAsync(ipAddress);
+        }
         else
         {
-            // isRegister
-            rateLimitResult = await rateLimitService.CheckRegisterLimitAsync(ipAddress);
+            // isApiKeyExchange
+            rateLimitResult = await rateLimitService.CheckApiKeyExchangeLimitAsync(ipAddress);
         }
 
         if (!rateLimitResult.IsAllowed)
@@ -94,7 +98,7 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
                 context.Response.Headers["Retry-After"] = ((int)rateLimitResult.RetryAfter.Value.TotalSeconds).ToString();
             }
 
-            string endpoint = isLogin ? "login" : "register";
+            string endpoint = isLogin ? "login" : isRegister ? "register" : "api-key-exchange";
             _logger.LogWarning("Rate limit exceeded for {Endpoint} from IP {IpAddress}", endpoint, ipAddress);
 
             await context.Response.WriteAsJsonAsync(new
@@ -112,11 +116,41 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         {
             await rateLimitService.RecordLoginAttemptAsync(ipAddress);
         }
-        else
+        else if (isRegister)
         {
             await rateLimitService.RecordRegisterAttemptAsync(ipAddress);
         }
+        else
+        {
+            await rateLimitService.RecordApiKeyExchangeAttemptAsync(ipAddress);
+        }
 
         await _next(context);
+    }
+
+    private static string ResolveClientIp(HttpContext context)
+    {
+        try
+        {
+            IPAddress? remote = context.Connection.RemoteIpAddress;
+            if (remote is null)
+            {
+                return UnknownIpKey;
+            }
+
+            // Normalize IPv4-mapped IPv6 addresses (::ffff:1.2.3.4) so a single client
+            // always maps to the same rate-limit bucket regardless of the socket family
+            // the reverse proxy connected on.
+            if (remote.IsIPv4MappedToIPv6)
+            {
+                remote = remote.MapToIPv4();
+            }
+
+            return remote.ToString();
+        }
+        catch
+        {
+            return UnknownIpKey;
+        }
     }
 }

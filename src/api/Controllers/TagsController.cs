@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Tags;
+﻿using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -288,6 +289,68 @@ public class TagsController(
         {
             _unifiedLoggingService?.LogError(ex, "[TagsController] DeleteTagAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to delete tag" });
+        }
+    }
+
+    /// <summary>
+    /// Updates a tag's metadata using optimistic concurrency (#844).
+    /// </summary>
+    /// <param name="tagId">Unique tag identifier</param>
+    /// <param name="updateTagDto">Fields to update plus the expected revision</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>The updated tag</returns>
+    /// <response code="200">Tag updated successfully</response>
+    /// <response code="400">Invalid request</response>
+    /// <response code="401">Unauthorized</response>
+    /// <response code="404">Tag not found</response>
+    /// <response code="409">Revision conflict or duplicate tag name</response>
+    /// <response code="500">Internal server error</response>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPut("{tagId:guid}")]
+    [ProducesResponseType(typeof(TagDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<TagDto>> UpdateTagAsync(
+        [FromRoute] Guid tagId,
+        [FromBody] UpdateTagDto updateTagDto,
+        CancellationToken ct)
+    {
+        if (updateTagDto is null)
+        {
+            return BadRequest(new { error = "Update payload is required" });
+        }
+
+        try
+        {
+            TagDto tag = await _tagService.UpdateTagAsync(tagId, updateTagDto, ct);
+            return Ok(tag);
+        }
+        catch (KeyNotFoundException ex)
+        {
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] UpdateTagAsync - Tag not found: {Message}", ex.Message);
+            return NotFound(new { error = ex.Message });
+        }
+        catch (TagConcurrencyException ex)
+        {
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] UpdateTagAsync - Revision conflict: {Message}", ex.Message);
+            return Conflict(new { error = ex.Message, expectedRevision = ex.ExpectedRevision, actualRevision = ex.ActualRevision });
+        }
+        catch (DuplicateEntityException ex)
+        {
+            _unifiedLoggingService?.LogWarning(ex, "[TagsController] UpdateTagAsync - Duplicate name: {Message}", ex.Message);
+            return Conflict(new { error = ex.Message });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[TagsController] UpdateTagAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update tag" });
         }
     }
 

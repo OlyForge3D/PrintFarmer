@@ -1,0 +1,729 @@
+#!/usr/bin/env bash
+# =============================================================================
+# select-dotnet-tests.sh — path-aware selector for CI .NET matrix
+#
+# Emits deterministic GITHUB_OUTPUT lines that downstream CI jobs consume to
+# decide (a) whether the frontend build/test job runs, (b) whether the full
+# .NET solution is compiled, (c) which .NET test projects run in a matrix,
+# (d) which EF Core migration-drift context/provider pairs run, and (e) a
+# human-readable reason used in job summaries.
+#
+# Inputs (env):
+#   CHANGED_FILES_FROM_Z  path to a file containing NUL-terminated changed paths
+#                         (produced by `git diff -z --no-renames --name-only`).
+#                         Preferred over CHANGED_FILES.
+#   CHANGED_FILES         newline-separated changed paths (fallback). Any path
+#                         containing a control character, backslash, or quote
+#                         forces full-safe (Git may have quoted the path).
+#   EVENT_NAME            GitHub event name: pull_request | push |
+#                         workflow_dispatch | (empty). Trusted-branch pushes
+#                         and workflow_dispatch always force full-safe.
+#   BASE_REF              base branch name for push events (e.g. main).
+#   FORCE_FULL_SAFE       when non-empty, forces the full safe matrix and
+#                         records the value as the reason. Used by the calling
+#                         workflow when diff discovery itself failed.
+#   GITHUB_OUTPUT         path to the step outputs file (required). Failure to
+#                         write to it exits with rc=3 rather than silently
+#                         producing no outputs.
+#
+# Outputs (GITHUB_OUTPUT):
+#   want_frontend, want_dotnet_build, want_dotnet_test, want_mig_drift
+#         — string booleans "true" | "false".
+#   full_matrix
+#         — "true" when the full safe fallback was chosen.
+#   matrix
+#         — JSON object with `include` list of {name, project, label} for the
+#           .NET test matrix. Always contains at least one element (or
+#           want_dotnet_test=false).
+#   mig_matrix
+#         — JSON object with `include` list of {name, project, context,
+#           provider} for the migration-drift matrix. May be empty when
+#           want_mig_drift=false.
+#   reason
+#         — sanitized human-readable string describing the decision. ASCII
+#           allowlist [a-zA-Z0-9._/:[:space:]-] only; shell metacharacters are
+#           stripped so downstream `run:` blocks that reference `$REASON` via
+#           step env cannot be command-injected.
+# =============================================================================
+
+set -uo pipefail
+
+SCRIPT_VERSION="1.2.1"
+
+# ---------------------------------------------------------------------------
+# Required CI test projects. The final field opts projects into special MSBuild
+# properties during restore, build, and test. Farm.Web.IntegrationTests
+# intentionally lives outside farm-web.sln and must be invoked directly with
+# RunIntegrationTests=true because its csproj disables test discovery otherwise.
+# ---------------------------------------------------------------------------
+readonly ALL_TEST_PROJECTS=(
+  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false"
+  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false"
+  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false"
+  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true"
+)
+
+# All migration context/provider pairs (matches the ci.yml legacy drift block).
+readonly ALL_MIG_ENTRIES=(
+  "AppPg|AppDbContext PostgreSQL|migrations/Farm.Migrations.PostgreSQL|AppDbContext|postgres"
+  "AppSqlServer|AppDbContext SQL Server|migrations/Farm.Migrations.SqlServer|AppDbContext|sqlserver"
+  "SlicerPg|SlicerDbContext PostgreSQL|migrations/Farm.Slicer.Migrations.PostgreSQL|SlicerDbContext|postgres"
+  "SlicerSqlServer|SlicerDbContext SQL Server|migrations/Farm.Slicer.Migrations.SqlServer|SlicerDbContext|sqlserver"
+)
+
+# ---------------------------------------------------------------------------
+# Sanitize a free-form reason string: keep ASCII alphanumerics, dot, slash,
+# underscore, colon, brackets, whitespace, and hyphen. Everything else — dollar,
+# backtick, backslash, quotes, semicolon, ampersand, pipe, control chars — is
+# stripped. Truncated to 300 chars to keep step summaries bounded.
+# ---------------------------------------------------------------------------
+sanitize_reason() {
+  local raw="${1-}"
+  local clean
+  clean="$(printf '%s' "$raw" | LC_ALL=C tr -c 'A-Za-z0-9._/:[:space:]\-' ' ' | tr -s ' ')"
+  clean="${clean## }"
+  clean="${clean%% }"
+  if (( ${#clean} > 300 )); then
+    clean="${clean:0:297}..."
+  fi
+  printf '%s' "$clean"
+}
+
+# ---------------------------------------------------------------------------
+# Write a single key=value line to $GITHUB_OUTPUT. Multi-line values use the
+# heredoc form (`KEY<<DELIM ... DELIM`). Exits rc=3 if writes fail — the
+# workflow depends on every output being present.
+# ---------------------------------------------------------------------------
+emit() {
+  local key="$1"
+  local value="$2"
+  if [[ -z "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'select-dotnet-tests: GITHUB_OUTPUT is unset — cannot emit %s\n' "$key" >&2
+    exit 3
+  fi
+  if [[ ! -w "$GITHUB_OUTPUT" ]]; then
+    printf 'select-dotnet-tests: GITHUB_OUTPUT (%s) is not writable\n' "$GITHUB_OUTPUT" >&2
+    exit 3
+  fi
+  if [[ "$value" == *$'\n'* ]]; then
+    local delim
+    delim="EOF_$(printf '%s%s' "$key" "$RANDOM" | tr -cd 'A-Za-z0-9')"
+    {
+      printf '%s<<%s\n' "$key" "$delim"
+      printf '%s\n' "$value"
+      printf '%s\n' "$delim"
+    } >> "$GITHUB_OUTPUT" || exit 3
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$GITHUB_OUTPUT" || exit 3
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Load changed files from CHANGED_FILES_FROM_Z (NUL-terminated) first, falling
+# back to CHANGED_FILES (newline-separated). Returns nonzero on I/O failure.
+# Sets globals CHANGED_LIST (bash array) and CHANGED_COUNT.
+# ---------------------------------------------------------------------------
+CHANGED_LIST=()
+CHANGED_COUNT=0
+
+check_nul_terminated() {
+  local f="$1"
+  # Empty file is valid (no changes).
+  if [[ ! -s "$f" ]]; then
+    return 0
+  fi
+  local last_byte
+  # Pipefail is inherited. Reject if the pipeline itself failed OR if the
+  # last byte is not 00 (Git NUL-terminates every record including the last).
+  last_byte="$(tail -c1 "$f" | od -An -tx1 | tr -d ' \n')" || return 1
+  if [[ -z "$last_byte" ]]; then
+    return 1
+  fi
+  if [[ "$last_byte" != "00" ]]; then
+    return 1
+  fi
+  return 0
+}
+
+load_changed_files() {
+  CHANGED_LIST=()
+  CHANGED_COUNT=0
+
+  local z_file="${CHANGED_FILES_FROM_Z:-}"
+  if [[ -n "$z_file" ]]; then
+    if [[ ! -r "$z_file" ]]; then
+      printf 'select-dotnet-tests: CHANGED_FILES_FROM_Z=%s is not readable\n' "$z_file" >&2
+      return 1
+    fi
+    if ! check_nul_terminated "$z_file"; then
+      printf 'select-dotnet-tests: CHANGED_FILES_FROM_Z=%s is not properly NUL-terminated\n' "$z_file" >&2
+      return 1
+    fi
+    # BSD awk on macOS cannot use NUL as RS. Use bash read with -d ''.
+    local entry
+    while IFS= read -r -d '' entry; do
+      # Empty entries can appear if the input starts with NUL; skip them.
+      [[ -z "$entry" ]] && continue
+      CHANGED_LIST+=("$entry")
+    done < "$z_file"
+    CHANGED_COUNT=${#CHANGED_LIST[@]}
+    return 0
+  fi
+
+  local nl_input="${CHANGED_FILES:-}"
+  if [[ -z "$nl_input" ]]; then
+    CHANGED_COUNT=0
+    return 0
+  fi
+  # Newline-separated input cannot represent paths containing newlines. Detect
+  # Git-quoted paths (leading double quote) and control characters, and force
+  # full-safe by returning nonzero — the caller records this as fail-safe.
+  local line
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    # Reject Git-quoted paths ("path\nwith\tspecial") — caller must set
+    # core.quotePath=false and switch to CHANGED_FILES_FROM_Z.
+    if [[ "$line" == \"* ]]; then
+      printf 'select-dotnet-tests: CHANGED_FILES contains git-quoted path; refusing (set CHANGED_FILES_FROM_Z)\n' >&2
+      return 1
+    fi
+    # Reject embedded control characters.
+    if printf '%s' "$line" | LC_ALL=C grep -q $'[\x01-\x08\x0b-\x1f\x7f]'; then
+      printf 'select-dotnet-tests: CHANGED_FILES contains control character; refusing\n' >&2
+      return 1
+    fi
+    CHANGED_LIST+=("$line")
+  done <<< "$nl_input"
+  CHANGED_COUNT=${#CHANGED_LIST[@]}
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# Classification of one path. Sets integer bitfield flags on stdout as a
+# space-separated list of category tokens. We keep this out-of-band from
+# the affected-tests table so callers can print human-readable reasons.
+#
+# Tokens (order matters only for readability):
+#   shared_config   — global.json, *.sln, Directory.Build.*,
+#                     Directory.Packages.props, NuGet.Config
+#   ci_selector     — .github/workflows/**, scripts/ci/**, .githooks/**,
+#                     .devcontainer/**
+#   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
+#   frontend        — src/Web/**
+#   api             — src/api/**
+#   infra           — src/infra/** (conservatively includes App model drift)
+#   backend_core    — src/backends/Farm.Backend.Plugin.Core/**
+#                     (referenced by Farm.Slicer.Module in addition to the
+#                     concrete plugins, so both test projects are affected).
+#   backend_plugin  — every other src/backends/** path (concrete plugin
+#                     projects: Moonraker, PrusaLink, OctoPrint, Sdcp,
+#                     FlashForge, TestEmulator). Farm.Web.Api.Tests and
+#                     Farm.Web.IntegrationTests both exercise the assembled
+#                     Farm.Web.Api graph that references these.
+#   slicer          — src/slicer/**, src/Slicers/**, src/worker-shared/**
+#   orca_worker     — src/orcaslicer-worker/**
+#   discovery       — src/discovery/**, src/printer-discovery/**
+#   settings        — src/settings/**
+#   migrations_app  — src/migrations/Farm.Migrations.*/**
+#   migrations_slcr — src/migrations/Farm.Slicer.Migrations.*/**
+#   tests_api       — src/tests/Farm.Web.Api.Tests/**
+#   tests_slicer    — src/tests/Farm.Slicer.Module.Tests/**
+#   tests_orca      — src/tests/Farm.OrcaSlicer.Worker.Tests/**
+#   tests_integration — src/tests/Farm.Web.IntegrationTests/**
+#   tests_other     — any other src/tests/**
+#   tools           — src/tools/**
+#   dotnet_config   — src/*.props, src/*.targets, src/.editorconfig
+#   mobile          — mobile/** (does not force any .NET action)
+#   unknown_src     — any other src/**
+#   unclassified    — anything else outside the buckets above
+# ---------------------------------------------------------------------------
+classify_path() {
+  local p="$1"
+  # Reject anything that could be shell-metacharacter-injected before we act.
+  # The reason sanitizer will scrub the final string; classifier itself is
+  # data-only.
+  case "$p" in
+    # Shared configuration that affects every project.
+    global.json|NuGet.Config|NuGet.config|nuget.config|Directory.Build.props|Directory.Build.targets|Directory.Packages.props)
+      printf 'shared_config' ; return ;;
+    */Directory.Build.props|*/Directory.Build.targets|*/Directory.Packages.props)
+      printf 'shared_config' ; return ;;
+    src/farm-web.sln|src/.editorconfig)
+      printf 'shared_config' ; return ;;
+    *.sln)
+      printf 'shared_config' ; return ;;
+
+    # CI selector, workflows, hooks, devcontainer post-create integration.
+    .github/workflows/*)
+      printf 'ci_selector' ; return ;;
+    scripts/ci/*)
+      printf 'ci_selector' ; return ;;
+    .githooks/*)
+      printf 'ci_selector' ; return ;;
+    .devcontainer/*)
+      printf 'ci_selector' ; return ;;
+
+    # iOS/macOS surface — does not trigger .NET work.
+    mobile/*)
+      printf 'mobile' ; return ;;
+
+    # Documentation and markdown outside src/. `LICENSE.md` is intentionally
+    # not listed separately because `*.md` already covers it (ShellCheck
+    # SC2221 flagged the redundancy in an earlier iteration).
+    docs/*|*.md|LICENSE|.gitignore|.gitattributes|.editorconfig)
+      printf 'docs' ; return ;;
+
+    # Frontend.
+    src/Web/*)
+      printf 'frontend' ; return ;;
+  esac
+
+  case "$p" in
+    src/api/*)               printf 'api' ; return ;;
+    src/infra/*)             printf 'infra' ; return ;;
+    # Farm.Backend.Plugin.Core is the shared plugin abstraction referenced by
+    # BOTH `Farm.Slicer.Module` (via ../../backends/Farm.Backend.Plugin.Core)
+    # and every concrete backend plugin. Because Farm.Slicer.Module.Tests
+    # transitively depends on it through Farm.Slicer.Module, any Core edit
+    # affects the slicer test project too. Match this bucket BEFORE the more
+    # general `src/backends/*` case so concrete plugins keep their narrower
+    # API-tests-only classification. See docs/CI.md for the mapping table.
+    src/backends/Farm.Backend.Plugin.Core/*) printf 'backend_core' ; return ;;
+    src/backends/*)          printf 'backend_plugin' ; return ;;
+    src/slicer/*)            printf 'slicer' ; return ;;
+    src/Slicers/*)           printf 'slicer' ; return ;;
+    src/worker-shared/*)     printf 'slicer' ; return ;;
+    src/orcaslicer-worker/*) printf 'orca_worker' ; return ;;
+    src/discovery/*)         printf 'discovery' ; return ;;
+    src/printer-discovery/*) printf 'discovery' ; return ;;
+    src/settings/*)          printf 'settings' ; return ;;
+    src/migrations/Farm.Migrations.*)         printf 'migrations_app' ; return ;;
+    src/migrations/Farm.Slicer.Migrations.*)  printf 'migrations_slcr' ; return ;;
+    src/tests/Farm.Web.Api.Tests/*)             printf 'tests_api' ; return ;;
+    src/tests/Farm.Slicer.Module.Tests/*)       printf 'tests_slicer' ; return ;;
+    src/tests/Farm.OrcaSlicer.Worker.Tests/*)   printf 'tests_orca' ; return ;;
+    src/tests/Farm.Web.IntegrationTests/*)      printf 'tests_integration' ; return ;;
+    src/tests/*)             printf 'tests_other' ; return ;;
+    src/tools/*)             printf 'tools' ; return ;;
+  esac
+
+  case "$p" in
+    src/*)   printf 'unknown_src' ; return ;;
+    *)       printf 'unclassified' ; return ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Emit the final matrix and outputs, then exit 0.
+# ---------------------------------------------------------------------------
+finish() {
+  local want_frontend="$1" want_dotnet_build="$2" want_dotnet_test="$3"
+  local want_mig_drift="$4" full_matrix="$5" reason_raw="$6"
+  shift 6
+  # Remaining args: test project names, then a "---" separator, then mig entry names.
+  # `"$@"` is safe with 0 args; we defensively guard subsequent array
+  # expansions with `${arr[@]+"${arr[@]}"}` for Bash 3.2 + `set -u`
+  # (macOS default), which errors on `"${empty_arr[@]}"`.
+  local test_selected=() mig_selected=() sawsep=0
+  local a
+  for a in "$@"; do
+    if [[ "$a" == "---" ]]; then sawsep=1; continue; fi
+    if (( sawsep == 0 )); then
+      test_selected+=("$a")
+    else
+      mig_selected+=("$a")
+    fi
+  done
+
+  # Build test matrix JSON.
+  local matrix_json='{"include":[]}'
+  if (( ${#test_selected[@]} > 0 )); then
+    local items="" first=1 entry name project run_integration
+    for name in "${test_selected[@]}"; do
+      # Look up project from ALL_TEST_PROJECTS.
+      project=""
+      run_integration="false"
+      for entry in "${ALL_TEST_PROJECTS[@]}"; do
+        local entry_name entry_project entry_integration
+        IFS='|' read -r entry_name entry_project entry_integration <<< "$entry"
+        if [[ "$entry_name" == "$name" ]]; then
+          project="$entry_project"
+          run_integration="$entry_integration"
+          break
+        fi
+      done
+      if [[ -z "$project" ]]; then
+        continue
+      fi
+      local label="$name"
+      if (( first == 0 )); then items+=","; fi
+      first=0
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'","run_integration":"'"$run_integration"'"}'
+    done
+    matrix_json='{"include":['"$items"']}'
+  fi
+
+  # Build mig matrix JSON.
+  local mig_json='{"include":[]}'
+  if (( ${#mig_selected[@]} > 0 )); then
+    local items="" first=1 entry name
+    for name in "${mig_selected[@]}"; do
+      for entry in "${ALL_MIG_ENTRIES[@]}"; do
+        IFS='|' read -r ename elabel eproject econtext eprovider <<< "$entry"
+        if [[ "$ename" == "$name" ]]; then
+          if (( first == 0 )); then items+=","; fi
+          first=0
+          items+='{"name":"'"$ename"'","label":"'"$elabel"'","project":"'"$eproject"'","context":"'"$econtext"'","provider":"'"$eprovider"'"}'
+          break
+        fi
+      done
+    done
+    mig_json='{"include":['"$items"']}'
+  fi
+
+  # If want_dotnet_test=true but selection empty, that's a bug — coerce to full-safe.
+  if [[ "$want_dotnet_test" == "true" && "$matrix_json" == '{"include":[]}' ]]; then
+    reason_raw="internal: empty test selection with want_dotnet_test=true — coercing full safe"
+    full_matrix="true"
+    local items="" first=1 entry name project run_integration
+    for entry in "${ALL_TEST_PROJECTS[@]}"; do
+      IFS='|' read -r name project run_integration <<< "$entry"
+      if (( first == 0 )); then items+=","; fi
+      first=0
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$name"'","run_integration":"'"$run_integration"'"}'
+    done
+    matrix_json='{"include":['"$items"']}'
+  fi
+
+  local reason
+  reason="$(sanitize_reason "$reason_raw")"
+
+  emit "want_frontend"     "$want_frontend"
+  emit "want_dotnet_build" "$want_dotnet_build"
+  emit "want_dotnet_test"  "$want_dotnet_test"
+  emit "want_mig_drift"    "$want_mig_drift"
+  emit "full_matrix"       "$full_matrix"
+  emit "matrix"            "$matrix_json"
+  emit "mig_matrix"        "$mig_json"
+  emit "reason"            "$reason"
+
+  # Human-readable summary to stderr for the CI log.
+  {
+    printf '=== select-dotnet-tests v%s ===\n' "$SCRIPT_VERSION"
+    printf 'reason:            %s\n' "$reason"
+    printf 'want_frontend:     %s\n' "$want_frontend"
+    printf 'want_dotnet_build: %s\n' "$want_dotnet_build"
+    printf 'want_dotnet_test:  %s\n' "$want_dotnet_test"
+    printf 'want_mig_drift:    %s\n' "$want_mig_drift"
+    printf 'full_matrix:       %s\n' "$full_matrix"
+    printf 'matrix:            %s\n' "$matrix_json"
+    printf 'mig_matrix:        %s\n' "$mig_json"
+  } >&2
+
+  exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Produce every test project + every mig entry (used by full-safe fallback).
+# `ALL_TEST_PROJECTS`/`ALL_MIG_ENTRIES` are non-empty constants but we still
+# guard the `finish` invocation with `${arr[@]+…}` so a future refactor that
+# empties them cannot regress into the Bash 3.2 empty-array crash path.
+# ---------------------------------------------------------------------------
+emit_full_safe() {
+  local reason="$1"
+  local all_tests=() all_migs=() entry
+  for entry in "${ALL_TEST_PROJECTS[@]}"; do all_tests+=("${entry%%|*}"); done
+  for entry in "${ALL_MIG_ENTRIES[@]}"; do all_migs+=("${entry%%|*}"); done
+  finish "true" "true" "true" "true" "true" "$reason" \
+    ${all_tests[@]+"${all_tests[@]}"} "---" ${all_migs[@]+"${all_migs[@]}"}
+}
+
+# ---------------------------------------------------------------------------
+# Main decision logic.
+# ---------------------------------------------------------------------------
+main() {
+  # Explicit force from caller — used when the workflow's own diff step failed.
+  if [[ -n "${FORCE_FULL_SAFE:-}" ]]; then
+    emit_full_safe "full-safe: caller forced (${FORCE_FULL_SAFE})"
+  fi
+
+  local event="${EVENT_NAME:-}"
+  local base="${BASE_REF:-}"
+
+  case "$event" in
+    workflow_dispatch)
+      emit_full_safe "full-safe: workflow_dispatch"
+      ;;
+    push)
+      # Trusted branches always run the full safe matrix so nothing merges
+      # to main/development untested.
+      if [[ "$base" == "main" || "$base" == "development" ]]; then
+        emit_full_safe "full-safe: trusted push to $base"
+      fi
+      ;;
+  esac
+
+  # Load changed files. Any I/O failure — including hostile paths — falls back
+  # to full-safe rather than emitting an empty matrix.
+  if ! load_changed_files; then
+    emit_full_safe "full-safe: selector input load failed"
+  fi
+
+  if (( CHANGED_COUNT == 0 )); then
+    # No changes detected. Safest interpretation: run nothing beyond
+    # frontend=false, dotnet=false. This can happen on doc-only base-changes
+    # already merged, or on synchronize events with no fresh commits.
+    finish "false" "false" "false" "false" "false" \
+      "no changed files detected" "---"
+  fi
+
+  # Bucket flags.
+  local has_shared_config=0 has_ci_selector=0 has_frontend=0
+  local has_api=0 has_infra=0 has_backend=0 has_backend_core=0 has_slicer=0
+  local has_orca=0 has_discovery=0 has_settings=0
+  local has_mig_app=0 has_mig_slcr=0
+  local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
+  local has_tests_integration=0 has_tests_other=0
+  local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_other=0
+
+  local p category
+  for p in "${CHANGED_LIST[@]}"; do
+    category="$(classify_path "$p")"
+    case "$category" in
+      shared_config)   has_shared_config=1 ;;
+      ci_selector)     has_ci_selector=1 ;;
+      frontend)        has_frontend=1 ;;
+      api)             has_api=1 ;;
+      infra)           has_infra=1 ;;
+      backend_plugin)  has_backend=1 ;;
+      backend_core)    has_backend_core=1 ;;
+      slicer)          has_slicer=1 ;;
+      orca_worker)     has_orca=1 ;;
+      discovery)       has_discovery=1 ;;
+      settings)        has_settings=1 ;;
+      migrations_app)  has_mig_app=1 ;;
+      migrations_slcr) has_mig_slcr=1 ;;
+      tests_api)       has_tests_api=1 ;;
+      tests_slicer)    has_tests_slicer=1 ;;
+      tests_orca)      has_tests_orca=1 ;;
+      tests_integration) has_tests_integration=1 ;;
+      tests_other)     has_tests_other=1 ;;
+      tools)           has_tools=1 ;;
+      unknown_src)     has_unknown_src=1 ;;
+      docs)            has_docs=1 ;;
+      mobile)          has_mobile=1 ;;
+      *)               has_other=1 ;;
+    esac
+  done
+
+  # Full-safe conditions (highest priority) — any of these routes to the
+  # full matrix, ignoring the more granular buckets.
+  if (( has_shared_config )); then
+    emit_full_safe "full-safe: shared build/package/solution config changed"
+  fi
+  if (( has_ci_selector )); then
+    emit_full_safe "full-safe: CI selector or hook changed"
+  fi
+  if (( has_unknown_src )); then
+    emit_full_safe "full-safe: unknown src/ path (unmapped)"
+  fi
+  # Discovery/settings are foundational — nearly every other project transitively
+  # depends on them via the plugin chain. Treat as full-safe rather than
+  # attempting to enumerate.
+  if (( has_discovery )); then
+    emit_full_safe "full-safe: discovery framework changed"
+  fi
+  if (( has_settings )); then
+    emit_full_safe "full-safe: settings abstractions changed"
+  fi
+  # tests_other = a future unmapped test project. Do not silently ignore.
+  if (( has_tests_other )); then
+    emit_full_safe "full-safe: unmapped test project changed"
+  fi
+
+  # From here, we're in scoped-selection territory.
+  local test_names=() mig_names=()
+  local want_frontend="false" want_dotnet_build="false"
+  local want_dotnet_test="false" want_mig_drift="false"
+
+  if (( has_frontend )); then
+    want_frontend="true"
+  fi
+
+  # Any .NET-relevant bucket forces a full solution build to preserve compile
+  # coverage across the whole graph.
+  if (( has_api || has_infra || has_backend || has_backend_core || has_slicer ||
+        has_orca ||
+        has_mig_app || has_mig_slcr ||
+        has_tests_api || has_tests_slicer || has_tests_orca ||
+        has_tests_integration || has_tools )); then
+    want_dotnet_build="true"
+  fi
+
+  # tools alone → build only, no tests.
+  local net_test_bucket_hit=0
+  if (( has_api || has_infra )); then
+    # api / infra sit under both tests. Both are affected.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_infra )); then
+    # Farm.OrcaSlicer.Worker.Tests references infra through the worker graph.
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_backend )); then
+    # Concrete backend plugins (Moonraker/PrusaLink/OctoPrint/Sdcp/FlashForge/
+    # TestEmulator) are referenced by Farm.Web.Api. IntegrationTests targets the
+    # assembled API, so run it alongside Api.Tests; they are NOT referenced by
+    # Farm.Slicer.Module or Farm.Slicer.Module.Tests.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_backend_core )); then
+    # Farm.Backend.Plugin.Core is referenced directly by Farm.Web.Api.Tests
+    # AND transitively by Farm.Slicer.Module.Tests through Farm.Slicer.Module
+    # (src/slicer/Farm.Slicer.Module/Farm.Slicer.Module.csproj declares
+    # ../../backends/Farm.Backend.Plugin.Core/Farm.Backend.Plugin.Core.csproj).
+    # A Core edit must therefore run both test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_slicer )); then
+    # slicer projects are referenced by both test suites.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.OrcaSlicer.Worker.Tests" "Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_orca )); then
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_mig_app )); then
+    # Api.Tests and IntegrationTests cover the assembled API graph that includes
+    # the App migration projects.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Web.IntegrationTests")
+    mig_names+=("AppPg" "AppSqlServer")
+    want_mig_drift="true"
+    net_test_bucket_hit=1
+  fi
+  if (( has_mig_slcr )); then
+    # Farm.Web.Api references slicer migrations directly, IntegrationTests
+    # targets the assembled API, and Slicer.Module.Tests covers the slicer graph.
+    test_names+=("Farm.Web.Api.Tests" "Farm.Slicer.Module.Tests" "Farm.Web.IntegrationTests")
+    mig_names+=("SlicerPg" "SlicerSqlServer")
+    want_mig_drift="true"
+    net_test_bucket_hit=1
+  fi
+  # Api changes also imply App migration drift (Api owns AppDbContext model).
+  if (( has_api )); then
+    mig_names+=("AppPg" "AppSqlServer")
+    want_mig_drift="true"
+  fi
+  # AppDbContext, domain entities, and IEntityTypeConfiguration classes all
+  # live under src/infra. Conservatively run both App providers for any infra
+  # change rather than risk missing model drift when those files move.
+  if (( has_infra )); then
+    mig_names+=("AppPg" "AppSqlServer")
+    want_mig_drift="true"
+  fi
+  # Slicer changes also imply Slicer migration drift (slicer owns SlicerDbContext).
+  if (( has_slicer )); then
+    mig_names+=("SlicerPg" "SlicerSqlServer")
+    want_mig_drift="true"
+  fi
+  # Test-project-only edits: run just that test project. Skip a full sln build
+  # in the future — for now we still build to keep --no-build safe.
+  if (( has_tests_api )); then
+    test_names+=("Farm.Web.Api.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_slicer )); then
+    test_names+=("Farm.Slicer.Module.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_orca )); then
+    test_names+=("Farm.OrcaSlicer.Worker.Tests")
+    net_test_bucket_hit=1
+  fi
+  if (( has_tests_integration )); then
+    test_names+=("Farm.Web.IntegrationTests")
+    net_test_bucket_hit=1
+  fi
+  if (( net_test_bucket_hit )); then
+    want_dotnet_test="true"
+  fi
+
+  # Reason string composition.
+  local reason=""
+  if (( has_frontend )); then reason+="frontend "; fi
+  if (( has_api )); then reason+="api "; fi
+  if (( has_infra )); then reason+="infra "; fi
+  if (( has_backend )); then reason+="backend-plugin "; fi
+  if (( has_backend_core )); then reason+="backend-core "; fi
+  if (( has_slicer )); then reason+="slicer "; fi
+  if (( has_orca )); then reason+="orcaslicer-worker "; fi
+  if (( has_mig_app )); then reason+="mig-app "; fi
+  if (( has_mig_slcr )); then reason+="mig-slicer "; fi
+  if (( has_tests_api )); then reason+="tests-api "; fi
+  if (( has_tests_slicer )); then reason+="tests-slicer "; fi
+  if (( has_tests_orca )); then reason+="tests-orca "; fi
+  if (( has_tests_integration )); then reason+="tests-integration "; fi
+  if (( has_tools )); then reason+="tools "; fi
+  if (( has_docs )); then reason+="docs "; fi
+  if (( has_mobile )); then reason+="mobile "; fi
+  if (( has_other )); then reason+="other "; fi
+  reason="${reason%% }"
+  if [[ -z "$reason" ]]; then
+    reason="no relevant buckets"
+  fi
+  if [[ "$want_dotnet_test" == "false" && "$want_dotnet_build" == "true" ]]; then
+    reason="scoped: $reason (build-only)"
+  else
+    reason="scoped: $reason"
+  fi
+
+  # Dedup test/mig names with indexed arrays so the selector remains runnable
+  # under macOS's Bash 3.2 as well as CI's newer Bash. Bash 3.2 + `set -u`
+  # errors on `"${empty_arr[@]}"`; the `${arr[@]+"${arr[@]}"}` form is safe
+  # on the first-item iteration when `out`/`out2` are still empty.
+  local -a out=()
+  local nm existing duplicate
+  for nm in ${test_names[@]+"${test_names[@]}"}; do
+    duplicate=0
+    for existing in ${out[@]+"${out[@]}"}; do
+      if [[ "$existing" == "$nm" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
+      out+=("$nm")
+    fi
+  done
+  test_names=(${out[@]+"${out[@]}"})
+
+  local -a out2=()
+  local nm2 existing2
+  for nm2 in ${mig_names[@]+"${mig_names[@]}"}; do
+    duplicate=0
+    for existing2 in ${out2[@]+"${out2[@]}"}; do
+      if [[ "$existing2" == "$nm2" ]]; then
+        duplicate=1
+        break
+      fi
+    done
+    if (( duplicate == 0 )); then
+      out2+=("$nm2")
+    fi
+  done
+  mig_names=(${out2[@]+"${out2[@]}"})
+
+  # When nothing at all is wanted, still return a well-formed set of outputs.
+  # `test_names`/`mig_names` may be empty here (e.g. pure-frontend scoped run);
+  # guard both expansions so the final `finish` call is safe on Bash 3.2.
+  finish "$want_frontend" "$want_dotnet_build" "$want_dotnet_test" \
+         "$want_mig_drift" "false" "$reason" \
+         ${test_names[@]+"${test_names[@]}"} "---" ${mig_names[@]+"${mig_names[@]}"}
+}
+
+main "$@"

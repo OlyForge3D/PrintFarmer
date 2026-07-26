@@ -13,10 +13,14 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
+    public const string SlicerVersion = "2.3.1";
+    public const string UpstreamDistributionCapability = "orcaslicer-upstream";
+
     // Legacy static capability list — retained for the diagnostic root endpoint.
     // Live routing uses WorkerCapabilityProvider so the version-specific tag
     // (issue #578) is emitted from configuration.
-    public static readonly string[] Capabilities = ["orcaslicer", "stl-processing", "gcode-generation"];
+    public static readonly string[] Capabilities =
+        ["orcaslicer", UpstreamDistributionCapability, "stl-processing", "gcode-generation"];
 }
 
 public static class Program
@@ -123,7 +127,7 @@ public static class Program
         _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
         {
             service = "orcaslicer-worker",
-            version = "1.0.0",
+            version = WorkerConstants.SlicerVersion,
             status = "running",
             realBinary = detector.IsRealBinaryPresent(),
             capabilities = WorkerConstants.Capabilities
@@ -155,6 +159,7 @@ public static class Program
                 orcaslicerVersion = orcaVersion,
                 environment = app.Environment.EnvironmentName,
                 runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                workerVersion = WorkerConstants.SlicerVersion,
                 timestamp = DateTime.UtcNow,
             });
         }

@@ -16,11 +16,13 @@ These are the main documentation files you should read first:
 - **[UI.md](./UI.md)** - Frontend components and pages
 - **[DEVELOPMENT.md](./DEVELOPMENT.md)** - Code style, testing, and contribution guide
 - **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Common issues and solutions
+- **[LICENSING_AND_SOURCE.md](./LICENSING_AND_SOURCE.md)** - License, corresponding source, SBOM, notices, and calibration provenance
 
 ## Project Management
 
 - **[CONTRIBUTING.md](../CONTRIBUTING.md)** - Contribution guidelines
 - **[SECURITY.md](../SECURITY.md)** - Security policy and reporting
+- **[THIRD-PARTY-NOTICES.md](../THIRD-PARTY-NOTICES.md)** - Bundled component and asset notices
 
 ## Advanced Topics
 
@@ -106,6 +108,7 @@ These are the main documentation files you should read first:
 ### Controls & Settings
 
 - **docs/CONTROLS_GUIDE.md** - Printer controls documentation
+- **docs/SETTINGS_ARCHITECTURE.md** - Admin and settings surface (SettingsShell, URL contract, per-group save, command palette, admin overview) — canonical reference
 - **docs/SETTINGS_ADVANCED_UI_PLAN.md** - Advanced settings UI
 - **docs/ENUM_BACKEND_SELECTOR.md** - Backend selection enum
 

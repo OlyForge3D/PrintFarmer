@@ -293,7 +293,8 @@ public sealed class PrusaLinkPollingService(
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
+                    await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                        .SendAsync("printerupdated", signalRUpdate, ct);
                     await _coverageBroadcaster
                         .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
                         .ConfigureAwait(false);
@@ -350,7 +351,8 @@ public sealed class PrusaLinkPollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 

@@ -1,14 +1,20 @@
 {
   "name": "tools",
   "version": "1.0.0",
-  "description": "",
+  "private": true,
+  "description": "PrintFarmer development tools",
   "main": "signalr-debug-client.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "OlyForge3D contributors",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OlyForge3D/PrintFarmer.git",
+    "directory": "tools"
+  },
   "type": "commonjs",
   "dependencies": {
     "@microsoft/signalr": "^9.0.6"

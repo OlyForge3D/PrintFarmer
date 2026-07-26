@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -83,6 +84,22 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
         builder.ConfigureServices((context, services) =>
         {
+            if (_configOverrides?.TryGetValue("Testing:UseTestAuthentication", out string? useTestAuth) == true &&
+                bool.TryParse(useTestAuth, out bool enabled) &&
+                enabled)
+            {
+                _ = services
+                    .AddAuthentication(options =>
+                    {
+                        options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+                        options.DefaultChallengeScheme = TestAuthHandler.SchemeName;
+                        options.DefaultForbidScheme = TestAuthHandler.SchemeName;
+                    })
+                    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, TestAuthHandler>(
+                        TestAuthHandler.SchemeName,
+                        _ => { });
+            }
+
             foreach (ServiceDescriptor descriptor in services
                 .Where(d => d.ServiceType == typeof(AppDbContext)
                     || d.ServiceType == typeof(DbContextOptions<AppDbContext>)
@@ -93,9 +110,21 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 services.Remove(descriptor);
             }
 
-            services.AddPooledDbContextFactory<AppDbContext>(options => options.UseSqlite(_connectionString));
-            services.AddScoped(sp =>
-                sp.GetRequiredService<IDbContextFactory<AppDbContext>>().CreateDbContext());
+            // Register in-memory SQLite database
+            services.AddDbContext<AppDbContext>(options =>
+            {
+                options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+            });
+
+            // Re-register DbContextFactory with the test SQLite connection (same pattern as production)
+            DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+            optionsBuilder.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
+            services.AddSingleton(optionsBuilder.Options);
+            services.AddDbContextFactory<AppDbContext>();
 
             // Ensure database is created after all services are registered
             ServiceProvider sp = services.BuildServiceProvider();
@@ -165,11 +194,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
                 services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
                 {
-                    options.UseSqlite(_connectionString);
+                    options.UseSqlite(
+                        _connectionString,
+                        sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 });
 
                 DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
-                slicerOptionsBuilder.UseSqlite(_connectionString);
+                slicerOptionsBuilder.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 services.AddSingleton(slicerOptionsBuilder.Options);
                 services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
 

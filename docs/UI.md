@@ -95,49 +95,62 @@ Standalone browser-based 3D slicer application for converting models to G-code.
 
 **Note:** This is a dedicated application interface separate from Files management. It provides an immersive slicing experience as a first-class application feature.
 
-### Admin Dashboard
-Administrative panel for configuration and management.
+### Admin Control Center And Settings
 
-**Available Tabs:**
+Administrative UI is a **single URL-driven shell** rendered by
+`SettingsShell.tsx`. Every admin/settings page is one of three routes:
 
-1. **Manage Locations**
-   - `LocationManagement.tsx` - CRUD interface
-   - Create new locations
-   - Edit location details
-   - Delete locations
-   - View printer counts
+| Route | Scope | Access |
+|---|---|---|
+| `/settings` | User (self-service) | Any authenticated user |
+| `/admin/settings` | System (farm-wide config) | `farm_admin` role |
+| `/admin/manage` | Admin (accounts, data, operations) | `farm_admin` role |
+| `/admin` | Control Center hub | `farm_admin` role |
 
-2. **Assign Printers to Locations**
-   - `PrinterLocationDragDrop.tsx` - Drag-and-drop interface
-   - Drag unassigned printers to locations
-   - Drag from locations to unassign
-   - Visual feedback during drag
-   - Real-time API updates
+The shell is entirely driven by URL parameters:
 
-3. **Manage Printers**
-   - `PrinterForm.tsx` - Add/edit printer
-   - Configure printer connection
-   - Select location
-   - Test connection
-   - Delete printer
+- `?scope=<user|system|admin>` — which shell you are in (defaults from the route).
+- `?tab=<categoryId>` — category within the scope.
+- `?sub=<subPageId>` — sub-page within the tab.
+- `?q=<query>` — search the current sub-page's metadata.
+- `?field=<Section.Property>` — deep-link to one property row.
 
-4. **Catalog Management**
-   - `CatalogManager.tsx` - Manage models
-   - Add printer models
-   - Configure specifications
-   - Manage manufacturers
+Exactly ONE settings page mounts at a time. The metadata-driven pages
+(`<SettingsPage>`) filter by group and render fields from the backend metadata
+API — no hand-written forms per property. Bespoke sub-pages (Bed Types,
+Cameras, Users, Login Audit, Tags, Data Management, Slicer Profiles, Webhooks,
+Workers, System Status) render their own components inside the shell.
 
-5. **Printer Discovery**
-   - `DiscoveryTool.tsx` - Network discovery
-   - Auto-detect Moonraker/PrusaLink
-   - Quick add detected printers
-   - Configure discovery settings
+For the full architecture, tab-to-group map, save model, Essential mode, and
+palette details, see [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md).
 
-6. **Slicer Profiles** (`/admin/slicer-profiles`)
-   - Manage available slicer profiles
-   - Profile organization and filtering
-   - Profile compatibility matrix
-   - Bulk operations
+#### Legacy Admin Routes
+
+Older admin URLs (`/admin/tags`, `/admin/slicer-profiles`, `/admin/webhooks`,
+`/admin/cameras`, `/admin/quotas`, `/admin/workers`, `/admin/system`, …) still
+resolve — they auto-redirect to the appropriate shell location via
+`src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`. Do not delete
+entries from that file when you rename a route; add a new one instead so
+external bookmarks keep working.
+
+### Command Palette (Ctrl+K)
+
+`GlobalCommandPaletteProvider` is mounted globally in `Layout.tsx`, so
+`Ctrl+K` (or `Cmd+K` on macOS) works on every authenticated route — not just
+settings pages.
+
+Items come from four sources:
+
+1. **Places** — every registered admin destination.
+2. **User settings sections** — user-scope settings-nav entries.
+3. **Individual settings properties** — one row per property (farm_admin only),
+   each linking to a `?field=Section.Property` deep-link on the appropriate
+   sub-page.
+4. **Actions** — Sign out, Refresh admin overview (farm_admin), Switch theme.
+
+The palette is only mounted for authenticated users. Its metadata query is
+disabled until first open so signed-out users never trigger a background
+`401` on the metadata endpoint.
 
 ## Component Library
 

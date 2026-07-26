@@ -94,7 +94,7 @@ public class ArtifactsMetadataEndpointTests(CustomWebApplicationFactory factory)
         _ = result.Should().BeOfType<NotFoundResult>();
     }
 
-    [Fact(DisplayName = "GetMetadata returns 403 when caller does not own the artifact's job")]
+    [Fact(DisplayName = "GetMetadata returns a 403 problem when caller does not own the artifact's job")]
     public async Task GetMetadata_Returns403_ForUnauthorizedCaller()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
@@ -141,7 +141,10 @@ public class ArtifactsMetadataEndpointTests(CustomWebApplicationFactory factory)
 
         IActionResult result = await controller.GetMetadataAsync(artifact.Id, default);
 
-        _ = result.Should().BeOfType<ForbidResult>();
+        ObjectResult problemResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = problemResult.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        ProblemDetails problem = problemResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("resource_forbidden");
     }
 
     private static ControllerContext BuildControllerContext(string userId, bool isAdmin)

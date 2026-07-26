@@ -1,8 +1,10 @@
-﻿using Farm.Infrastructure.Services;
+﻿using System.Security.Claims;
+using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Controllers;
@@ -24,16 +26,24 @@ public class Model3DFilesController(
     private readonly I3MfToStlConversionService _threeMfConverter = threeMfConverter;
 
     /// <summary>
-    /// Uploads a 3D model file (STL, 3MF, OBJ, etc.) with validation and thumbnail generation.
+    /// Uploads a 3D model file (STL, 3MF, OBJ, etc.) with validation and optional client PNG thumbnail.
     /// </summary>
     /// <param name="modelFile">The file to upload.</param>
+    /// <param name="thumbnailFile">Optional client-generated PNG thumbnail.</param>
+    /// <param name="clientUploadId">Optional caller-generated idempotency identifier.</param>
+    /// <param name="ct">Cancellation token for the request.</param>
     [HttpPost("upload")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(Model3DUploadResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "3D model uploads are explicitly capped at 500 MB for slicer workflows.")]
-    [RequestSizeLimit(500_000_000)] // 500 MB
-    [RequestFormLimits(MultipartBodyLengthLimit = 500_000_000)]
-    public async Task<IActionResult> UploadModelAsync(IFormFile modelFile)
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "3D model uploads are explicitly capped at 500 MB plus an optional 10 MiB thumbnail for slicer workflows.")]
+    [RequestSizeLimit(512_000_000)] // 500 MB model + 10 MiB thumbnail + multipart overhead
+    [RequestFormLimits(MultipartBodyLengthLimit = 512_000_000)]
+    public async Task<IActionResult> UploadModelAsync(
+        [FromForm] IFormFile modelFile,
+        [FromForm] IFormFile? thumbnailFile = null,
+        [FromForm] string? clientUploadId = null,
+        CancellationToken ct = default)
     {
         if (modelFile is null || modelFile.Length == 0)
         {
@@ -42,12 +52,42 @@ public class Model3DFilesController(
 
         _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", modelFile.FileName, modelFile.Length);
 
+        string? userIdClaim = User?.FindFirstValue(ClaimTypes.NameIdentifier);
+        bool hasUserId = Guid.TryParse(userIdClaim, out Guid userId) && userId != Guid.Empty;
+
+        Guid? parsedClientUploadId = null;
+        if (clientUploadId is not null)
+        {
+            if (!Guid.TryParse(clientUploadId, out Guid value) || value == Guid.Empty)
+            {
+                return BadRequest("clientUploadId must be a non-empty GUID.");
+            }
+
+            parsedClientUploadId = value;
+        }
+
+        if (parsedClientUploadId.HasValue && !hasUserId)
+        {
+            return Unauthorized();
+        }
+
         try
         {
-            Model3DUploadResultDto result = await _modelService.UploadModelAsync(modelFile, CancellationToken.None);
-
+            Model3DUploadResultDto result = hasUserId
+                ? await _modelService.UploadModelAsync(
+                    modelFile,
+                    thumbnailFile,
+                    userId,
+                    parsedClientUploadId,
+                    ct)
+                : await _modelService.UploadModelAsync(modelFile, thumbnailFile, ct);
+            SetETagHeader(result.ETag);
             _logger.LogInformation("Upload complete, returning response: {ModelId}", result.Id);
             return Created($"/api/models/{result.Id}", result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (ArgumentException ex)
         {
@@ -62,9 +102,89 @@ public class Model3DFilesController(
     }
 
     /// <summary>
+    /// Replaces a model's thumbnail with a validated client-generated PNG.
+    /// </summary>
+    /// <param name="id">The model identifier.</param>
+    /// <param name="thumbnailFile">The replacement PNG thumbnail.</param>
+    /// <param name="ct">Cancellation token for the request.</param>
+    [HttpPut("{id:guid}/thumbnail")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(typeof(Model3DThumbnailUpdateResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "Thumbnail replacement is explicitly capped at 10 MiB plus multipart overhead.")]
+    [RequestSizeLimit(11 * 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = 11 * 1024 * 1024)]
+    public async Task<IActionResult> ReplaceThumbnailAsync(
+        Guid id,
+        [FromForm] IFormFile thumbnailFile,
+        CancellationToken ct)
+    {
+        if (thumbnailFile is null || thumbnailFile.Length == 0)
+        {
+            return BadRequest("No thumbnail uploaded or thumbnail is empty.");
+        }
+
+        bool isAdmin = User.IsInRole("farm_admin");
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        Guid? userId = Guid.TryParse(userIdClaim, out Guid parsedUserId) && parsedUserId != Guid.Empty
+            ? parsedUserId
+            : null;
+        if (!isAdmin && !userId.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            Model3DThumbnailUpdateResultDto result = await _modelService.ReplaceThumbnailAsync(
+                id,
+                thumbnailFile,
+                userId,
+                isAdmin,
+                Request.Headers.IfMatch.ToString(),
+                ct);
+            SetETagHeader(result.ETag);
+            return Ok(result);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning("Thumbnail replacement validation failed for model {Id}: {Message}", id, ex.Message);
+            return BadRequest(ex.Message);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Forbid();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return StatusCode(
+                StatusCodes.Status412PreconditionFailed,
+                "The model changed before its thumbnail could be replaced.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to replace thumbnail for model {Id}", id);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Failed to replace thumbnail");
+        }
+    }
+
+    /// <summary>
     /// Lists all 3D models in a flat list.
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(IEnumerable<Model3DDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListModelsAsync()
     {
@@ -85,6 +205,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("folders")]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(List<Model3DEntryDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListAllFoldersAsync(CancellationToken ct)
     {
@@ -105,12 +226,19 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">The model's unique identifier.</param>
     [HttpGet("{id:guid}", Name = "GetModel")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelAsync(Guid id)
     {
         Model3DDto? model = await _modelService.GetModelAsync(id, CancellationToken.None);
-        return model is null ? NotFound() : Ok(model);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        SetETagHeader(model.ETag);
+        return Ok(model);
     }
 
     /// <summary>
@@ -119,12 +247,19 @@ public class Model3DFilesController(
     /// <param name="id">The model's unique identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id:guid}/details")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(Model3DDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetModelDetailsAsync(Guid id, CancellationToken ct)
     {
         Model3DDto? model = await _modelService.GetModelAsync(id, ct);
-        return model is null ? NotFound() : Ok(model);
+        if (model is null)
+        {
+            return NotFound();
+        }
+
+        SetETagHeader(model.ETag);
+        return Ok(model);
     }
 
     /// <summary>
@@ -388,6 +523,7 @@ public class Model3DFilesController(
     /// <param name="request">Search and filter parameters.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("query")]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(Model3DListResponse), StatusCodes.Status200OK)]
     public async Task<IActionResult> QueryModelsAsync(
         [FromBody] Model3DSearchRequestDto request,
@@ -420,6 +556,7 @@ public class Model3DFilesController(
     /// <param name="request">Folder creation request.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("folder")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateFolderAsync(
@@ -454,6 +591,7 @@ public class Model3DFilesController(
     /// <param name="request">Move request with model IDs and target folder.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("move")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(FolderOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> MoveFilesAsync(
@@ -538,5 +676,13 @@ public class Model3DFilesController(
             ".jpg" or ".jpeg" => "image/jpeg",
             _ => "application/octet-stream"
         };
+    }
+
+    private void SetETagHeader(string etag)
+    {
+        if (HttpContext is not null)
+        {
+            Response.Headers.ETag = etag;
+        }
     }
 }

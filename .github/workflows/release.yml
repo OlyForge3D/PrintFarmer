@@ -12,6 +12,7 @@ on:
         default: 'false'
 
 permissions:
+  actions: read
   contents: write
   packages: write
   id-token: write
@@ -23,17 +24,26 @@ jobs:
       group: 'release-${{ github.event.inputs.version }}'
       cancel-in-progress: false
     steps:
-      - name: Validate version
-        run: |
-          if [[ ! "${{ github.event.inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Version must be vX.Y.Z"; exit 1; fi
-      - name: Checkout
-        uses: actions/checkout@v7
       - name: Checkout (with PAT for push)
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
           token: ${{ secrets.REPO_PAT }}
+
+      - name: Verify release version metadata
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Version must be vX.Y.Z"
+            exit 1
+          fi
+          bash scripts/sync-monorepo-version.sh --check
+          REPOSITORY_VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [[ "${REPOSITORY_VERSION#v}" != "${VERSION#v}" ]]; then
+            echo "Requested release $VERSION does not match VERSION ($REPOSITORY_VERSION)"
+            exit 1
+          fi
 
       - name: Create and push tag
         run: |
@@ -57,6 +67,11 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          ref: ${{ github.event.inputs.version }}
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24.x
       - name: Determine previous tag
         id: prev
         run: |
@@ -68,17 +83,71 @@ jobs:
         with:
           config: cliff.toml
           args: --current-tag ${{ github.event.inputs.version }} ${{ steps.prev.outputs.prev_tag && format('--previous-tag {0}', steps.prev.outputs.prev_tag) || '' }}
-      - name: Wait for image build
-        uses: lewagon/wait-on-check-action@v1.8.1
-        with:
-          ref: ${{ github.event.inputs.version }}
-          check-name: 'Build & Push Images'
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 30
-      - name: Download artifacts (digests, SBOMs)
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
+      - name: Wait for exact-tag Docker workflow
+        id: docker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+          COMMIT="$(git rev-parse "${VERSION}^{commit}")"
+          RUN_ID=""
+          for attempt in $(seq 1 30); do
+            RUN_ID="$(gh run list \
+              --workflow docker-publish.yml \
+              --branch "$VERSION" \
+              --commit "$COMMIT" \
+              --event push \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId // empty')"
+            [[ -n "$RUN_ID" ]] && break
+            sleep 10
+          done
+          if [[ -z "$RUN_ID" ]]; then
+            echo "Could not find the Docker workflow for $VERSION ($COMMIT)"
+            exit 1
+          fi
+          gh run watch "$RUN_ID" --exit-status
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+      - name: Download Docker release artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh run download "${{ steps.docker.outputs.run_id }}" \
+            --pattern 'sbom-*' \
+            --dir artifacts
+          gh run download "${{ steps.docker.outputs.run_id }}" \
+            --pattern 'digest-*' \
+            --dir artifacts
+      - name: Require and revalidate all image artifacts
+        run: |
+          set -euo pipefail
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest_file="artifacts/digest-${image}/digest-${image}.txt"
+            if [[ ! -s "$digest_file" ]]; then
+              echo "Missing digest artifact for $image"
+              exit 1
+            fi
+            digest="$(tr -d '[:space:]' < "$digest_file")"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Invalid digest artifact for $image: $digest"
+              exit 1
+            fi
+            mapfile -d '' sboms < <(
+              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
+            )
+            if [[ "${#sboms[@]}" -ne 1 ]]; then
+              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
+              exit 1
+            fi
+            node scripts/compliance/validate-compliance.mjs \
+              --skip-dependencies \
+              --sbom "${sboms[0]}"
+          done
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
       - name: Gather release notes skeleton
         run: |
           echo "## Release ${VERSION}" > RELEASE_NOTES.md
@@ -87,6 +156,11 @@ jobs:
           grep -R "^sha256:" -h artifacts/digest-*/* >> RELEASE_NOTES.md || true
           echo "### SBOM Files" >> RELEASE_NOTES.md
           find artifacts -name '*.spdx.json' -maxdepth 4 -print >> RELEASE_NOTES.md || true
+          echo "### License and Corresponding Source" >> RELEASE_NOTES.md
+          echo "- License: GNU AGPL v3.0 only (AGPL-3.0-only)" >> RELEASE_NOTES.md
+          echo "- Exact source archive: PrintFarmer-${VERSION}-source.tar.gz" >> RELEASE_NOTES.md
+          echo "- Source manifest: PrintFarmer-${VERSION}-source.json" >> RELEASE_NOTES.md
+          echo "- Third-party notices: THIRD-PARTY-NOTICES.md" >> RELEASE_NOTES.md
           echo "### Changes" >> RELEASE_NOTES.md
           PREV_TAG=$(git describe --tags --abbrev=0 --match 'v*' --exclude ${VERSION} 2>/dev/null || true)
           if [ -n "$PREV_TAG" ]; then
@@ -106,37 +180,31 @@ jobs:
         env:
           VERSION: ${{ github.event.inputs.version }}
 
-      - name: Verify image signatures (best-effort)
+      - name: Verify all image signatures and SPDX attestations
+        env:
+          VERSION: ${{ github.event.inputs.version }}
+          OWNER: ${{ github.repository_owner }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          set -e
-          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          DIGEST_LINES=$(grep -R '^sha256:' -h artifacts/digest-*/* || true)
-          if [ -z "$DIGEST_LINES" ]; then echo "No digests found to verify"; exit 0; fi
-          echo "$DIGEST_LINES" | while read d; do
-            for IMG in printfarmer-api printfarmer-frontend; do
-              cosign verify "ghcr.io/${OWNER_LC}/$IMG@${d}" || echo "Verify failed for $IMG@$d"
-            done
-          done || true
-
-      - name: Enforce verification (fail on missing signatures)
-        run: |
-          set -e
-          OWNER_LC="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
-          MISSING=0
-          for IMG in printfarmer-api printfarmer-frontend; do
-            if ! cosign verify "ghcr.io/${OWNER_LC}/$IMG:${{ github.event.inputs.version }}" \
-              --certificate-identity-regexp 'https://github.com/${{ github.repository }}' \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null 2>&1; then
-              echo "Missing or invalid signature for $IMG:${{ github.event.inputs.version }}"; MISSING=1; fi
+          set -euo pipefail
+          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          CERTIFICATE_IDENTITY="https://github.com/${REPOSITORY}/.github/workflows/docker-publish.yml@refs/tags/${VERSION}"
+          IMAGES=(api frontend printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            reference="ghcr.io/${OWNER_LC}/printfarmer-${image}@${digest}"
+            cosign verify "$reference" \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            cosign verify-attestation "$reference" \
+              --type spdxjson \
+              --certificate-identity "$CERTIFICATE_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
           done
-          if [ $MISSING -eq 1 ]; then echo "Signature enforcement failed"; exit 1; fi
-          echo "All images have valid signatures" >> RELEASE_NOTES.md
-
-      - name: Append verification note
-        run: echo "Signatures verified (non-fatal) where possible." >> RELEASE_NOTES.md
+          echo "All image signatures and SPDX attestations verified." >> RELEASE_NOTES.md
 
       - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2.4.3
+        uses: ossf/scorecard-action@v2.4.4
         with:
           results_file: scorecard.json
           results_format: json
@@ -151,7 +219,7 @@ jobs:
             echo "Key Checks:" >> RELEASE_NOTES.md
             jq -r '.checks[] | select(.name=="Code-Review" or .name=="Vulnerabilities" or .name=="Dependency-Update-Tool" or .name=="Branch-Protection") | "- " + .name + ": " + (.score|tostring)' scorecard.json >> RELEASE_NOTES.md || true
           fi
-      - name: Create GitHub Release
+      - name: Finalize GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.event.inputs.version }}
@@ -159,9 +227,6 @@ jobs:
           body_path: RELEASE_NOTES.md
           draft: false
           prerelease: ${{ github.event.inputs.prerelease == 'true' }}
-          files: |
-            artifacts/**/*.spdx.json
-            artifacts/digest-*/*.txt
 
       - name: Upload RELEASE_NOTES.md as release asset
         if: always()

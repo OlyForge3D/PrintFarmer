@@ -37,6 +37,7 @@ public class PrintersControllerControlGuardsTests
             catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
             validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
             discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
+            discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),
             printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),

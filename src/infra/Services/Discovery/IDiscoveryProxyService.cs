@@ -15,11 +15,13 @@ public interface IDiscoveryProxyService
     /// </summary>
     /// <param name="backends">Optional list of backends to filter discovery</param>
     /// <param name="autoRegister">If true, automatically register discovered printers (default: false)</param>
+    /// <param name="ownerUserId">Authenticated owner of the discovery session.</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Session ID and message from the discovery service</returns>
     Task<DiscoveryStreamResponse> StartDiscoveryStreamAsync(
         IReadOnlyList<PrinterBackend>? backends = null,
         bool autoRegister = false,
+        Guid? ownerUserId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

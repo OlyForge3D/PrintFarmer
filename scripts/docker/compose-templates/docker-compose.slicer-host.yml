@@ -23,6 +23,11 @@ services:
         NGINX_TAG: ${NGINX_TAG}
         UBUNTU_TAG: ${UBUNTU_TAG}
         GIT_SHA: ${GIT_SHA:-unknown}
+        BUILD_VERSION: ${BUILD_VERSION:-development}
+        VCS_REF: ${VCS_REF:-unknown}
+        SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+        SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+        SBOM_URL: ${SBOM_URL:-}
     image: printfarmer-slicer-host
     container_name: printfarmer-slicer-host
     restart: unless-stopped
@@ -38,9 +43,19 @@ services:
       - ConnectionStrings__Default=${ConnectionStrings__Default}
       # URL of the main API for cross-domain lookups (printers, catalog models, manufacturers)
       - MainApi__BaseUrl=${MAIN_API_URL:-http://api:5245}
-      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
-      # JWT configuration — must match the main API so bearer tokens are accepted
-      - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
+      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
+      # JWT signing configuration - MUST match the main API's Jwt__Key so Desktop
+      # API-key exchange tokens (see docs/SLICER_CONFIGURATION.md) issued by the
+      # API are accepted here. Intentionally has NO baked-in default: unlike the
+      # main API (which requires Jwt__Key and refuses to start without it), this
+      # host must keep working with zero JWT configuration for standalone-only
+      # deployments. Leaving it unset (or shorter than 32 chars) keeps this host
+      # in standalone mode (Bearer scheme not registered, auto-admin auth only).
+      # Set it explicitly - to the SAME value configured for the api service -
+      # to accept Desktop-exchanged tokens. Do NOT reuse the main API compose
+      # file's placeholder default here; that value is committed to source
+      # control and must never be treated as a real secret.
+      - Jwt__Key=${Jwt__Key:-}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
       - MODEL_UPLOAD_PATH=/app/models

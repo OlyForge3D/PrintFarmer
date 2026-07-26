@@ -33,6 +33,8 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Automatic Camera Discovery** - Detect and populate camera URLs when importing printers  
 ✅ **Job Queue Management** - Monitor and control print jobs across all printers  
 ✅ **Integrated Slicing** - Built-in OrcaSlicer with profile management  
+✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
+✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
 ✅ **Multi-Database Support** - SQLite, PostgreSQL, SQL Server, MySQL (all tested)  
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
@@ -140,6 +142,7 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 
 **Operations:**
 - **[Deployment Guide](./docs/DEPLOYMENT.md)** - Docker, environments, configuration
+- **[Worker Authentication](./docs/WORKER_AUTHENTICATION.md)** - Slicer registry, service, and job-route credentials
 - **[Development Guide](./docs/DEVELOPMENT.md)** - Code style, testing, contribution workflow
 - **[Troubleshooting Guide](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
@@ -314,7 +317,7 @@ For complete Pi hardware recommendations, setup checklist, and troubleshooting, 
 ## 🔒 Security
 
 - **Authentication**: JWT tokens with secure HttpOnly cookies
-- **Authorization**: Role-based access control (Admin, Operator, Viewer)
+- **Authorization**: Role, `resource:action` permission, owner, farm, and worker-resource checks
 - **Encryption**: API keys encrypted at rest
 - **HTTPS**: Enforced in production
 - **Validation**: Input validation and CORS protection
@@ -330,13 +333,20 @@ We welcome contributions! See **[Contributing Guide](./CONTRIBUTING.md)** for:
 - Git workflow and commits
 - PR process
 
-### Git Hooks (Optional)
+### Git Hooks (Strongly Recommended)
 
 ```bash
 ./.githooks/setup.sh
 ```
 
-This installs pre-commit hooks for local linting (ShellCheck, yamllint, path casing, ESLint, dotnet format). Checks run only on staged files for speed. CI workflows remain the server-side enforcement.
+This installs two hooks:
+
+- **`pre-commit`** — runs local linting (ShellCheck, yamllint, path casing, ESLint) on staged files.
+- **`pre-push`** — runs `dotnet format --verify-no-changes` against the exact outgoing Git tree whenever any `.cs`, `.csproj`, `farm-web.sln`, `.editorconfig`, or `Directory.Build.*` file is changed. Successful verifications are cached by tree + SDK + formatter version, so repeat pushes of the same tree are effectively free.
+
+**`dotnet format` no longer runs in CI.** The pre-push hook is the local format gate. Branch protection still enforces CI build/test/drift checks, but does not independently recheck formatting. See [docs/CI.md](./docs/CI.md) for the full CI architecture.
+
+**Emergency bypass:** `git push --no-verify` skips the pre-push hook (Git's standard emergency escape hatch). Local hooks are not server-enforceable — required CI checks are.
 
 ## 📊 Project Status
 
@@ -359,7 +369,16 @@ This installs pre-commit hooks for local linting (ShellCheck, yamllint, path cas
 
 ## 📝 License
 
-This project is licensed under the MIT License - see [LICENSE](./LICENSE) file for details.
+PrintFarmer is licensed under the
+[GNU Affero General Public License v3.0 only](./LICENSE)
+(`AGPL-3.0-only`) beginning with v0.2.3. Releases through v0.2.2 retain
+their historically applicable terms.
+
+Network users can identify and retrieve the exact corresponding source from
+the unauthenticated `GET /api/system/source` endpoint. See
+[Licensing, source availability, and provenance](./docs/LICENSING_AND_SOURCE.md)
+for operator and contributor procedures. Third-party components retain their
+own terms and notices in [THIRD-PARTY-NOTICES.md](./THIRD-PARTY-NOTICES.md).
 
 ## 🙏 Acknowledgments
 

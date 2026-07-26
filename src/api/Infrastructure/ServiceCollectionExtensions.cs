@@ -99,8 +99,9 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            // SQLite: Development only - uses EnsureCreated, no migrations
-            _ = options.UseSqlite(dbConfig.ConnectionString);
+            _ = options.UseSqlite(
+                dbConfig.ConnectionString,
+                x => x.MigrationsAssembly("Farm.Migrations.Sqlite"));
         }
     }
 
@@ -149,7 +150,7 @@ public static class ServiceCollectionExtensions
         _ = environment;
 
         // Check if background services should be disabled (for testing)
-        bool disableBackgroundServices = ShouldDisableBackgroundServices();
+        bool disableBackgroundServices = ShouldDisableBackgroundServices(configuration);
 
         // Register services by category
         RegisterCoreInfrastructure(services);
@@ -269,6 +270,8 @@ public static class ServiceCollectionExtensions
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
+        _ = services.AddSingleton<IDiscoverySessionRegistry, DiscoverySessionRegistry>();
+        _ = services.AddSingleton<DiscoveryServiceAuthenticator>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
         _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, DiscoveryProxyService>();
@@ -304,6 +307,12 @@ public static class ServiceCollectionExtensions
 
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
+
+        // Model collection repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Collections.IModelCollectionRepository, Farm.Infrastructure.Repositories.Collections.EfModelCollectionRepository>();
+
+        // Library sync journal (change journal + tombstones, issue #844)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncJournal, Farm.Infrastructure.Services.Sync.LibrarySyncJournal>();
 
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
@@ -550,7 +559,9 @@ public static class ServiceCollectionExtensions
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+        _ = services.AddSingleton(TimeProvider.System);
 
         // Register the per-tool activity accumulator (issue #711, round-14). Singleton so the
         // backend plugin that samples active-tool telemetry and the statistics sync service that
@@ -626,6 +637,12 @@ public static class ServiceCollectionExtensions
     {
         // Tag services
         _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
+
+        // Model collection services
+        _ = services.AddScoped<Farm.Infrastructure.Services.Collections.IModelCollectionService, Farm.Infrastructure.Services.Collections.ModelCollectionService>();
+
+        // Library sync service (cursor-based pull + transactional apply, issue #845)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncService, Farm.Infrastructure.Services.Sync.LibrarySyncService>();
 
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
@@ -814,17 +831,11 @@ public static class ServiceCollectionExtensions
 
     #region Helpers
 
-    private static bool ShouldDisableBackgroundServices()
+    private static bool ShouldDisableBackgroundServices(IConfiguration configuration)
     {
-        try
-        {
-            string? env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
-            return !string.IsNullOrEmpty(env) && (string.Equals(env, "true", StringComparison.OrdinalIgnoreCase) || env == "1");
-        }
-        catch
-        {
-            return false;
-        }
+        string? value = configuration["TEST_DISABLE_BACKGROUND_SERVICES"];
+        return !string.IsNullOrEmpty(value)
+            && (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1");
     }
 
     #endregion

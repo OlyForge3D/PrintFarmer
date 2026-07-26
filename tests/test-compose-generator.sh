@@ -160,6 +160,27 @@ test_discovery_network_consistency() {
     pass_test
 }
 
+# Test that the API and discovery service receive the same generated shared key
+test_discovery_shared_key_wiring() {
+    start_test "discovery shared API key wiring"
+
+    local outdir="$TEST_TEMP_DIR/compose-discovery-auth"
+    mkdir -p "$outdir"
+
+    assert_command_success "$COMPOSE_GENERATOR --include-discovery --output-dir $outdir"
+
+    local compose_content
+    compose_content=$(cat "$outdir/docker-compose.yml")
+    local env_template_content
+    env_template_content=$(cat "$REPO_ROOT/.env.template")
+
+    assert_contains "$compose_content" 'DiscoveryAuth__SharedKey=${DISCOVERY_SHARED_API_KEY:-}' "API should receive the discovery shared key"
+    assert_contains "$compose_content" 'Discovery__SharedKey=${DISCOVERY_SHARED_API_KEY:-}' "Discovery service should receive the same shared key"
+    assert_contains "$env_template_content" "DISCOVERY_SHARED_API_KEY=" "Environment template should declare the discovery shared key"
+
+    pass_test
+}
+
 # Test microservices architecture generation
 
 # Test OrcaSlicer worker configuration
@@ -201,6 +222,37 @@ test_orcaslicer_worker_config() {
     assert_not_contains "$compose_content" "prusaslicer-worker" "Should not contain PrusaSlicer worker"
     assert_not_contains "$compose_content" "PrusaSlicerPath" "Should not contain PrusaSlicer path config"
     
+    pass_test
+}
+
+test_model_thumbnail_replacement_routing() {
+    start_test "model thumbnail replacement routing"
+
+    local split_config="$REPO_ROOT/deploy/nginx/nginx-proxy-split.conf"
+    assert_file_exists "$split_config" || return 1
+
+    local route_count
+    route_count=$(grep -c "location /api/3d-models/" "$split_config")
+    assert_equals "2" "$route_count" "Split proxy should route 3D model endpoints over HTTP and HTTPS" || return 1
+
+    local upstream_count
+    upstream_count=$(grep -c 'set $slicer_upstream http://slicer-host:5246;' "$split_config")
+    assert_equals "2" "$upstream_count" "Both split proxy server blocks should resolve slicer-host" || return 1
+
+    local routed_to_slicer
+    routed_to_slicer=$(awk '
+        /location \/api\/3d-models\// { in_route = 1; next }
+        in_route && /proxy_pass \$slicer_upstream\$request_uri;/ { routed++; in_route = 0 }
+        in_route && /^        }/ { in_route = 0 }
+        END { print routed + 0 }
+    ' "$split_config")
+    assert_equals "2" "$routed_to_slicer" "Both 3D model routes should target the slicer upstream" || return 1
+
+    assert_contains \
+        "$(cat "$REPO_ROOT/deploy/nginx/nginx-proxy.conf")" \
+        "location /api/" \
+        "Monolith proxy should route 3D model endpoints through the main API" || return 1
+
     pass_test
 }
 
@@ -1673,6 +1725,8 @@ run_all_tests() {
     test_help_output
     test_standard_generation
     test_microservices_generation
+    test_discovery_network_consistency
+    test_discovery_shared_key_wiring
     test_generated_compose_file_is_valid_yaml
     test_database_initialization_order
     test_database_volume_mount_correctness
@@ -1700,6 +1754,7 @@ run_all_tests() {
     test_registry_stack_configuration
     test_telemetry_stack_configuration
     test_orcaslicer_worker_config
+    test_model_thumbnail_replacement_routing
     test_orcaslicer_worker_variations
     test_prusaslicer_worker_disabled
     test_database_provider_config

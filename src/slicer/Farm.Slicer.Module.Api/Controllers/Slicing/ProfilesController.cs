@@ -1,5 +1,7 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
@@ -23,6 +25,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 [Route("api/slicer/profiles")]
 [Tags("Slicer Profiles")]
 [Authorize]
+[RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
 public class ProfilesController(
     ILogger<ProfilesController> logger,
     IProfilesService profilesService,
@@ -138,7 +141,6 @@ public class ProfilesController(
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("extended")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(ExtendedProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListExtendedAsync(CancellationToken ct)
     {
@@ -161,7 +163,6 @@ public class ProfilesController(
     /// <param name="machineProfileId">Optional filter to retrieve only profiles compatible with a specific machine.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("hierarchy")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(HierarchicalProfilesResponseDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListHierarchyAsync(
         [FromQuery] string? manufacturer = null,
@@ -308,7 +309,6 @@ public class ProfilesController(
     /// <param name="printerId">Optional printer ID to filter profiles.</param>
     /// <param name="slicerType">Optional slicer type to filter profiles.</param>
     [HttpGet]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetProfilesAsync([FromQuery] string? printerId = null, [FromQuery] string? slicerType = null)
     {
@@ -747,7 +747,6 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("worker-hierarchy")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetWorkerProfilesHierarchyAsync(
@@ -811,7 +810,6 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/{manufacturer}/{model}")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetMachineProfilesForModelAsync(
@@ -846,7 +844,6 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/for-model/{modelId:guid}")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
@@ -910,7 +907,6 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("process/for-machines")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
@@ -944,7 +940,6 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("filament/for-machines")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
@@ -976,7 +971,6 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("filament/templates")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentTemplatesAsync(
@@ -1006,7 +1000,6 @@ public class ProfilesController(
     /// <param name="modelId">The printer model ID to check imported profiles for.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("imported-names/{modelId:guid}")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(ImportedProfileNamesDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetImportedProfileNamesAsync(Guid modelId, CancellationToken ct)
     {

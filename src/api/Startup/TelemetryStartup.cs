@@ -12,7 +12,7 @@ public static class TelemetryStartup
 {
     /// <summary>
     /// Adds PrintFarmer OpenTelemetry configuration (tracing + metrics).
-    /// Skipped for tests and when DISABLE_TELEMETRY=true.
+    /// Skipped for tests and when <c>DISABLE_TELEMETRY=true</c> in configuration.
     /// </summary>
     public static IServiceCollection AddPrintFarmerTelemetry(
         this IServiceCollection services,
@@ -20,18 +20,10 @@ public static class TelemetryStartup
         IWebHostEnvironment environment)
     {
         // Configure OpenTelemetry (skippable for tests)
-        bool disableTelemetry = false;
-        try
-        {
-            string? disableEnv = Environment.GetEnvironmentVariable("DISABLE_TELEMETRY");
-            if (!string.IsNullOrEmpty(disableEnv) && string.Equals(disableEnv, "true", StringComparison.OrdinalIgnoreCase))
-            {
-                disableTelemetry = true;
-            }
-        }
-        catch
-        { /* best-effort */
-        }
+        bool disableTelemetry = string.Equals(
+            configuration["DISABLE_TELEMETRY"],
+            "true",
+            StringComparison.OrdinalIgnoreCase);
 
         // Also skip telemetry when running under the 'Testing' environment to avoid external exporters
         if (!disableTelemetry && !string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase))

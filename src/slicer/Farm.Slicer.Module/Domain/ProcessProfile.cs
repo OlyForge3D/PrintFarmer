@@ -41,6 +41,10 @@ public class ProcessProfile
     /// </summary>
     public string? SlicerVersion { get; set; }
 
+    public string? SlicerDistribution { get; set; }
+
+    public string? ProfileFormat { get; set; }
+
     /// <summary>
     /// Raw slicer profile JSON as imported from OrcaSlicer / PrusaSlicer (sanitized but otherwise unchanged).
     /// </summary>

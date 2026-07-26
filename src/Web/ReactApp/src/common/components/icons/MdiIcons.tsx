@@ -111,6 +111,9 @@ import {
   mdiClipboardListOutline,
   mdiShield,
   mdiCloudDownload,
+  mdiShareVariant,
+  mdiEarth,
+  mdiFolderPlusOutline,
   mdiBarcodeScan,
   mdiRuler,
   mdiFormatText,
@@ -3098,6 +3101,27 @@ export function CloudDownloadIcon({ className = 'w-4 h-4', ariaLabel = 'Cloud do
 }
 
 /**
+ * Share icon for sharing collections with all users
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <ShareIcon className="w-4 h-4" ariaLabel="Share collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function ShareIcon({ className = 'w-4 h-4', ariaLabel = 'Share' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiShareVariant} />
+    </svg>
+  );
+}
+
+/**
  * Barcode scan icon
  *
  * Material Design icon component for barcode/QR scanning actions.
@@ -3123,6 +3147,27 @@ export function BarcodeScanIcon({ className = 'w-4 h-4', ariaLabel = 'Scan barco
 }
 
 /**
+ * Earth/globe icon indicating a collection is shared with all users
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <EarthIcon className="w-4 h-4" ariaLabel="Shared collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function EarthIcon({ className = 'w-4 h-4', ariaLabel = 'Shared' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiEarth} />
+    </svg>
+  );
+}
+
+/**
  * Ruler icon — measurement tool in 3D viewer
  *
  * @preview ![ruler](https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg) — https://unpkg.com/@mdi/svg@7.4.47/svg/ruler.svg
@@ -3137,6 +3182,27 @@ export function RulerIcon({ className = 'w-4 h-4', ariaLabel = 'Measure' }: Omit
       role="img"
     >
       <path fill="currentColor" d={mdiRuler} />
+    </svg>
+  );
+}
+
+/**
+ * Multiple-accounts icon indicating shared/team collections
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <AccountMultipleIcon className="w-4 h-4" ariaLabel="Shared collections" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function AccountMultipleIcon({ className = 'w-4 h-4', ariaLabel = 'Shared with everyone' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiAccountMultiple} />
     </svg>
   );
 }
@@ -3160,6 +3226,27 @@ export function SimplifyIcon({ className = 'w-4 h-4', ariaLabel = 'Simplify Mesh
         fill="currentColor"
         d="M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L5,8.09V15.91L12,19.85L19,15.91V8.09L12,4.15Z"
       />
+    </svg>
+  );
+}
+
+/**
+ * Folder-plus icon for creating a new collection
+ *
+ * Material Design icon component that renders an SVG element.
+ * @example
+ * <FolderPlusIcon className="w-4 h-4" ariaLabel="New collection" />
+ * @see — https://materialdesignicons.com - Material Design Icons Library
+ */
+export function FolderPlusIcon({ className = 'w-4 h-4', ariaLabel = 'New collection' }: Omit<IconProps, 'isOn'>) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-label={ariaLabel}
+      role="img"
+    >
+      <path fill="currentColor" d={mdiFolderPlusOutline} />
     </svg>
   );
 }

@@ -12,12 +12,33 @@ public class WorkerStateService : IWorkerStateService
             return new WorkerState
             {
                 WorkerId = _state.WorkerId,
+                RegisteredServiceId = _state.RegisteredServiceId,
+                RegisteredServiceApiKey = _state.RegisteredServiceApiKey,
                 IsInitialized = _state.IsInitialized,
                 IsShuttingDown = _state.IsShuttingDown,
                 ActiveJobs = _state.ActiveJobs,
                 MaxConcurrentJobs = _state.MaxConcurrentJobs,
                 StartedAt = _state.StartedAt
             };
+        }
+    }
+
+    public void SetRegisteredService(Guid serviceId, string serviceApiKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceApiKey);
+        lock (_lock)
+        {
+            _state.RegisteredServiceId = serviceId;
+            _state.RegisteredServiceApiKey = serviceApiKey;
+        }
+    }
+
+    public void ClearRegisteredService()
+    {
+        lock (_lock)
+        {
+            _state.RegisteredServiceId = null;
+            _state.RegisteredServiceApiKey = null;
         }
     }
 

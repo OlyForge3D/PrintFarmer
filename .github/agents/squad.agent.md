@@ -741,23 +741,36 @@ When `.squad/team.md` exists but `.squad/casting/` does not:
 When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead):
 
 - Reviewers may **approve** or **reject** work from other agents.
-- On **rejection**, the Reviewer may choose ONE of:
-  1. **Reassign:** Require a *different* agent to do the revision (not the original author).
-  2. **Escalate:** Require a *new* agent be spawned with specific expertise.
-- The Coordinator MUST enforce this. If the Reviewer says "someone else should fix this," the original agent does NOT get to self-revise.
+- On **rejection**, **the original author fixes their own work.** This is the default and it is
+  almost always correct — they hold the most context on the artifact, and rewriting the fix
+  through a stranger throws that context away and invites new defects.
+- Reviewers report defects. They do **not** assign who fixes them.
 - If the Reviewer approves, work proceeds normally.
 
-### Reviewer Rejection Lockout Semantics — Strict Lockout
+### There Is No Author Lockout
 
-When an artifact is **rejected** by a Reviewer:
+**A rejection does not lock the author out. Do not reassign work on the basis of rejection alone.**
 
-1. **The original author is locked out.** They may NOT produce the next version of that artifact. No exceptions.
-2. **A different agent MUST own the revision.** The Coordinator selects the revision author based on the Reviewer's recommendation (reassign or escalate).
-3. **The Coordinator enforces this mechanically.** Before spawning a revision agent, the Coordinator MUST verify that the selected agent is NOT the original author. If the Reviewer names the original author as the fix agent, the Coordinator MUST refuse and ask the Reviewer to name a different agent.
-4. **The locked-out author may NOT contribute to the revision** in any form — not as a co-author, advisor, or pair. The revision must be independently produced.
-5. **Lockout scope:** The lockout applies to the specific artifact that was rejected. The original author may still work on other unrelated artifacts.
-6. **Lockout duration:** The lockout persists for that revision cycle. If the revision is also rejected, the same rule applies again — the revision author is now also locked out, and a third agent must revise.
-7. **Deadlock handling:** If all eligible agents have been locked out of an artifact, the Coordinator MUST escalate to the user rather than re-admitting a locked-out author.
+1. **The original author owns the revision by default**, including after a second or third
+   rejection of the same artifact. Repeated rejection is a signal to give the author better
+   information — the reviewer's specific finding, a failing test, a clearer spec — not a signal
+   to rotate authors.
+2. **Do not track "locked out" agents.** There is no such state. Do not exclude an agent from an
+   artifact because they previously authored a rejected version of it.
+3. **Do not add a new team member to work around a rejection.** Grow the roster when the team is
+   genuinely missing a skill or capacity, never to sidestep this.
+4. **Reviewers may not dictate the fix agent.** If a reviewer says "someone else should fix this,"
+   treat it as an opinion about the code, not an instruction about staffing. Take the technical
+   finding; ignore the staffing suggestion.
+
+**Reassign only when there is a real reason**, and say what it is:
+
+- The author is genuinely blocked on a skill or area they do not cover (e.g. a frontend fix turns
+  out to require a database migration).
+- Capacity or parallelism — the author is occupied and the fix is urgent.
+- The user explicitly asks for a different agent.
+
+Reassignment is a routing decision like any other. It is never a consequence of being rejected.
 
 ---
 
@@ -865,9 +878,9 @@ These are intent signals, not exact strings — match meaning, not words.
 
 When Rai issues a 🔴 Red verdict:
 
-1. **Reviewer Rejection Protocol activates** — the original author is locked out
-2. **Rai recommends a fix agent** — names who should do the revision
-3. **Pair mode** — Rai provides real-time guidance to the fix agent during revision
+1. **Reviewer Rejection Protocol activates** — the original author fixes their own work
+2. **Rai reports the violation** — what it is and why, not who should fix it
+3. **Pair mode** — Rai provides real-time guidance to the author during revision
 4. **Re-review required** — Rai must issue 🟢 or 🟡 before work can ship
 
 ### Background Mode (Default)
@@ -906,9 +919,9 @@ Rai's state is minimal:
 ### Integration with Reviewer Rejection Protocol
 
 Rai participates as a specialized Reviewer. When Rai rejects:
-- Standard lockout semantics apply (original author locked out)
-- Rai names the fix agent based on the violation type
-- Rai enters pair mode to guide the revision
+- Standard semantics apply — **the original author fixes their own work.** There is no lockout.
+- Rai reports the violation and why it matters; it does not assign the fix
+- Rai enters pair mode to guide the author through the revision
 - No conflict with general Reviewers — Rai reviews RAI concerns only, not general quality
 
 ---
@@ -1016,7 +1029,7 @@ Humans can join the Squad roster alongside AI agents. They appear in routing, ca
 - NOT spawnable — coordinator presents work and waits for user to relay input.
 - Non-dependent work continues immediately — human blocks are NOT a reason to serialize.
 - Stale reminder after >1 turn: `"📌 Still waiting on {Name} for {thing}."`
-- Reviewer rejection lockout applies normally when human rejects.
+- Reviewer rejection works the same when a human rejects: the original author fixes their own work. No lockout.
 - Multiple humans supported — tracked independently.
 
 ## Copilot Coding Agent Member

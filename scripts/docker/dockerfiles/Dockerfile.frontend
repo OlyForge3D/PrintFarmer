@@ -1,4 +1,10 @@
 # Standalone React Frontend Dockerfile
+ARG BUILD_VERSION=development
+ARG VCS_REF=unknown
+ARG SOURCE_REPOSITORY=""
+ARG SOURCE_ARCHIVE_URL=""
+ARG SBOM_URL=""
+
 FROM node:24-alpine AS build
 
 # Build-time configuration (can be overridden with --build-arg)
@@ -14,18 +20,43 @@ WORKDIR /app
 
 # Copy package files
 COPY src/Web/ReactApp/package*.json ./
-RUN npm install --silent
+RUN npm ci --no-audit --no-fund --silent
 
 # Copy source and build
 COPY src/Web/ReactApp/ ./
+COPY scripts/compliance /scripts/compliance
+COPY compliance/dependency-license-policy.json /compliance/dependency-license-policy.json
+COPY compliance/licenses /compliance/licenses
 # Vite reads VITE_* vars at build time; ensure they are present now.
-RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_SIGNALR_PRINTERS_URL=$VITE_SIGNALR_PRINTERS_URL VITE_SIGNALR_HARVEST_URL=$VITE_SIGNALR_HARVEST_URL" && npm run build
+RUN echo "Building with VITE_API_BASE_URL=$VITE_API_BASE_URL VITE_SIGNALR_PRINTERS_URL=$VITE_SIGNALR_PRINTERS_URL VITE_SIGNALR_HARVEST_URL=$VITE_SIGNALR_HARVEST_URL" \
+    && npm run build \
+    && node /scripts/compliance/create-npm-notices.mjs \
+        --repo / \
+        --package-root app \
+        --output app/dist/THIRD-PARTY-LICENSES.npm.txt
 
 # Production stage with Nginx
 FROM nginx:alpine
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
+
+LABEL org.opencontainers.image.title="PrintFarmer Frontend" \
+      org.opencontainers.image.description="PrintFarmer React web client" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 # Copy built app to nginx
 COPY --from=build /app/dist /usr/share/nginx/html
+COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
+COPY --from=build /app/dist/THIRD-PARTY-LICENSES.npm.txt /usr/share/licenses/printfarmer/THIRD-PARTY-LICENSES.npm.txt
 
 # Copy nginx configuration (root + server include)
 COPY deploy/nginx/nginx-frontend.conf /etc/nginx/nginx.conf

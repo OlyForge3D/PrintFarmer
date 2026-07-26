@@ -18,6 +18,7 @@ public class PasskeyControllerTests
     private readonly Mock<ILoginAuditService> _loginAudit = new();
     private readonly Mock<IPasskeyService> _passkeySvc = new();
     private readonly Mock<ILogger<Farm.Web.Api.Controllers.AuthController>> _logger = new();
+    private readonly Mock<IApiKeyExchangeService> _apiKeyExchangeService = new();
 
     private Farm.Web.Api.Controllers.AuthController CreateController(Guid? userId = null, string? username = null)
     {
@@ -25,7 +26,8 @@ public class PasskeyControllerTests
             _authService.Object,
             _loginAudit.Object,
             _passkeySvc.Object,
-            _logger.Object);
+            _logger.Object,
+            _apiKeyExchangeService.Object);
 
         List<Claim> claims = [
             new(ClaimTypes.NameIdentifier, (userId ?? Guid.NewGuid()).ToString()),

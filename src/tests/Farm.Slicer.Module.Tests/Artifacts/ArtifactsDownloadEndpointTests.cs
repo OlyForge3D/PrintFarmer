@@ -72,8 +72,8 @@ public class ArtifactsDownloadEndpointTests(CustomWebApplicationFactory factory)
         _ = result.Should().BeOfType<PhysicalFileResult>();
     }
 
-    [Fact(DisplayName = "GetArtifact returns 404 for non-owner (prevents enumeration)")]
-    public async Task GetArtifact_Returns404_ForNonOwner()
+    [Fact(DisplayName = "GetArtifact returns a 403 problem for non-owner")]
+    public async Task GetArtifact_Returns403Problem_ForNonOwner()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         IArtifactsService svc = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
@@ -119,7 +119,10 @@ public class ArtifactsDownloadEndpointTests(CustomWebApplicationFactory factory)
 
         IActionResult result = await controller.GetAsync(artifact.Id, default);
 
-        _ = result.Should().BeOfType<NotFoundResult>();
+        ObjectResult problemResult = result.Should().BeOfType<ObjectResult>().Subject;
+        _ = problemResult.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        ProblemDetails problem = problemResult.Value.Should().BeOfType<ProblemDetails>().Subject;
+        _ = problem.Extensions["code"].Should().Be("resource_forbidden");
     }
 
     [Fact(DisplayName = "GetArtifact returns file for farm_admin")]

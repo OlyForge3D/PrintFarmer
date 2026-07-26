@@ -1,15 +1,17 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Farm.Slicer.Module.Domain;
+using Microsoft.AspNetCore.Http;
 
 namespace Farm.Slicer.Module.Services;
 
 /// <summary>
-/// Validates worker API key headers against configured shared key.
+/// Resolves workers from registry-issued service credentials.
 /// </summary>
 public interface IWorkerAuthService
 {
     /// <summary>
-    /// Returns true if the request contains a valid worker API key header.
+    /// Authenticates the worker service identity and its registry-issued key.
     /// </summary>
     /// <param name="httpContext">The HTTP request context to validate.</param>
-    bool IsAuthorized(HttpContext httpContext);
+    /// <returns>The enabled worker bound to the presented credential, or <see langword="null"/>.</returns>
+    Task<Worker?> AuthenticateAsync(HttpContext httpContext);
 }

@@ -13,6 +13,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.Idempotency;
@@ -51,6 +52,7 @@ public class PrintersController(
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
     IDiscoveryProxyService discoveryProxyService,
+    IDiscoverySessionRegistry discoverySessions,
     Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
@@ -69,6 +71,7 @@ public class PrintersController(
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly IDiscoverySessionRegistry _discoverySessions = discoverySessions;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
@@ -82,10 +85,10 @@ public class PrintersController(
     private readonly Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader _printerStatusCache = printerStatusCache;
 
     /// <summary>
-    /// Retrieves camera URLs for all printers without making external API calls.
+    /// Retrieves same-origin camera proxy URLs for enabled printers.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>A lightweight list of all printers with their configured camera URLs.</returns>
+    /// <returns>A lightweight list of enabled printers with authenticated proxy URLs.</returns>
     /// <response code="200">Returns the list of printers with camera URL information.</response>
     [HttpGet("camera-urls")]
     [ProducesResponseType(typeof(IEnumerable<PrinterCameraUrlsDto>), 200)]
@@ -95,7 +98,7 @@ public class PrintersController(
         try
         {
             PrinterCameraUrlsDto[] dtos = await _printersService.GetCameraUrlsAsync(ct);
-            return Ok(dtos.ToList());
+            return Ok(dtos.Select(CreateSafeCameraUrls).ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -105,7 +108,14 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/camera-urls. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Camera routes could not be read",
+                type: "https://printfarmer.dev/problems/camera-routes-read-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "camera_routes_read_failed",
+                });
         }
     }
 
@@ -232,7 +242,7 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
         }
 
-        _logger.LogInformation("Testing connection to {RequestServerUrl} with backend {RequestBackend}", request.ServerUrl, request.Backend);
+        _logger.LogInformation("Testing printer connection with backend {RequestBackend}", request.Backend);
 
         try
         {
@@ -1011,7 +1021,13 @@ public class PrintersController(
             p.NozzleDiameter,
             p.HasMmu,
             fallbackGroups,
-            perToolAttributionActive);
+            perToolAttributionActive,
+            !string.IsNullOrWhiteSpace(p.ServerUrl),
+            !string.IsNullOrWhiteSpace(p.ApiKey),
+            !string.IsNullOrWhiteSpace(p.Username),
+            !string.IsNullOrWhiteSpace(p.Password),
+            false,
+            false);
     }
 
     /// <summary>
@@ -1049,43 +1065,48 @@ public class PrintersController(
         }
 
         _logger.LogInformation("Creating new printer: {DtoName} ({DtoBackend})", dto.Name, dto.Backend);
-
-        // Delegate creation/business logic to the service
-        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
-
-        // Import slicer profiles for this printer's model (pull-based, on-demand import)
-        // Only imports if profiles don't already exist for this model
-        // Use the input DTO since it has ModelId, and the result DTO only has names
-        Guid? modelId = dto.ModelId;
-        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
-        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
-
-        if (modelId.HasValue && modelId.Value != Guid.Empty)
-        {
-            try
-            {
-                if (_profileImportService is not null)
-                {
-                    int imported = await _profileImportService.ImportProfilesForModelAsync(
-                        modelId.Value,
-                        modelName,
-                        manufacturerName,
-                        ct);
-
-                    if (imported > 0)
-                    {
-                        _logger.LogInformation("Imported {Imported} slicer profiles for {ModelName}", imported, modelName);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log but don't fail printer creation if profile import fails
-                _logger.LogWarning("Failed to import profiles for {ModelName}: {Message}", modelName, ex.Message);
-            }
-        }
+        PrinterDto created = await CreatePrinterAndImportProfilesAsync(dto, ct);
 
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
+    }
+
+    private async Task<PrinterDto> CreatePrinterAndImportProfilesAsync(
+        CreatePrinterFromDiscoveryDto dto,
+        CancellationToken ct)
+    {
+        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+        Guid? modelId = dto.ModelId;
+        if (modelId is null || modelId == Guid.Empty || _profileImportService is null)
+        {
+            return created;
+        }
+
+        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
+        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
+        try
+        {
+            int imported = await _profileImportService.ImportProfilesForModelAsync(
+                modelId.Value,
+                modelName,
+                manufacturerName,
+                ct);
+            if (imported > 0)
+            {
+                _logger.LogInformation(
+                    "Imported {Imported} slicer profiles for {ModelName}",
+                    imported,
+                    modelName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "Failed to import profiles for {ModelName}: {Message}",
+                modelName,
+                ex.Message);
+        }
+
+        return created;
     }
 
     /// <summary>
@@ -1173,7 +1194,7 @@ public class PrintersController(
 
                 if (existing != null)
                 {
-                    _logger.LogInformation("Printer already registered: {ExistingName} (ServerUrl: {ExistingServerUrl})", existing.Name, existing.ServerUrl);
+                    _logger.LogInformation("Printer already registered: {ExistingName} ({ExistingId})", existing.Name, existing.Id);
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -1735,6 +1756,8 @@ public class PrintersController(
             }
         }
 
+        capabilityChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(p, dto);
+
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
         {
@@ -1810,6 +1833,10 @@ public class PrintersController(
                         toolhead.IsPrimary = toolheadDto.IsPrimary.Value;
                         toolheadChanged = true;
                     }
+
+                    toolheadChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(
+                        toolhead,
+                        toolheadDto);
 
                     if (toolheadChanged)
                     {
@@ -3107,17 +3134,16 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Retrieves the camera stream and snapshot URLs for the specified printer.
+    /// Retrieves authenticated same-origin camera proxy URLs for the specified printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported).</returns>
+    /// <returns>Object containing relative stream and snapshot proxy URLs.</returns>
     /// <response code="200">Returns the camera URLs.</response>
     /// <response code="404">If the printer with the specified ID was not found or camera is not available.</response>
     /// <remarks>
-    /// Returns the URLs for live camera streaming and snapshot capture.
-    /// Either or both URLs may be null depending on printer capabilities and configuration.
-    /// Frontend should validate URL accessibility before attempting to load.
+    /// Raw camera targets remain server-side so private network details and embedded
+    /// camera credentials are never disclosed to API clients.
     /// </remarks>
     [HttpGet("{id:guid}/camera/url")]
     [ProducesResponseType(typeof(CameraUrlResult), 200)]
@@ -3125,8 +3151,103 @@ public class PrintersController(
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
-        return streamUrl == null && snapshotUrl == null ? NotFound() : CameraUrlResult.FromUrls(streamUrl, snapshotUrl);
+        return streamUrl == null && snapshotUrl == null
+            ? NotFound()
+            : new CameraUrlResult(
+                streamUrl == null ? null : GetCameraProxyPath(id, "stream"),
+                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"));
     }
+
+    /// <summary>Streams camera content without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/camera/stream")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraStreamAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: false, ct);
+
+    /// <summary>Returns a camera snapshot without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/camera/snapshot")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraSnapshotAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: true, ct);
+
+    private static PrinterCameraUrlsDto CreateSafeCameraUrls(PrinterCameraUrlsDto camera) =>
+        new(
+            camera.Id,
+            camera.Name,
+            camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
+            camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"));
+
+    private static string GetCameraProxyPath(Guid printerId, string kind) =>
+        $"/api/printers/{printerId:D}/camera/{kind}";
+
+    private async Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)
+    {
+        (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
+        string? target = useSnapshot ? snapshotUrl : streamUrl;
+        if (target is null)
+        {
+            return NotFound();
+        }
+
+        if (!Uri.TryCreate(target, UriKind.Absolute, out Uri? targetUri) ||
+            (targetUri.Scheme != Uri.UriSchemeHttp && targetUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _logger.LogWarning("Camera target for printer {PrinterId} is not an HTTP(S) URL", id);
+            return CameraProxyProblem("camera_target_invalid", "The configured camera target is invalid.");
+        }
+
+        try
+        {
+            HttpClient client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
+            HttpResponseMessage response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Camera proxy request for printer {PrinterId} returned {StatusCode}",
+                    id,
+                    response.StatusCode);
+                response.Dispose();
+                return CameraProxyProblem("camera_upstream_failed", "The camera did not return a successful response.");
+            }
+
+            Stream content = await response.Content.ReadAsStreamAsync(ct);
+            HttpContext.Response.RegisterForDispose(response);
+            string contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            if (response.Content.Headers.ContentLength is long contentLength)
+            {
+                HttpContext.Response.ContentLength = contentLength;
+            }
+
+            return File(content, contentType);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return CameraProxyProblem("camera_upstream_timeout", "The camera request timed out.");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Camera proxy request failed for printer {PrinterId}", id);
+            return CameraProxyProblem("camera_upstream_unavailable", "The camera is unavailable.");
+        }
+    }
+
+    private ObjectResult CameraProxyProblem(string code, string title) =>
+        Problem(
+            statusCode: StatusCodes.Status502BadGateway,
+            title: title,
+            type: $"https://printfarmer.dev/problems/{code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
 
     [HttpPost("{id:guid}/files/upload")]
     [ProducesResponseType(typeof(UploadGcodeResultDto), 200)]
@@ -3531,6 +3652,7 @@ public class PrintersController(
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
+    [Authorize(Policy = "farm_admin")]
     public async Task<IActionResult> GetPrinterConfigAsync(Guid id, CancellationToken ct)
     {
         try
@@ -3549,17 +3671,18 @@ public class PrintersController(
             {
                 id = printer.Id,
                 name = printer.Name,
-                serverUrl = printer.ServerUrl,
-                originalServerUrl = printer.OriginalServerUrl,
                 backend = printer.Backend,
-                apiKey = printer.ApiKey,
                 backendPort = printer.BackendPort,
                 frontendPort = printer.FrontendPort,
                 notes = printer.Notes,
                 manufacturerId = printer.ManufacturerId,
                 modelId = printer.ModelId,
                 dateAcquired = printer.DateAcquired,
-                inMaintenance = printer.InMaintenance
+                inMaintenance = printer.InMaintenance,
+                serverConfigured = !string.IsNullOrWhiteSpace(printer.ServerUrl),
+                apiKeyConfigured = !string.IsNullOrWhiteSpace(printer.ApiKey),
+                usernameConfigured = !string.IsNullOrWhiteSpace(printer.Username),
+                passwordConfigured = !string.IsNullOrWhiteSpace(printer.Password)
             };
 
             return Ok(config);
@@ -3567,11 +3690,14 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Config] Failed to get printer configuration for {Id}: {Message}", id, ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to retrieve printer configuration",
-                error = ex.Message
-            });
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Printer configuration could not be read",
+                type: "https://printfarmer.dev/problems/printer-configuration-read-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "printer_configuration_read_failed",
+                });
         }
     }
 
@@ -3665,10 +3791,7 @@ public class PrintersController(
                 {
                     id = printer.Id,
                     name = printer.Name,
-                    serverUrl = printer.ServerUrl,
-                    originalServerUrl = printer.OriginalServerUrl,
                     backend = printer.Backend,
-                    apiKey = printer.ApiKey,
                     backendPort = printer.BackendPort,
                     frontendPort = printer.FrontendPort,
                     notes = printer.Notes,
@@ -3676,6 +3799,10 @@ public class PrintersController(
                     modelId = printer.ModelId,
                     dateAcquired = printer.DateAcquired,
                     inMaintenance = printer.InMaintenance,
+                    serverConfigured = !string.IsNullOrWhiteSpace(printer.ServerUrl),
+                    apiKeyConfigured = !string.IsNullOrWhiteSpace(printer.ApiKey),
+                    usernameConfigured = !string.IsNullOrWhiteSpace(printer.Username),
+                    passwordConfigured = !string.IsNullOrWhiteSpace(printer.Password),
                     message = "Configuration updated successfully"
                 };
 
@@ -3687,11 +3814,14 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Config] Failed to update printer configuration for {Id}: {Message}", id, ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to update printer configuration",
-                error = ex.Message
-            });
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Printer configuration could not be updated",
+                type: "https://printfarmer.dev/problems/printer-configuration-update-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "printer_configuration_update_failed",
+                });
         }
     }
 
@@ -3706,7 +3836,7 @@ public class PrintersController(
     /// <returns>Session ID for tracking discovery progress.</returns>
     /// <response code="200">Discovery started successfully.</response>
     /// <response code="500">Failed to start discovery.</response>
-    [Authorize(Roles = "farm_admin")]
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3714,6 +3844,11 @@ public class PrintersController(
         [FromBody] DiscoveryStreamRequest? request,
         CancellationToken ct)
     {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
         try
         {
             bool autoRegister = request?.AutoRegister ?? false;
@@ -3723,6 +3858,7 @@ public class PrintersController(
             DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
                 backends: backends,
                 autoRegister: autoRegister,
+                ownerUserId: userId,
                 cancellationToken: ct);
 
             return Ok(new { sessionId = result.SessionId, message = result.Message });
@@ -3739,6 +3875,73 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Registers a redacted discovery result whose network target remains server-side.
+    /// </summary>
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [HttpPost("discover/{sessionId}/register")]
+    [ProducesResponseType(typeof(PrinterDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrinterDto>> RegisterDiscoveryResultAsync(
+        [FromRoute] string sessionId,
+        [FromBody] RegisterDiscoveredPrinterRequest request,
+        CancellationToken ct)
+    {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
+        bool isOwner = _discoverySessions.IsSessionOwner(sessionId, userId);
+        bool isFarmAdmin = PrintFarmerPermissions.IsFarmAdmin(User);
+        if (!_discoverySessions.TryGetPrinter(
+                sessionId,
+                request.DiscoveryId,
+                userId,
+                isFarmAdmin,
+                out DiscoveredPrinterDto? discovered) ||
+            discovered is null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Status = StatusCodes.Status404NotFound,
+                Title = "Discovery result not found",
+                Type = "https://printfarmer.dev/problems/resource_not_found",
+                Extensions = { ["code"] = "resource_not_found" },
+            });
+        }
+
+        if (!isOwner)
+        {
+            _logger.LogInformation(
+                "Audited farm-admin discovery result bypass by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+        }
+
+        CreatePrinterFromDiscoveryDto dto = CreatePrinterFromDiscoveryDto.FromDiscovered(
+            discovered,
+            request.ManufacturerId,
+            request.ModelId,
+            request.NewManufacturerName,
+            request.NewModelName);
+        ValidationResult validationResult = await _validator.ValidateAsync(dto, ct);
+        if (!validationResult.IsValid)
+        {
+            foreach (ValidationFailure error in validationResult.Errors)
+            {
+                ModelState.AddModelError(error.PropertyName, error.ErrorMessage);
+            }
+
+            return BadRequest(ModelState);
+        }
+
+        PrinterDto created = await CreatePrinterAndImportProfilesAsync(dto, ct);
+        _discoverySessions.RemovePrinter(sessionId, request.DiscoveryId);
+        return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
+    }
+
+    /// <summary>
     /// Cancel an active discovery stream.
     /// </summary>
     /// <param name="sessionId">The session ID to cancel.</param>
@@ -3746,7 +3949,7 @@ public class PrintersController(
     /// <returns>Cancellation confirmation.</returns>
     /// <response code="200">Discovery cancelled successfully.</response>
     /// <response code="500">Failed to cancel discovery.</response>
-    [Authorize(Roles = "farm_admin")]
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3754,6 +3957,31 @@ public class PrintersController(
         [FromRoute] string sessionId,
         CancellationToken ct)
     {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
+        bool isOwner = _discoverySessions.IsSessionOwner(sessionId, userId);
+        if (!_discoverySessions.SessionExists(sessionId))
+        {
+            return NotFound(new ProblemDetails
+            {
+                Status = StatusCodes.Status404NotFound,
+                Title = "Discovery session not found",
+                Type = "https://printfarmer.dev/problems/resource_not_found",
+                Extensions = { ["code"] = "resource_not_found" },
+            });
+        }
+
+        if (!isOwner)
+        {
+            _logger.LogInformation(
+                "Audited farm-admin discovery session bypass by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+        }
+
         try
         {
             _logger.LogInformation("[DISCOVERY] Cancelling discovery stream {SessionId}", sessionId);
