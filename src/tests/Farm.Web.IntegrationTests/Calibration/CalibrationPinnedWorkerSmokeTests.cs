@@ -431,11 +431,11 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
                 profiles.NozzleDiameterMillimeters),
             new CalibrationModelReference(
                 uploaded.Model3DId,
-                uploaded.Sha256,
+                uploaded.Sha256.ToLowerInvariant(),
                 CalibrationModelFormats.Stl,
                 "calibration-smoke-cube.stl",
                 uploaded.SizeBytes,
-                "uploaded"),
+                "imported"),
             pinnedIdentity);
 
     private AppDbContext CreateSeedContext()
