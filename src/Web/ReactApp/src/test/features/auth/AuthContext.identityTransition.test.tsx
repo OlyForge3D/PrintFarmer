@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/services/queryClient';
 import { AuthProvider } from '@/common/contexts/AuthContext';
+import { notifyAuthenticationExpired } from '@/common/auth/authenticationExpiration';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useNotificationPreferences } from '@/features/notifications/hooks/useNotificationPreferences';
 import { useUserSettings, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
@@ -122,12 +123,13 @@ function SettingsConsumer() {
 }
 
 function Harness() {
-  const { isAuthenticated, user, login, logout } = useAuth();
+  const { isAuthenticated, isLoading, user, login, logout } = useAuth();
   return (
     <div>
       <button onClick={() => login({ username: 'alice', password: 'x' })}>login-a</button>
       <button onClick={() => login({ username: 'bob', password: 'x' })}>login-b</button>
       <button onClick={() => logout()}>logout</button>
+      {isLoading && <span data-testid="auth-loading">loading</span>}
       {isAuthenticated && <span data-testid="current-user">{user?.id}</span>}
       {isAuthenticated && <PreferencesConsumer />}
       {isAuthenticated && <SettingsConsumer />}
@@ -299,6 +301,51 @@ describe('Identity transition cache isolation (#762)', () => {
     await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
     await waitFor(() => expect(signalRSessionTestState.reset).toHaveBeenCalledTimes(2));
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
+  });
+
+  it('finishes loading and clears the rejected token when cross-tab identity validation fails', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+
+    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(new Error('temporary network failure'));
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: 'token-a',
+        newValue: 'token-b',
+      }));
+    });
+
+    await waitFor(() => expect(localStorage.getItem('auth-token')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('auth-loading')).toBeNull());
+    expect(screen.queryByTestId('current-user')).toBeNull();
+  });
+
+  it('clears the current identity when this document expires its authentication session', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+    queryClient.setQueryData(['notifications', 'preferences'], prefsFor('user-a'));
+
+    await act(async () => {
+      localStorage.removeItem('auth-token');
+      notifyAuthenticationExpired();
+    });
+
+    await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
+    expect(screen.queryByTestId('auth-loading')).toBeNull();
+    await waitFor(() =>
+      expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined());
   });
 
   it('discards a stale in-flight fetch for the previous identity instead of letting it repopulate the cache', async () => {

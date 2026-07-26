@@ -164,6 +164,7 @@ import type {
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
 import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
+import { notifyAuthenticationExpired } from "@/common/auth/authenticationExpiration";
 import type {
   ModelCollection,
   ModelCollectionMembership,
@@ -508,6 +509,7 @@ export class ApiClient {
         if (error.response?.status === 401 && !(error.config as PfRequestConfig)?.skipAuthRedirect) {
           await resetAuthenticatedSignalRSession();
           localStorage.removeItem("auth-token");
+          notifyAuthenticationExpired();
           // Only redirect if not already on auth pages
           if (
             window.location.pathname !== "/login" &&

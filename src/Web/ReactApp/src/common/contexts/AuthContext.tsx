@@ -1,11 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import React, { createContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import React, { createContext, useEffect, useState, ReactNode, useCallback, useRef } from 'react';
 import { apiClient } from '@/services/api';
 import { UserDto, LoginRequest, RegisterRequest } from '@/types/api';
 import { loginWithPasskey as passkeyLogin } from '@/services/passkeyService';
 import { queryClient } from '@/services/queryClient';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
+import { subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -21,6 +22,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<UserDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const authTransitionGeneration = useRef(0);
 
   const isAuthenticated = user !== null;
 
@@ -64,8 +66,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       const expectedToken = event.newValue;
+      const transitionGeneration = ++authTransitionGeneration.current;
+      const ownsTransition = () =>
+        !disposed && authTransitionGeneration.current === transitionGeneration;
       const isCurrentTransition = () =>
-        !disposed && localStorage.getItem('auth-token') === expectedToken;
+        ownsTransition() && localStorage.getItem('auth-token') === expectedToken;
       setIsLoading(true);
       setUser(null);
       setError(null);
@@ -88,16 +93,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
             localStorage.removeItem('auth-token');
           }
         } finally {
-          if (isCurrentTransition()) {
+          if (ownsTransition()) {
             setIsLoading(false);
           }
         }
       })();
     };
 
+    const unsubscribeFromAuthenticationExpiration = subscribeToAuthenticationExpiration(() => {
+      authTransitionGeneration.current++;
+      setUser(null);
+      setError(null);
+      setIsLoading(false);
+      void clearSensitiveUserQueries(queryClient).catch(err => {
+        console.error('Failed to clear sensitive authentication state:', err);
+      });
+    });
     window.addEventListener('storage', handleAuthTokenChange);
     return () => {
       disposed = true;
+      unsubscribeFromAuthenticationExpiration();
       window.removeEventListener('storage', handleAuthTokenChange);
     };
   }, []);

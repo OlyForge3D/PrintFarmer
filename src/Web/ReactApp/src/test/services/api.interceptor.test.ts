@@ -14,9 +14,15 @@ import type { PfRequestConfig } from '@/services/api';
 const signalRSessionTestState = vi.hoisted(() => ({
   reset: vi.fn().mockResolvedValue(undefined),
 }));
+const authenticationExpirationTestState = vi.hoisted(() => ({
+  notify: vi.fn(),
+}));
 
 vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
   resetAuthenticatedSignalRSession: signalRSessionTestState.reset,
+}));
+vi.mock('@/common/auth/authenticationExpiration', () => ({
+  notifyAuthenticationExpired: authenticationExpirationTestState.notify,
 }));
 
 // Do NOT mock axios — real interceptors must run.
@@ -80,6 +86,7 @@ describe('ApiClient — 401 response interceptor', () => {
 
     expect(removeItemSpy).not.toHaveBeenCalledWith('auth-token');
     expect(signalRSessionTestState.reset).not.toHaveBeenCalled();
+    expect(authenticationExpirationTestState.notify).not.toHaveBeenCalled();
     expect(window.location.href).toBe('http://localhost/');
   });
 
@@ -94,6 +101,8 @@ describe('ApiClient — 401 response interceptor', () => {
     expect(signalRSessionTestState.reset).toHaveBeenCalledOnce();
     expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
       .toBeLessThan(removeItemSpy.mock.invocationCallOrder[0]);
+    expect(removeItemSpy.mock.invocationCallOrder[0])
+      .toBeLessThan(authenticationExpirationTestState.notify.mock.invocationCallOrder[0]);
     expect(window.location.href).toBe('/login');
   });
 
@@ -108,6 +117,7 @@ describe('ApiClient — 401 response interceptor', () => {
     expect(signalRSessionTestState.reset).toHaveBeenCalledOnce();
     expect(signalRSessionTestState.reset.mock.invocationCallOrder[0])
       .toBeLessThan(removeItemSpy.mock.invocationCallOrder[0]);
+    expect(authenticationExpirationTestState.notify).toHaveBeenCalledOnce();
     expect(window.location.href).toBe('http://localhost/');
   });
 });
