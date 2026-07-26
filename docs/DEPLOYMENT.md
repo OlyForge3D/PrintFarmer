@@ -198,14 +198,22 @@ sqlcmd -S "$SQLSERVER_HOST" -Q \
   "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
 ```
 
-Previously supported databases created without migration history are adopted
-only after every expected table and column is validated. The migration history
-baseline is recorded transactionally and does not rewrite application data.
-A partial legacy schema, missing migration assembly, unsupported provider, or
+Previously supported SQLite databases created with `EnsureCreated` and without
+migration history are adopted only when the complete relational fingerprint
+matches the current model. Validation covers table and column names, store
+types, nullability, defaults, primary keys, unique and filtered indexes, foreign
+keys, and delete behavior. The migration-history baseline is then recorded
+transactionally without rewriting application data.
+
+No-history PostgreSQL and SQL Server databases are not adopted because a local
+fingerprint cannot safely establish their migration provenance. Restore a
+migration-managed backup instead. A mismatched SQLite fingerprint, unsupported
+server adoption, missing migration assembly, unsupported provider, or
 post-migration validation failure stops startup with one of these stable
 diagnostic codes:
 
 - `legacy_schema_incomplete`
+- `legacy_schema_adoption_unsupported`
 - `schema_validation_failed`
 - `migration_assembly_missing`
 - `provider_unsupported`

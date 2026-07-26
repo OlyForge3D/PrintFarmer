@@ -108,6 +108,59 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithMissingIndexWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """DROP INDEX "IX_UserTasks_SourceKind_SourceId";""",
+            "UserTasks (unique index: SOURCEKIND|SOURCEID)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongColumnTypeWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql("""TEXT NOT NULL DEFAULT 3"""),
+            "RetryPolicies.MaxRetries (store type)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongNullabilityWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql("""INTEGER NULL DEFAULT 3"""),
+            "RetryPolicies.MaxRetries (nullability)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "UserRoles_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_UserRoles" PRIMARY KEY,
+                "UserId" TEXT NOT NULL,
+                "RoleId" TEXT NOT NULL,
+                "AssignedAt" TEXT NOT NULL,
+                "ExpiresAt" TEXT NULL,
+                "IsActive" INTEGER NOT NULL,
+                CONSTRAINT "FK_UserRoles_Roles_RoleId"
+                    FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") ON DELETE NO ACTION,
+                CONSTRAINT "FK_UserRoles_Users_UserId"
+                    FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE
+            );
+            DROP TABLE "UserRoles";
+            ALTER TABLE "UserRoles_replacement" RENAME TO "UserRoles";
+            CREATE INDEX "IX_UserRoles_ExpiresAt" ON "UserRoles" ("ExpiresAt");
+            CREATE INDEX "IX_UserRoles_IsActive" ON "UserRoles" ("IsActive");
+            CREATE INDEX "IX_UserRoles_RoleId" ON "UserRoles" ("RoleId");
+            CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
+            PRAGMA foreign_keys = ON;
+            """,
+            "UserRoles (foreign key: ROLEID -> ROLES.ID)");
+    }
+
+    [Fact]
     public async Task SlicerMigration_UsesIndependentSqliteMigrationSet()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
@@ -442,5 +495,51 @@ public sealed class DatabaseMigrationTests
         _ = command.Parameters.AddWithValue("@tableName", tableName);
         object? result = await command.ExecuteScalarAsync();
         return Convert.ToBoolean(result);
+    }
+
+    private static async Task AssertCorruptedLegacySchemaRejectedAsync(
+        string corruptionSql,
+        string expectedDetail)
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        _ = await context.Database.EnsureCreatedAsync();
+        await using (SqliteCommand corruptCommand = connection.CreateCommand())
+        {
+            corruptCommand.CommandText = corruptionSql;
+            _ = await corruptCommand.ExecuteNonQueryAsync();
+        }
+
+        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        DatabaseMigrationContractException exception =
+            (await migrate.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
+        exception.Code.Should().Be("schema_validation_failed");
+        exception.Message.Should().Contain(expectedDetail);
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    private static string BuildRetryPoliciesReplacementSql(string maxRetriesDefinition)
+    {
+        return $"""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "RetryPolicies_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY,
+                "IsEnabled" INTEGER NOT NULL DEFAULT 1,
+                "MaxRetries" {maxRetriesDefinition},
+                "InitialDelaySeconds" INTEGER NOT NULL DEFAULT 60,
+                "ExponentialBase" REAL NOT NULL DEFAULT 2.0,
+                "MaxDelaySeconds" INTEGER NOT NULL DEFAULT 3600,
+                "RetryOnErrorCategories" TEXT NOT NULL DEFAULT 'Recoverable',
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            DROP TABLE "RetryPolicies";
+            ALTER TABLE "RetryPolicies_replacement" RENAME TO "RetryPolicies";
+            PRAGMA foreign_keys = ON;
+            """;
     }
 }
