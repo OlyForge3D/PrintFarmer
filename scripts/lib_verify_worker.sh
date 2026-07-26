@@ -138,8 +138,9 @@ vw_check_binary_attestation() {
 }
 
 vw_invoke_help() {
+  local invocation_path="${BINARY_PAYLOAD_PATH:-${BINARY_PATH}}"
   # Always attempt help; in stub mode it may fail (only enforced in require-real)
-  if /usr/bin/env bash -c "docker exec '${CONTAINER_NAME}' '${BINARY_PATH}' --help >/dev/null 2>&1"; then
+  if /usr/bin/env bash -c "docker exec '${CONTAINER_NAME}' '${invocation_path}' --help >/dev/null 2>&1"; then
     vw_log "Help invocation succeeded"
   else
     vw_log "Help invocation failed"
