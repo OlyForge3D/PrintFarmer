@@ -6,6 +6,7 @@ using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
+using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
@@ -75,6 +76,14 @@ public interface IUnitOfWork : IDisposable, IAsyncDisposable
     /// Shares the DbContext so an override audit commits atomically with the spool binding.
     /// </summary>
     IFilamentSwapOverrideRepository FilamentSwapOverrides { get; }
+
+    /// <summary>
+    /// Repository for job-output → SKU mappings (PartOutputMappings). Shares the DbContext
+    /// so direct-mapping deletions commit atomically with the parent GcodeFile deletion,
+    /// which the Dallas cascade adjudication for #953 now requires because the direct
+    /// GcodeFile → PartOutputMapping FK is Restrict rather than Cascade.
+    /// </summary>
+    IPartOutputMappingRepository PartOutputMappings { get; }
 
     /// <summary>
     /// Repository for tag persistence and retrieval (generic tags).

@@ -179,7 +179,7 @@ public partial class AddPrintedPartsInventory : Migration
                     column: x => x.GcodeFileId,
                     principalTable: "GcodeFiles",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.Cascade);
+                    onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
                     name: "FK_PartOutputMappings_PartInventories_PartInventoryId",
                     column: x => x.PartInventoryId,

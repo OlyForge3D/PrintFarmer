@@ -7,6 +7,7 @@ using Farm.Infrastructure.Repositories.Folder;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Locations;
+using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.Tags;
@@ -45,6 +46,7 @@ public class AppUnitOfWork : IUnitOfWork
     private IQueueRepository? _queueRepository;
     private ITagRepository? _tagRepository;
     private IFilamentSwapOverrideRepository? _filamentSwapOverrideRepository;
+    private IPartOutputMappingRepository? _partOutputMappingRepository;
 
     /// <summary>
     /// Lazy-initializes the Camera repository, reusing the same DbContext.
@@ -95,6 +97,16 @@ public class AppUnitOfWork : IUnitOfWork
     /// </summary>
     public IFilamentSwapOverrideRepository FilamentSwapOverrides =>
         _filamentSwapOverrideRepository ??= new EfFilamentSwapOverrideRepository(_db);
+
+    /// <summary>
+    /// Lazy-initializes the PartOutputMapping repository, reusing the same DbContext so
+    /// direct-mapping deletions commit atomically with GcodeFile deletions. Introduced by
+    /// the Dallas cascade adjudication for #953: the direct GcodeFile → PartOutputMapping FK
+    /// is Restrict (not Cascade) to break the SQL Server 1785 multi-cascading-path graph, so
+    /// callers must explicitly delete direct mappings before removing the parent GcodeFile.
+    /// </summary>
+    public IPartOutputMappingRepository PartOutputMappings =>
+        _partOutputMappingRepository ??= new EfPartOutputMappingRepository(_db);
 
     /// <summary>
     /// Lazy-initializes the Tag repository, reusing the same DbContext.

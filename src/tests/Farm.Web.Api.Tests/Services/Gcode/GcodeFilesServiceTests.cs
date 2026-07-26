@@ -9,6 +9,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
@@ -328,10 +329,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
@@ -399,10 +404,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
@@ -487,10 +496,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);

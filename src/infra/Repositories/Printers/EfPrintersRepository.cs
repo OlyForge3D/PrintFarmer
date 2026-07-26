@@ -136,6 +136,17 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             .Where(h => h.PrinterId == trackedPrinter.Id)
             .ExecuteDeleteAsync(ct);
 
+        // Remove PrinterMaintenanceSchedule records for this printer BEFORE Printers.Remove.
+        // The Schedule.PrinterId FK is Restrict (not Cascade) to break the SQL Server
+        // multi-cascading-path graph Printers ⇒ Schedules ⇒ MaintenanceAlerts (SetNull)
+        // that triggered error 1785 on fresh SQL Server InitialV1 (#953). Deleting schedules
+        // here matches the surrounding cleanup pattern. Deleting a schedule also nulls the
+        // schedule-link on any dependent MaintenanceAlerts and MaintenanceLogs (SetNull FK),
+        // so audit rows are preserved.
+        await _db.PrinterMaintenanceSchedules
+            .Where(s => s.PrinterId == trackedPrinter.Id)
+            .ExecuteDeleteAsync(ct);
+
         // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
 
         // Now remove the tracked printer

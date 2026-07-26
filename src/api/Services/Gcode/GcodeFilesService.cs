@@ -863,10 +863,17 @@ public class GcodeFilesService(
         // Step 3: Clear FK references that would otherwise block deletion.
         // - PrintJobs keep history; we null out the FK.
         // - Harvest import mappings are safe to remove when deleting the library file.
+        // - Direct PartOutputMappings (GcodeFileId path) must be explicitly deleted
+        //   because their FK to GcodeFiles is Restrict, not Cascade, after the Dallas
+        //   cascade adjudication for #953 (broke the SQL Server 1785 multi-cascading-path
+        //   graph GcodeFiles ⇒ PartOutputMappings via {direct, via PrintProjectFiles}).
+        //   Mappings that reach the file indirectly via PrintProjectFileId are NOT touched
+        //   here — they cascade normally when the PrintProjectFile is removed.
         foreach (GcodeFile file in filesToDelete)
         {
             await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
             await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+            await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFileAsync(file.Id, ct);
         }
 
         // Step 4: Delete database records first (before deleting physical files)
