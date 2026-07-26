@@ -280,6 +280,7 @@ public static class ProviderAwareMigrationRunner
                     NormalizeIdentifier(foreignKey.PrincipalTable.Name),
                     NormalizeIdentifiers(foreignKey.Columns.Select(column => column.Name)),
                     NormalizeIdentifiers(foreignKey.PrincipalColumns.Select(column => column.Name)),
+                    "NO ACTION",
                     NormalizeReferentialAction(foreignKey.OnDeleteAction))),
             ];
             HashSet<CheckConstraintContract> checkConstraints =
@@ -573,7 +574,7 @@ public static class ProviderAwareMigrationRunner
         var foreignKeys = new Dictionary<long, SqliteForeignKeyBuilder>();
         await using DbCommand command = connection.CreateCommand();
         command.CommandText =
-            "SELECT id, seq, \"table\", \"from\", \"to\", on_delete " +
+            "SELECT id, seq, \"table\", \"from\", \"to\", on_update, on_delete " +
             "FROM pragma_foreign_key_list(@tableName) ORDER BY id, seq";
         AddParameter(command, "@tableName", table.Name);
         await using DbDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -584,7 +585,8 @@ public static class ProviderAwareMigrationRunner
             {
                 foreignKey = new SqliteForeignKeyBuilder(
                     reader.GetString(2),
-                    reader.GetString(5));
+                    reader.GetString(5),
+                    reader.GetString(6));
                 foreignKeys.Add(id, foreignKey);
             }
 
@@ -598,6 +600,7 @@ public static class ProviderAwareMigrationRunner
                 NormalizeIdentifier(foreignKey.PrincipalTable),
                 NormalizeIdentifiers(foreignKey.Columns),
                 NormalizeIdentifiers(foreignKey.PrincipalColumns),
+                NormalizeSql(foreignKey.OnUpdateAction) ?? string.Empty,
                 NormalizeSql(foreignKey.OnDeleteAction) ?? string.Empty)),
         ];
     }
@@ -1017,6 +1020,7 @@ public static class ProviderAwareMigrationRunner
         string PrincipalTable,
         string Columns,
         string PrincipalColumns,
+        string OnUpdateAction,
         string OnDeleteAction);
 
     private sealed record CheckConstraintContract(string Sql);
@@ -1033,9 +1037,14 @@ public static class ProviderAwareMigrationRunner
         IReadOnlySet<ForeignKeyContract> ForeignKeys,
         IReadOnlySet<CheckConstraintContract> CheckConstraints);
 
-    private sealed class SqliteForeignKeyBuilder(string principalTable, string onDeleteAction)
+    private sealed class SqliteForeignKeyBuilder(
+        string principalTable,
+        string onUpdateAction,
+        string onDeleteAction)
     {
         public string PrincipalTable { get; } = principalTable;
+
+        public string OnUpdateAction { get; } = onUpdateAction;
 
         public string OnDeleteAction { get; } = onDeleteAction;
 

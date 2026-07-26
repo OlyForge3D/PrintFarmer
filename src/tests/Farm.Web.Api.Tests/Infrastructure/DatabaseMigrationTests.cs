@@ -135,28 +135,15 @@ public sealed class DatabaseMigrationTests
     public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyWithoutRecordingHistory()
     {
         return AssertCorruptedLegacySchemaRejectedAsync(
-            """
-            PRAGMA foreign_keys = OFF;
-            CREATE TABLE "UserRoles_replacement" (
-                "Id" TEXT NOT NULL CONSTRAINT "PK_UserRoles" PRIMARY KEY,
-                "UserId" TEXT NOT NULL,
-                "RoleId" TEXT NOT NULL,
-                "AssignedAt" TEXT NOT NULL,
-                "ExpiresAt" TEXT NULL,
-                "IsActive" INTEGER NOT NULL,
-                CONSTRAINT "FK_UserRoles_Roles_RoleId"
-                    FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") ON DELETE NO ACTION,
-                CONSTRAINT "FK_UserRoles_Users_UserId"
-                    FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE
-            );
-            DROP TABLE "UserRoles";
-            ALTER TABLE "UserRoles_replacement" RENAME TO "UserRoles";
-            CREATE INDEX "IX_UserRoles_ExpiresAt" ON "UserRoles" ("ExpiresAt");
-            CREATE INDEX "IX_UserRoles_IsActive" ON "UserRoles" ("IsActive");
-            CREATE INDEX "IX_UserRoles_RoleId" ON "UserRoles" ("RoleId");
-            CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
-            PRAGMA foreign_keys = ON;
-            """,
+            BuildUserRolesReplacementSql("ON DELETE NO ACTION"),
+            "UserRoles (foreign key: ROLEID -> ROLES.ID)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyUpdateWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildUserRolesReplacementSql("ON UPDATE CASCADE ON DELETE CASCADE"),
             "UserRoles (foreign key: ROLEID -> ROLES.ID)");
     }
 
@@ -565,6 +552,32 @@ public sealed class DatabaseMigrationTests
             );
             DROP TABLE "RetryPolicies";
             ALTER TABLE "RetryPolicies_replacement" RENAME TO "RetryPolicies";
+            PRAGMA foreign_keys = ON;
+            """;
+    }
+
+    private static string BuildUserRolesReplacementSql(string roleForeignKeyActions)
+    {
+        return $"""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "UserRoles_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_UserRoles" PRIMARY KEY,
+                "UserId" TEXT NOT NULL,
+                "RoleId" TEXT NOT NULL,
+                "AssignedAt" TEXT NOT NULL,
+                "ExpiresAt" TEXT NULL,
+                "IsActive" INTEGER NOT NULL,
+                CONSTRAINT "FK_UserRoles_Roles_RoleId"
+                    FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") {roleForeignKeyActions},
+                CONSTRAINT "FK_UserRoles_Users_UserId"
+                    FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE
+            );
+            DROP TABLE "UserRoles";
+            ALTER TABLE "UserRoles_replacement" RENAME TO "UserRoles";
+            CREATE INDEX "IX_UserRoles_ExpiresAt" ON "UserRoles" ("ExpiresAt");
+            CREATE INDEX "IX_UserRoles_IsActive" ON "UserRoles" ("IsActive");
+            CREATE INDEX "IX_UserRoles_RoleId" ON "UserRoles" ("RoleId");
+            CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
             PRAGMA foreign_keys = ON;
             """;
     }
