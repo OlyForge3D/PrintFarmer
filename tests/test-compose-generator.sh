@@ -1802,7 +1802,6 @@ run_all_tests() {
     test_complete_user_scenario
     test_addon_templates_yaml_syntax
     test_pgadmin_template_structure
-    test_pgadmin_init_json
     test_pgadmin_compose_generation
     test_pgadmin_postgres_only
     
@@ -2153,43 +2152,16 @@ test_pgadmin_template_structure() {
     # Validate volume configuration (may use variable reference)
     assert_contains "$template_content" "/var/lib/pgadmin" "Should persist pgAdmin data"
     
-    # Validate health check endpoint
-    assert_contains "$template_content" "/pgadmin4/misc/ping" "Should health check pgAdmin endpoint"
+    # Validate health check endpoint (matches SCRIPT_NAME=/pgadmin remap)
+    assert_contains "$template_content" "/pgadmin/misc/ping" "Should health check pgAdmin endpoint"
     
     pass_test
 }
 
-# Test pgAdmin initialization JSON structure
-test_pgadmin_init_json() {
-    start_test "pgAdmin initialization JSON validation"
-    
-    local pgadmin_init="$SCRIPT_DIR/../scripts/docker/pgadmin-init.json"
-    
-    if [ ! -f "$pgadmin_init" ]; then
-        print_fail "pgAdmin init JSON not found: $pgadmin_init"
-        fail_test
-        return 1
-    fi
-    
-    # Validate it's valid JSON
-    if ! jq empty "$pgadmin_init" 2>/dev/null; then
-        print_fail "pgAdmin init JSON is not valid JSON"
-        fail_test
-        return 1
-    fi
-    
-    local init_content=$(cat "$pgadmin_init")
-    
-    # Validate required structure
-    assert_contains "$init_content" "Servers" "Should define Servers section"
-    assert_contains "$init_content" "PrintFarmer PostgreSQL" "Should name the server 'PrintFarmer PostgreSQL'"
-    assert_contains "$init_content" "database" "Should reference database service"
-    assert_contains "$init_content" "5432" "Should use PostgreSQL default port"
-    assert_contains "$init_content" "POSTGRES_USER" "Should reference POSTGRES_USER variable"
-    assert_contains "$init_content" "POSTGRES_PASSWORD" "Should reference POSTGRES_PASSWORD variable"
-    
-    pass_test
-}
+# pgAdmin initialization JSON structure test removed: scripts/docker/pgadmin-init.json
+# was intentionally deleted in commit 297612f05e ("Delete obsolete pgadmin-init.json —
+# replaced by dynamic generation"). The dynamic generation surface is exercised by
+# test_pgadmin_compose_generation below and by deploy-docker tests.
 
 # Test pgAdmin integration with compose-generator
 test_pgadmin_compose_generation() {
@@ -2198,8 +2170,10 @@ test_pgadmin_compose_generation() {
     local outdir="$TEST_TEMP_DIR/pgadmin-compose"
     mkdir -p "$outdir"
     
-    # Generate with pgAdmin enabled
-    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --output-dir $outdir"
+    # Generate with pgAdmin enabled. Explicit --db-provider postgres pins the
+    # test's intent (pgAdmin only merges under postgres) and isolates it from
+    # DB_PROVIDER environment leaked by earlier scenario tests.
+    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --db-provider postgres --output-dir $outdir"
     
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"
