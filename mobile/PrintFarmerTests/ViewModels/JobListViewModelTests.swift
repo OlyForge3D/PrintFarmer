@@ -7,17 +7,17 @@ final class JobListViewModelTests: XCTestCase {
     private var mockJobService: MockJobService!
     private var viewModel: JobListViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobService = MockJobService()
         viewModel = JobListViewModel()
         viewModel.configure(jobService: mockJobService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

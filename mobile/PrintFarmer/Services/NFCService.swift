@@ -257,11 +257,17 @@ private final class NFCMessageWriteDelegate: NSObject, NFCTagReaderSessionDelega
     func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
         nonisolated(unsafe) let session = session
 
-        guard let tag = tags.first else {
+        guard let detectedTag = tags.first else {
             session.invalidate(errorMessage: "No tag detected.")
             resume(throwing: SpoolScanError.invalidPayload("No tag detected."))
             return
         }
+        // NFCTag is not Sendable but CoreNFC drives its own callback chain
+        // on a serial dispatch queue, so the tag is only touched from that
+        // queue. Rebind with nonisolated(unsafe) so the @Sendable connect
+        // completion handler can capture it without triggering Swift 6
+        // strict-concurrency diagnostics.
+        nonisolated(unsafe) let tag = detectedTag
 
         session.connect(to: tag) { [weak self] error in
             guard let self else { return }
@@ -338,11 +344,16 @@ private final class NFCWriteDelegate: NSObject, NFCTagReaderSessionDelegate, @un
         // Rebind once so all nested @Sendable closures capture the safe binding.
         nonisolated(unsafe) let session = session
 
-        guard let tag = tags.first else {
+        guard let detectedTag = tags.first else {
             session.invalidate(errorMessage: "No tag detected.")
             resume(throwing: SpoolScanError.invalidPayload("No tag detected."))
             return
         }
+        // NFCTag is not Sendable but CoreNFC drives its callbacks on its
+        // own serial dispatch queue, so this tag is only touched from there.
+        // Rebind with nonisolated(unsafe) so the @Sendable connect
+        // completion handler can capture it under Swift 6 strict concurrency.
+        nonisolated(unsafe) let tag = detectedTag
 
         session.connect(to: tag) { [weak self] error in
             guard let self else { return }

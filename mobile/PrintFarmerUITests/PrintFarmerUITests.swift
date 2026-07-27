@@ -7,6 +7,7 @@ import XCTest
 /// operator-shell mode. Subclasses that need a different deterministic
 /// launch mode (e.g. the unauthenticated login flow) override
 /// `additionalLaunchArguments`; those are applied before the app launches.
+@MainActor
 class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
@@ -16,22 +17,19 @@ class PrintFarmerUITestCase: XCTestCase {
     /// bootstrap; override to select a different explicit launch mode.
     var additionalLaunchArguments: [String] { [] }
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        let application = app!
-        MainActor.assumeIsolated {
-            application.launchEnvironment["PFARM_UI_TESTING"] = "1"
-        }
+        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
         app.launch()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         app = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

@@ -9,17 +9,17 @@ final class MaintenanceViewModelTests: XCTestCase {
     private var mockMaintenanceService: MockMaintenanceService!
     private var viewModel: MaintenanceViewModel!
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockMaintenanceService = MockMaintenanceService()
         viewModel = MaintenanceViewModel()
         viewModel.configure(maintenanceService: mockMaintenanceService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockMaintenanceService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
     
     // MARK: - Initial State

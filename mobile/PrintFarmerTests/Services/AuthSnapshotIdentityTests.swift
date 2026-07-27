@@ -15,8 +15,8 @@ final class AuthSnapshotIdentityTests: XCTestCase {
     private var authService: AuthService!
     private var serverID: UUID!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
         registry = ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
@@ -36,10 +36,10 @@ final class AuthSnapshotIdentityTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         mockAPIClient = nil; apiClient = nil; registry = nil
         owners = nil; epoch = nil; authService = nil; serverID = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func userJSON(id: UUID, username: String = "user") -> String {

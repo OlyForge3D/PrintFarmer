@@ -10,8 +10,8 @@ final class SpoolInventoryViewModelTests: XCTestCase {
     private var mockScanner: MockScannerService!
     private var viewModel: SpoolInventoryViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockSpoolService()
         mockScanner = MockScannerService()
         viewModel = SpoolInventoryViewModel()
@@ -19,11 +19,11 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         viewModel.configureNFC(scanner: mockScanner)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockScanner = nil
         mockService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

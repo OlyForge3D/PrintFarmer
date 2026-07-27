@@ -7,17 +7,17 @@ final class NotificationsViewModelTests: XCTestCase {
     private var mockNotificationService: MockNotificationService!
     private var viewModel: NotificationsViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockNotificationService = MockNotificationService()
         viewModel = NotificationsViewModel()
         viewModel.configure(notificationService: mockNotificationService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockNotificationService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

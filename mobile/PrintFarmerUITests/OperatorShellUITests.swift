@@ -15,6 +15,7 @@ import XCTest
 /// details tab targets may not present rich content. Assertions fall
 /// back to "at least the navigation chrome exists" when data is missing,
 /// mirroring `PrinterListUITests`.
+@MainActor
 final class OperatorShellUITests: PrintFarmerUITestCase {
 
     private let expectedTabsInOrder = ["Attention", "Farm", "Tasks", "Scan", "Inventory"]

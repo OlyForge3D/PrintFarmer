@@ -23,16 +23,16 @@ final class SystemCapabilitiesTests: XCTestCase {
     nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         apiClient = nil
         mockAPIClient = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Defaults

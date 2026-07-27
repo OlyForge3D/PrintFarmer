@@ -43,17 +43,17 @@ final class PredictiveViewModelTests: XCTestCase {
         XCTAssertFalse(snapshot.exactNormalDeliveryObserved, file: file, line: line)
     }
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockPredictiveService = MockPredictiveService()
         viewModel = PredictiveViewModel()
         viewModel.configure(predictiveService: mockPredictiveService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockPredictiveService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func boundedOutcome(

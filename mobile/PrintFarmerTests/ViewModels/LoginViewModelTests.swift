@@ -8,17 +8,17 @@ final class LoginViewModelTests: XCTestCase {
 
     private var viewModel: LoginViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         // Clear any persisted server URL before each test
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         viewModel = LoginViewModel()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         viewModel = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Form Validation

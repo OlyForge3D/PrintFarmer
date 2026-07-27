@@ -14,8 +14,8 @@ final class AuthViewModelTests: XCTestCase {
     private var services: ServiceContainer!
     private var viewModel: AuthViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
         // These tests exercise the AuthViewModel → AuthService → APIClient auth path;
@@ -27,14 +27,14 @@ final class AuthViewModelTests: XCTestCase {
         viewModel = AuthViewModel(services: services)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
         viewModel = nil
         services = nil
         authService = nil
         apiClient = nil
         mockAPIClient = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State
