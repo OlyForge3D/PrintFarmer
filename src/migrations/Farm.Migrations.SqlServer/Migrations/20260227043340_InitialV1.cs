@@ -873,7 +873,7 @@ public partial class InitialV1 : Migration
                     column: x => x.ManufacturerId,
                     principalTable: "Manufacturers",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
                     name: "FK_ToolheadModelDefinitions_NozzleModelDefinitions_DefaultNozzleId",
                     column: x => x.DefaultNozzleId,
