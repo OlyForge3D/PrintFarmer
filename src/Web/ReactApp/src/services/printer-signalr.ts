@@ -16,6 +16,7 @@ import {
 } from "@/types/api";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
+import { AUTH_SESSION_ESTABLISHED_EVENT } from "@/services/authEvents";
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
@@ -298,6 +299,8 @@ export class PrinterSignalRService {
     logLevel: string;
     consoleLoggingEnabled: boolean;
   } | null = null;
+  private isRefreshingSettings = false;
+  private authListener: (() => void) | null = null;
 
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
   private jobQueueUpdateCallbacks: JobQueueUpdateCallback[] = [];
@@ -314,6 +317,14 @@ export class PrinterSignalRService {
     this.loadSettings().then(() => {
       this.buildConnection();
     });
+    // The initial load above runs at module-import time, before the user has
+    // authenticated, so the anonymous GET /api/settings/SignalR fails closed
+    // (401) and falls back to defaults. Re-load once a session is established so
+    // the admin-configured log level is actually honoured for the session.
+    this.authListener = () => {
+      void this.refreshSettings();
+    };
+    window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
   }
 
   private async loadSettings(): Promise<void> {
@@ -329,6 +340,41 @@ export class PrinterSignalRService {
         logLevel: "Information",
         consoleLoggingEnabled: true,
       };
+    }
+  }
+
+  /**
+   * Re-fetch the SignalR settings section (e.g. after the user authenticates)
+   * and, if the effective log level changed, rebuild the connection so the new
+   * level takes effect — the level is only applied when the connection is built.
+   * Guarded against overlapping runs so it cannot race with itself, and it emits
+   * no events, so it cannot re-trigger its own auth listener.
+   */
+  public async refreshSettings(): Promise<void> {
+    if (this.isRefreshingSettings) {
+      return;
+    }
+    this.isRefreshingSettings = true;
+    try {
+      const previousLevel = this.getLogLevel();
+      await this.loadSettings();
+      if (this.getLogLevel() === previousLevel) {
+        // Nothing changed (or still on defaults) — no reconnect needed.
+        return;
+      }
+      const wasActive =
+        this.connection?.state === HubConnectionState.Connected ||
+        this.connection?.state === HubConnectionState.Connecting;
+      if (this.connection) {
+        await this.connection.stop();
+        this.connection = null;
+      }
+      this.buildConnection();
+      if (wasActive) {
+        await this.connect();
+      }
+    } finally {
+      this.isRefreshingSettings = false;
     }
   }
 
@@ -616,6 +662,10 @@ export class PrinterSignalRService {
     return this.connection?.connectionId ?? null;
   }
   dispose(): void {
+    if (this.authListener) {
+      window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
+      this.authListener = null;
+    }
     this.printerStatusCallbacks = [];
     this.jobQueueUpdateCallbacks = [];
     this.connectionStateCallbacks = [];
