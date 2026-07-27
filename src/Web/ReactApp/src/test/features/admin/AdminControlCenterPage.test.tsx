@@ -286,6 +286,124 @@ describe('AdminControlCenterPage', () => {
     expect(within(row).queryByRole('link')).not.toBeInTheDocument();
   });
 
+  it('resolves actionDestinationId through the ADMIN_DESTINATIONS registry', async () => {
+    // Backend sends the stable id "ops-status" rather than a hardcoded route.
+    // The client must look it up in ADMIN_DESTINATIONS and use the current canonical
+    // path (/admin/manage?tab=operations&sub=status), never a legacy /admin/system.
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'admin-overview-probe-failed',
+            severity: 'Error',
+            title: 'System health probes are not reporting',
+            detail: 'probe error',
+            actionLabel: 'Open System logs',
+            actionDestinationId: 'ops-status',
+            actionRoute: null,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    const actionLink = within(row).getByRole('link', { name: /Open System logs/i });
+    expect(actionLink).toHaveAttribute('href', '/admin/manage?tab=operations&sub=status');
+    // Legacy path must not leak through.
+    expect(actionLink).not.toHaveAttribute('href', '/admin/system');
+  });
+
+  it('prefers actionDestinationId over actionRoute when both are supplied', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'both',
+            severity: 'Error',
+            title: 'Both fields set',
+            detail: 'id wins',
+            actionLabel: 'Open',
+            actionDestinationId: 'ops-status',
+            actionRoute: '/legacy-fallback-should-not-be-used',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    const actionLink = within(row).getByRole('link', { name: /Open/i });
+    expect(actionLink).toHaveAttribute('href', '/admin/manage?tab=operations&sub=status');
+  });
+
+  it('falls back to actionRoute when actionDestinationId does not resolve', async () => {
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'unknown-id',
+            severity: 'Warning',
+            title: 'Unknown destination id',
+            detail: 'Backend shipped an id the frontend does not know about.',
+            actionLabel: 'Open',
+            actionDestinationId: 'nonexistent-destination-xyz',
+            actionRoute: '/printers',
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    const actionLink = within(row).getByRole('link', { name: /Open/i });
+    expect(actionLink).toHaveAttribute('href', '/printers');
+  });
+
+  it('drops the action link when only an unknown destination id is supplied', async () => {
+    // Registry drift: id unknown AND no route fallback → link disappears entirely.
+    // Better a visible missing button than a silent broken navigation.
+    mockedApiGet.mockResolvedValue({
+      data: makeOverview({
+        attention: [
+          {
+            key: 'orphan',
+            severity: 'Warning',
+            title: 'Orphaned destination',
+            detail: 'Backend shipped a stale id; the link cannot be rendered.',
+            actionLabel: 'Open',
+            actionDestinationId: 'nonexistent-destination-xyz',
+            actionRoute: null,
+          },
+        ],
+      }),
+    });
+
+    renderHub();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-hub-attention-item')).toBeInTheDocument();
+    });
+
+    const row = screen.getByTestId('admin-hub-attention-item');
+    expect(within(row).queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('degrades unknown attention severities to the Info treatment without crashing', async () => {
     mockedApiGet.mockResolvedValue({
       data: makeOverview({

@@ -98,13 +98,28 @@ public record AttentionItemDto
 
     /// <summary>
     /// Optional call-to-action label (e.g. <c>"Open Slicer Workers"</c>). Present when
-    /// <see cref="ActionRoute"/> is present.
+    /// <see cref="ActionDestinationId"/> or <see cref="ActionRoute"/> is present.
     /// </summary>
     public string? ActionLabel { get; init; }
 
     /// <summary>
-    /// Client-side route the UI navigates to (e.g. <c>"/admin/workers"</c>). Never a raw URL,
-    /// so the client is safe to treat it as a router path.
+    /// Preferred navigation target: the stable <c>id</c> of an entry in the frontend's
+    /// <c>ADMIN_DESTINATIONS</c> registry (e.g. <c>"ops-status"</c>). The client resolves
+    /// the id to the current canonical path, so route renames stay a frontend concern
+    /// and the backend never hardcodes URLs it does not own.
+    /// </summary>
+    /// <remarks>
+    /// When both <see cref="ActionDestinationId"/> and <see cref="ActionRoute"/> are
+    /// provided, the client prefers the id and falls back to the route only if the id
+    /// does not resolve. Emit <see cref="ActionRoute"/> alone only when there is no
+    /// matching registry entry (e.g. non-admin operational pages).
+    /// </remarks>
+    public string? ActionDestinationId { get; init; }
+
+    /// <summary>
+    /// Fallback client-side route the UI navigates to when no <see cref="ActionDestinationId"/>
+    /// is available (e.g. <c>"/printers"</c>). Never a raw URL, so the client is safe to
+    /// treat it as a router path.
     /// </summary>
     public string? ActionRoute { get; init; }
 }

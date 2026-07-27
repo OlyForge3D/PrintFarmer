@@ -16,6 +16,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import {
+  getDestinationById,
   getHubGroupedDestinations,
   type AdminDestination,
 } from '@/features/admin/registry';
@@ -194,10 +195,32 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
   );
 }
 
+/**
+ * Resolve an attention item's navigation target.
+ *
+ * The backend emits either a stable `actionDestinationId` (preferred: keeps route
+ * knowledge on the frontend) or a raw `actionRoute` fallback for pages outside the
+ * ADMIN_DESTINATIONS registry (e.g. `/printers`). We prefer the id lookup so the
+ * backend cannot silently ship a stale path; if the id doesn't resolve — because
+ * someone renamed a registry entry without updating the backend — we fall back to
+ * `actionRoute`, and if that's also missing, the link disappears (visible failure,
+ * not a silent broken navigation).
+ */
+function resolveAttentionActionRoute(item: AttentionItemDto): string | null {
+  if (item.actionDestinationId) {
+    const destination = getDestinationById(item.actionDestinationId);
+    if (destination) {
+      return destination.path;
+    }
+  }
+  return item.actionRoute ?? null;
+}
+
 function AttentionRow({ item }: { item: AttentionItemDto }) {
   const presentation = presentationForAttentionSeverity(item.severity);
   const { Icon } = presentation;
-  const hasAction = Boolean(item.actionLabel && item.actionRoute);
+  const actionRoute = resolveAttentionActionRoute(item);
+  const hasAction = Boolean(item.actionLabel && actionRoute);
   return (
     <li
       className={clsx(
@@ -225,10 +248,10 @@ function AttentionRow({ item }: { item: AttentionItemDto }) {
         </div>
         <p className="mt-1 text-sm text-pf-text-secondary">{item.detail}</p>
       </div>
-      {hasAction && item.actionRoute && (
+      {hasAction && actionRoute && (
         <div className="shrink-0 sm:ml-auto sm:self-center">
           <Link
-            to={item.actionRoute}
+            to={actionRoute}
             className="inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-3 py-1.5 text-sm font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
           >
             {item.actionLabel}

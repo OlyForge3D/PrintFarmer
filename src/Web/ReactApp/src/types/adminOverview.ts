@@ -70,9 +70,18 @@ export interface AttentionItemDto {
   title: string;
   /** Additional detail explaining the issue. */
   detail: string;
-  /** Optional call-to-action label (only present alongside `actionRoute`). */
+  /** Optional call-to-action label (only present alongside a destination id or route). */
   actionLabel?: string | null;
-  /** Optional client-side route to navigate to. */
+  /**
+   * Preferred navigation target: the stable id of an entry in `ADMIN_DESTINATIONS`.
+   * When present, the client resolves the id to the current canonical path. This keeps
+   * route renames a frontend concern — the backend never has to know URLs it does not own.
+   */
+  actionDestinationId?: string | null;
+  /**
+   * Fallback client-side route to navigate to when {@link actionDestinationId} is not
+   * provided or does not resolve (e.g. non-admin operational pages like `/printers`).
+   */
   actionRoute?: string | null;
 }
 
