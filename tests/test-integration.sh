@@ -424,7 +424,6 @@ run_all_tests() {
     
     test_monolithic_deployment_pipeline
     test_microservices_deployment_pipeline
-    test_host_network_deployment_pipeline
     test_configuration_consistency
     test_cleanup_and_regeneration
     test_environment_file_generation

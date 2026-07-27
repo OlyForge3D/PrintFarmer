@@ -226,5 +226,186 @@ if ! echo "$plain_out2" | grep -Eq "Passed:[[:space:]]+4( |$)"; then
 fi
 pass "Dynamic-fail: summary reports 4 passed"
 
+# ----------------------------------------------------------------------------
+# Static regression: test-compose-generator.sh must guard `wait $pid` in
+# test_concurrent_generation_safety. Under `set -euo pipefail` a naked
+# `wait $pid` propagates the child's exit code and, when two concurrent
+# compose-generator processes race on the same output dir, aborts the whole
+# test suite silently (no [FAIL] emitted) — the exact symptom of blocker
+# #980's "concurrent generation safety" flake.
+# ----------------------------------------------------------------------------
+
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+COMPOSE_TEST="$REPO_ROOT/tests/test-compose-generator.sh"
+
+if [[ ! -f "$COMPOSE_TEST" ]]; then
+    fail "test-compose-generator.sh not found at $COMPOSE_TEST"
+fi
+
+# Locate test_concurrent_generation_safety start (line number) and its next
+# top-level function boundary, then check every `wait $pidN` inside is guarded.
+concurrent_start=$(grep -n '^test_concurrent_generation_safety[[:space:]]*()' "$COMPOSE_TEST" | head -1 | cut -d: -f1 || true)
+if [[ -z "$concurrent_start" ]]; then
+    fail "Missing test_concurrent_generation_safety in $COMPOSE_TEST"
+fi
+concurrent_end=$(awk -v start="$concurrent_start" 'NR>start && /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/ {print NR; exit}' "$COMPOSE_TEST")
+if [[ -z "$concurrent_end" ]]; then
+    concurrent_end=$(wc -l < "$COMPOSE_TEST")
+fi
+naked_wait=$(sed -n "${concurrent_start},${concurrent_end}p" "$COMPOSE_TEST" \
+    | grep -nE 'wait[[:space:]]+\$pid[0-9]+' \
+    | grep -vE '\|\|[[:space:]]*true' || true)
+if [[ -n "$naked_wait" ]]; then
+    echo "$naked_wait"
+    fail "test_concurrent_generation_safety has unguarded 'wait \$pidN' — must add '|| true' so set -e does not abort silently on legitimate concurrent-race failures."
+fi
+pass "Static: test_concurrent_generation_safety guards wait \$pidN with || true"
+
+# ----------------------------------------------------------------------------
+# Static regression: test-integration.sh run_all_tests must reference only
+# functions that are defined in the same file. A stale reference (like the
+# removed test_host_network_deployment_pipeline from commit a2aca38ff) causes
+# `command not found` under set -e, silently aborting the suite mid-run.
+# ----------------------------------------------------------------------------
+
+INTEG_TEST="$REPO_ROOT/tests/test-integration.sh"
+if [[ ! -f "$INTEG_TEST" ]]; then
+    fail "test-integration.sh not found at $INTEG_TEST"
+fi
+
+run_all_start=$(grep -n '^run_all_tests[[:space:]]*()' "$INTEG_TEST" | head -1 | cut -d: -f1 || true)
+if [[ -z "$run_all_start" ]]; then
+    fail "Missing run_all_tests in $INTEG_TEST"
+fi
+run_all_end=$(awk -v start="$run_all_start" 'NR>start && /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/ {print NR; exit}' "$INTEG_TEST")
+if [[ -z "$run_all_end" ]]; then
+    run_all_end=$(wc -l < "$INTEG_TEST")
+fi
+missing_fns=()
+while IFS= read -r fn; do
+    [[ -z "$fn" ]] && continue
+    if ! grep -qE "^${fn}[[:space:]]*\(\)" "$INTEG_TEST"; then
+        missing_fns+=("$fn")
+    fi
+done < <(sed -n "${run_all_start},${run_all_end}p" "$INTEG_TEST" \
+    | grep -oE '^[[:space:]]+test_[A-Za-z0-9_]+' \
+    | awk '{print $1}' \
+    | sort -u)
+
+if (( ${#missing_fns[@]} > 0 )); then
+    echo "run_all_tests references undefined functions: ${missing_fns[*]}"
+    fail "test-integration.sh run_all_tests calls undefined test function(s); this triggers 'command not found' and aborts the suite under set -e."
+fi
+pass "Static: test-integration.sh run_all_tests only references defined test functions"
+
+# ----------------------------------------------------------------------------
+# Static regression: deploy-docker.sh must derive CONNECTION_STRING and
+# HTTP_PORT / HTTPS_PORT / API_PORT inside the NON_INTERACTIVE short-circuit
+# paths of configure_database / configure_networking. Without this, a stale
+# .deploy-config that omits these values leaves them unbound; save_deployment_config
+# then references them in a heredoc opened via `cat >`, `set -u` fires, and
+# .deploy-config is truncated to 0 bytes — silently dropping INCLUDE_MONITORING
+# and every setting written after the first heredoc (blockers #2 / #3 / #4).
+# ----------------------------------------------------------------------------
+
+DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy-docker.sh"
+if [[ ! -f "$DEPLOY_SCRIPT" ]]; then
+    fail "deploy-docker.sh not found at $DEPLOY_SCRIPT"
+fi
+
+# Helper: locate a function body's line range.
+function_range() {
+    local fn="$1" file="$2"
+    local start end
+    start=$(grep -n "^${fn}[[:space:]]*()" "$file" | head -1 | cut -d: -f1 || true)
+    if [[ -z "$start" ]]; then
+        echo "0 0"
+        return
+    fi
+    end=$(awk -v s="$start" 'NR>s && /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*\(\)/ {print NR; exit}' "$file")
+    if [[ -z "$end" ]]; then
+        end=$(wc -l < "$file")
+    fi
+    echo "$start $end"
+}
+
+read -r cd_start cd_end <<<"$(function_range configure_database "$DEPLOY_SCRIPT")"
+if [[ "$cd_start" == "0" ]]; then
+    fail "configure_database not found in $DEPLOY_SCRIPT"
+fi
+cd_body=$(sed -n "${cd_start},${cd_end}p" "$DEPLOY_SCRIPT")
+if ! echo "$cd_body" | grep -qE 'NON_INTERACTIVE.*=.*"true".*DB_PROVIDER'; then
+    fail "configure_database missing NON_INTERACTIVE + DB_PROVIDER short-circuit guard."
+fi
+# Extract just the short-circuit block (up to its `return 0`).
+cd_shortcircuit=$(echo "$cd_body" | awk '
+    /NON_INTERACTIVE.*=.*"true".*DB_PROVIDER/ { in_block=1 }
+    in_block { print }
+    in_block && /return 0/ { exit }
+')
+if ! echo "$cd_shortcircuit" | grep -qE 'CONNECTION_STRING='; then
+    echo "$cd_shortcircuit"
+    fail "configure_database short-circuit does not derive CONNECTION_STRING; save_deployment_config heredoc will trip set -u."
+fi
+pass "Static: configure_database short-circuit derives CONNECTION_STRING"
+
+read -r cn_start cn_end <<<"$(function_range configure_networking "$DEPLOY_SCRIPT")"
+if [[ "$cn_start" == "0" ]]; then
+    fail "configure_networking not found in $DEPLOY_SCRIPT"
+fi
+cn_body=$(sed -n "${cn_start},${cn_end}p" "$DEPLOY_SCRIPT")
+if ! echo "$cn_body" | grep -qE 'NON_INTERACTIVE.*=.*"true".*NETWORK_MODE'; then
+    fail "configure_networking missing NON_INTERACTIVE + NETWORK_MODE short-circuit guard."
+fi
+cn_shortcircuit=$(echo "$cn_body" | awk '
+    /NON_INTERACTIVE.*=.*"true".*NETWORK_MODE/ { in_block=1 }
+    in_block { print }
+    in_block && /return 0/ { exit }
+')
+for port_var in HTTP_PORT HTTPS_PORT API_PORT; do
+    if ! echo "$cn_shortcircuit" | grep -qE "${port_var}="; then
+        echo "$cn_shortcircuit"
+        fail "configure_networking short-circuit does not derive ${port_var}; save_deployment_config heredoc will trip set -u."
+    fi
+done
+pass "Static: configure_networking short-circuit derives HTTP_PORT, HTTPS_PORT, API_PORT"
+
+# ----------------------------------------------------------------------------
+# Static regression: configure_additional must respect a pre-loaded
+# ENABLE_SPOOLMAN in NON_INTERACTIVE mode. Without this guard, the interactive
+# "Choose an option [1/2/3]:" prompt returns the "3" (skip) default and
+# overwrites SPOOLMAN_BASE_URL with "" — dropping PFARM__Spoolman__BaseUrl
+# from the generated .env even when it was set in .deploy-config.
+# ----------------------------------------------------------------------------
+
+read -r ca_start ca_end <<<"$(function_range configure_additional "$DEPLOY_SCRIPT")"
+if [[ "$ca_start" == "0" ]]; then
+    fail "configure_additional not found in $DEPLOY_SCRIPT"
+fi
+ca_body=$(sed -n "${ca_start},${ca_end}p" "$DEPLOY_SCRIPT")
+if ! echo "$ca_body" | grep -qE 'NON_INTERACTIVE.*=.*"true".*ENABLE_SPOOLMAN'; then
+    fail "configure_additional missing NON_INTERACTIVE + ENABLE_SPOOLMAN short-circuit guard."
+fi
+pass "Static: configure_additional preserves pre-loaded ENABLE_SPOOLMAN in NON_INTERACTIVE mode"
+
+# ----------------------------------------------------------------------------
+# Static regression: generate_slicer_worker_api_keys must reuse
+# WORKER_SHARED_API_KEY as the primary worker's key so slicer-host ↔ worker
+# auth (WORKER_SHARED_API_KEY) matches the SlicerRegistry__ApiKey the primary
+# worker registers with. Otherwise two different values are written into .env
+# under WORKER_SHARED_API_KEY / SlicerRegistry__ApiKey and worker job-claim
+# auth fails after registration.
+# ----------------------------------------------------------------------------
+
+read -r ws_start ws_end <<<"$(function_range generate_slicer_worker_api_keys "$DEPLOY_SCRIPT")"
+if [[ "$ws_start" == "0" ]]; then
+    fail "generate_slicer_worker_api_keys not found in $DEPLOY_SCRIPT"
+fi
+ws_body=$(sed -n "${ws_start},${ws_end}p" "$DEPLOY_SCRIPT")
+if ! echo "$ws_body" | grep -qE 'WORKER_SHARED_API_KEY'; then
+    fail "generate_slicer_worker_api_keys does not reference WORKER_SHARED_API_KEY; primary worker key will diverge from the shared job-claim key."
+fi
+pass "Static: generate_slicer_worker_api_keys reuses WORKER_SHARED_API_KEY for the primary worker"
+
 echo ""
 printf '%sAll run-deployment-tests harness regressions passed%s\n' "$GREEN" "$NC"

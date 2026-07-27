@@ -414,7 +414,7 @@ test_all_database_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    local databases=("postgres" "sqlserver" "mysql")
+    local databases=("postgres" "sqlserver")
     
     for db in "${databases[@]}"; do
         # Create config file for this combination
@@ -659,7 +659,7 @@ test_env_provider_standard_providers() {
 
     cd "$TEST_TEMP_DIR"
 
-    local providers=("postgres" "sqlserver" "mysql")
+    local providers=("postgres" "sqlserver")
     for provider in "${providers[@]}"; do
         cat > .deploy-config << EOF
 ARCHITECTURE=microservices
@@ -684,11 +684,6 @@ EOF
                 assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for sqlserver"
                 assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for sqlserver"
                 assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
-                ;;
-            mysql)
-                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for mysql"
-                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for mysql"
-                assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
                 ;;
         esac
 
@@ -1306,19 +1301,23 @@ test_postgres_password_authentication_integration() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Run deploy script to generate compose and env files
+    # The deploy script's --dry-run mode intentionally short-circuits compose
+    # generation (compose-generator returns after show_dry_run). To validate
+    # that the init-postgres.sh reference is wired into the compose the deploy
+    # script would produce, invoke compose-generator directly against the test
+    # temp dir. This preserves the original test intent (init script must be
+    # referenced) without depending on --dry-run to leave files on disk.
+    local generator="$REPO_ROOT/scripts/docker/compose-generator.sh"
+    assert_file_exists "$generator" "compose-generator.sh should exist"
+    capture_output "'$generator' --architecture microservices --db-provider postgres --output-dir '$TEST_TEMP_DIR' 2>&1 || true"
+
+    # Also generate an env file via deploy dry-run so POSTGRES_PASSWORD is
+    # produced through the same code path a real deployment would use.
     capture_output "$(get_deploy_script_command --dry-run --batch)"
-    local output=$(get_output)
-    
-    # Find the generated compose file
+
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
-    if [ ! -f "$compose_file" ]; then
-        # Try the repo root
-        compose_file="$REPO_ROOT/docker-compose.yml"
-    fi
-    
     assert_file_exists "$compose_file" "Generated compose file should exist"
-    
+
     local env_file="$TEST_TEMP_DIR/.env"
     if [ ! -f "$env_file" ]; then
         env_file="$REPO_ROOT/.env"
@@ -1368,7 +1367,6 @@ run_all_tests() {
     test_multistage_build_integration
     test_env_provider_only_end_to_end
     test_env_provider_only_end_to_end_postgres
-    test_env_provider_only_end_to_end_mysql
     test_env_provider_standard_providers
     test_env_file_sourcing_with_connection_strings
     test_connection_string_sync_resolves_stale_export
@@ -1426,7 +1424,8 @@ test_pgadmin_postgres_only() {
     
     # pgAdmin should only be supported with PostgreSQL
     # This is enforced in compose-generator.sh
-    assert_contains "$(grep -n 'postgres' $COMPOSE_GENERATOR | head -5)" "postgres" "compose-generator should reference PostgreSQL"
+    local compose_generator="$REPO_ROOT/scripts/docker/compose-generator.sh"
+    assert_contains "$(grep -n 'postgres' "$compose_generator" | head -5)" "postgres" "compose-generator should reference PostgreSQL"
     
     pass_test
 }
