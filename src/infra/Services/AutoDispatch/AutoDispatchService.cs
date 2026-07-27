@@ -48,6 +48,12 @@ public interface IAutoDispatchService
     /// </summary>
     Task<AutoDispatchStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default);
 
+    Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        CancellationToken ct = default) =>
+        MarkPreClearAsync(printerId, ct);
+
     /// <summary>
     /// Gets the current auto-dispatch status for a printer.
     /// </summary>
@@ -423,7 +429,18 @@ public class AutoDispatchService(
         return status;
     }
 
-    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default)
+    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        CancellationToken ct = default) =>
+        await MarkPreClearAsync(
+            printerId,
+            QueueActorIdentity.AutoDispatch,
+            ct);
+
+    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        CancellationToken ct = default)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
@@ -465,7 +482,7 @@ public class AutoDispatchService(
         // transaction as the flag it sets (issue #900, defect 13).
         _ = QueueAuditWriter.Add(
             db,
-            actorSubject: "operator",
+            actorSubject,
             QueueAuditOperations.SafetyOverride,
             QueueAuditOutcomes.Success,
             nameof(Printer),

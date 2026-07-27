@@ -81,6 +81,32 @@ public class CalibrationQueueDispatchTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task AcknowledgeBedClear_WithoutJobEtag_Returns428BeforeServiceCall()
+    {
+        var request = new AcknowledgeBedClearRequestDto
+        {
+            PrinterId = Guid.NewGuid(),
+            IdempotencyKey = "job-etag-required",
+        };
+        _controller.ControllerContext.HttpContext.Request.Headers[
+            "X-Dispatch-State-If-Match"] = "\"AAAA\"";
+
+        IActionResult result = await _controller.AcknowledgeBedClearAndStartAsync(
+            Guid.NewGuid(),
+            request,
+            CancellationToken.None);
+
+        var status = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status428PreconditionRequired, status.StatusCode);
+        _bedClearSvc.Verify(
+            service => service.AcknowledgeAsync(
+                It.IsAny<AcknowledgeBedClearRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task AcknowledgeBedClear_JobNotFound_Returns404()
     {
         // Arrange
@@ -843,7 +869,8 @@ public class CalibrationQueueDispatchTests
             "operator-1",
             "ack-key-1",
             dispatchState.RowVersion,
-            ExpectedPrinterConfigRevision: 1);
+            ExpectedPrinterConfigRevision: 1,
+            IfMatchJob: job.RowVersion);
 
         AcknowledgeBedClearResult result = await sut.AcknowledgeAsync(request, CancellationToken.None);
 
@@ -932,6 +959,8 @@ public class CalibrationQueueDispatchTests
     private void SetIfMatchHeader(string base64)
     {
         _controller.ControllerContext.HttpContext.Request.Headers["If-Match"] = $"\"{base64}\"";
+        _controller.ControllerContext.HttpContext.Request.Headers[
+            "X-Dispatch-State-If-Match"] = $"\"{base64}\"";
     }
 
     private void SetIdempotencyKeyHeader(string key)

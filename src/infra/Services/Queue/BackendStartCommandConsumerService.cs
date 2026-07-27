@@ -132,7 +132,7 @@ public sealed class BackendStartCommandConsumerService(
         }
     }
 
-    private async Task ProcessPendingCommandsAsync(CancellationToken ct)
+    internal async Task ProcessPendingCommandsAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -183,15 +183,24 @@ public sealed class BackendStartCommandConsumerService(
             evt.Status = QueueOutboxEventStatus.DeadLettered;
             evt.LastError = $"Invalid payload JSON: {jsonEx.Message}"[..Math.Min(jsonEx.Message.Length + 24, 2047)];
             evt.CompletedAtUtc = DateTime.UtcNow;
+            await SetBedClearCommandStatusAsync(
+                db, evt.Id, BedClearCommandStatus.Rejected, ct);
             await db.SaveChangesAsync(ct);
             return;
         }
 
-        if (payload is null || payload.JobId == Guid.Empty || string.IsNullOrWhiteSpace(payload.AcknowledgementKey))
+        if (payload is null ||
+            payload.JobId == Guid.Empty ||
+            string.IsNullOrWhiteSpace(payload.AcknowledgementKey) ||
+            string.IsNullOrWhiteSpace(payload.ActorSubject))
         {
             evt.Status = QueueOutboxEventStatus.DeadLettered;
-            evt.LastError = "BackendStartCommand payload is missing required fields (jobId, acknowledgementKey).";
+            evt.LastError =
+                "BackendStartCommand payload is missing required fields " +
+                "(jobId, actorSubject, acknowledgementKey).";
             evt.CompletedAtUtc = DateTime.UtcNow;
+            await SetBedClearCommandStatusAsync(
+                db, evt.Id, BedClearCommandStatus.Rejected, ct);
             logger.LogError(
                 "[BackendStartConsumer] Event {EventId} has incomplete payload — dead-lettered",
                 evt.Id);
@@ -227,7 +236,7 @@ public sealed class BackendStartCommandConsumerService(
             "[BackendStartConsumer] Executing backend start: EventId={EventId} Job={JobId} Actor={Actor}",
             evt.Id,
             payload.JobId,
-            payload.ActorSubject ?? "system");
+            payload.ActorSubject);
 
         // ===================================================================
         // Step 3: Awaited backend execution (NOT fire-and-forget).
@@ -240,7 +249,7 @@ public sealed class BackendStartCommandConsumerService(
             IPrintJobManagementService mgmt = scope.ServiceProvider.GetRequiredService<IPrintJobManagementService>();
             BackendStartOutcome outcome = await mgmt.DispatchJobWithAckAsync(
                 payload.JobId.ToString(),
-                payload.ActorSubject ?? "system",
+                payload.ActorSubject,
                 payload.AcknowledgementKey,
                 ct);
 
@@ -306,6 +315,8 @@ public sealed class BackendStartCommandConsumerService(
                 row.LastError = null;
                 row.FailureCode = null;
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+                await SetBedClearCommandStatusAsync(
+                    outcomeDb, eventId, BedClearCommandStatus.Accepted, ct);
 
                 logger.LogInformation(
                     "[BackendStartConsumer] Backend start confirmed ({Status}): EventId={EventId} Job={JobId}",
@@ -317,6 +328,8 @@ public sealed class BackendStartCommandConsumerService(
                 row.LastError = null;
                 row.FailureCode = null;
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+                await SetBedClearCommandStatusAsync(
+                    outcomeDb, eventId, BedClearCommandStatus.Accepted, ct);
                 break;
             case BackendStartStatus.AlreadyStarted:
                 row.Status = QueueOutboxEventStatus.Processing;
@@ -325,6 +338,8 @@ public sealed class BackendStartCommandConsumerService(
                     "Database state alone does not prove backend acceptance; reconciliation is required.");
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
                 row.RetryAfterUtc = null;
+                await SetBedClearCommandStatusAsync(
+                    outcomeDb, eventId, BedClearCommandStatus.Unknown, ct);
                 break;
 
             case BackendStartStatus.Unknown:
@@ -335,6 +350,8 @@ public sealed class BackendStartCommandConsumerService(
                 row.LastError = Truncate(outcome.ErrorDetail);
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
                 row.RetryAfterUtc = null;
+                await SetBedClearCommandStatusAsync(
+                    outcomeDb, eventId, BedClearCommandStatus.Unknown, ct);
 
                 logger.LogError(
                     "[BackendStartConsumer] UNKNOWN backend outcome: EventId={EventId} Job={JobId} — " +
@@ -352,6 +369,8 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     row.Status = QueueOutboxEventStatus.DeadLettered;
                     row.CompletedAtUtc = DateTime.UtcNow;
+                    await SetBedClearCommandStatusAsync(
+                        outcomeDb, eventId, BedClearCommandStatus.Rejected, ct);
                     logger.LogError(
                         "[BackendStartConsumer] Event {EventId} ended as {Status} after {Count} attempt(s)",
                         eventId,
@@ -363,12 +382,31 @@ public sealed class BackendStartCommandConsumerService(
                     double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, row.AttemptCount - 1);
                     row.Status = QueueOutboxEventStatus.Pending;
                     row.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
+                    await SetBedClearCommandStatusAsync(
+                        outcomeDb, eventId, BedClearCommandStatus.Pending, ct);
                 }
 
                 break;
         }
 
         _ = await outcomeDb.SaveChangesAsync(ct);
+    }
+
+    private static async Task SetBedClearCommandStatusAsync(
+        AppDbContext db,
+        Guid outboxEventId,
+        BedClearCommandStatus status,
+        CancellationToken ct)
+    {
+        BedClearCommandRecord? command = await db.BedClearCommandRecords
+            .FirstOrDefaultAsync(
+                candidate => candidate.OutboxEventId == outboxEventId,
+                ct);
+        if (command is not null)
+        {
+            command.Status = status;
+            command.UpdatedAtUtc = DateTime.UtcNow;
+        }
     }
 
     private static string? Truncate(string? value) =>

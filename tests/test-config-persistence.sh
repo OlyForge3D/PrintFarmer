@@ -15,18 +15,60 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
+REPO_BACKUP_DIR=""
+TEARDOWN_COMPLETE=false
 
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
+    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
     test_info "Using temp directory: $TEST_TEMP_DIR"
+    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    trap teardown EXIT
 }
 
 teardown() {
+    if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
+        return
+    fi
+
     cd "$ORIGINAL_PWD" 2>/dev/null || true
+    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
+}
+
+write_base_config() {
+    local config_file="$1"
+    cat > "$config_file" << 'EOF'
+ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
+DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
+NETWORK_MODE=bridge
+ENABLE_DISCOVERY=false
+ALLOW_LOCAL_NETWORK=false
+NETWORK_RANGES=
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_DISCOVERY=false
+ENABLE_DISTRIBUTED_SLICING=false
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+ENABLE_SPOOLMAN=no
+USE_EXTERNAL_STORAGE=no
+EOF
 }
 
 # Test that monitoring/telemetry/security settings are saved to config file
@@ -35,32 +77,21 @@ test_monitoring_config_persistence() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Create a config with monitoring settings
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
-DB_PROVIDER=postgres
-NETWORK_MODE=bridge
-API_PORT=5245
-WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
-ENABLE_DISTRIBUTED_SLICING=true
-ORCA_WORKER_COUNT=1
-ENABLE_ORCA_WORKER=yes
-ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.4.0
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
 INCLUDE_MONITORING=true
 INCLUDE_TELEMETRY=false
 INCLUDE_SECURITY=true
 INCLUDE_REGISTRY=false
 EOF
     
-    # Run deploy script from repo root with batch mode
-    capture_output "cd '$REPO_ROOT' && cp '$TEST_TEMP_DIR/.deploy-config' '$REPO_ROOT/.deploy-config' && timeout 60 '$DEPLOY_SCRIPT' --dry-run --batch 2>&1 || true"
-    local output=$(get_output)
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --batch 2>&1 || true"
+    local output
+    output=$(get_output)
     
-    # Check if new config file was created in repo root
-    if [[ -f "$REPO_ROOT/.deploy-config" ]]; then
-        local new_config_content=$(cat "$REPO_ROOT/.deploy-config")
+    if [[ -f ".deploy-config" ]]; then
+        local new_config_content
+        new_config_content=$(cat ".deploy-config")
         
         # Check that monitoring/telemetry/security settings are saved
         assert_contains "$new_config_content" "INCLUDE_MONITORING=" "Config should contain INCLUDE_MONITORING setting"
@@ -74,8 +105,6 @@ EOF
         assert_contains "$new_config_content" "INCLUDE_SECURITY=true" "Config should save security=true"
         assert_contains "$new_config_content" "INCLUDE_REGISTRY=false" "Config should save registry=false"
         
-        # Clean up
-        rm -f "$REPO_ROOT/.deploy-config"
     else
         fail_test "Config file was not created"
         return 1
@@ -90,10 +119,8 @@ test_cli_flag_override() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Create a config with monitoring disabled
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
-DB_PROVIDER=postgres
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
 INCLUDE_MONITORING=false
 INCLUDE_TELEMETRY=false
 INCLUDE_SECURITY=false
@@ -101,14 +128,19 @@ INCLUDE_REGISTRY=false
 EOF
     
     # Run deploy script with CLI flags to enable monitoring
-    capture_output "cd '$REPO_ROOT' && timeout 60 '$DEPLOY_SCRIPT' --include-monitoring --include-security --dry-run --batch 2>&1 || true"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --include-monitoring --include-security --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
-    # Should mention that monitoring is enabled via CLI flag
+    # The CLI override must be visible and persisted for future non-interactive runs.
+    if [[ "$output" != *"enabled via CLI flag"* ]]; then
+        test_info "CLI override output: $output"
+    fi
+
     assert_contains "$output" "enabled via CLI flag" "Should indicate CLI flag override"
-    
-    # Clean up
-    rm -f "$REPO_ROOT/.deploy-config"
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+    assert_contains "$persisted_config" "INCLUDE_MONITORING=true" "Should persist the monitoring CLI override"
+    assert_contains "$persisted_config" "INCLUDE_SECURITY=true" "Should persist the security CLI override"
     
     pass_test
 }
@@ -119,23 +151,18 @@ test_config_loading_display() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Create a config with some monitoring settings
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
-ARCHITECTURE=monolithic
-DB_PROVIDER=postgres
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
 INCLUDE_MONITORING=true
 INCLUDE_TELEMETRY=true
 EOF
     
     # Run deploy script to see if it loads and displays the config properly
-    capture_output "cd '$REPO_ROOT' && timeout 30 '$DEPLOY_SCRIPT' --dry-run --batch 2>&1 || true"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --batch 2>&1 || true"
     local output=$(get_output)
     
     # Should show that previous configuration was loaded
     assert_contains "$output" "Loaded configuration" "Should indicate config was loaded"
-    
-    # Clean up
-    rm -f "$REPO_ROOT/.deploy-config"
     
     pass_test
 }

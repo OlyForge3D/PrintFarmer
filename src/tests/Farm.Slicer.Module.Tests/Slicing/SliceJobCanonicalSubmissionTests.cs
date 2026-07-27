@@ -225,8 +225,8 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = (await ReadCodeAsync(response)).Should().Be("profile_hash_mismatch");
     }
 
-    [Fact(DisplayName = "Correlation identifiers are unique per owner")]
-    public async Task Submit_WithDuplicateCorrelation_ReturnsConflict()
+    [Fact(DisplayName = "Standard-job correlation identifiers remain repeatable")]
+    public async Task Submit_StandardJobWithDuplicateCorrelation_AllowsBoth()
     {
         Guid correlationId = Guid.NewGuid();
         SubmitSliceJobRequest request = new()
@@ -235,6 +235,27 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             ModelFileUrl = "models/test.stl",
             ModelFileName = "test.stl",
             SlicerEngine = SlicerEngineType.OrcaSlicer,
+            CorrelationId = correlationId,
+        };
+
+        HttpResponseMessage first = await _client.PostAsJsonAsync("/api/slice", request);
+        HttpResponseMessage second = await _client.PostAsJsonAsync("/api/slice", request);
+
+        _ = first.StatusCode.Should().Be(HttpStatusCode.Created);
+        _ = second.StatusCode.Should().Be(HttpStatusCode.Created);
+    }
+
+    [Fact(DisplayName = "Correlation identifiers are unique within a calibration project")]
+    public async Task Submit_CalibrationJobWithDuplicateCorrelation_ReturnsConflict()
+    {
+        Guid correlationId = Guid.NewGuid();
+        SubmitSliceJobRequest request = new()
+        {
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = "models/test.stl",
+            ModelFileName = "test.stl",
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+            CalibrationProjectId = Guid.NewGuid(),
             CorrelationId = correlationId,
         };
 

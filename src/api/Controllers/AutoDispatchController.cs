@@ -207,7 +207,10 @@ public class AutoDispatchController(
 
         try
         {
-            var status = await autoDispatchService.MarkPreClearAsync(printerId, ct);
+            var status = await autoDispatchService.MarkPreClearAsync(
+                printerId,
+                QueueActorIdentity.Resolve(User),
+                ct);
             return Ok(status);
         }
         catch (InvalidOperationException ex)

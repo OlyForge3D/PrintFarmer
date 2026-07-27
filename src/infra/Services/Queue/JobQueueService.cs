@@ -48,6 +48,7 @@ public class JobQueueService : IJobQueueService
     private readonly AppDbContext? _db;
     private readonly IDbOutboxSequenceAllocator? _sequenceAllocator;
     private readonly IQueuePositionAllocator? _positionAllocator;
+    private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -63,6 +64,7 @@ public class JobQueueService : IJobQueueService
     /// <param name="db">Optional database context used for atomic calibration job and outbox persistence</param>
     /// <param name="sequenceAllocator">Optional outbox sequence allocator for cross-process monotonic ordering; required when <paramref name="db"/> is provided</param>
     /// <param name="positionAllocator">Optional provider-native allocator for unique monotonic queue positions.</param>
+    /// <param name="resourceAuthorization">Optional service-boundary resource authorization.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -75,7 +77,8 @@ public class JobQueueService : IJobQueueService
         ISettingsService? settingsService = null,
         AppDbContext? db = null,
         IDbOutboxSequenceAllocator? sequenceAllocator = null,
-        IQueuePositionAllocator? positionAllocator = null)
+        IQueuePositionAllocator? positionAllocator = null,
+        IQueueResourceAuthorizationService? resourceAuthorization = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -91,6 +94,7 @@ public class JobQueueService : IJobQueueService
         _db = db;
         _sequenceAllocator = sequenceAllocator;
         _positionAllocator = positionAllocator;
+        _resourceAuthorization = resourceAuthorization;
     }
 
     /// <summary>
@@ -417,7 +421,7 @@ public class JobQueueService : IJobQueueService
         Guid? assignedPrinterId = effectiveRequest.AssignedPrinterId;
         if (assignedPrinterId is null)
         {
-            assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, ct);
+            assignedPrinterId = await FindBestAvailablePrinterAsync(effectiveRequest, userId, ct);
 
             if (assignedPrinterId is null)
             {
@@ -428,6 +432,18 @@ public class JobQueueService : IJobQueueService
                     effectiveRequest.RequiredNozzleDiameter?.ToString("F2") ?? "(any)");
                 return null;
             }
+        }
+
+        if (userId.HasValue &&
+            assignedPrinterId.HasValue &&
+            _resourceAuthorization is not null &&
+            !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                userId.Value.ToString(),
+                assignedPrinterId.Value,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            throw new UnauthorizedAccessException("The target printer was not found.");
         }
 
         QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
@@ -580,27 +596,24 @@ public class JobQueueService : IJobQueueService
             _db!.PrintJobs.Add(job);
             _db.QueueDispatchOutbox.Add(outboxEvent);
 
-            // Bounded retry: if only the OutboxSequenceState row had a conflict, reload
-            // the counter and retry so every concurrent calibration-queue producer persists
-            // its own event with a distinct, monotonically increasing sequence number.
-            const int MaxSequenceRetries = 5;
-            bool saved = false;
-            DbUpdateConcurrencyException? lastConflict = null;
-
-            for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !saved; seqRetry++)
+            try
             {
+                await using QueueOutboxTransactionScope transaction =
+                    await QueueOutboxTransactionScope.BeginAsync(_db, ct);
                 if (_sequenceAllocator is not null)
                 {
-                    outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db!, ct);
+                    outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
                 }
                 else
                 {
-                    // Fallback when no allocator is injected (e.g., test environments that did not
-                    // wire IDbOutboxSequenceAllocator): directly increment the tracked counter row.
-                    // If the OutboxSequenceState row does not exist (e.g., InMemory DB without
-                    // HasData seed), skip allocation and leave Sequence at 0 — InMemory databases
-                    // do not enforce the unique index, so this is safe for unit tests.
-                    OutboxSequenceState? seqState = await _db!.OutboxSequenceStates.SingleOrDefaultAsync(ct);
+                    if (_db.Database.IsRelational())
+                    {
+                        throw new InvalidOperationException(
+                            "Calibration queue writes require the durable outbox sequence allocator.");
+                    }
+
+                    OutboxSequenceState? seqState =
+                        await _db.OutboxSequenceStates.SingleOrDefaultAsync(ct);
                     if (seqState is not null)
                     {
                         seqState.NextSequence++;
@@ -608,74 +621,28 @@ public class JobQueueService : IJobQueueService
                     }
                 }
 
-                try
-                {
-                    await _db!.SaveChangesAsync(ct);
-                    saved = true;
-                    lastConflict = null;
-                }
-                catch (DbUpdateConcurrencyException ex)
-                {
-                    lastConflict = ex;
-                    bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
-                        ex.Entries.All(e => e.Entity is OutboxSequenceState);
-
-                    if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
-                    {
-                        break;
-                    }
-
-                    _logger.LogWarning(
-                        ex,
-                        "[Queue] Calibration outbox sequence contention (retry {Retry}/{Max}); reloading counter",
-                        seqRetry + 1, MaxSequenceRetries);
-
-                    OutboxSequenceState? stateLocal = _db!.OutboxSequenceStates.Local.SingleOrDefault();
-                    if (stateLocal is not null)
-                    {
-                        await _db.Entry(stateLocal).ReloadAsync(ct);
-                    }
-                }
-                catch (DbUpdateException ex) when (!ex.Entries.Any(e => e.Entity is OutboxSequenceState))
-                {
-                    // =========================================================
-                    // LOST THE UNIQUE-INDEX RACE (issue #900, defect 2).
-                    //
-                    // Read-then-insert cannot be atomic across processes: a concurrent
-                    // request with the same (scope, key) may have committed between our
-                    // read and our insert. The filtered unique index is the arbiter.
-                    // The loser must NOT surface a 500 — it re-reads the winner and
-                    // returns the same replay/mismatch answer the winner would produce.
-                    // =========================================================
-                    _logger.LogInformation(
-                        ex,
-                        "[Queue] Calibration idempotency race lost for Scope={Scope}; rereading winner",
-                        idempotencyScope);
-
-                    DetachPendingCalibrationWrite(job, outboxEvent);
-
-                    JobQueuePrintJobDto? winner = await TryResolveCalibrationReplayAsync(
-                        idempotencyScope, effectiveRequest.IdempotencyKey!, requestSha256, gcode.Name, ct);
-
-                    if (winner is not null)
-                    {
-                        return winner;
-                    }
-
-                    // The constraint violation was NOT our idempotency index — rethrow.
-                    throw;
-                }
+                await _db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
             }
-
-            if (!saved)
+            catch (DbUpdateException ex)
             {
-                if (lastConflict is not null)
+                _logger.LogInformation(
+                    ex,
+                    "[Queue] Calibration create race lost for Scope={Scope}; rereading winner",
+                    idempotencyScope);
+                DetachPendingCalibrationWrite(job, outboxEvent);
+                JobQueuePrintJobDto? winner = await TryResolveCalibrationReplayAsync(
+                    idempotencyScope,
+                    effectiveRequest.IdempotencyKey!,
+                    requestSha256,
+                    gcode.Name,
+                    ct);
+                if (winner is not null)
                 {
-                    throw lastConflict;
+                    return winner;
                 }
 
-                // Should never reach here
-                await _db!.SaveChangesAsync(ct);
+                throw;
             }
         }
         else
@@ -810,6 +777,21 @@ public class JobQueueService : IJobQueueService
 
     /// <inheritdoc />
     public async Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct)
+        => await RemoveJobCoreAsync(id, ifMatchJobRowVersion, actorSubject: null, ct);
+
+    /// <inheritdoc />
+    public async Task<bool> RemoveJobAsync(
+        Guid id,
+        string? ifMatchJobRowVersion,
+        string actorSubject,
+        CancellationToken ct) =>
+        await RemoveJobCoreAsync(id, ifMatchJobRowVersion, actorSubject, ct);
+
+    private async Task<bool> RemoveJobCoreAsync(
+        Guid id,
+        string? ifMatchJobRowVersion,
+        string? actorSubject,
+        CancellationToken ct)
     {
         PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
         if (job == null)
@@ -817,6 +799,7 @@ public class JobQueueService : IJobQueueService
             return false;
         }
 
+        await EnsureActorCanAccessJobAsync(actorSubject, id, ct);
         EnsureIfMatch(ifMatchJobRowVersion, job.RowVersion, "job deletion");
 
         if (job.Status != PrintJobStatus.Queued && job.Status != PrintJobStatus.Assigned)
@@ -885,7 +868,25 @@ public class JobQueueService : IJobQueueService
     /// within the same printer's queue. The update timestamp is automatically set to the current UTC time.
     /// Returns null if the specified job ID does not exist. Priority changes are effective immediately.
     /// </remarks>
-    public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
+    public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(
+        Guid id,
+        UpdateJobPriorityDto request,
+        CancellationToken ct) =>
+        await UpdateJobPriorityCoreAsync(id, request, actorSubject: null, ct);
+
+    /// <inheritdoc />
+    public async Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(
+        Guid id,
+        UpdateJobPriorityDto request,
+        string actorSubject,
+        CancellationToken ct) =>
+        await UpdateJobPriorityCoreAsync(id, request, actorSubject, ct);
+
+    private async Task<JobQueuePrintJobDto?> UpdateJobPriorityCoreAsync(
+        Guid id,
+        UpdateJobPriorityDto request,
+        string? actorSubject,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -895,6 +896,7 @@ public class JobQueueService : IJobQueueService
             return null;
         }
 
+        await EnsureActorCanAccessJobAsync(actorSubject, id, ct);
         EnsureIfMatch(request.IfMatchJobRowVersion, job.RowVersion, "job priority updates");
 
         // Reject undefined priority values — every mutation must use a valid semantic priority.
@@ -964,7 +966,25 @@ public class JobQueueService : IJobQueueService
     /// is automatically set to current UTC time. Printer assignment changes trigger a reload of the complete job data
     /// to ensure printer information is current. Returns null if job not found or if assigned printer ID is invalid.
     /// </remarks>
-    public async Task<JobQueuePrintJobDto?> UpdateJobAsync(Guid id, UpdatePrintJobStatusDto request, CancellationToken ct)
+    public async Task<JobQueuePrintJobDto?> UpdateJobAsync(
+        Guid id,
+        UpdatePrintJobStatusDto request,
+        CancellationToken ct) =>
+        await UpdateJobCoreAsync(id, request, actorSubject: null, ct);
+
+    /// <inheritdoc />
+    public async Task<JobQueuePrintJobDto?> UpdateJobAsync(
+        Guid id,
+        UpdatePrintJobStatusDto request,
+        string actorSubject,
+        CancellationToken ct) =>
+        await UpdateJobCoreAsync(id, request, actorSubject, ct);
+
+    private async Task<JobQueuePrintJobDto?> UpdateJobCoreAsync(
+        Guid id,
+        UpdatePrintJobStatusDto request,
+        string? actorSubject,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -973,6 +993,8 @@ public class JobQueueService : IJobQueueService
         {
             return null;
         }
+
+        await EnsureActorCanAccessJobAsync(actorSubject, id, ct);
 
         // =====================================================================
         // REVISION PRECONDITION (issue #900, defect 4 and 11).
@@ -1086,10 +1108,21 @@ public class JobQueueService : IJobQueueService
 
             if (job.AssignedPrinterId != request.AssignedPrinterId.Value)
             {
+                if (actorSubject is not null)
+                {
+                    await EnsureActorCanAccessPrinterAsync(
+                        actorSubject,
+                        request.AssignedPrinterId.Value,
+                        ct);
+                }
+
                 // Reassignment invalidates the acknowledgement on BOTH the old and the
                 // new printer: the operator confirmed a specific bed for a specific job.
                 await InvalidateAcknowledgementForJobAsync(job, id, "printer reassignment", ct);
                 await InvalidateAcknowledgementOnPrinterAsync(request.AssignedPrinterId.Value, id, ct);
+                job.QueuePosition = await AllocateQueuePositionAsync(
+                    request.AssignedPrinterId.Value,
+                    ct);
             }
 
             job.AssignedPrinterId = request.AssignedPrinterId.Value;
@@ -1196,7 +1229,10 @@ public class JobQueueService : IJobQueueService
         };
     }
 
-    private async Task<Guid?> FindBestAvailablePrinterAsync(QueuePrintJobDto request, CancellationToken ct)
+    private async Task<Guid?> FindBestAvailablePrinterAsync(
+        QueuePrintJobDto request,
+        Guid? userId,
+        CancellationToken ct)
     {
         // Filter by model if specified (same logic as manual printer selection)
         List<Printer> printers = string.IsNullOrWhiteSpace(request.RequiredPrinterModel)
@@ -1205,6 +1241,17 @@ public class JobQueueService : IJobQueueService
 
         foreach (Printer printer in printers)
         {
+            if (userId.HasValue &&
+                _resourceAuthorization is not null &&
+                !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                    userId.Value.ToString(),
+                    printer.Id,
+                    PrinterGroupAccessLevel.Submit,
+                    ct))
+            {
+                continue;
+            }
+
             // Check nozzle diameter - now per-toolhead, check if any toolhead's nozzle model matches
             if (request.RequiredNozzleDiameter.HasValue)
             {
@@ -1235,6 +1282,42 @@ public class JobQueueService : IJobQueueService
         }
 
         return null;
+    }
+
+    private async Task EnsureActorCanAccessJobAsync(
+        string? actorSubject,
+        Guid jobId,
+        CancellationToken ct)
+    {
+        if (actorSubject is null || _resourceAuthorization is null)
+        {
+            return;
+        }
+
+        if (!await _resourceAuthorization.CanActorAccessJobAsync(
+                actorSubject,
+                jobId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            throw new KeyNotFoundException($"Print job {jobId} not found.");
+        }
+    }
+
+    private async Task EnsureActorCanAccessPrinterAsync(
+        string actorSubject,
+        Guid printerId,
+        CancellationToken ct)
+    {
+        if (_resourceAuthorization is not null &&
+            !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                actorSubject,
+                printerId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            throw new KeyNotFoundException($"Printer {printerId} not found.");
+        }
     }
 
     private static DateTime? CalculateEstimatedCompletionTime(List<PrintJob> queuedJobs, PrintJob? currentJob)

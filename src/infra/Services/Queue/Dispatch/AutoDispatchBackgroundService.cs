@@ -355,7 +355,7 @@ public sealed class AutoDispatchBackgroundService(
                 await dispatchService.DispatchJobAsync(
                     bestJob.Id,
                     printerId,
-                    "system:auto-dispatch",
+                    QueueActorIdentity.AutoDispatch,
                     bestMatch,
                     ct);
             if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)

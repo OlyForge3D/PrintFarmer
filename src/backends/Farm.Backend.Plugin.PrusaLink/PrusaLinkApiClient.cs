@@ -764,17 +764,26 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         try
         {
             using HttpResponseMessage response = await client.SendAsync(request, ct);
-            if (!response.IsSuccessStatusCode)
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return null;
             }
 
+            response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync(ct);
             return ParseOctoPrintHistoryJob(content);
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            return null;
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "PrusaLink history probe failed for job {JobId}",
+                jobId);
+            throw;
         }
     }
 

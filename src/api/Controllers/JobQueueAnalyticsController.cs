@@ -305,7 +305,7 @@ public class JobQueueAnalyticsController(
                 return precondition;
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            string userId = QueueActorIdentity.Resolve(User);
             QueuedPrintJobDto job = await _printJobManagementService.UpdateJobPriorityAsync(
                 jobId,
                 request.NewPriority,
@@ -317,6 +317,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
                                        QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
                                        DbUpdateConcurrencyException)
         {
             return MapRevisionException(ex);
@@ -364,10 +365,21 @@ public class JobQueueAnalyticsController(
                 return precondition;
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.PauseJobAsync(jobId, userId, cancellationToken);
+            string userId = QueueActorIdentity.Resolve(User);
+            QueuedPrintJobDto job = await _printJobManagementService.PauseJobAsync(
+                jobId,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
 
-            return Ok(job);
+            return Accepted(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -408,10 +420,21 @@ public class JobQueueAnalyticsController(
                 return precondition;
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.ResumeJobAsync(jobId, userId, cancellationToken);
+            string userId = QueueActorIdentity.Resolve(User);
+            QueuedPrintJobDto job = await _printJobManagementService.ResumeJobAsync(
+                jobId,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
 
-            return Ok(job);
+            return Accepted(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -452,7 +475,7 @@ public class JobQueueAnalyticsController(
                 return precondition;
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            string userId = QueueActorIdentity.Resolve(User);
             await _printJobManagementService.CancelJobAsync(
                 jobId,
                 userId,
@@ -463,6 +486,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
                                        QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
                                        DbUpdateConcurrencyException)
         {
             return MapRevisionException(ex);
@@ -506,7 +530,7 @@ public class JobQueueAnalyticsController(
                 return precondition;
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            string userId = QueueActorIdentity.Resolve(User);
             string etag = ReadIfMatch()!;
             QueuedPrintJobDto job = await _printJobManagementService.RerunJobAsync(
                 jobId,
@@ -515,6 +539,12 @@ public class JobQueueAnalyticsController(
                 cancellationToken);
 
             return Ok(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -563,7 +593,7 @@ public class JobQueueAnalyticsController(
                 }
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            string userId = QueueActorIdentity.Resolve(User);
             QueueBulkOperationResultDto result =
                 await _printJobManagementService.BulkCancelJobsAsync(
                     request.JobIds,
@@ -629,7 +659,7 @@ public class JobQueueAnalyticsController(
                 }
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            string userId = QueueActorIdentity.Resolve(User);
             QueueBulkOperationResultDto result = await _printJobManagementService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
 
             return Ok(result);
@@ -721,7 +751,13 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Update data is required" });
             }
 
-            QueuedPrintJobDto? updatedJob = await _printJobManagementService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
+            QueuedPrintJobDto? updatedJob =
+                await _printJobManagementService.UpdateJobDetailsAsync(
+                    jobId,
+                    updates,
+                    QueueActorIdentity.Resolve(User),
+                    ReadIfMatch(),
+                    cancellationToken);
 
             if (updatedJob == null)
             {
@@ -730,6 +766,12 @@ public class JobQueueAnalyticsController(
 
             _logger.LogInformation("Job {JobId} details updated", jobId);
             return Ok(updatedJob);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (ArgumentException ex)
         {
@@ -788,7 +830,12 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Notes must be 500 characters or less" });
             }
 
-            bool success = await _printJobManagementService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
+            bool success = await _printJobManagementService.UpdateJobNotesAsync(
+                jobId,
+                request.Notes,
+                QueueActorIdentity.Resolve(User),
+                ReadIfMatch(),
+                cancellationToken);
 
             if (!success)
             {
@@ -797,6 +844,12 @@ public class JobQueueAnalyticsController(
 
             _logger.LogInformation("Notes updated for job {JobId}", jobId);
             return NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -1084,6 +1137,8 @@ public class JobQueueAnalyticsController(
                 request.EnergyCostUsd,
                 request.MachineTimeCostUsd,
                 request.LaborCostUsd,
+                QueueActorIdentity.Resolve(User),
+                ReadIfMatch(),
                 cancellationToken);
 
             if (updated == null)
@@ -1092,6 +1147,12 @@ public class JobQueueAnalyticsController(
             }
 
             return Ok(updated);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -1197,6 +1258,9 @@ public class JobQueueAnalyticsController(
         QueueRevisionConflictException conflict => StatusCode(
             StatusCodes.Status412PreconditionFailed,
             new { error = "revision_conflict", detail = conflict.Message }),
+        QueueSemanticConflictException conflict => StatusCode(
+            StatusCodes.Status409Conflict,
+            new { error = "semantic_conflict", detail = conflict.Message }),
         DbUpdateConcurrencyException => StatusCode(
             StatusCodes.Status412PreconditionFailed,
             new

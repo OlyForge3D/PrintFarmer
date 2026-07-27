@@ -116,6 +116,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         string key,
         string actor = "actor")
     {
+        await using var transaction = await db.Database.BeginTransactionAsync();
         PrintJob job = await db.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
         Printer printer = await db.Printers.SingleAsync(candidate => candidate.Id == printerId);
         PrinterDispatchState state = await db.PrinterDispatchStates
@@ -164,6 +165,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             CreatedAtUtc = DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     /// <summary>Applies migrations and seeds a printer + dispatch state + print job.</summary>
@@ -463,6 +465,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         PrinterDispatchState? ds = await seedCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
+        PrintJob jobForAck = await seedCtx.PrintJobs.SingleAsync(job => job.Id == jobId);
         ds.Should().NotBeNull();
 
         await using AppDbContext ackCtx = CreateContext();
@@ -474,7 +477,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             ActorSubject: "operator-1",
             IdempotencyKey: "ack-key-atomic",
             IfMatchDispatchState: ds!.RowVersion,
-            ExpectedPrinterConfigRevision: 1);
+            ExpectedPrinterConfigRevision: 1,
+            IfMatchJob: jobForAck.RowVersion);
 
         // Act
         AcknowledgeBedClearResult result = await ackService.AcknowledgeAsync(request);
@@ -851,10 +855,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         PrinterDispatchState? ds = await seedCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
+        PrintJob jobForAck = await seedCtx.PrintJobs.SingleAsync(job => job.Id == jobId);
 
         var req = new AcknowledgeBedClearRequest(
             jobId, printerId, "actor", "ack-key-dedup",
-            ds!.RowVersion, 1);
+            ds!.RowVersion, 1, jobForAck.RowVersion);
 
         // First ack — should succeed.
         await using AppDbContext ctx1 = CreateContext();
@@ -864,7 +869,12 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         // Act — replay the same ack request (same key, same job, ack already persisted).
         await using AppDbContext ctx2 = CreateContext();
         PrinterDispatchState? ds2 = await ctx2.PrinterDispatchStates.FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        var replayReq = req with { IfMatchDispatchState = ds2!.RowVersion };
+        PrintJob replayJob = await ctx2.PrintJobs.SingleAsync(job => job.Id == jobId);
+        var replayReq = req with
+        {
+            IfMatchDispatchState = ds2!.RowVersion,
+            IfMatchJob = replayJob.RowVersion,
+        };
         AcknowledgeBedClearResult replay = await CreateAckService(ctx2).AcknowledgeAsync(replayReq);
 
         // Assert — replay detected (same key + same job).
@@ -945,9 +955,17 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         await using AppDbContext ackCtx = CreateContext();
         PrinterDispatchState? ds1 = await ackCtx.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == printerId);
+        PrintJob jobForAck = await ackCtx.PrintJobs.SingleAsync(job => job.Id == jobId1);
         var ackSvc = CreateAckService(ackCtx);
         AcknowledgeBedClearResult ack1 = await ackSvc.AcknowledgeAsync(
-            new AcknowledgeBedClearRequest(jobId1, printerId, "actor", "mono-key-1", ds1!.RowVersion, 1));
+            new AcknowledgeBedClearRequest(
+                jobId1,
+                printerId,
+                "actor",
+                "mono-key-1",
+                ds1!.RowVersion,
+                1,
+                jobForAck.RowVersion));
         ack1.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
         // Pre-stamp an ack so the claim can fire and write a second outbox event.
@@ -1053,8 +1071,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     /// <summary>
     /// Critical cross-process test: two separate <see cref="AppDbContext"/> instances
     /// (simulating two API processes) both attempt to allocate a sequence and write
-    /// an outbox event concurrently. Provider-native allocation assigns adjacent
-    /// values before either event write, so both legitimate producers can commit.
+    /// an outbox event concurrently. Each allocation and event insert share one
+    /// transaction so a sequence cannot commit without its corresponding event.
     /// </summary>
     [Fact]
     public async Task DbSequenceAllocator_TwoConcurrentContexts_ProduceUniqueSequences()
@@ -1072,44 +1090,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         await using AppDbContext ctx1 = CreateContext();
         await using AppDbContext ctx2 = CreateContext();
 
-        var alloc1 = new DbOutboxSequenceAllocator();
-        var alloc2 = new DbOutboxSequenceAllocator();
+        Task<long> producer1 = PersistEventAsync(ctx1, jobId);
+        Task<long> producer2 = PersistEventAsync(ctx2, jobId);
+        long[] allocated = await Task.WhenAll(producer1, producer2);
 
-        // Both allocate provider-native sequence values before any event save.
-        long seq1 = await alloc1.AllocateAsync(ctx1);
-        long seq2 = await alloc2.AllocateAsync(ctx2);
-
-        seq1.Should().Be(1, "first allocation from fresh counter should be 1");
-        seq2.Should().Be(2, "the second provider-native allocation must not contend or duplicate");
-
-        // Both write distinct sequence values.
-        ctx1.QueueDispatchOutbox.Add(new QueueDispatchOutbox
-        {
-            Id = Guid.NewGuid(),
-            Sequence = seq1,
-            AggregateType = nameof(PrintJob),
-            AggregateId = jobId,
-            EventType = "PrintFarmer.Queue.Test.v1",
-            SchemaVersion = "1",
-            PayloadJson = "{}",
-            Status = QueueOutboxEventStatus.Pending,
-            CreatedAtUtc = DateTime.UtcNow,
-        });
-        ctx2.QueueDispatchOutbox.Add(new QueueDispatchOutbox
-        {
-            Id = Guid.NewGuid(),
-            Sequence = seq2,
-            AggregateType = nameof(PrintJob),
-            AggregateId = jobId,
-            EventType = "PrintFarmer.Queue.Test.v1",
-            SchemaVersion = "1",
-            PayloadJson = "{}",
-            Status = QueueOutboxEventStatus.Pending,
-            CreatedAtUtc = DateTime.UtcNow,
-        });
-
-        await ctx1.SaveChangesAsync();
-        await ctx2.SaveChangesAsync();
+        allocated.Should().BeEquivalentTo([1L, 2L]);
 
         await using AppDbContext verifyCtx = CreateContext();
         List<long> sequences = await verifyCtx.QueueDispatchOutbox
@@ -1120,6 +1105,30 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         OutboxSequenceState? finalState = await verifyCtx.OutboxSequenceStates.SingleAsync();
         finalState.NextSequence.Should().Be(2);
+    }
+
+    private static async Task<long> PersistEventAsync(
+        AppDbContext db,
+        Guid jobId)
+    {
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db);
+        long sequence = await new DbOutboxSequenceAllocator().AllocateAsync(db);
+        db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = sequence,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            EventType = "PrintFarmer.Queue.Test.v1",
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return sequence;
     }
 
     // =========================================================================
@@ -1135,15 +1144,35 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         var alloc = new DbOutboxSequenceAllocator();
 
-        // Allocate three values sequentially in the same context — each must be unique.
+        await using var transaction = await seedCtx.Database.BeginTransactionAsync();
         long seq1 = await alloc.AllocateAsync(seedCtx);
         long seq2 = await alloc.AllocateAsync(seedCtx);
         long seq3 = await alloc.AllocateAsync(seedCtx);
+        seedCtx.QueueDispatchOutbox.AddRange(
+            CreateOutboxEvent(seq1),
+            CreateOutboxEvent(seq2),
+            CreateOutboxEvent(seq3));
+        await seedCtx.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         seq1.Should().Be(1);
         seq2.Should().Be(2);
         seq3.Should().Be(3, "in-context sequential allocations must increment the in-memory counter");
     }
+
+    private static QueueDispatchOutbox CreateOutboxEvent(long sequence) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Sequence = sequence,
+            AggregateType = nameof(PrintJob),
+            AggregateId = Guid.NewGuid(),
+            EventType = QueueLifecycleEventWriter.EventTypeJobCompleted,
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
 
     // =========================================================================
     // Test 14: QueueDispatchOutbox RowVersion enables atomic lease acquisition —

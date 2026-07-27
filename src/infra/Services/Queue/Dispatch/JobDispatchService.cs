@@ -19,7 +19,8 @@ public class JobDispatchService(
     ISpoolmanService spoolmanService,
     AppDbContext db,
     ILogger<JobDispatchService> logger,
-    IQueueResourceAuthorizationService? resourceAuthorization = null) : IJobDispatchService
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    IQueuePositionAllocator? positionAllocator = null) : IJobDispatchService
 {
     public async Task<List<DispatchCandidateDto>> FindCandidatesAsync(Guid jobId, CancellationToken ct = default)
     {
@@ -159,6 +160,27 @@ public class JobDispatchService(
         Guid? originalPrinterId = job.AssignedPrinterId;
 
         // Assign the job and log the dispatch in a single batch save
+        if (originalPrinterId != printerId)
+        {
+            if (positionAllocator is not null)
+            {
+                job.QueuePosition = await positionAllocator.AllocateAsync(printerId, ct);
+            }
+            else if (db.Database.IsRelational())
+            {
+                throw new InvalidOperationException(
+                    "A provider-native queue position allocator is required for printer reassignment.");
+            }
+            else
+            {
+                job.QueuePosition = await db.PrintJobs
+                    .Where(candidate => candidate.AssignedPrinterId == printerId)
+                    .Select(candidate => (int?)candidate.QueuePosition)
+                    .MaxAsync(ct) ?? 0;
+                job.QueuePosition++;
+            }
+        }
+
         job.AssignedPrinterId = printerId;
         job.DispatchedAt = DateTime.UtcNow;
         job.DispatchScore = printerScore?.TotalScore;

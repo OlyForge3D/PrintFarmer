@@ -102,6 +102,20 @@ require explicit authorized printer/project/job subscriptions. Clients detect
 sequence gaps and refetch
 `GET /api/job-queue/changes?afterSequence={n}` as REST authority.
 
+Pause, resume, cancel, and abort are durable, single-flight hardware commands.
+Database state changes only after backend acceptance. A response-lost command is
+never resent blindly: it retains the active attempt lease while exact current
+state and history are reconciled. Inconclusive commands become manual-review
+dead letters after 24 hours without releasing ownership. Active pre-upgrade jobs
+without a lease receive persistent synthetic ownership before control is sent.
+
+Outbox sequence allocation and event insertion share one database transaction,
+so the change-feed cursor cannot advance past a sequence whose event has not
+committed. Printer subscribers receive only a redacted state-change hint; full
+job, attempt, project, revision, and failure details are delivered only to
+authorized job or project subscriptions. Service-boundary authorization checks
+both source G-code and destination printer groups.
+
 ---
 
 ## Components Overview

@@ -18,7 +18,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 #pragma warning disable 612, 618
             modelBuilder
                 .HasDefaultSchema("slicer")
-                .HasAnnotation("ProductVersion", "10.0.7")
+                .HasAnnotation("ProductVersion", "10.0.10")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -828,11 +828,13 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("UserId", "IdempotencyScopeId", "Checksum")
                         .IsUnique()
-                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum");
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum")
+                        .HasFilter("\"Checksum\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
 
                     b.HasIndex("UserId", "IdempotencyScopeId", "CorrelationId")
                         .IsUnique()
-                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation");
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation")
+                        .HasFilter("\"CorrelationId\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
 
                     b.ToTable("SliceJobs", "slicer");
                 });

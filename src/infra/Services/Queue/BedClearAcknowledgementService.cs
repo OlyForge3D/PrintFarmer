@@ -118,17 +118,15 @@ public sealed class BedClearAcknowledgementService(
                 $"Printer dispatch state for {request.PrinterId} not found.");
         }
 
-        // Public callers provide both tokens. Trusted internal callers may omit the
-        // job token and bind to the revision loaded in this unit of work.
-        if (request.IfMatchDispatchState is null)
+        if (request.IfMatchJob is null || request.IfMatchDispatchState is null)
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PreconditionRequired,
                 job.RowVersion, dispatchState.RowVersion,
-                "X-Dispatch-State-If-Match is required for bed-clear acknowledgements.");
+                "Both If-Match and X-Dispatch-State-If-Match are required for bed-clear acknowledgements.");
         }
 
-        byte[] effectiveJobRevision = request.IfMatchJob ?? job.RowVersion ?? [];
+        byte[] effectiveJobRevision = request.IfMatchJob;
         string requestSha256 = BuildCommandRequestSha256(request);
         BedClearCommandRecord? priorCommand = await _db.BedClearCommandRecords
             .FirstOrDefaultAsync(
@@ -245,13 +243,14 @@ public sealed class BedClearAcknowledgementService(
         }
 
         // Check whether the printer is already occupied.
-        if (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != request.JobId)
+        if (dispatchState.ActiveDispatchAttemptId.HasValue ||
+            (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != request.JobId))
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PrinterBusy,
                 job.RowVersion,
                 dispatchState.RowVersion,
-                $"Printer {request.PrinterId} is busy with job {dispatchState.ActiveJobId}.");
+                "The printer is already owned by an active queue or ad-hoc dispatch attempt.");
         }
 
         // Short-circuit only after durable idempotency and revision checks.
@@ -655,88 +654,18 @@ public sealed class BedClearAcknowledgementService(
                 commandId = startCommand.Id,
             });
 
-        // Bounded retry loop: up to MaxSequenceRetries attempts on sequence-only conflicts.
-        // Any other conflict (e.g., the dispatch-state If-Match already caught above) surfaces
-        // as DispatchRevisionConflict without retrying.
-        const int MaxSequenceRetries = 5;
-        bool saved = false;
-        DbUpdateConcurrencyException? lastConflict = null;
-
-        for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !saved; seqRetry++)
+        try
         {
+            await using QueueOutboxTransactionScope transaction =
+                await QueueOutboxTransactionScope.BeginAsync(_db, ct);
             startCommand.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
-
-            try
-            {
-                await _db.SaveChangesAsync(ct);
-                saved = true;
-                lastConflict = null;
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                lastConflict = ex;
-
-                // Only retry when the sole conflicting entity is the sequence counter.
-                // A conflict on the dispatch state or job means a genuine race that the
-                // client must resolve by re-fetching.
-                bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
-                    ex.Entries.All(e => e.Entity is OutboxSequenceState);
-
-                if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
-                {
-                    // Give up — not a sequence conflict or max retries exhausted.
-                    break;
-                }
-
-                _logger.LogWarning(
-                    ex,
-                    "[BedClearAck] Outbox sequence contention (retry {Retry}/{Max}); reloading counter for Job={JobId}",
-                    seqRetry + 1, MaxSequenceRetries, request.JobId);
-
-                // Reload the sequence-state row so the next AllocateAsync call sees
-                // the winner's committed NextSequence value and increments from there.
-                OutboxSequenceState? seqState = _db.OutboxSequenceStates.Local.SingleOrDefault();
-                if (seqState is not null)
-                {
-                    await _db.Entry(seqState).ReloadAsync(ct);
-                }
-            }
-            catch (DbUpdateException)
-            {
-                _db.ChangeTracker.Clear();
-                BedClearCommandRecord? winner = await _db.BedClearCommandRecords
-                    .AsNoTracking()
-                    .FirstOrDefaultAsync(
-                        record =>
-                            record.PrinterId == request.PrinterId &&
-                            record.IdempotencyKey == request.IdempotencyKey,
-                        ct);
-                if (winner is not null)
-                {
-                    bool isReplay = string.Equals(
-                        winner.RequestSha256,
-                        requestSha256,
-                        StringComparison.Ordinal);
-                    string? replayError = isReplay
-                        ? null
-                        : "Idempotency key was concurrently used with different inputs.";
-                    return new AcknowledgeBedClearResult(
-                        isReplay
-                            ? BedClearAckOutcome.Replayed
-                            : BedClearAckOutcome.IdempotencyMismatch,
-                        null,
-                        null,
-                        replayError);
-                }
-
-                throw;
-            }
+            await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
-
-        if (!saved)
+        catch (DbUpdateConcurrencyException ex)
         {
             _logger.LogWarning(
-                lastConflict,
+                ex,
                 "[BedClearAck] Concurrency conflict persisting bed-clear acknowledgement for Job={JobId}",
                 request.JobId);
 
@@ -744,6 +673,36 @@ public sealed class BedClearAcknowledgementService(
                 BedClearAckOutcome.DispatchRevisionConflict,
                 null, null,
                 "A concurrent operation modified the dispatch state. Re-fetch and retry.");
+        }
+        catch (DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            BedClearCommandRecord? winner = await _db.BedClearCommandRecords
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    record =>
+                        record.PrinterId == request.PrinterId &&
+                        record.IdempotencyKey == request.IdempotencyKey,
+                    ct);
+            if (winner is not null)
+            {
+                bool isReplay = string.Equals(
+                    winner.RequestSha256,
+                    requestSha256,
+                    StringComparison.Ordinal);
+                string? replayError = isReplay
+                    ? null
+                    : "Idempotency key was concurrently used with different inputs.";
+                return new AcknowledgeBedClearResult(
+                    isReplay
+                        ? BedClearAckOutcome.Replayed
+                        : BedClearAckOutcome.IdempotencyMismatch,
+                    null,
+                    null,
+                    replayError);
+            }
+
+            throw;
         }
 
         _logger.LogInformation(

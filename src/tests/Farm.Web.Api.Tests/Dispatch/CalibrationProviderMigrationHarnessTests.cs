@@ -522,17 +522,11 @@ public class CalibrationProviderMigrationHarnessTests
     {
         await using var first = new AppDbContext(options);
         await using var second = new AppDbContext(options);
-        var firstSequence = new DbOutboxSequenceAllocator();
-        var secondSequence = new DbOutboxSequenceAllocator();
         long[] sequences = await Task.WhenAll(
-            firstSequence.AllocateAsync(first),
-            secondSequence.AllocateAsync(second));
+            AllocateAndInsertTerminalEventAsync(first),
+            AllocateAndInsertTerminalEventAsync(second));
         sequences.Should().OnlyHaveUniqueItems(
             $"[{providerName}] simultaneous producers need distinct provider-native outbox ordering");
-
-        first.QueueDispatchOutbox.Add(CreateTerminalEvent(sequences[0]));
-        second.QueueDispatchOutbox.Add(CreateTerminalEvent(sequences[1]));
-        await Task.WhenAll(first.SaveChangesAsync(), second.SaveChangesAsync());
 
         await using var firstPositionContext = new AppDbContext(options);
         await using var secondPositionContext = new AppDbContext(options);
@@ -542,6 +536,16 @@ public class CalibrationProviderMigrationHarnessTests
             new QueuePositionAllocator(secondPositionContext).AllocateAsync(printerScope));
         positions.Should().OnlyHaveUniqueItems(
             $"[{providerName}] simultaneous queue producers need distinct positions");
+    }
+
+    private static async Task<long> AllocateAndInsertTerminalEventAsync(AppDbContext context)
+    {
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        long sequence = await new DbOutboxSequenceAllocator().AllocateAsync(context);
+        context.QueueDispatchOutbox.Add(CreateTerminalEvent(sequence));
+        await context.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return sequence;
     }
 
     private static QueueDispatchOutbox CreateTerminalEvent(long sequence) =>

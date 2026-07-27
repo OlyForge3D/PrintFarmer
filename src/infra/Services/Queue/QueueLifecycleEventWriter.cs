@@ -61,6 +61,12 @@ public static class QueueLifecycleEventWriter
     /// <summary>Job's current print attempt aborted (job returns to queued).</summary>
     public const string EventTypeJobAborted = Dispatch.DispatchClaimService.EventTypeJobAborted;
 
+    /// <summary>Backend confirmed the active print was paused.</summary>
+    public const string EventTypeJobPaused = "PrintFarmer.Queue.JobPaused.v1";
+
+    /// <summary>Backend confirmed the paused print was resumed.</summary>
+    public const string EventTypeJobResumed = "PrintFarmer.Queue.JobResumed.v1";
+
     // ── Shared writer ───────────────────────────────────────────────────────────
 
     /// <summary>

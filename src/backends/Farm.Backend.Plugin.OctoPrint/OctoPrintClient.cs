@@ -633,13 +633,23 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync();
             return ParseOctoPrintHistoryJob(content);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             LogError("Get history job failed", ex);
-            return null;
+            throw;
         }
     }
 

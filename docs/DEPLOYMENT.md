@@ -201,6 +201,21 @@ restoring the matching provider-native database backup and blob snapshot before
 starting the old release; never run old binaries on the upgraded schema and
 never use an EF down-migration as an operational rollback.
 
+Before the quiescence window, drain pending queue work and inspect
+`QueueDispatchOutbox` for `Pending` or `Processing` backend start/control
+commands. Do not clear leases or replay uncertain commands during deployment.
+After all replicas are upgraded, verify the start consumer, control consumer,
+reconciler, and SignalR publisher are running before allowing new queue writes.
+An unresolved control command stays fenced and becomes a
+`manual_control_reconciliation_required` dead letter after 24 hours.
+
+The owner-scoped artifact promotion key and calibration-scoped slicer
+idempotency migrations intentionally have no down path. Valid head data can
+contain repeated legacy promotion identifiers and repeated standard-job
+checksums, so recreating the old global unique indexes is unsafe. Roll back only
+by restoring the matching database and blob backups taken while all writers
+were stopped.
+
 ```bash
 # SQLite: stop PrintFarmer before copying the database and sidecar files.
 cp farm.db "farm.db.$(date +%Y%m%d%H%M%S).bak"

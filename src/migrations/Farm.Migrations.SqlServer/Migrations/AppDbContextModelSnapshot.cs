@@ -7884,7 +7884,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
                         .WithMany()
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", "PrinterMaintenanceSchedule")
@@ -7909,7 +7909,7 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.HasOne("Farm.Infrastructure.Domain.Printer", "Printer")
                         .WithMany("MaintenanceLogs")
                         .HasForeignKey("PrinterId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("Farm.Infrastructure.Domain.PrinterMaintenanceSchedule", "PrinterMaintenanceSchedule")

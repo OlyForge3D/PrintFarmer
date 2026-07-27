@@ -53,9 +53,33 @@ public interface IJobQueueService
     /// <returns><see langword="true"/> when the job was removed.</returns>
     Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct);
 
+    /// <summary>Removes a public caller's authorized job with an ETag precondition.</summary>
+    Task<bool> RemoveJobAsync(
+        Guid id,
+        string? ifMatchJobRowVersion,
+        string actorSubject,
+        CancellationToken ct) =>
+        RemoveJobAsync(id, ifMatchJobRowVersion, ct);
+
     /// <summary>Updates a job's priority in the queue.</summary>
     Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct);
 
+    /// <summary>Updates an authorized public caller's job priority.</summary>
+    Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(
+        Guid id,
+        UpdateJobPriorityDto request,
+        string actorSubject,
+        CancellationToken ct) =>
+        UpdateJobPriorityAsync(id, request, ct);
+
     /// <summary>Updates a job's status.</summary>
     Task<JobQueuePrintJobDto?> UpdateJobAsync(Guid id, UpdatePrintJobStatusDto request, CancellationToken ct);
+
+    /// <summary>Updates an authorized public caller's queue job.</summary>
+    Task<JobQueuePrintJobDto?> UpdateJobAsync(
+        Guid id,
+        UpdatePrintJobStatusDto request,
+        string actorSubject,
+        CancellationToken ct) =>
+        UpdateJobAsync(id, request, ct);
 }

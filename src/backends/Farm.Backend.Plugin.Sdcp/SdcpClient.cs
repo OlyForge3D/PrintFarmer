@@ -2080,7 +2080,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         catch (Exception ex)
         {
             LogSdcp(LogLevel.Debug, $"SDCP history job detail failed for {jobId}", ex);
-            return null;
+            throw;
         }
     }
 

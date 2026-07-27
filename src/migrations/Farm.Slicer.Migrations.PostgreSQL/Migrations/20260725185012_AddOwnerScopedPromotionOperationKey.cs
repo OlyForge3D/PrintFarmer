@@ -40,26 +40,8 @@ public partial class AddOwnerScopedPromotionOperationKey : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropIndex(
-            name: "IX_Artifacts_PromotionOperationId",
-            schema: "slicer",
-            table: "Artifacts");
-
-        migrationBuilder.DropIndex(
-            name: "IX_Artifacts_PromotionOperationKey",
-            schema: "slicer",
-            table: "Artifacts");
-
-        migrationBuilder.DropColumn(
-            name: "PromotionOperationKey",
-            schema: "slicer",
-            table: "Artifacts");
-
-        migrationBuilder.CreateIndex(
-            name: "IX_Artifacts_PromotionOperationId",
-            schema: "slicer",
-            table: "Artifacts",
-            column: "PromotionOperationId",
-            unique: true);
+        throw new NotSupportedException(
+            "Owner-scoped promotion keys are a forward-only migration because valid head " +
+            "data can contain repeated legacy PromotionOperationId values.");
     }
 }

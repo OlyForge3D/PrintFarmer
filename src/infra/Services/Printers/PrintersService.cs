@@ -282,12 +282,7 @@ public class PrintersService(
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[History] Failed to retrieve job {JobId} for printer {PrinterId}: {Message}", jobId, printerId, ex.Message);
-            if (ex is KeyNotFoundException || ex is InvalidOperationException)
-            {
-                throw;
-            }
-
-            throw new KeyNotFoundException($"History job {jobId} not found", ex);
+            throw;
         }
     }
 
@@ -2424,6 +2419,73 @@ public class PrintersService(
         {
             _logger.LogWarning(ex, "Failed to cancel print on printer {Id}", id);
             return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return BackendControlOutcome.Rejected(
+                "printer_not_found",
+                "The printer was not found.");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetControlOperationsClientTyped(
+                backend,
+                out ISupportsControlOperations? controlClient))
+        {
+            return BackendControlOutcome.Rejected(
+                "control_unsupported",
+                "The printer backend does not support lifecycle control.");
+        }
+
+        try
+        {
+            bool accepted = operation switch
+            {
+                BackendControlOperation.Pause =>
+                    await controlClient!.PauseAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Resume =>
+                    await controlClient!.ResumeAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Cancel or BackendControlOperation.Abort =>
+                    await controlClient!.CancelAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                _ => false,
+            };
+
+            return accepted
+                ? BackendControlOutcome.Accepted()
+                : BackendControlOutcome.Unknown(
+                    "The provider did not prove whether the lifecycle command was accepted.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Lifecycle command {Operation} produced an unknown outcome on printer {PrinterId}",
+                operation,
+                id);
+            return BackendControlOutcome.Unknown(
+                "The provider response was lost; backend reconciliation is required.");
         }
     }
 

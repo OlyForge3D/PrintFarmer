@@ -334,6 +334,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         if (setAck)
         {
+            await using var transaction = await db.Database.BeginTransactionAsync();
             ds.AcknowledgedJobId = job.Id;
             ds.AcknowledgementIdempotencyKey = "valid-ack-key";
             ds.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(15);
@@ -376,6 +377,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
                 CreatedAtUtc = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
 
         return (printer.Id, job.Id, gcode.Id);
@@ -392,7 +394,15 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
 
         PrinterDispatchState ds = await seedCtx.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
-        var req = new AcknowledgeBedClearRequest(jobId, printerId, "actor", "ack-key-g2", ds.RowVersion, 1);
+        PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
+        var req = new AcknowledgeBedClearRequest(
+            jobId,
+            printerId,
+            "actor",
+            "ack-key-g2",
+            ds.RowVersion,
+            1,
+            job.RowVersion);
 
         // First ack.
         await using AppDbContext ctx1 = CreateContext();
@@ -492,14 +502,28 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         await using AppDbContext ctx1 = CreateContext();
         PrinterDispatchState? ds1 = await ctx1.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printer.Id);
         var r1 = await CreateAckService(ctx1).AcknowledgeAsync(
-            new AcknowledgeBedClearRequest(jobA.Id, printer.Id, "actor", "shared-key", ds1.RowVersion, 1));
+            new AcknowledgeBedClearRequest(
+                jobA.Id,
+                printer.Id,
+                "actor",
+                "shared-key",
+                ds1.RowVersion,
+                1,
+                jobA.RowVersion));
         r1.Outcome.Should().Be(BedClearAckOutcome.Accepted, "first ack (key A for job-A) must succeed");
 
         // Second ack: SAME key "shared-key" for job-B → IdempotencyMismatch.
         await using AppDbContext ctx2 = CreateContext();
         PrinterDispatchState? ds2 = await ctx2.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printer.Id);
         var r2 = await CreateAckService(ctx2).AcknowledgeAsync(
-            new AcknowledgeBedClearRequest(jobB.Id, printer.Id, "actor", "shared-key", ds2.RowVersion, 1));
+            new AcknowledgeBedClearRequest(
+                jobB.Id,
+                printer.Id,
+                "actor",
+                "shared-key",
+                ds2.RowVersion,
+                1,
+                jobB.RowVersion));
 
         r2.Outcome.Should().Be(BedClearAckOutcome.IdempotencyMismatch,
             "using the same idempotency key for a different job must return IdempotencyMismatch");
@@ -1238,11 +1262,19 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
 
         PrinterDispatchState ds = await seedCtx.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
+        PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
 
         await using AppDbContext ackCtx = CreateContext();
         var ackSvc = CreateAckService(ackCtx);
         var result = await ackSvc.AcknowledgeAsync(
-            new AcknowledgeBedClearRequest(jobId, printerId, "actor-g9", "ack-key-g9", ds.RowVersion, 1));
+            new AcknowledgeBedClearRequest(
+                jobId,
+                printerId,
+                "actor-g9",
+                "ack-key-g9",
+                ds.RowVersion,
+                1,
+                job.RowVersion));
 
         result.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
@@ -1300,11 +1332,13 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         await using AppDbContext ackCtx = CreateContext();
         var ackSvc = CreateAckService(ackCtx);
+        PrintJob job = await ackCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
         var result = await ackSvc.AcknowledgeAsync(
             new AcknowledgeBedClearRequest(
                 jobId, printerId, "actor", "ack-key-412",
                 IfMatchDispatchState: staleRowVersion,
-                ExpectedPrinterConfigRevision: null));
+                ExpectedPrinterConfigRevision: null,
+                IfMatchJob: job.RowVersion));
 
         result.Outcome.Should().Be(BedClearAckOutcome.DispatchRevisionConflict,
             "stale If-Match on dispatch state must return 412 DispatchRevisionConflict");
@@ -1318,11 +1352,13 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         await using AppDbContext ackCtx = CreateContext();
         var ackSvc = CreateAckService(ackCtx);
+        PrintJob job = await ackCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
         var result = await ackSvc.AcknowledgeAsync(
             new AcknowledgeBedClearRequest(
                 jobId, printerId, "actor", "ack-key-428",
                 IfMatchDispatchState: null,
-                ExpectedPrinterConfigRevision: null));
+                ExpectedPrinterConfigRevision: null,
+                IfMatchJob: job.RowVersion));
 
         result.Outcome.Should().Be(BedClearAckOutcome.PreconditionRequired,
             "missing If-Match must return 428 PreconditionRequired");

@@ -2349,18 +2349,23 @@ public class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
                 return null;
             }
 
+            resp.EnsureSuccessStatusCode();
             MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
             return response?.Result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
-            return null;
+            throw;
         }
     }
 

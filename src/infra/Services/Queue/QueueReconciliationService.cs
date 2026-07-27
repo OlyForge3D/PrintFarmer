@@ -60,7 +60,7 @@ public sealed class QueueReconciliationService(
         logger.LogInformation("[Reconciliation] Queue reconciliation service stopped");
     }
 
-    private async Task ReconcileStaleAttemptsAsync(CancellationToken ct)
+    internal async Task ReconcileStaleAttemptsAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -178,6 +178,8 @@ public sealed class QueueReconciliationService(
         // Query the authoritative backend for the current printer state.
         BackendReconciliationOutcome outcome = await QueryBackendOutcomeAsync(
             printersSvc, attempt, ct);
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db, ct);
         attempt.ReconciliationCount++;
         attempt.LastReconciledAtUtc = DateTime.UtcNow;
 
@@ -480,6 +482,9 @@ public sealed class QueueReconciliationService(
 
                 break;
         }
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private static void MarkRequiresReconciliation(QueueDispatchAttempt attempt, string reason)
@@ -658,6 +663,16 @@ public sealed class QueueReconciliationService(
                         return BackendReconciliationOutcome.CompletedOnBackend;
                     }
                 }
+                catch (KeyNotFoundException)
+                {
+                    // The production history contract uses KeyNotFoundException only for
+                    // an authoritative 404/absent result. Exhaust every persisted identity
+                    // before concluding that the attempt never reached the backend.
+                    logger.LogDebug(
+                        "[Reconciliation] Identity '{Identity}' is absent from history on printer {PrinterId}",
+                        identity,
+                        attempt.PrinterId);
+                }
                 catch (Exception histEx) when (histEx is not OperationCanceledException)
                 {
                     logger.LogDebug(
@@ -676,7 +691,7 @@ public sealed class QueueReconciliationService(
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
-            // Idle backend, all history probes returned nothing: the job is genuinely absent.
+            // Idle backend, every exact identity was authoritatively absent.
             return BackendReconciliationOutcome.AbsentFromBackend;
         }
         catch (OperationCanceledException)

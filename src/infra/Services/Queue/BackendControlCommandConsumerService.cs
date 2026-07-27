@@ -25,12 +25,11 @@ public sealed class BackendControlCommandConsumerService(
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ManualReviewAge = TimeSpan.FromHours(24);
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
     };
-
-    private const int MaxAttempts = 10;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -54,27 +53,23 @@ public sealed class BackendControlCommandConsumerService(
         }
     }
 
-    private async Task RecoverStaleLeasesAsync(CancellationToken ct)
+    internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         DateTime cutoff = DateTime.UtcNow - StaleLeaseAge;
-        List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
+        List<Guid> stale = await db.QueueDispatchOutbox
+            .AsNoTracking()
             .Where(command =>
                 command.EventType == EventType &&
                 command.Status == QueueOutboxEventStatus.Processing &&
                 command.LastAttemptedAtUtc < cutoff)
+            .Select(command => command.Id)
             .ToListAsync(ct);
-        foreach (QueueDispatchOutbox command in stale)
-        {
-            command.Status = QueueOutboxEventStatus.Pending;
-            command.RetryAfterUtc = DateTime.UtcNow;
-            command.LastError = "Recovered after a stale control-command lease.";
-        }
 
-        if (stale.Count > 0)
+        foreach (Guid commandId in stale)
         {
-            await db.SaveChangesAsync(ct);
+            await ReconcileProcessingCommandAsync(commandId, ct);
         }
     }
 
@@ -103,7 +98,6 @@ public sealed class BackendControlCommandConsumerService(
     private async Task ProcessOneAsync(Guid commandId, CancellationToken ct)
     {
         BackendControlPayload payload;
-        int attemptCount;
         await using (AsyncServiceScope leaseScope = scopeFactory.CreateAsyncScope())
         {
             AppDbContext leaseDb = leaseScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -134,7 +128,7 @@ public sealed class BackendControlCommandConsumerService(
             if (payload.JobId == Guid.Empty ||
                 payload.PrinterId == Guid.Empty ||
                 !payload.AttemptId.HasValue ||
-                (payload.Operation != "cancel" && payload.Operation != "abort"))
+                !TryParseOperation(payload.Operation, out _))
             {
                 command.Status = QueueOutboxEventStatus.DeadLettered;
                 command.FailureCode = "invalid_control_command";
@@ -164,7 +158,6 @@ public sealed class BackendControlCommandConsumerService(
             command.AttemptCount++;
             command.LastAttemptedAtUtc = DateTime.UtcNow;
             command.LastError = null;
-            attemptCount = command.AttemptCount;
             try
             {
                 await leaseDb.SaveChangesAsync(ct);
@@ -179,13 +172,43 @@ public sealed class BackendControlCommandConsumerService(
         {
             await using AsyncServiceScope callScope = scopeFactory.CreateAsyncScope();
             IPrintersService printers = callScope.ServiceProvider.GetRequiredService<IPrintersService>();
-            bool accepted = await printers.CancelPrintAsync(payload.PrinterId, ct);
-            if (!accepted)
+            if (!TryParseOperation(payload.Operation, out BackendControlOperation operation))
             {
-                throw new InvalidOperationException("The backend did not confirm the cancel command.");
+                await ApplyRejectedAsync(
+                    commandId,
+                    payload,
+                    "invalid_control_command",
+                    "The lifecycle command operation is invalid.",
+                    ct);
+                return;
             }
 
-            await ApplyAcceptedAsync(commandId, payload, ct);
+            BackendControlOutcome outcome = await printers.ExecuteControlAsync(
+                payload.PrinterId,
+                operation,
+                ct);
+            switch (outcome.Status)
+            {
+                case BackendControlStatus.Accepted:
+                    await ApplyAcceptedAsync(commandId, payload, ct);
+                    break;
+                case BackendControlStatus.Rejected:
+                    await ApplyRejectedAsync(
+                        commandId,
+                        payload,
+                        outcome.ErrorCode ?? "backend_control_rejected",
+                        outcome.ErrorDetail ?? "The backend rejected the lifecycle command.",
+                        ct);
+                    break;
+                default:
+                    string unknownDetail = outcome.ErrorDetail ??
+                        "The backend lifecycle command requires reconciliation.";
+                    await ApplyUnknownAsync(
+                        commandId,
+                        unknownDetail,
+                        ct);
+                    break;
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -193,7 +216,7 @@ public sealed class BackendControlCommandConsumerService(
         }
         catch (Exception exception)
         {
-            await ApplyFailureAsync(commandId, attemptCount, exception, ct);
+            await ApplyUnknownAsync(commandId, exception.Message, ct);
         }
     }
 
@@ -212,7 +235,10 @@ public sealed class BackendControlCommandConsumerService(
             .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
         PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
             .FirstOrDefaultAsync(candidate => candidate.PrinterId == payload.PrinterId, ct);
-        if (command is null || job is null || dispatchState is null)
+        if (command is null ||
+            command.Status != QueueOutboxEventStatus.Processing ||
+            job is null ||
+            dispatchState is null)
         {
             return;
         }
@@ -228,18 +254,32 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db, ct);
         DateTime now = DateTime.UtcNow;
         PrintJobStatus fromStatus = job.Status;
+        bool pause = string.Equals(payload.Operation, "pause", StringComparison.Ordinal);
+        bool resume = string.Equals(payload.Operation, "resume", StringComparison.Ordinal);
         bool abort = string.Equals(payload.Operation, "abort", StringComparison.Ordinal);
-        job.Status = abort ? PrintJobStatus.Queued : PrintJobStatus.Cancelled;
+        bool terminalControl = !pause && !resume;
+        job.Status = payload.Operation switch
+        {
+            "pause" => PrintJobStatus.Paused,
+            "resume" => PrintJobStatus.Printing,
+            "abort" => PrintJobStatus.Queued,
+            _ => PrintJobStatus.Cancelled,
+        };
         job.ActualStartTime = abort ? null : job.ActualStartTime;
-        job.ActualEndTime = abort ? null : now;
+        job.ActualEndTime = terminalControl && !abort ? now : null;
         job.UpdatedAt = now;
 
-        dispatchState.ActiveJobId = null;
-        dispatchState.ActiveDispatchAttemptId = null;
-        dispatchState.QueueRevision++;
-        ClearAcknowledgement(dispatchState);
+        if (terminalControl)
+        {
+            dispatchState.ActiveJobId = null;
+            dispatchState.ActiveDispatchAttemptId = null;
+            dispatchState.QueueRevision++;
+            ClearAcknowledgement(dispatchState);
+        }
 
         if (payload.AttemptId.HasValue)
         {
@@ -247,8 +287,12 @@ public sealed class BackendControlCommandConsumerService(
                 .FirstOrDefaultAsync(candidate => candidate.Id == payload.AttemptId.Value, ct);
             if (attempt is not null)
             {
-                attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
-                attempt.TerminalAtUtc = now;
+                if (terminalControl)
+                {
+                    attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
+                    attempt.TerminalAtUtc = now;
+                }
+
                 attempt.RequiresReconciliation = false;
                 attempt.UpdatedAtUtc = now;
             }
@@ -267,12 +311,19 @@ public sealed class BackendControlCommandConsumerService(
             ToState = job.Status.ToString(),
             TransitionedAtUtc = now,
             CreatedAt = now,
-            Notes = abort ? "Durable hardware abort accepted" : "Durable hardware cancel accepted",
+            Notes = $"Durable hardware {payload.Operation} accepted",
         });
+        string auditOperation = payload.Operation switch
+        {
+            "pause" => QueueAuditOperations.JobPause,
+            "resume" => QueueAuditOperations.JobResume,
+            "abort" => QueueAuditOperations.JobAbort,
+            _ => QueueAuditOperations.JobCancel,
+        };
         _ = QueueAuditWriter.Add(
             db,
             payload.ActorSubject,
-            abort ? QueueAuditOperations.JobAbort : QueueAuditOperations.JobCancel,
+            auditOperation,
             QueueAuditOutcomes.Success,
             nameof(PrintJob),
             resourceId: job.Id,
@@ -282,9 +333,13 @@ public sealed class BackendControlCommandConsumerService(
             jobRowVersion: job.RowVersion,
             dispatchStateRowVersion: dispatchState.RowVersion,
             detail: new { commandId });
-        string lifecycleEventType = abort
-            ? QueueLifecycleEventWriter.EventTypeJobAborted
-            : QueueLifecycleEventWriter.EventTypeJobCancelled;
+        string lifecycleEventType = payload.Operation switch
+        {
+            "pause" => QueueLifecycleEventWriter.EventTypeJobPaused,
+            "resume" => QueueLifecycleEventWriter.EventTypeJobResumed,
+            "abort" => QueueLifecycleEventWriter.EventTypeJobAborted,
+            _ => QueueLifecycleEventWriter.EventTypeJobCancelled,
+        };
         await QueueLifecycleEventWriter.AddEventAsync(
             db,
             allocator,
@@ -293,49 +348,290 @@ public sealed class BackendControlCommandConsumerService(
             payload.PrinterId,
             payload.AttemptId,
             job.RowVersion,
-            abort ? null : "job_cancelled",
+            payload.Operation == "cancel" ? "job_cancelled" : null,
             QueueLifecycleEventWriter.BuildTerminalPayload(
                 job.Id,
                 payload.PrinterId,
                 payload.AttemptId,
                 job.Status.ToString(),
                 job.JobKind?.ToString() ?? nameof(JobKind.Standard),
-                abort ? null : "job_cancelled"),
+                payload.Operation == "cancel" ? "job_cancelled" : null),
             ct);
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
-    private async Task ApplyFailureAsync(
+    private async Task ApplyRejectedAsync(
         Guid commandId,
-        int attemptCount,
-        Exception exception,
+        BackendControlPayload payload,
+        string errorCode,
+        string errorDetail,
         CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         QueueDispatchOutbox? command = await db.QueueDispatchOutbox
             .FirstOrDefaultAsync(candidate => candidate.Id == commandId, ct);
-        if (command is null)
+        if (command is null || command.Status != QueueOutboxEventStatus.Processing)
         {
             return;
         }
 
-        command.LastError = exception.Message[..Math.Min(exception.Message.Length, 2047)];
-        command.FailureCode = "backend_control_unconfirmed";
-        if (attemptCount >= MaxAttempts)
+        command.LastError = errorDetail[..Math.Min(errorDetail.Length, 2047)];
+        command.FailureCode = errorCode;
+        command.Status = QueueOutboxEventStatus.DeadLettered;
+        command.CompletedAtUtc = DateTime.UtcNow;
+        _ = QueueAuditWriter.Add(
+            db,
+            payload.ActorSubject,
+            QueueAuditOperation(payload.Operation),
+            QueueAuditOutcomes.Denied,
+            nameof(PrintJob),
+            resourceId: payload.JobId,
+            printerId: payload.PrinterId,
+            printJobId: payload.JobId,
+            dispatchAttemptId: payload.AttemptId,
+            reasonCode: errorCode,
+            detail: new { commandId });
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task ApplyUnknownAsync(
+        Guid commandId,
+        string errorDetail,
+        CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        QueueDispatchOutbox? command = await db.QueueDispatchOutbox
+            .FirstOrDefaultAsync(candidate => candidate.Id == commandId, ct);
+        if (command is null || command.Status != QueueOutboxEventStatus.Processing)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        command.LastAttemptedAtUtc = now;
+        command.RetryAfterUtc = null;
+        if (command.CreatedAtUtc <= now - ManualReviewAge)
         {
             command.Status = QueueOutboxEventStatus.DeadLettered;
-            command.CompletedAtUtc = DateTime.UtcNow;
+            command.FailureCode = "manual_control_reconciliation_required";
+            command.LastError =
+                "Backend control outcome remained indeterminate for 24 hours. " +
+                "The dispatch lease remains fenced for manual review.";
+            command.CompletedAtUtc = now;
+            logger.LogError(
+                "Backend control command {CommandId} requires manual reconciliation; " +
+                "the dispatch lease remains fenced",
+                commandId);
         }
         else
         {
-            command.Status = QueueOutboxEventStatus.Pending;
-            command.RetryAfterUtc = DateTime.UtcNow +
-                TimeSpan.FromSeconds(5 * Math.Pow(2, attemptCount - 1));
+            command.Status = QueueOutboxEventStatus.Processing;
+            command.FailureCode = "backend_control_unknown";
+            command.LastError = errorDetail[..Math.Min(errorDetail.Length, 2047)];
         }
 
         await db.SaveChangesAsync(ct);
     }
+
+    private async Task ReconcileProcessingCommandAsync(Guid commandId, CancellationToken ct)
+    {
+        BackendControlPayload payload;
+        await using (AsyncServiceScope scope = scopeFactory.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            QueueDispatchOutbox? command = await db.QueueDispatchOutbox
+                .AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == commandId, ct);
+            if (command is null || command.Status != QueueOutboxEventStatus.Processing)
+            {
+                return;
+            }
+
+            try
+            {
+                payload = JsonSerializer.Deserialize<BackendControlPayload>(
+                    command.PayloadJson,
+                    PayloadOptions)
+                    ?? throw new JsonException("Control command payload was empty.");
+            }
+            catch (JsonException exception)
+            {
+                command = await db.QueueDispatchOutbox
+                    .FirstAsync(candidate => candidate.Id == commandId, ct);
+                command.Status = QueueOutboxEventStatus.DeadLettered;
+                command.FailureCode = "invalid_control_command";
+                command.LastError = exception.Message;
+                command.CompletedAtUtc = DateTime.UtcNow;
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+
+            PrinterDispatchState? state = await db.PrinterDispatchStates
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    candidate => candidate.PrinterId == payload.PrinterId,
+                    ct);
+            if (state?.ActiveJobId != payload.JobId ||
+                state.ActiveDispatchAttemptId != payload.AttemptId)
+            {
+                await ApplyRejectedAsync(
+                    commandId,
+                    payload,
+                    "control_attempt_fence_conflict",
+                    "The active dispatch ownership changed before reconciliation.",
+                    ct);
+                return;
+            }
+        }
+
+        if (!TryParseOperation(payload.Operation, out BackendControlOperation operation))
+        {
+            await ApplyRejectedAsync(
+                commandId,
+                payload,
+                "invalid_control_command",
+                "The lifecycle command operation is invalid.",
+                ct);
+            return;
+        }
+
+        await using AsyncServiceScope printerScope = scopeFactory.CreateAsyncScope();
+        IPrintersService printers =
+            printerScope.ServiceProvider.GetRequiredService<IPrintersService>();
+        PrinterStatusDto status;
+        try
+        {
+            status = await printers.GetStatusDtoAsync(payload.PrinterId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await ApplyUnknownAsync(commandId, ex.Message, ct);
+            return;
+        }
+
+        bool identityMatches = MatchesBackendIdentity(payload.BackendIdentity, status);
+        if (operation == BackendControlOperation.Pause &&
+            IsPausedState(status.State) &&
+            identityMatches)
+        {
+            await ApplyAcceptedAsync(commandId, payload, ct);
+            return;
+        }
+
+        if (operation == BackendControlOperation.Resume &&
+            IsPrintingState(status.State) &&
+            identityMatches)
+        {
+            await ApplyAcceptedAsync(commandId, payload, ct);
+            return;
+        }
+
+        if (operation is BackendControlOperation.Cancel or BackendControlOperation.Abort &&
+            !IsActiveState(status.State) &&
+            !string.IsNullOrWhiteSpace(payload.BackendIdentity))
+        {
+            try
+            {
+                HistoryJob history = await printers.GetHistoryJobAsync(
+                    payload.PrinterId,
+                    payload.BackendIdentity,
+                    ct);
+                if (IsCancelledHistoryState(history.Status))
+                {
+                    await ApplyAcceptedAsync(commandId, payload, ct);
+                    return;
+                }
+
+                if (IsCompletedHistoryState(history.Status))
+                {
+                    await ApplyRejectedAsync(
+                        commandId,
+                        payload,
+                        "control_not_applied",
+                        "Exact backend history shows the print completed instead of being cancelled.",
+                        ct);
+                    return;
+                }
+            }
+            catch (KeyNotFoundException)
+            {
+                // Exact absence is not proof that a response-lost control command ran.
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await ApplyUnknownAsync(commandId, ex.Message, ct);
+                return;
+            }
+        }
+
+        await ApplyUnknownAsync(
+            commandId,
+            "Authoritative backend state does not yet prove the lifecycle command outcome.",
+            ct);
+    }
+
+    private static bool TryParseOperation(
+        string value,
+        out BackendControlOperation operation) =>
+        Enum.TryParse(value, ignoreCase: true, out operation) &&
+        Enum.IsDefined(operation);
+
+    private static bool MatchesBackendIdentity(
+        string? expected,
+        PrinterStatusDto status)
+    {
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return false;
+        }
+
+        string? actual = status.FileName ?? status.JobName;
+        return !string.IsNullOrWhiteSpace(actual) &&
+            string.Equals(
+                Path.GetFileName(actual),
+                Path.GetFileName(expected),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPausedState(string? state) =>
+        string.Equals(state?.Trim(), "paused", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPrintingState(string? state) =>
+        state?.Trim() is { } value &&
+        (value.Equals("printing", StringComparison.OrdinalIgnoreCase) ||
+         value.Equals("resuming", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsActiveState(string? state) =>
+        IsPrintingState(state) ||
+        IsPausedState(state) ||
+        string.Equals(state?.Trim(), "starting", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(state?.Trim(), "heating", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCancelledHistoryState(string? state) =>
+        state?.Trim() is { } value &&
+        (value.Contains("cancel", StringComparison.OrdinalIgnoreCase) ||
+         value.Contains("abort", StringComparison.OrdinalIgnoreCase) ||
+         value.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+         value.Contains("error", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsCompletedHistoryState(string? state) =>
+        state?.Trim() is { } value &&
+        (value.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
+         value.Equals("complete", StringComparison.OrdinalIgnoreCase) ||
+         value.Equals("finished", StringComparison.OrdinalIgnoreCase));
+
+    private static string QueueAuditOperation(string operation) =>
+        operation switch
+        {
+            "pause" => QueueAuditOperations.JobPause,
+            "resume" => QueueAuditOperations.JobResume,
+            "abort" => QueueAuditOperations.JobAbort,
+            _ => QueueAuditOperations.JobCancel,
+        };
 
     private static void ClearAcknowledgement(PrinterDispatchState state)
     {
@@ -353,6 +649,7 @@ public sealed class BackendControlCommandConsumerService(
         Guid JobId,
         Guid PrinterId,
         Guid? AttemptId,
+        string? BackendIdentity,
         string Operation,
         string ActorSubject);
 }

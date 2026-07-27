@@ -120,7 +120,8 @@ public sealed class DatabaseMigrationTests
             "20260725140244_AddSliceJobLeaseAndCalibrationProvenance",
             "20260725144915_AddArtifactPromotionCoordination",
             "20260725173232_AlignDevelopmentSlicerSchema",
-            "20260725185010_AddOwnerScopedPromotionOperationKey");
+            "20260725185010_AddOwnerScopedPromotionOperationKey",
+            "20260727103155_FilterSliceJobIdempotencyToCalibration");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

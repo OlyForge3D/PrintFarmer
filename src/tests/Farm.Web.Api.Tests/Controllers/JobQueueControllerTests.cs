@@ -526,8 +526,13 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.UpdateJobAsync(jobId, request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.UpdateJobAsync(
+                jobId,
+                request,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(updatedDto);
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
@@ -549,8 +554,13 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.UpdateJobAsync(jobId, request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.UpdateJobAsync(
+                jobId,
+                request,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync((JobQueuePrintJobDto?)null);
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
@@ -571,8 +581,13 @@ public class JobQueueControllerTests
         };
 
         _queueServiceMock
-            .Setup(s => s.UpdateJobAsync(jobId, request, It.IsAny<CancellationToken>()))
+            .Setup(s => s.UpdateJobAsync(
+                jobId,
+                request,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new ValidationException("Deadline must be at least 2 hour(s) in the future."));
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         ActionResult<JobQueuePrintJobDto> result = await _controller.UpdateJobAsync(jobId, request);
@@ -590,8 +605,13 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(
+                jobId,
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         IActionResult result = await _controller.DeleteJobAsync(jobId);
@@ -607,8 +627,13 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(
+                jobId,
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         IActionResult result = await _controller.DeleteJobAsync(jobId);
@@ -625,8 +650,13 @@ public class JobQueueControllerTests
         var jobId = Guid.NewGuid();
 
         _queueServiceMock
-            .Setup(s => s.RemoveJobAsync(jobId, It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RemoveJobAsync(
+                jobId,
+                It.IsAny<string?>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Test exception"));
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"dGVzdA==\"";
 
         // Act
         IActionResult result = await _controller.DeleteJobAsync(jobId);

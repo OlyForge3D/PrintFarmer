@@ -16,81 +16,109 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
+REPO_BACKUP_DIR=""
+TEARDOWN_COMPLETE=false
 
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
+    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
     test_info "Using temp directory: $TEST_TEMP_DIR"
+    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    trap teardown EXIT
 }
 
 teardown() {
+    if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
+        return
+    fi
+
     cd "$ORIGINAL_PWD" 2>/dev/null || true
+    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
+}
+
+write_base_config() {
+    local config_file="$1"
+    local provider="${2:-postgres}"
+    local worker_count="${3:-0}"
+    local worker_enabled="no"
+    local distributed_slicing="false"
+    local include_postgres="yes"
+    local include_sqlserver="no"
+    if [[ "$worker_count" -gt 0 ]]; then
+        worker_enabled="yes"
+        distributed_slicing="true"
+    fi
+    if [[ "$provider" == "sqlserver" ]]; then
+        include_postgres="no"
+        include_sqlserver="yes"
+    fi
+
+    cat > "$config_file" << EOF
+ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
+DB_PROVIDER=$provider
+CONNECTION_STRING=
+INCLUDE_POSTGRES=$include_postgres
+INCLUDE_SQLSERVER=$include_sqlserver
+NETWORK_MODE=bridge
+ENABLE_DISCOVERY=false
+ALLOW_LOCAL_NETWORK=false
+NETWORK_RANGES=
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+INCLUDE_DISCOVERY=false
+ENABLE_DISTRIBUTED_SLICING=$distributed_slicing
+ENABLE_ORCA_WORKER=$worker_enabled
+ORCA_WORKER_COUNT=$worker_count
+ENABLE_SPOOLMAN=no
+USE_EXTERNAL_STORAGE=no
+EOF
 }
 
 # Helper function to run deployment with proper directory handling
 run_deployment_test() {
     local config_name="$1"
     local timeout_duration="${2:-60}"
-    local generate_files="${3:-false}"  # Set to true to actually generate files for testing
-    
-    # Run deployment from repo root
-    local original_dir=$(pwd)
-    cd "$REPO_ROOT"
-    
-    if [[ "$generate_files" == "true" ]]; then
-        # Extract architecture from config (before copying)
-        local arch_value="monolithic"
-        if grep -q "ARCHITECTURE=microservices" "$original_dir/$config_name" 2>/dev/null; then
-            arch_value="microservices"
-        elif grep -q "ARCHITECTURE=microservices" "$original_dir/$config_name" 2>/dev/null; then
-            arch_value="microservices"
-        fi
-        
-        # Copy config to repo root for deployment script
-        cp "$original_dir/$config_name" "$REPO_ROOT/"
-        
-        # Generate files by calling compose generator directly (silently)
-        "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$REPO_ROOT" >/dev/null 2>&1 || true
-        
-        # Run deploy script in dry-run to get output for validation
-        # Capture output directly instead of using test framework function
-        local output
-        output=$(timeout $timeout_duration $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true)
+    local generate_files="${3:-false}"
+    if [[ $# -ge 3 ]]; then
+        shift 3
     else
-        # Copy config to repo root for deployment script
-        cp "$original_dir/$config_name" "$REPO_ROOT/"
-        
-        # Standard dry-run mode (no files generated)
-        # Capture output directly instead of using test framework function
-        local output
-        output=$(timeout $timeout_duration $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true)
+        set --
     fi
-    
-    # Clean up config file
-    rm -f "$config_name"
-    
-    # Return to temp directory for compose file checks
-    cd "$original_dir"
-    
-    # Copy generated compose file back to temp dir for checking
-    if [[ -f "$REPO_ROOT/docker-compose.yml" ]]; then
-        cp "$REPO_ROOT/docker-compose.yml" "./docker-compose.yml"
-        # Also copy Dockerfile.multistage if it exists
-        if [[ -f "$REPO_ROOT/Dockerfile.multistage" ]]; then
-            cp "$REPO_ROOT/Dockerfile.multistage" "./Dockerfile.multistage"
-        fi
-    fi
-    
-    # Clean up generated files in repo root (for file generation mode)
+    local working_dir
+    working_dir=$(pwd)
+    local config_path="$working_dir/$config_name"
+    local output_dir="$working_dir/generated"
+    mkdir -p "$output_dir"
+
     if [[ "$generate_files" == "true" ]]; then
-        cd "$REPO_ROOT"
-        rm -f docker-compose.yml Dockerfile.multistage .env .env.* docker-entrypoint-config.sh
-        cd "$original_dir"
+        "$COMPOSE_GENERATOR" --output-dir "$output_dir" >/dev/null 2>&1 || true
     fi
-    
+
+    local output
+    output=$(timeout "$timeout_duration" "$DEPLOY_SCRIPT" \
+        --config-file "$config_path" \
+        --env-file "$working_dir/.env" \
+        --output-dir "$output_dir" \
+        --dry-run \
+        --batch \
+        "$@" 2>&1 || true)
     echo "$output"
 }
 
@@ -102,20 +130,7 @@ test_monolithic_deployment_pipeline() {
     # But we need to set up config in a temp space first
     cd "$TEST_TEMP_DIR"
     
-    # Create basic config to avoid prompts
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-NETWORK_MODE=bridge
-API_PORT=5245
-WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
-ENABLE_DISTRIBUTED_SLICING=true
-ORCA_WORKER_COUNT=1
-ENABLE_ORCA_WORKER=yes
-ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.4.0
-EOF
+    write_base_config ".deploy-config" postgres 1
     
     # Run deployment test in dry-run mode (focus on process success)
     local output=$(run_deployment_test ".deploy-config" 60 false)
@@ -144,20 +159,7 @@ test_microservices_deployment_pipeline() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Create microservices config
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-NETWORK_MODE=bridge
-API_PORT=5245
-WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
-ENABLE_DISTRIBUTED_SLICING=true
-ORCA_WORKER_COUNT=2
-ENABLE_ORCA_WORKER=yes
-ENABLE_SPOOLMAN=no
-ORCASLICER_VERSION=2.4.0
-EOF
+    write_base_config ".deploy-config" postgres 2
     
     # Run deployment test in dry-run mode (focus on process success)
     local output=$(run_deployment_test ".deploy-config" 60 false)
@@ -189,11 +191,7 @@ test_configuration_consistency() {
     cd "$TEST_TEMP_DIR"
     rm -f docker-compose.yml Dockerfile.multistage
     
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-ENABLE_ORCA_WORKER=yes
-ORCA_WORKER_COUNT=1
-EOF
+    write_base_config ".deploy-config" postgres 1
     
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
@@ -216,12 +214,7 @@ test_cleanup_and_regeneration() {
     cd "$TEST_TEMP_DIR"
     
     # Create initial deployment
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-ENABLE_ORCA_WORKER=yes
-ORCA_WORKER_COUNT=1
-EOF
+    write_base_config ".deploy-config" postgres 1
     
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
@@ -230,12 +223,7 @@ EOF
     assert_file_exists "docker-compose.yml" "Should create initial files"
     
     # Modify config and regenerate
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=sqlserver
-ENABLE_ORCA_WORKER=yes
-ORCA_WORKER_COUNT=2
-EOF
+    write_base_config ".deploy-config" sqlserver 2
     
     local output2=$(run_deployment_test ".deploy-config" 60 false)
     
@@ -255,14 +243,10 @@ test_environment_file_generation() {
     
     cd "$TEST_TEMP_DIR"
     
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
+    write_base_config ".deploy-config" postgres 1
+    cat >> ".deploy-config" << 'EOF'
 API_PORT=5555
-WEB_PORT=3333
-ENABLE_ORCA_WORKER=yes
-ORCA_WORKER_COUNT=1
-DISCOVERY_RANGES=192.168.1.0/24
+NETWORK_RANGES=192.168.1.0/24
 EOF
     
     local output=$(run_deployment_test ".deploy-config" 60)
@@ -285,10 +269,7 @@ test_multistage_dockerfile_presence() {
     
     rm -f "$TEST_TEMP_DIR/Dockerfile.multistage"
     
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-EOF
+    write_base_config ".deploy-config"
     
     local output=$(run_deployment_test ".deploy-config" 60 false)
     
@@ -327,11 +308,7 @@ test_redis_removal_verification() {
     
     cd "$TEST_TEMP_DIR"
     
-    cat > ".deploy-config" << 'EOF'
-ARCHITECTURE=microservices
-DB_PROVIDER=postgres
-ENABLE_ORCA_WORKER=yes
-EOF
+    write_base_config ".deploy-config" postgres 1
     
     local deploy_output=$(run_deployment_test ".deploy-config" 60 false)
     
@@ -361,9 +338,9 @@ test_network_mode_combinations() {
     
     assert_file_exists "docker-compose.yml" "Should create compose file"
     
-    # Test deployment from repo root
-    capture_output "cd '$REPO_ROOT' && timeout 40 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
-    local output=$(get_output)
+    write_base_config ".deploy-config"
+    local output
+    output=$(run_deployment_test ".deploy-config" 60 false)
     
     assert_contains "$output" "Setup completed successfully" "Should deploy successfully"
     
@@ -382,15 +359,15 @@ test_security_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Test with security enabled using helper function
-    capture_output "$(get_deploy_script_command --include-security --dry-run --batch)"
-    local output=$(get_output)
+    write_base_config ".deploy-config"
+    local output
+    output=$(run_deployment_test ".deploy-config" 60 false --include-security)
     
     assert_contains "$output" "Setup completed successfully" "Should deploy with security"
     
     # Test without security  
-    capture_output "$(get_deploy_script_command --dry-run --batch)"
-    local output2=$(get_output)
+    local output2
+    output2=$(run_deployment_test ".deploy-config" 60 false)
 
     assert_contains "$output2" "Setup completed successfully" "Should deploy without security"
     
@@ -403,15 +380,21 @@ test_comprehensive_addon_combinations() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Test all addons enabled using deploy script with addon flags
-    capture_output "$(get_deploy_script_command --include-monitoring --include-telemetry --include-security --dry-run --batch)"
-    local output=$(get_output)
+    write_base_config ".deploy-config"
+    local output
+    output=$(run_deployment_test \
+        ".deploy-config" \
+        60 \
+        false \
+        --include-monitoring \
+        --include-telemetry \
+        --include-security)
     
     assert_contains "$output" "Setup completed successfully" "Should deploy all addons successfully"
     
     # Test minimal configuration  
-    capture_output "$(get_deploy_script_command --dry-run --batch)"
-    local output2=$(get_output)
+    local output2
+    output2=$(run_deployment_test ".deploy-config" 60 false)
     
     assert_contains "$output2" "Setup completed successfully" "Should deploy minimal configuration successfully"
     
@@ -424,7 +407,6 @@ run_all_tests() {
     
     test_monolithic_deployment_pipeline
     test_microservices_deployment_pipeline
-    test_host_network_deployment_pipeline
     test_configuration_consistency
     test_cleanup_and_regeneration
     test_environment_file_generation

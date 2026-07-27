@@ -30,6 +30,13 @@ public sealed class DbOutboxSequenceAllocator : IDbOutboxSequenceAllocator
             return state.NextSequence;
         }
 
+        if (db.Database.CurrentTransaction is null)
+        {
+            throw new InvalidOperationException(
+                "Relational outbox sequence allocation must run inside the same transaction " +
+                "that inserts the event.");
+        }
+
         DbConnection connection = db.Database.GetDbConnection();
         bool closeConnection = connection.State != ConnectionState.Open;
         if (closeConnection)
@@ -58,10 +65,7 @@ public sealed class DbOutboxSequenceAllocator : IDbOutboxSequenceAllocator
                     $"Outbox sequence allocation is not configured for provider '{db.Database.ProviderName}'."),
             };
 
-            if (db.Database.CurrentTransaction is { } transaction)
-            {
-                command.Transaction = transaction.GetDbTransaction();
-            }
+            command.Transaction = db.Database.CurrentTransaction.GetDbTransaction();
 
             object? value = await command.ExecuteScalarAsync(ct);
             if (value is null || value is DBNull)

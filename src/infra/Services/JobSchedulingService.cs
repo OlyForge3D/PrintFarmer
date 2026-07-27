@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -374,13 +376,30 @@ public class JobSchedulingService(
 
         try
         {
-            _ = await _printJobManagement.DispatchJobAsync(
+            QueuedPrintJobDto result = await _printJobManagement.DispatchJobAsync(
                 schedule.PrintJobId.ToString(),
-                "scheduler",
+                QueueActorIdentity.Scheduler,
                 ifMatchJobRowVersion: null,
                 cancellationToken);
 
-            execution.Status = "Completed";
+            DispatchAttemptResultDto? dispatch = result.DispatchResult;
+            if (dispatch?.Outcome == DispatchAttemptOutcome.Accepted)
+            {
+                execution.Status = "Completed";
+                execution.Message = "The backend confirmed the scheduled start.";
+            }
+            else if (dispatch?.Outcome == DispatchAttemptOutcome.Unknown)
+            {
+                execution.Status = "Unknown";
+                execution.Message =
+                    dispatch.ErrorDetail ?? "The backend start requires reconciliation.";
+            }
+            else
+            {
+                execution.Status = "Failed";
+                execution.Message =
+                    dispatch?.ErrorDetail ?? "The scheduled start was not accepted.";
+            }
         }
         catch (Exception ex)
         {

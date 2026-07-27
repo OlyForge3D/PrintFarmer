@@ -20,7 +20,7 @@ public class MaintenanceAlertConfiguration : IEntityTypeConfiguration<Maintenanc
         _ = builder.HasOne(a => a.Printer)
             .WithMany()
             .HasForeignKey(a => a.PrinterId)
-            .OnDelete(DeleteBehavior.Cascade);
+            .OnDelete(DeleteBehavior.Restrict);
 
         // Relationship with PrinterMaintenanceSchedule (optional — alerts can outlive removed deployments)
         _ = builder.HasOne(a => a.PrinterMaintenanceSchedule)

@@ -114,8 +114,7 @@ public class JobQueueController(
             request.IdempotencyKey = idempotencyKey;
 
             // Parse userId from claims for ACL enforcement — fail closed for authenticated requests
-            string? userIdStr = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                ?? User?.FindFirst("sub")?.Value;
+            string? userIdStr = QueueActorIdentity.Resolve(User);
 
             if (!Guid.TryParse(userIdStr, out Guid parsed))
             {
@@ -406,7 +405,11 @@ public class JobQueueController(
 
         try
         {
-            JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(id, request, CancellationToken.None);
+            JobQueuePrintJobDto? updated = await queueService.UpdateJobAsync(
+                id,
+                request,
+                GetActorSubject(),
+                CancellationToken.None);
             if (updated == null)
             {
                 // Service returns null for not found or invalid assignment; translate to proper HTTP
@@ -635,7 +638,11 @@ public class JobQueueController(
     {
         try
         {
-            bool ok = await queueService.RemoveJobAsync(id, ReadIfMatch() ?? string.Empty, CancellationToken.None);
+            bool ok = await queueService.RemoveJobAsync(
+                id,
+                ReadIfMatch() ?? string.Empty,
+                GetActorSubject(),
+                CancellationToken.None);
             return !ok ? BadRequest("Cannot delete the job (not found or currently printing)") : NoContent();
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
@@ -882,6 +889,18 @@ public class JobQueueController(
         string? dispatchIfMatchHeader =
             Request.Headers["X-Dispatch-State-If-Match"].FirstOrDefault();
 #pragma warning restore S6932
+        if (string.IsNullOrWhiteSpace(ifMatchHeader) ||
+            string.IsNullOrWhiteSpace(dispatchIfMatchHeader))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "Both If-Match and X-Dispatch-State-If-Match are required.",
+                });
+        }
+
         byte[]? ifMatchJobBytes;
         byte[]? ifMatchDispatchBytes;
         try
@@ -905,8 +924,7 @@ public class JobQueueController(
                 new { error = "Unable to verify user identity from claims." });
         }
 
-        string actorSubject = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? userId.ToString();
+        string actorSubject = QueueActorIdentity.Resolve(User);
 
         var ackRequest = new AcknowledgeBedClearRequest(
             JobId: jobId,
@@ -1010,8 +1028,5 @@ public class JobQueueController(
             ? null
             : Convert.FromBase64String(value.Trim('"', ' '));
 
-    private string GetActorSubject() =>
-        User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-        ?? User.FindFirst("sub")?.Value
-        ?? "anonymous";
+    private string GetActorSubject() => QueueActorIdentity.Resolve(User);
 }

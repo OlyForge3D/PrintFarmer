@@ -177,7 +177,9 @@ public sealed class QueueOutboxPublisherService(
             // Printer-scoped group (when the event is associated with a printer).
             if (evt.PrinterId.HasValue)
             {
-                sends.Add(hub.Clients.Group(AuthorizedHubGroups.Printer(evt.PrinterId.Value)).SendAsync("queueevent", envelope, ct));
+                sends.Add(
+                    hub.Clients.Group(AuthorizedHubGroups.Printer(evt.PrinterId.Value))
+                        .SendAsync("queueevent", envelope.RedactForPrinter(), ct));
             }
 
             if (evt.ProjectId.HasValue)

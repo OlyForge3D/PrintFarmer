@@ -1,6 +1,14 @@
 ﻿namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
+/// Exact backend observation that caused a terminal callback. The identity is captured
+/// before a poller overwrites its previous active-job state.
+/// </summary>
+public sealed record PrinterTerminalObservation(
+    string? BackendIdentity,
+    Guid? DispatchAttemptId = null);
+
+/// <summary>
 /// Service for synchronizing print job completion status when printers finish printing.
 /// Called by subscription services (e.g., MoonrakerSubscriptionService) when printer state
 /// transitions from "printing" to a completed state (standby, complete, idle).
@@ -13,9 +21,14 @@ public interface IPrintJobCompletionService
     /// </summary>
     /// <param name="printerId">The ID of the printer that finished printing.</param>
     /// <param name="completionState">The final state (e.g., "standby", "complete", "idle").</param>
+    /// <param name="observation">Exact attempt/backend identity captured by the status producer.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if a job was marked as completed; false if no printing job was found.</returns>
-    Task<bool> MarkCurrentJobAsCompletedAsync(Guid printerId, string completionState, CancellationToken ct = default);
+    Task<bool> MarkCurrentJobAsCompletedAsync(
+        Guid printerId,
+        string completionState,
+        PrinterTerminalObservation observation,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Marks the currently printing job for a printer as failed.
@@ -23,9 +36,14 @@ public interface IPrintJobCompletionService
     /// </summary>
     /// <param name="printerId">The ID of the printer that encountered an error.</param>
     /// <param name="failureReason">The reason for the failure.</param>
+    /// <param name="observation">Exact attempt/backend identity captured by the status producer.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>True if a job was marked as failed; false if no printing job was found.</returns>
-    Task<bool> MarkCurrentJobAsFailedAsync(Guid printerId, string failureReason, CancellationToken ct = default);
+    Task<bool> MarkCurrentJobAsFailedAsync(
+        Guid printerId,
+        string failureReason,
+        PrinterTerminalObservation observation,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Synchronizes orphaned jobs that are stuck in "Printing" status but the printer is now idle.

@@ -15,6 +15,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -3144,10 +3145,7 @@ public class PrintersController(
                 new CommandResult(false, "Dispatch claim service is not available."));
         }
 
-        string actorSubject =
-            User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? User?.FindFirst("sub")?.Value
-            ?? "anonymous";
+        string actorSubject = QueueActorIdentity.Resolve(User);
 
         DispatchClaimResult claim = await _dispatchClaimService.AcquireAdHocClaimAsync(
             new AdHocDispatchClaimRequest(

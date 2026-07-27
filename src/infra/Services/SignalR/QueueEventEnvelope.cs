@@ -114,6 +114,28 @@ public sealed record QueueEventEnvelope(
             jobLogicalRevision,
             dispatchStateLogicalRevision);
 
+    /// <summary>
+    /// Produces a printer-view hint without job, project, attempt, revision, failure, or
+    /// calibration payload data. Authorized job/project subscribers receive the full envelope.
+    /// </summary>
+    public QueueEventEnvelope RedactForPrinter() =>
+        this with
+        {
+            EventType = "PrintFarmer.Queue.PrinterStateChanged.v1",
+            JobId = null,
+            ProjectId = null,
+            JobKind = null,
+            JobRevision = null,
+            DispatchStateRevision = null,
+            AttemptId = null,
+            BedClearState = null,
+            ErrorCode = null,
+            FailureCode = null,
+            PayloadJson = null,
+            JobLogicalRevision = null,
+            DispatchStateLogicalRevision = null,
+        };
+
     private static string? Encode(byte[]? rowVersion) =>
         rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : null;
 }

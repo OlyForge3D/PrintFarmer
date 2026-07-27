@@ -193,6 +193,8 @@ public sealed class DispatchAttemptResultDto
 
     public string? ErrorCode { get; set; }
 
+    public string? ErrorDetail { get; set; }
+
     public bool IsRetryable { get; set; }
 
     public bool RequiresReconciliation { get; set; }

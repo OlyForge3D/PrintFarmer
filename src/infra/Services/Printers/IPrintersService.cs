@@ -380,6 +380,15 @@ public interface IPrintersService
     Task<bool> CancelPrintAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Executes a lifecycle command with a typed result suitable for durable queue control.
+    /// A false provider response is unknown unless the command was rejected before I/O.
+    /// </summary>
+    Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct);
+
+    /// <summary>
     /// Immediately stops and cancels the currently running print job using emergency stop (M112).
     /// This is more aggressive than CancelPrintAsync - use only in emergencies.
     /// </summary>

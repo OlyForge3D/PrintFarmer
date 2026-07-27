@@ -105,6 +105,12 @@ public static class QueueAuditOperations
     /// <summary>An in-flight print was aborted.</summary>
     public const string JobAbort = "queue.abort";
 
+    /// <summary>An in-flight print was paused.</summary>
+    public const string JobPause = "queue.pause";
+
+    /// <summary>A paused print was resumed.</summary>
+    public const string JobResume = "queue.resume";
+
     /// <summary>A safety gate was overridden by an operator.</summary>
     public const string SafetyOverride = "queue.safety_override";
 

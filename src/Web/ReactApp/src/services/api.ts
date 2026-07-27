@@ -2564,7 +2564,11 @@ export class ApiClient {
     if (!value) {
       throw new Error(`Queue job ${jobId} did not return an ETag`);
     }
-    return value.startsWith('"') ? value : `"${value}"`;
+    return `"${this.normalizeQueueJobEtagForBody(value)}"`;
+  }
+
+  private normalizeQueueJobEtagForBody(etag: string): string {
+    return etag.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
   }
 
   async getQueueChanges(
@@ -4115,7 +4119,10 @@ export class ApiClient {
    */
   async bulkCancelJobs(request: { jobIds: string[] }): Promise<unknown> {
     const etags = await Promise.all(
-      request.jobIds.map(async (jobId) => [jobId, await this.getQueueJobEtag(jobId)] as const)
+      request.jobIds.map(async (jobId) => [
+        jobId,
+        this.normalizeQueueJobEtagForBody(await this.getQueueJobEtag(jobId)),
+      ] as const)
     );
     const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, {
       ...request,
@@ -4131,7 +4138,9 @@ export class ApiClient {
     const fencedMoves = await Promise.all(
       moves.map(async (move) => ({
         ...move,
-        ifMatch: await this.getQueueJobEtag(move.jobId),
+        ifMatch: this.normalizeQueueJobEtagForBody(
+          await this.getQueueJobEtag(move.jobId)
+        ),
       }))
     );
     const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, {

@@ -142,6 +142,13 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Queues a durable pause command after enforcing the public job ETag.</summary>
+    Task<QueuedPrintJobDto> PauseJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Resume a paused job
     /// </summary>
@@ -151,6 +158,13 @@ public interface IPrintJobManagementService
     Task<QueuedPrintJobDto> ResumeJobAsync(
         string jobId,
         string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Queues a durable resume command after enforcing the public job ETag.</summary>
+    Task<QueuedPrintJobDto> ResumeJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -296,6 +310,14 @@ public interface IPrintJobManagementService
         UpdateJobDetailsRequest updates,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Updates job details after resource authorization and an exact public ETag check.</summary>
+    Task<QueuedPrintJobDto?> UpdateJobDetailsAsync(
+        string jobId,
+        UpdateJobDetailsRequest updates,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Update job notes
     /// </summary>
@@ -305,6 +327,14 @@ public interface IPrintJobManagementService
     Task<bool> UpdateJobNotesAsync(
         string jobId,
         string? notes,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Updates job notes after resource authorization and an exact public ETag check.</summary>
+    Task<bool> UpdateJobNotesAsync(
+        string jobId,
+        string? notes,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     // ============= TIMELINE & ANALYTICS OPERATIONS (Phase 3C) =============
@@ -370,6 +400,17 @@ public interface IPrintJobManagementService
         decimal? energyCost,
         decimal? machineTimeCost,
         decimal? laborCost,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Updates job cost after resource authorization and an exact public ETag check.</summary>
+    Task<JobCostBreakdownDto?> UpdateJobCostAsync(
+        Guid jobId,
+        decimal? materialCost,
+        decimal? energyCost,
+        decimal? machineTimeCost,
+        decimal? laborCost,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     // ============= HISTORY OPERATIONS (Phase 2) =============

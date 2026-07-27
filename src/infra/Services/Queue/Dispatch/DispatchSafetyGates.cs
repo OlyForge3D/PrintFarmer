@@ -505,7 +505,9 @@ public static class DispatchSafetyGates
         }
 
         // A blocked calibration job is never dispatchable.
-        if (job.BlockedReasonCode.HasValue && job.BlockedReasonCode != JobBlockedReasonCode.None)
+        if (job.BlockedReasonCode.HasValue &&
+            job.BlockedReasonCode is not (
+                JobBlockedReasonCode.None or JobBlockedReasonCode.FilamentCheckFailed))
         {
             return DispatchClaimResult.Fail(
                 "calibration_job_blocked",

@@ -44,8 +44,8 @@ public interface IQueueResourceAuthorizationService
 }
 
 /// <summary>
-/// Evaluates ownership and printer-group ACLs from the database. System actors are trusted
-/// only when their explicit subject starts with <c>system:</c>.
+/// Evaluates ownership and printer-group ACLs from the database. Only explicitly allowlisted
+/// durable system actors bypass user resource checks.
 /// </summary>
 public sealed class QueueResourceAuthorizationService(AppDbContext db)
     : IQueueResourceAuthorizationService
@@ -111,7 +111,7 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default)
     {
-        if (IsSystemActor(actorSubject))
+        if (QueueActorIdentity.IsTrustedSystemActor(actorSubject))
         {
             return true;
         }
@@ -127,7 +127,7 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default)
     {
-        if (IsSystemActor(actorSubject))
+        if (QueueActorIdentity.IsTrustedSystemActor(actorSubject))
         {
             return true;
         }
@@ -163,11 +163,6 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
             return false;
         }
 
-        if (Guid.TryParse(job.CreatorSubject, out Guid creatorId) && creatorId == userId)
-        {
-            return true;
-        }
-
         if (job.CalibrationProjectId.HasValue)
         {
             bool ownsCalibration = await _db.CalibrationProjects
@@ -183,9 +178,26 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
             }
         }
 
-        Guid? groupId = job.PrinterGroupId ?? job.GcodeGroupId;
-        return !groupId.HasValue ||
-            await CanUserAccessGroupAsync(userId, groupId.Value, minimumAccess, ct);
+        Guid[] groupIds = new[] { job.PrinterGroupId, job.GcodeGroupId }
+            .Where(groupId => groupId.HasValue)
+            .Select(groupId => groupId!.Value)
+            .Distinct()
+            .ToArray();
+        foreach (Guid groupId in groupIds)
+        {
+            if (!await CanUserAccessGroupAsync(userId, groupId, minimumAccess, ct))
+            {
+                return false;
+            }
+        }
+
+        // A creator does not bypass either source or destination group boundary. Conversely,
+        // authorized group collaborators may operate standard shared jobs. Calibration
+        // ownership was enforced above through the authoritative project owner.
+        return job.CalibrationProjectId.HasValue ||
+            !Guid.TryParse(job.CreatorSubject, out Guid creatorId) ||
+            creatorId == userId ||
+            groupIds.Length > 0;
     }
 
     private async Task<bool> CanUserAccessPrinterAsync(
@@ -241,7 +253,4 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                     userRole.IsActive &&
                     userRole.Role.Name == PrintFarmerPermissions.FarmAdminRole,
                 ct);
-
-    private static bool IsSystemActor(string actorSubject) =>
-        string.Equals(actorSubject, "system:auto-dispatch", StringComparison.Ordinal);
 }

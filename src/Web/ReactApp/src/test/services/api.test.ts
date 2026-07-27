@@ -545,6 +545,40 @@ describe("ApiClient", () => {
           hasMore: false,
         });
       });
+
+      describe("queue body ETags", () => {
+        it("strips header quotes from bulk cancel body tokens", async () => {
+          const mockGet = vi.fn()
+            .mockResolvedValueOnce({ data: {}, headers: { etag: '"etag-a"' } })
+            .mockResolvedValueOnce({ data: {}, headers: { etag: 'W/"etag-b"' } });
+          const mockPost = vi.fn().mockResolvedValue({ data: {} });
+          (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+          (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+          await apiClient.bulkCancelJobs({ jobIds: ["job-a", "job-b"] });
+
+          expect(mockPost).toHaveBeenCalledWith("/job-queue-analytics/bulk/cancel", {
+            jobIds: ["job-a", "job-b"],
+            jobETags: { "job-a": "etag-a", "job-b": "etag-b" },
+          });
+        });
+
+        it("strips header quotes from bulk reorder body tokens", async () => {
+          const mockGet = vi.fn().mockResolvedValue({
+            data: {},
+            headers: { etag: '"etag-swap"' },
+          });
+          const mockPost = vi.fn().mockResolvedValue({ data: {} });
+          (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+          (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+          await apiClient.reorderQueueJobs([{ jobId: "job-a", newPosition: 2 }]);
+
+          expect(mockPost).toHaveBeenCalledWith("/job-queue-analytics/bulk/reorder", {
+            moves: [{ jobId: "job-a", newPosition: 2, ifMatch: "etag-swap" }],
+          });
+        });
+      });
     });
   });
 

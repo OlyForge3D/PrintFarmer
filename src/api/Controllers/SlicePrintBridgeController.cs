@@ -127,9 +127,7 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
         }
 
-        // 4. Validate the target printer exists
-        // NOTE: PrintFarmer is single-tenant — all authenticated users may access all printers.
-        // If multi-tenant support is added, add printer access authorization here.
+        // 4. Validate the target printer exists after the resource-scope check above.
         var printer = await printersService.FindByIdAsync(request.PrinterId, ct);
         if (printer is null)
         {
@@ -388,7 +386,7 @@ public class SlicePrintBridgeController(
                 new { error = "Dispatch claim service is not available.", code = "DISPATCH_UNAVAILABLE" });
         }
 
-        string actorSubject = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "anonymous";
+        string actorSubject = QueueActorIdentity.Resolve(User);
 
         DispatchClaimResult claim = await dispatchClaimService.AcquireAdHocClaimAsync(
             new AdHocDispatchClaimRequest(printerId, actorSubject, "SliceBridge", fileName), ct);

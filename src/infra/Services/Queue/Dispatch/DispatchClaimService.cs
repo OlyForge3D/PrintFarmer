@@ -279,6 +279,12 @@ public sealed class DispatchClaimService(
             }
         }
 
+        if (job.BlockedReasonCode == JobBlockedReasonCode.FilamentCheckFailed)
+        {
+            job.BlockedReasonCode = null;
+            job.BlockedReasonJson = null;
+        }
+
         int attemptNumber = await _db.QueueDispatchAttempts
             .Where(a => a.PrintJobId == request.JobId)
             .CountAsync(ct) + 1;
@@ -395,51 +401,18 @@ public sealed class DispatchClaimService(
                 acknowledgementConsumed = consumesAcknowledgement,
             });
 
-        // Bounded retry: on sequence-only concurrency conflicts, reload the counter and retry.
-        // Conflicts on PrintJob or PrinterDispatchState are genuine races and surface immediately.
-        const int MaxSequenceRetries = 5;
-        bool claimed = false;
-        DbUpdateConcurrencyException? lastConflict = null;
-
-        for (int seqRetry = 0; seqRetry < MaxSequenceRetries && !claimed; seqRetry++)
+        try
         {
+            await using QueueOutboxTransactionScope transaction =
+                await QueueOutboxTransactionScope.BeginAsync(_db, ct);
             outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
-
-            try
-            {
-                _ = await _db.SaveChangesAsync(ct);
-                claimed = true;
-                lastConflict = null;
-            }
-            catch (DbUpdateConcurrencyException ex)
-            {
-                lastConflict = ex;
-
-                bool isSequenceConflictOnly = ex.Entries.Count > 0 &&
-                    ex.Entries.All(e => e.Entity is OutboxSequenceState);
-
-                if (!isSequenceConflictOnly || seqRetry >= MaxSequenceRetries - 1)
-                {
-                    break;
-                }
-
-                _logger.LogWarning(
-                    ex,
-                    "[Claim] Sequence contention (retry {Retry}/{Max}) for Job={JobId} Printer={PrinterId}",
-                    seqRetry + 1, MaxSequenceRetries, request.JobId, request.PrinterId);
-
-                OutboxSequenceState? seqState = _db.OutboxSequenceStates.Local.SingleOrDefault();
-                if (seqState is not null)
-                {
-                    await _db.Entry(seqState).ReloadAsync(ct);
-                }
-            }
+            _ = await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
-
-        if (!claimed)
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException or DbUpdateException)
         {
             _logger.LogWarning(
-                lastConflict,
+                ex,
                 "Concurrency conflict acquiring dispatch claim for Job={JobId} Printer={PrinterId}",
                 request.JobId, request.PrinterId);
 
@@ -677,6 +650,8 @@ public sealed class DispatchClaimService(
         PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
 
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         DateTime nowUtc = DateTime.UtcNow;
 
         attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
@@ -759,6 +734,7 @@ public sealed class DispatchClaimService(
         }
 
         _ = await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         _logger.LogInformation(
             "Dispatch claim released (known failure): Attempt={AttemptId} Code={ErrorCode}",
@@ -781,6 +757,8 @@ public sealed class DispatchClaimService(
             return;
         }
 
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         DateTime nowUtc = DateTime.UtcNow;
 
         attempt.Outcome = DispatchAttemptOutcome.Accepted;
@@ -868,6 +846,7 @@ public sealed class DispatchClaimService(
         }
 
         _ = await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         _logger.LogInformation(
             "Backend accepted dispatch: Attempt={AttemptId} BackendJobId={BackendJobId}",
@@ -889,6 +868,8 @@ public sealed class DispatchClaimService(
             return;
         }
 
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         attempt.Outcome = DispatchAttemptOutcome.Unknown;
         attempt.ErrorDetail = errorDetail;
         attempt.IsRetryable = false;
@@ -946,6 +927,7 @@ public sealed class DispatchClaimService(
         }
 
         _ = await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         _logger.LogWarning(
             "Dispatch outcome unknown - reconciliation required: Attempt={AttemptId}",

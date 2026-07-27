@@ -410,11 +410,15 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
 
         // Get dispatch state row versions for If-Match.
         var dsRowVersions = new List<byte[]?>();
+        var jobRowVersions = new List<byte[]?>();
         for (int i = 0; i < N; i++)
         {
             await using AppDbContext readCtx = CreateContext();
             var ds = await readCtx.PrinterDispatchStates.FindAsync(printerIds[i]);
             dsRowVersions.Add(ds!.RowVersion);
+            PrintJob job = await readCtx.PrintJobs.SingleAsync(
+                candidate => candidate.Id == jobIds[i]);
+            jobRowVersions.Add(job.RowVersion);
         }
 
         // Act: fire all N acks concurrently.
@@ -435,7 +439,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 ActorSubject: $"actor-{i}",
                 IdempotencyKey: ackKeys[i],
                 IfMatchDispatchState: dsRowVersions[i],
-                ExpectedPrinterConfigRevision: 1));
+                ExpectedPrinterConfigRevision: 1,
+                IfMatchJob: jobRowVersions[i]));
         });
 
         AcknowledgeBedClearResult[] results = await Task.WhenAll(tasks);
@@ -536,7 +541,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             ActorSubject: "actor",
             IdempotencyKey: "single-ack-key",
             IfMatchDispatchState: dsForAck!.RowVersion,
-            ExpectedPrinterConfigRevision: 1));
+            ExpectedPrinterConfigRevision: 1,
+            IfMatchJob: job.RowVersion));
 
         result.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
@@ -615,6 +621,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         {
             await using AppDbContext ackCtx = CreateContext();
             var ds = await ackCtx.PrinterDispatchStates.FindAsync(printers[i].PrinterId);
+            PrintJob job = await ackCtx.PrintJobs.SingleAsync(
+                candidate => candidate.Id == printers[i].JobId);
             var ackSvc = new BedClearAcknowledgementService(
                 ackCtx,
                 new DbOutboxSequenceAllocator(),
@@ -625,7 +633,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             var r = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
                 printers[i].JobId, printers[i].PrinterId,
                 $"actor-{i}", $"multi-ack-{i}",
-                ds!.RowVersion, 1));
+                ds!.RowVersion, 1, job.RowVersion));
 
             r.Outcome.Should().Be(BedClearAckOutcome.Accepted, $"ack {i} must succeed");
         }
