@@ -1088,7 +1088,7 @@ public partial class InitialV1 : Migration
                     column: x => x.FolderId,
                     principalTable: "FolderNode",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.SetNull);
+                    onDelete: ReferentialAction.Restrict);
                 table.ForeignKey(
                     name: "FK_GcodeFiles_PrinterModels_PrinterModelId",
                     column: x => x.PrinterModelId,
