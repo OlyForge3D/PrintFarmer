@@ -278,7 +278,7 @@ export class PrinterSignalRService {
     this.connection.onreconnected(() => {
       this.reconnectAttempts = 0;
       this.notifyConnectionState(true);
-      void this.restoreResourceSubscriptions();
+      void this.restoreSubscriptionsAndDrain();
     });
     // Add debug hooks for connection lifecycle (gated behind debug flag)
     if (
@@ -323,6 +323,7 @@ export class PrinterSignalRService {
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
   private lastQueueSequence = 0;
+  private queueDrain: Promise<void> | null = null;
 
   constructor() {
     this.loadSettings().then(() => {
@@ -479,6 +480,7 @@ export class PrinterSignalRService {
       }
       await this.connection!.start();
       await this.restoreResourceSubscriptions();
+      await this.drainQueueChanges();
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
           .PrintFarmerDebug?.printerSignalR
@@ -567,10 +569,7 @@ export class PrinterSignalRService {
   }
 
   private async handleQueueEvent(event: QueueEventEnvelope): Promise<void> {
-    if (
-      this.lastQueueSequence > 0 &&
-      event.sequence > this.lastQueueSequence + 1
-    ) {
+    if (event.sequence > this.lastQueueSequence + 1) {
       let cursor = this.lastQueueSequence;
       let hasMore = true;
       while (hasMore && cursor < event.sequence) {
@@ -593,6 +592,42 @@ export class PrinterSignalRService {
     if (event.sequence > this.lastQueueSequence) {
       this.emitQueueEvent(event);
       this.lastQueueSequence = event.sequence;
+    }
+  }
+
+  private async drainQueueChanges(): Promise<void> {
+    if (this.queueDrain) {
+      await this.queueDrain;
+      return;
+    }
+
+    this.queueDrain = this.drainQueueChangesCore();
+    try {
+      await this.queueDrain;
+    } finally {
+      this.queueDrain = null;
+    }
+  }
+
+  private async drainQueueChangesCore(): Promise<void> {
+    let cursor = this.lastQueueSequence;
+    let hasMore = true;
+    while (hasMore) {
+      const feed = await apiClient.getQueueChanges(cursor);
+      for (const event of feed.events) {
+        if (event.sequence > this.lastQueueSequence) {
+          this.emitQueueEvent(event);
+          this.lastQueueSequence = event.sequence;
+        }
+      }
+
+      if (feed.nextSequence <= cursor) {
+        break;
+      }
+
+      cursor = feed.nextSequence;
+      this.lastQueueSequence = Math.max(this.lastQueueSequence, cursor);
+      hasMore = feed.hasMore;
     }
   }
 
@@ -619,6 +654,11 @@ export class PrinterSignalRService {
         this.connection!.invoke("SubscribeToProjectAsync", id)
       ),
     ]);
+  }
+
+  private async restoreSubscriptionsAndDrain(): Promise<void> {
+    await this.restoreResourceSubscriptions();
+    await this.drainQueueChanges();
   }
 
   // Discovery event subscriptions

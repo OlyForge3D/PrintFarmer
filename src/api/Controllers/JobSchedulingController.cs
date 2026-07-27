@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -47,6 +48,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
                 request.TimeZone ?? "UTC",
                 request.RecurrencePattern,
                 request.RecurrenceEndDate,
+                QueueActorIdentity.Resolve(User),
                 cancellationToken);
 
             return Ok(result);
@@ -60,6 +62,10 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
         {
             _logger.LogWarning("Job not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
         }
     }
 
@@ -85,6 +91,7 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
                 jobId,
                 request.NewScheduledTime,
                 request.TimeZone ?? "UTC",
+                QueueActorIdentity.Resolve(User),
                 cancellationToken);
 
             return Ok(result);
@@ -98,6 +105,10 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
         {
             _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
         }
     }
 
@@ -114,13 +125,20 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     {
         try
         {
-            await _schedulingService.CancelSchedulingAsync(jobId, cancellationToken);
+            await _schedulingService.CancelSchedulingAsync(
+                jobId,
+                QueueActorIdentity.Resolve(User),
+                cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
         }
     }
 
@@ -198,13 +216,20 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     {
         try
         {
-            await _schedulingService.PauseSchedulingAsync(jobId, cancellationToken);
+            await _schedulingService.PauseSchedulingAsync(
+                jobId,
+                QueueActorIdentity.Resolve(User),
+                cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
         }
     }
 
@@ -221,13 +246,20 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     {
         try
         {
-            await _schedulingService.ResumeSchedulingAsync(jobId, cancellationToken);
+            await _schedulingService.ResumeSchedulingAsync(
+                jobId,
+                QueueActorIdentity.Resolve(User),
+                cancellationToken);
             return NoContent();
         }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning("Job scheduling not found: {ExceptionMessage}", ex.Message);
             return NotFound(new { error = ex.Message });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound();
         }
     }
 }

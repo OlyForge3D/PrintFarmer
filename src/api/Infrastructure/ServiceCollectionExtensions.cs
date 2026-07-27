@@ -192,6 +192,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueuePositionAllocator, Farm.Infrastructure.Services.Queue.QueuePositionAllocator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IStoredGcodeIntegrityVerifier, Farm.Infrastructure.Services.Queue.StoredGcodeIntegrityVerifier>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService, Farm.Infrastructure.Services.Queue.QueueResourceAuthorizationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
@@ -768,6 +769,8 @@ public static class ServiceCollectionExtensions
             // Dedicated durable consumer for BackendStartCommand.v1 outbox events.
             // Drives atomic claim, awaited backend execution, crash recovery, and retry.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
+
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
 
             // Durable attempt-fenced cancel/abort hardware command consumer.
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();

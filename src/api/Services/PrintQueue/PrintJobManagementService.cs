@@ -1160,6 +1160,7 @@ public class PrintJobManagementService(
                         await _dispatchClaimService.RecordBackendAcceptedAsync(
                             dispatchAttemptId.Value,
                             result.BackendJobId,
+                            result.BackendFileIdentity ?? printerFileName,
                             cancellationToken);
                         claimResult.Attempt.Outcome = DispatchAttemptOutcome.Accepted;
                         claimResult.Attempt.BackendAcceptedAtUtc = DateTime.UtcNow;
@@ -3423,14 +3424,6 @@ public class PrintJobManagementService(
         }
 
         state.QueueRevision++;
-        state.AcknowledgedJobId = null;
-        state.AcknowledgedAtUtc = null;
-        state.AcknowledgedBySubject = null;
-        state.AcknowledgementIdempotencyKey = null;
-        state.AcknowledgementExpiresAtUtc = null;
-        state.AcknowledgedJobRowVersion = null;
-        state.AcknowledgedQueueRevision = null;
-        state.AcknowledgedPrinterConfigRevision = null;
 
         _logger.LogInformation(
             "Advanced queue revision for printer {PrinterId} to {QueueRevision} ({Reason})",
@@ -3549,7 +3542,6 @@ public class PrintJobManagementService(
                 "A lifecycle command for this dispatch attempt is already awaiting reconciliation.");
         }
 
-        string? backendIdentity = attempt.BackendJobId ?? attempt.BackendFileName;
         var command = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -3572,7 +3564,8 @@ public class PrintJobManagementService(
                 jobId = job.Id,
                 printerId = job.AssignedPrinterId.Value,
                 attemptId = attempt.Id,
-                backendIdentity,
+                backendJobId = attempt.BackendJobId,
+                backendFileIdentity = attempt.BackendFileIdentity ?? attempt.BackendFileName,
                 operation,
                 actorSubject,
             }),

@@ -5,12 +5,21 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Dispatch;
@@ -474,6 +483,7 @@ public class CalibrationProviderMigrationHarnessTests
             $"[{providerName}] the unique index must prevent duplicate outbox sequences");
 
         await AssertProviderNativeConcurrencyAsync(opts, providerName);
+        await AssertProviderBusinessRacesAsync(opts, providerName);
 
         // No pending migrations must remain.
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();
@@ -547,6 +557,442 @@ public class CalibrationProviderMigrationHarnessTests
         await transaction.CommitAsync();
         return sequence;
     }
+
+    private static async Task AssertProviderBusinessRacesAsync(
+        DbContextOptions<AppDbContext> options,
+        string providerName)
+    {
+        ProviderFixture claimFixture = await SeedProviderFixtureAsync(
+            options,
+            "claim",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        await using (var first = new AppDbContext(options))
+        await using (var second = new AppDbContext(options))
+        {
+            DispatchClaimResult[] claims = await Task.WhenAll(
+                CreateProviderClaim(first, claimFixture.PrinterId)
+                    .AcquireClaimAsync(ClaimRequest(claimFixture, "provider-a")),
+                CreateProviderClaim(second, claimFixture.PrinterId)
+                    .AcquireClaimAsync(ClaimRequest(claimFixture, "provider-b")));
+            claims.Count(result => result.Success).Should().Be(
+                1,
+                $"[{providerName}] one cross-process claim must win");
+        }
+
+        ProviderFixture ackFixture = await SeedProviderFixtureAsync(
+            options,
+            "ack",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        byte[] jobVersion;
+        byte[] dispatchVersion;
+        await using (var read = new AppDbContext(options))
+        {
+            jobVersion = (await read.PrintJobs.FindAsync(ackFixture.JobId))!.RowVersion!;
+            dispatchVersion = (await read.PrinterDispatchStates.FindAsync(
+                ackFixture.PrinterId))!.RowVersion!;
+        }
+
+        var ackRequest = new AcknowledgeBedClearRequest(
+            ackFixture.JobId,
+            ackFixture.PrinterId,
+            "provider-operator",
+            "provider-ack-key",
+            dispatchVersion,
+            1,
+            jobVersion);
+        await using (var first = new AppDbContext(options))
+        await using (var second = new AppDbContext(options))
+        {
+            AcknowledgeBedClearResult[] acknowledgements = await Task.WhenAll(
+                CreateProviderAck(first, ackFixture.PrinterId)
+                    .AcknowledgeAsync(ackRequest),
+                CreateProviderAck(second, ackFixture.PrinterId)
+                    .AcknowledgeAsync(ackRequest));
+            acknowledgements.Count(result =>
+                    result.Outcome == BedClearAckOutcome.Accepted)
+                .Should().Be(
+                    1,
+                    $"[{providerName}] one bed-clear acknowledgement must win");
+        }
+
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                ackFixture.JobId.ToString(),
+                "provider-operator",
+                "provider-ack-key",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BackendStartOutcome.Accepted(Guid.NewGuid()));
+        using (ServiceProvider provider = CreateProviderServices(
+                   options,
+                   management: management.Object))
+        {
+            var first = new BackendStartCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendStartCommandConsumerService>.Instance);
+            var second = new BackendStartCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendStartCommandConsumerService>.Instance);
+            await Task.WhenAll(
+                first.ProcessPendingCommandsAsync(CancellationToken.None),
+                second.ProcessPendingCommandsAsync(CancellationToken.None));
+        }
+
+        management.Verify(service => service.DispatchJobWithAckAsync(
+            ackFixture.JobId.ToString(),
+            "provider-operator",
+            "provider-ack-key",
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        ProviderFixture reconcileFixture = await SeedProviderFixtureAsync(
+            options,
+            "reconcile",
+            PrintJobStatus.Starting,
+            DispatchAttemptOutcome.Unknown,
+            createAttempt: true);
+        var reconcilePrinters = new Mock<IPrintersService>();
+        reconcilePrinters.Setup(service => service.GetStatusDtoAsync(
+                reconcileFixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                reconcileFixture.PrinterId,
+                IsOnline: true,
+                State: "printing",
+                FileName: reconcileFixture.BackendFileIdentity));
+        using (ServiceProvider provider = CreateProviderServices(
+                   options,
+                   printers: reconcilePrinters.Object))
+        {
+            var first = new QueueReconciliationService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<QueueReconciliationService>.Instance);
+            var second = new QueueReconciliationService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<QueueReconciliationService>.Instance);
+            await Task.WhenAll(
+                IgnoreExpectedRaceAsync(() =>
+                    first.ReconcileStaleAttemptsAsync(CancellationToken.None)),
+                IgnoreExpectedRaceAsync(() =>
+                    second.ReconcileStaleAttemptsAsync(CancellationToken.None)));
+        }
+
+        await using (var verify = new AppDbContext(options))
+        {
+            (await verify.PrintJobs.FindAsync(reconcileFixture.JobId))!.Status
+                .Should().Be(PrintJobStatus.Printing);
+            (await verify.QueueDispatchOutbox.CountAsync(@event =>
+                @event.AggregateId == reconcileFixture.JobId &&
+                @event.EventType ==
+                DispatchClaimService.EventTypeReconciliationAccepted)).Should().Be(1);
+        }
+
+        ProviderFixture controlFixture = await SeedProviderFixtureAsync(
+            options,
+            "control",
+            PrintJobStatus.Printing,
+            DispatchAttemptOutcome.Accepted,
+            createAttempt: true);
+        Guid controlCommandId = await AddProviderControlCommandAsync(
+            options,
+            controlFixture);
+        var controlPrinters = new Mock<IPrintersService>();
+        controlPrinters.Setup(service => service.ExecuteControlAsync(
+                controlFixture.PrinterId,
+                BackendControlOperation.Cancel,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BackendControlOutcome.Accepted());
+        using (ServiceProvider provider = CreateProviderServices(
+                   options,
+                   printers: controlPrinters.Object))
+        {
+            var first = new BackendControlCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendControlCommandConsumerService>.Instance);
+            var second = new BackendControlCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendControlCommandConsumerService>.Instance);
+            await Task.WhenAll(
+                first.ProcessPendingAsync(CancellationToken.None),
+                second.ProcessPendingAsync(CancellationToken.None));
+        }
+
+        controlPrinters.Verify(service => service.ExecuteControlAsync(
+            controlFixture.PrinterId,
+            BackendControlOperation.Cancel,
+            It.IsAny<CancellationToken>()), Times.Once);
+        await using (var verify = new AppDbContext(options))
+        {
+            (await verify.QueueDispatchOutbox.FindAsync(controlCommandId))!.Status
+                .Should().Be(QueueOutboxEventStatus.Published);
+        }
+
+        await using (var firstContext = new AppDbContext(options))
+        await using (var secondContext = new AppDbContext(options))
+        {
+            IHubContext<PrinterHub> hub = CreateProviderHub();
+            var first = new PrintJobCompletionService(
+                firstContext,
+                hub,
+                NullLogger<PrintJobCompletionService>.Instance);
+            var second = new PrintJobCompletionService(
+                secondContext,
+                hub,
+                NullLogger<PrintJobCompletionService>.Instance);
+            bool[] externalResults = await Task.WhenAll(
+                first.EnsureExternalPrintJobExistsAsync(
+                    ackFixture.PrinterId,
+                    "provider-external.gcode"),
+                second.EnsureExternalPrintJobExistsAsync(
+                    ackFixture.PrinterId,
+                    "provider-external.gcode"));
+            externalResults.Count(result => result).Should().Be(
+                1,
+                $"[{providerName}] one external active-print observer must win");
+        }
+
+        await using (var verify = new AppDbContext(options))
+        {
+            (await verify.PrintJobs.CountAsync(job =>
+                job.ActiveExternalPrinterId == ackFixture.PrinterId &&
+                job.IsExternalPrint &&
+                job.Status == PrintJobStatus.Printing)).Should().Be(1);
+        }
+    }
+
+    private static DispatchClaimService CreateProviderClaim(
+        AppDbContext db,
+        Guid printerId) =>
+        new(
+            db,
+            DispatchTestDoubles.OnlineIdleReader(printerId),
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance);
+
+    private static BedClearAcknowledgementService CreateProviderAck(
+        AppDbContext db,
+        Guid printerId) =>
+        new(
+            db,
+            new DbOutboxSequenceAllocator(),
+            DispatchTestDoubles.OnlineIdleReader(printerId),
+            NullLogger<BedClearAcknowledgementService>.Instance);
+
+    private static DispatchClaimRequest ClaimRequest(
+        ProviderFixture fixture,
+        string actor) =>
+        new(
+            fixture.JobId,
+            fixture.PrinterId,
+            actor,
+            "ProviderRace",
+            null,
+            null,
+            null);
+
+    private static async Task<ProviderFixture> SeedProviderFixtureAsync(
+        DbContextOptions<AppDbContext> options,
+        string suffix,
+        PrintJobStatus status,
+        DispatchAttemptOutcome attemptOutcome,
+        bool createAttempt)
+    {
+        await using var db = new AppDbContext(options);
+        Guid token = Guid.NewGuid();
+        var manufacturer = new Manufacturer
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Provider maker {suffix} {token:N}",
+        };
+        var model = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            ManufacturerId = manufacturer.Id,
+            Name = $"Provider model {suffix} {token:N}",
+        };
+        var folder = new FolderNode
+        {
+            Id = Guid.NewGuid(),
+            Path = $"/provider-{suffix}-{token:N}",
+            FolderType = "gcode",
+        };
+        var gcode = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FolderId = folder.Id,
+            Name = $"provider-{suffix}.gcode",
+            FileName = $"provider-{suffix}.gcode",
+            FilePath = folder.Path,
+            FileSizeBytes = 10,
+            FileHash = token.ToString("N").PadRight(64, '0'),
+        };
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Provider printer {suffix} {token:N}",
+            ServerUrl = $"http://provider-{token:N}",
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id,
+            IsEnabled = true,
+            IsAvailable = true,
+            ConfigurationRevision = 1,
+        };
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Provider job {suffix}",
+            GcodeFileId = gcode.Id,
+            AssignedPrinterId = printer.Id,
+            Status = status,
+            JobKind = JobKind.Standard,
+            Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 1000 + Math.Abs(token.GetHashCode() % 100_000),
+            ActualStartTime = status is PrintJobStatus.Starting or
+                PrintJobStatus.Printing
+                ? DateTime.UtcNow.AddMinutes(-30)
+                : null,
+            CreatedAt = DateTime.UtcNow.AddMinutes(-30),
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-30),
+            QueuedAt = DateTime.UtcNow.AddMinutes(-30),
+        };
+        var state = new PrinterDispatchState { PrinterId = printer.Id };
+        Guid? attemptId = null;
+        string backendFileIdentity = $"provider-{suffix}.gcode";
+        db.Manufacturers.Add(manufacturer);
+        db.PrinterModels.Add(model);
+        db.Set<FolderNode>().Add(folder);
+        db.GcodeFiles.Add(gcode);
+        db.Printers.Add(printer);
+        db.PrintJobs.Add(job);
+        db.PrinterDispatchStates.Add(state);
+        if (createAttempt)
+        {
+            attemptId = Guid.NewGuid();
+            var attempt = new QueueDispatchAttempt
+            {
+                Id = attemptId.Value,
+                PrintJobId = job.Id,
+                PrinterId = printer.Id,
+                PrinterConfigRevision = 1,
+                AttemptNumber = 1,
+                ActorSubject = "provider-operator",
+                StartPathKind = "ProviderRace",
+                ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-30),
+                Outcome = attemptOutcome,
+                RequiresReconciliation =
+                    attemptOutcome == DispatchAttemptOutcome.Unknown,
+                BackendFileName = backendFileIdentity,
+                BackendFileIdentity = backendFileIdentity,
+                BackendCallPhase = attemptOutcome == DispatchAttemptOutcome.Unknown
+                    ? DispatchBackendCallPhase.AwaitingReconciliation
+                    : DispatchBackendCallPhase.Reconciled,
+                UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-30),
+            };
+            db.QueueDispatchAttempts.Add(attempt);
+            state.ActiveJobId = job.Id;
+            state.ActiveDispatchAttemptId = attempt.Id;
+        }
+
+        await db.SaveChangesAsync();
+        return new ProviderFixture(
+            printer.Id,
+            job.Id,
+            attemptId,
+            backendFileIdentity);
+    }
+
+    private static async Task<Guid> AddProviderControlCommandAsync(
+        DbContextOptions<AppDbContext> options,
+        ProviderFixture fixture)
+    {
+        await using var db = new AppDbContext(options);
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        Guid commandId = Guid.NewGuid();
+        db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = commandId,
+            Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(db),
+            AggregateType = nameof(PrintJob),
+            AggregateId = fixture.JobId,
+            PrinterId = fixture.PrinterId,
+            AttemptId = fixture.AttemptId,
+            EventType = BackendControlCommandConsumerService.EventType,
+            SchemaVersion = "1",
+            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId = fixture.JobId,
+                printerId = fixture.PrinterId,
+                attemptId = fixture.AttemptId,
+                backendJobId = (string?)null,
+                backendFileIdentity = fixture.BackendFileIdentity,
+                operation = "cancel",
+                actorSubject = "provider-operator",
+            }),
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return commandId;
+    }
+
+    private static ServiceProvider CreateProviderServices(
+        DbContextOptions<AppDbContext> options,
+        IPrintersService? printers = null,
+        IPrintJobManagementService? management = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddScoped(_ => new AppDbContext(options));
+        services.AddScoped<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>();
+        if (printers is not null)
+        {
+            services.AddSingleton(printers);
+        }
+
+        if (management is not null)
+        {
+            services.AddSingleton(management);
+        }
+
+        return services.BuildServiceProvider();
+    }
+
+    private static async Task IgnoreExpectedRaceAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (Exception exception) when (
+            exception is DbUpdateConcurrencyException or DbUpdateException)
+        {
+            // The losing provider transaction proves the concurrency predicate held.
+        }
+    }
+
+    private static IHubContext<PrinterHub> CreateProviderHub()
+    {
+        var client = new Mock<IClientProxy>();
+        client.Setup(proxy => proxy.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(It.IsAny<string>())).Returns(client.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+        return hub.Object;
+    }
+
+    private sealed record ProviderFixture(
+        Guid PrinterId,
+        Guid JobId,
+        Guid? AttemptId,
+        string BackendFileIdentity);
 
     private static QueueDispatchOutbox CreateTerminalEvent(long sequence) =>
         new()

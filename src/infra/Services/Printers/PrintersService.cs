@@ -519,8 +519,14 @@ public class PrintersService(
                         throw; // Entity was deleted — cannot retry
                     }
 
-                    // Accept the database's RowVersion (and any other original values)
-                    // while keeping the caller's in-memory changes ("client wins").
+                    // Preserve explicit caller changes, but merge every untouched property
+                    // from the concurrent database row so retrying does not erase background
+                    // telemetry/configuration updates.
+                    foreach (var property in entry.Properties.Where(property => !property.IsModified))
+                    {
+                        property.CurrentValue = databaseValues[property.Metadata];
+                    }
+
                     entry.OriginalValues.SetValues(databaseValues);
                 }
             }
@@ -588,7 +594,13 @@ public class PrintersService(
             dto = CreateOfflinePrinterDto(p);
         }
 
-        return dto;
+        return dto with
+        {
+            RowVersion = p.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(p.RowVersion)
+                : null,
+            ConfigurationRevision = p.ConfigurationRevision,
+        };
     }
 #pragma warning restore CS8603
 
@@ -675,6 +687,13 @@ public class PrintersService(
                 };
             }
 
+            dto = dto with
+            {
+                RowVersion = p.RowVersion is { Length: > 0 }
+                    ? Convert.ToBase64String(p.RowVersion)
+                    : null,
+                ConfigurationRevision = p.ConfigurationRevision,
+            };
             return ApplyCameraContract(dto);
         }
         catch (Exception ex)
@@ -1365,6 +1384,9 @@ public class PrintersService(
 
     private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
+        string? rowVersion = p.RowVersion is { Length: > 0 }
+            ? Convert.ToBase64String(p.RowVersion)
+            : null;
         return ApplyCameraContract(new PrinterDto(
             Id: p.Id,
             Name: p.Name,
@@ -1400,7 +1422,9 @@ public class PrintersService(
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
             HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
-            UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+            RowVersion: rowVersion,
+            ConfigurationRevision: p.ConfigurationRevision));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)
@@ -2465,6 +2489,8 @@ public class PrintersService(
                         printer.BackendUrl,
                         printer.Credential,
                         ct).ConfigureAwait(false),
+                BackendControlOperation.EmergencyStop =>
+                    await EmergencyStopAsync(id, ct).ConfigureAwait(false),
                 _ => false,
             };
 

@@ -237,7 +237,17 @@ public class LoadBalancingTests : IAsyncLifetime
             MaxConcurrentDispatches = 10,
             LoadBalancingStrategy = strategy,
         };
-        await _client.PutAsJsonAsync("/api/dispatch-settings", settings, JsonOptions);
+        HttpResponseMessage current = await _client.GetAsync("/api/dispatch-settings");
+        current.EnsureSuccessStatusCode();
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Dispatch settings GET did not return an ETag.");
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/dispatch-settings")
+        {
+            Content = JsonContent.Create(settings, options: JsonOptions),
+        };
+        request.Headers.TryAddWithoutValidation("If-Match", etag);
+        HttpResponseMessage response = await _client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
     }
 
     // =========================================================================

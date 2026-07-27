@@ -174,6 +174,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         {
             Id = spoolId,
             Material = "PLA",
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printer.Id,
@@ -217,6 +219,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
             FilamentMaterial = "PLA",
+            FilamentSku = "PLA-TEST-SKU",
             LocalSpoolId = spoolId,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
@@ -546,13 +549,16 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
 
         result.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
-        // The outbox event must have Sequence = 1 (counter advanced from 0 to 1).
+        // The command and typed acknowledgement event occupy adjacent durable sequences.
         await using AppDbContext verifyCtx = CreateContext();
-        QueueDispatchOutbox? evt = await verifyCtx.QueueDispatchOutbox.SingleAsync();
-        evt.Sequence.Should().Be(1, "first outbox event must have sequence 1 (seeded at 0, incremented to 1)");
+        List<long> sequences = await verifyCtx.QueueDispatchOutbox
+            .OrderBy(@event => @event.Sequence)
+            .Select(@event => @event.Sequence)
+            .ToListAsync();
+        sequences.Should().Equal(1, 2);
 
         OutboxSequenceState? finalState = await verifyCtx.OutboxSequenceStates.SingleAsync();
-        finalState.NextSequence.Should().Be(1, "OutboxSequenceState counter must have advanced to 1");
+        finalState.NextSequence.Should().Be(2, "both durable rows must advance the counter");
     }
 
     // =========================================================================
@@ -638,14 +644,14 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             r.Outcome.Should().Be(BedClearAckOutcome.Accepted, $"ack {i} must succeed");
         }
 
-        // Verify sequences are 1, 2, 3 (contiguous from seed value 0).
+        // Each acknowledgement writes one command plus one public lifecycle event.
         await using AppDbContext verifyCtx = CreateContext();
         List<long> sequences = await verifyCtx.QueueDispatchOutbox
             .OrderBy(e => e.Sequence)
             .Select(e => e.Sequence)
             .ToListAsync();
 
-        sequences.Should().Equal(new long[] { 1, 2, 3 },
-            "three sequential acks must produce contiguous sequences 1, 2, 3");
+        sequences.Should().Equal(new long[] { 1, 2, 3, 4, 5, 6 },
+            "three sequential acknowledgements must produce six contiguous durable sequences");
     }
 }

@@ -182,9 +182,13 @@ public sealed class BedClearAcknowledgementService(
                     currentHeadId != priorCommand.JobId;
                 if (pendingIsStale)
                 {
-                    priorCommand.Status = BedClearCommandStatus.Expired;
-                    priorCommand.UpdatedAtUtc = DateTime.UtcNow;
-                    await _db.SaveChangesAsync(ct);
+                    await PersistBedClearTerminalAsync(
+                        priorCommand,
+                        job,
+                        dispatchState,
+                        expired: priorCommand.ExpiresAtUtc <= DateTime.UtcNow,
+                        "pending_inputs_changed",
+                        ct);
                     return new AcknowledgeBedClearResult(
                         BedClearAckOutcome.JobNotDispatchable,
                         job.RowVersion,
@@ -415,6 +419,16 @@ public sealed class BedClearAcknowledgementService(
                     pinnedSpool.Material,
                     job.RequiredMaterialType,
                     StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(job.PinnedFilamentSku) ||
+                string.IsNullOrWhiteSpace(job.PinnedFilamentLotNumber) ||
+                !string.Equals(
+                    pinnedSpool.Sku,
+                    job.PinnedFilamentSku,
+                    StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(
+                    pinnedSpool.LotNumber,
+                    job.PinnedFilamentLotNumber,
+                    StringComparison.Ordinal) ||
                 (job.EstimatedFilamentUsage is > 0 &&
                  pinnedSpool.WeightGrams < job.EstimatedFilamentUsage.Value))
             {
@@ -659,6 +673,27 @@ public sealed class BedClearAcknowledgementService(
             await using QueueOutboxTransactionScope transaction =
                 await QueueOutboxTransactionScope.BeginAsync(_db, ct);
             startCommand.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
+            await QueueLifecycleEventWriter.AddEventAsync(
+                db: _db,
+                sequenceAllocator: _sequenceAllocator,
+                eventType: QueueLifecycleEventWriter.EventTypeBedClearAcknowledged,
+                aggregateId: job.Id,
+                printerId: request.PrinterId,
+                attemptId: null,
+                aggregateRowVersion: job.RowVersion,
+                failureCode: null,
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    jobId = job.Id,
+                    printerId = request.PrinterId,
+                    bedClearCommandId = commandRecord.Id,
+                    bedClearState = "Acknowledged",
+                    expiresAtUtc = commandRecord.ExpiresAtUtc,
+                }),
+                bedClearState: "Acknowledged",
+                bedClearCommandId: commandRecord.Id,
+                bedClearExpiresAtUtc: commandRecord.ExpiresAtUtc,
+                ct: ct);
             await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -740,25 +775,123 @@ public sealed class BedClearAcknowledgementService(
             .OrderByPriorityDescending()
             .FirstOrDefaultAsync(ct);
 
-        bool isStale = frontJob is null || frontJob.Id != acknowledgedJobId;
+        long? printerRevision = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.Id == printerId)
+            .Select(printer => (long?)printer.ConfigurationRevision)
+            .SingleOrDefaultAsync(ct);
+        bool isStale =
+            frontJob is null ||
+            frontJob.Id != acknowledgedJobId ||
+            dispatchState.AcknowledgedQueueRevision != dispatchState.QueueRevision ||
+            dispatchState.AcknowledgedPrinterConfigRevision != printerRevision ||
+            dispatchState.AcknowledgedJobRowVersion is null ||
+            !dispatchState.AcknowledgedJobRowVersion.SequenceEqual(frontJob.RowVersion ?? []);
+        bool isExpired =
+            dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
+            dispatchState.AcknowledgementExpiresAtUtc <= DateTime.UtcNow;
 
-        if (isStale)
+        if (isStale || isExpired)
         {
-            dispatchState.AcknowledgedJobId = null;
-            dispatchState.AcknowledgedAtUtc = null;
-            dispatchState.AcknowledgedBySubject = null;
-            dispatchState.AcknowledgementIdempotencyKey = null;
-            dispatchState.AcknowledgementExpiresAtUtc = null;
-            dispatchState.AcknowledgedJobRowVersion = null;
-            dispatchState.AcknowledgedQueueRevision = null;
-            dispatchState.AcknowledgedPrinterConfigRevision = null;
-
-            await _db.SaveChangesAsync(ct);
+            PrintJob? acknowledgedJob = await _db.PrintJobs
+                .FirstOrDefaultAsync(candidate => candidate.Id == acknowledgedJobId, ct);
+            BedClearCommandRecord? command = await _db.BedClearCommandRecords
+                .Where(candidate =>
+                    candidate.PrinterId == printerId &&
+                    candidate.JobId == acknowledgedJobId)
+                .OrderByDescending(candidate => candidate.CreatedAtUtc)
+                .FirstOrDefaultAsync(ct);
+            if (acknowledgedJob is not null && command is not null)
+            {
+                await PersistBedClearTerminalAsync(
+                    command,
+                    acknowledgedJob,
+                    dispatchState,
+                    isExpired,
+                    isExpired ? "acknowledgement_expired" : "queue_head_changed",
+                    ct);
+            }
+            else
+            {
+                ClearAcknowledgement(dispatchState);
+                await _db.SaveChangesAsync(ct);
+            }
 
             _logger.LogInformation(
                 "Invalidated stale bed-clear acknowledgement for Printer={PrinterId} (was for Job={JobId})",
                 printerId, acknowledgedJobId);
         }
+    }
+
+    private async Task PersistBedClearTerminalAsync(
+        BedClearCommandRecord command,
+        PrintJob job,
+        PrinterDispatchState state,
+        bool expired,
+        string reasonCode,
+        CancellationToken ct)
+    {
+        DateTime now = DateTime.UtcNow;
+        command.Status = expired
+            ? BedClearCommandStatus.Expired
+            : BedClearCommandStatus.Rejected;
+        command.UpdatedAtUtc = now;
+        QueueDispatchOutbox? startCommand = await _db.QueueDispatchOutbox
+            .FirstOrDefaultAsync(candidate => candidate.Id == command.OutboxEventId, ct);
+        if (startCommand is not null &&
+            startCommand.Status is QueueOutboxEventStatus.Pending or
+                QueueOutboxEventStatus.Processing)
+        {
+            startCommand.Status = QueueOutboxEventStatus.DeadLettered;
+            startCommand.FailureCode = reasonCode;
+            startCommand.LastError = "The exact-job bed-clear acknowledgement is no longer valid.";
+            startCommand.CompletedAtUtc = now;
+        }
+
+        ClearAcknowledgement(state);
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
+        string eventType = expired
+            ? QueueLifecycleEventWriter.EventTypeBedClearExpired
+            : QueueLifecycleEventWriter.EventTypeBedClearInvalidated;
+        string stateName = expired ? "Expired" : "Invalidated";
+        await QueueLifecycleEventWriter.AddEventAsync(
+            _db,
+            _sequenceAllocator,
+            eventType,
+            job.Id,
+            state.PrinterId,
+            command.DispatchAttemptId,
+            job.RowVersion,
+            reasonCode,
+            System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId = job.Id,
+                printerId = state.PrinterId,
+                bedClearCommandId = command.Id,
+                bedClearState = stateName,
+                failureCode = reasonCode,
+            }),
+            bedClearState: stateName,
+            bedClearCommandId: command.Id,
+            bedClearExpiresAtUtc: command.ExpiresAtUtc,
+            failureRetryable: false,
+            failureRequiresReconciliation: false,
+            ct: ct);
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+    }
+
+    private static void ClearAcknowledgement(PrinterDispatchState state)
+    {
+        state.AcknowledgedJobId = null;
+        state.AcknowledgedAtUtc = null;
+        state.AcknowledgedBySubject = null;
+        state.AcknowledgementIdempotencyKey = null;
+        state.AcknowledgementExpiresAtUtc = null;
+        state.AcknowledgedJobRowVersion = null;
+        state.AcknowledgedQueueRevision = null;
+        state.AcknowledgedPrinterConfigRevision = null;
     }
 
     private static bool IsExplicitlyIdle(string? state) =>

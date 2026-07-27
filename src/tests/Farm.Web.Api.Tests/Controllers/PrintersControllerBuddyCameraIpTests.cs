@@ -80,7 +80,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: "192.168.1.100");
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -91,7 +91,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: "myprinter.local");
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -102,7 +102,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: "");
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -116,7 +116,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: injection);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -132,7 +132,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: injection);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -144,7 +144,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         string injection = "http://evil.example.com/payload";
         var dto = new UpdatePrinterDto(BuddyCameraIp: injection);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
         string body = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
@@ -162,7 +162,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: ipv6);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
@@ -175,7 +175,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: injection);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -221,7 +221,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
 
         // Act: clear BuddyCameraIp — this would throw FK violation before the fix
         var dto = new UpdatePrinterDto(BuddyCameraIp: "");
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(printerId, dto);
 
         // Assert: succeeds and camera + snapshot rows are gone
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -245,7 +245,7 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         var dto = new UpdatePrinterDto(BuddyCameraIp: ip);
 
         // Act
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(printerId, dto);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Assert: re-query in a fresh scope to avoid first-level cache hits
@@ -272,7 +272,9 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
     {
         // Arrange: set an IP first so a camera row exists
         Guid printerId = await SeedPrinterAsync();
-        HttpResponseMessage setupResponse = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+        HttpResponseMessage setupResponse = await PutPrinterAsync(
+            printerId,
+            new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
         Assert.True(setupResponse.IsSuccessStatusCode, $"setup failed: {await setupResponse.Content.ReadAsStringAsync()}");
 
         // Arrange: also seed a non-PrusaLink camera on the same printer (Vasquez #3)
@@ -293,7 +295,9 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         }
 
         // Act: clear the IP
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: ""));
+        HttpResponseMessage response = await PutPrinterAsync(
+            printerId,
+            new UpdatePrinterDto(BuddyCameraIp: ""));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Assert: camera row must be gone and BuddyCameraIp must be null
@@ -325,11 +329,15 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid printerAId = await SeedPrinterAsync();
         Guid printerBId = await SeedPrinterAsync();
 
-        HttpResponseMessage setupResponseA = await _client!.PutAsJsonAsync($"/api/printers/{printerAId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.1"));
+        HttpResponseMessage setupResponseA = await PutPrinterAsync(
+            printerAId,
+            new UpdatePrinterDto(BuddyCameraIp: "172.16.0.1"));
         Assert.True(setupResponseA.IsSuccessStatusCode, $"setup failed: {await setupResponseA.Content.ReadAsStringAsync()}");
 
         // Act: update printer B's BuddyCameraIp — must not touch printer A
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerBId}", new UpdatePrinterDto(BuddyCameraIp: "172.16.0.2"));
+        HttpResponseMessage response = await PutPrinterAsync(
+            printerBId,
+            new UpdatePrinterDto(BuddyCameraIp: "172.16.0.2"));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Assert: printer A's Buddy camera is unaffected
@@ -379,7 +387,9 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         }
 
         // Act: set a new BuddyCameraIp
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
+        HttpResponseMessage response = await PutPrinterAsync(
+            printerId,
+            new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Assert: single camera row, updated URL, re-enabled
@@ -407,11 +417,15 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
     {
         // Arrange: printer with an existing active PrusaLink Buddy camera
         Guid printerId = await SeedPrinterAsync();
-        HttpResponseMessage setupResponse = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
+        HttpResponseMessage setupResponse = await PutPrinterAsync(
+            printerId,
+            new UpdatePrinterDto(BuddyCameraIp: "10.0.0.1"));
         Assert.True(setupResponse.IsSuccessStatusCode, $"setup failed: {await setupResponse.Content.ReadAsStringAsync()}");
 
         // Act: update to a different IP
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{printerId}", new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
+        HttpResponseMessage response = await PutPrinterAsync(
+            printerId,
+            new UpdatePrinterDto(BuddyCameraIp: "10.0.0.2"));
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Assert: still exactly one PrusaLink camera row, stream URL points to new IP
@@ -438,9 +452,28 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
         Guid id = await SeedPrinterAsync();
         var dto = new UpdatePrinterDto(BuddyCameraIp: bracketedIpv4);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync($"/api/printers/{id}", dto);
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             because: "brackets are only valid around an IPv6 address");
+    }
+
+    private async Task<HttpResponseMessage> PutPrinterAsync(
+        Guid printerId,
+        UpdatePrinterDto dto)
+    {
+        HttpResponseMessage current = await _client!.GetAsync(
+            $"/api/printers/{printerId}");
+        current.EnsureSuccessStatusCode();
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Printer GET did not return an ETag.");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/printers/{printerId}")
+        {
+            Content = JsonContent.Create(dto),
+        };
+        request.Headers.TryAddWithoutValidation("If-Match", etag);
+        return await _client.SendAsync(request);
     }
 }

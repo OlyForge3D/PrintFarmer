@@ -140,6 +140,13 @@ public interface IDispatchClaimService
     /// <param name="ct">Cancellation token.</param>
     Task RecordBackendAcceptedAsync(Guid attemptId, string? backendJobId, CancellationToken ct = default);
 
+    /// <summary>Records acceptance with distinct provider job and file identities.</summary>
+    Task RecordBackendAcceptedAsync(
+        Guid attemptId,
+        string? backendJobId,
+        string? backendFileIdentity,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Records an unknown outcome (network/protocol error) on the attempt.
     /// The job remains in Starting; a reconciliation pass must determine actual state.

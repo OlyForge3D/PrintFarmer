@@ -67,6 +67,8 @@ public sealed class QueueReconciliationService(
         IDbOutboxSequenceAllocator? sequenceAllocator = scope.ServiceProvider.GetService<IDbOutboxSequenceAllocator>();
 
         DateTime staleCutoff = DateTime.UtcNow - StaleAttemptAge;
+        bool recoveredNullAttemptCommands =
+            await RecoverNullAttemptCommandsAsync(db, ct);
 
         // Find InProgress attempts older than the stale threshold — these are candidates
         // for authoritative backend reconciliation.
@@ -131,6 +133,11 @@ public sealed class QueueReconciliationService(
 
         if (toReconcile.Count == 0)
         {
+            if (recoveredNullAttemptCommands)
+            {
+                await db.SaveChangesAsync(ct);
+            }
+
             return;
         }
 
@@ -147,6 +154,79 @@ public sealed class QueueReconciliationService(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task<bool> RecoverNullAttemptCommandsAsync(
+        AppDbContext db,
+        CancellationToken ct)
+    {
+        List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
+            .Where(command =>
+                command.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
+                command.Status == QueueOutboxEventStatus.Processing &&
+                command.FailureCode == "backend_outcome_unknown" &&
+                command.AttemptId == null)
+            .Take(20)
+            .ToListAsync(ct);
+        bool changed = false;
+        foreach (QueueDispatchOutbox command in commands)
+        {
+            if (!command.PrinterId.HasValue)
+            {
+                continue;
+            }
+
+            PrinterDispatchState? state = await db.PrinterDispatchStates
+                .FirstOrDefaultAsync(
+                    candidate => candidate.PrinterId == command.PrinterId.Value,
+                    ct);
+            PrintJob? job = await db.PrintJobs
+                .FirstOrDefaultAsync(candidate => candidate.Id == command.AggregateId, ct);
+            if (state?.ActiveJobId == command.AggregateId &&
+                state.ActiveDispatchAttemptId.HasValue)
+            {
+                command.AttemptId = state.ActiveDispatchAttemptId;
+                BedClearCommandRecord? record = await db.BedClearCommandRecords
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.OutboxEventId == command.Id,
+                        ct);
+                if (record is not null)
+                {
+                    record.DispatchAttemptId = state.ActiveDispatchAttemptId;
+                    record.UpdatedAtUtc = DateTime.UtcNow;
+                }
+
+                changed = true;
+                continue;
+            }
+
+            if (state is not null &&
+                !state.ActiveDispatchAttemptId.HasValue &&
+                !state.ActiveJobId.HasValue &&
+                job?.Status is PrintJobStatus.Queued or PrintJobStatus.Assigned)
+            {
+                // A claim is committed before any start-capable network call. With no active
+                // attempt and a still-dispatchable job, the exception occurred pre-claim and
+                // this command is safe to retry.
+                command.Status = QueueOutboxEventStatus.Pending;
+                command.FailureCode = null;
+                command.LastError = "Recovered a pre-claim command with no persisted attempt.";
+                command.RetryAfterUtc = DateTime.UtcNow;
+                BedClearCommandRecord? record = await db.BedClearCommandRecords
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.OutboxEventId == command.Id,
+                        ct);
+                if (record is not null)
+                {
+                    record.Status = BedClearCommandStatus.Pending;
+                    record.UpdatedAtUtc = DateTime.UtcNow;
+                }
+
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private async Task ReconcileSingleAttemptAsync(
@@ -166,6 +246,54 @@ public sealed class QueueReconciliationService(
             attempt.StartPathKind,
             attempt.ClaimedAtUtc);
 
+        PrinterDispatchState? activeState = await db.PrinterDispatchStates
+            .FirstOrDefaultAsync(
+                state => state.PrinterId == attempt.PrinterId,
+                ct);
+        if (activeState is null ||
+            activeState.ActiveDispatchAttemptId != attempt.Id ||
+            activeState.ActiveJobId != attempt.PrintJobId)
+        {
+            attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
+            attempt.ErrorCode = "attempt_superseded";
+            attempt.ErrorDetail = "A newer dispatch attempt owns the printer.";
+            attempt.IsRetryable = false;
+            attempt.RequiresReconciliation = false;
+            attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
+            attempt.TerminalAtUtc = DateTime.UtcNow;
+            attempt.UpdatedAtUtc = DateTime.UtcNow;
+            return;
+        }
+
+        bool unresolvedStartMayReconcile =
+            string.Equals(
+                activeState.PhysicalControlOperation,
+                "start",
+                StringComparison.Ordinal) &&
+            attempt.BackendCallPhase == DispatchBackendCallPhase.AwaitingReconciliation;
+        bool hasOutstandingControl =
+            (activeState.PhysicalControlCommandId.HasValue &&
+             activeState.PhysicalControlAttemptId == attempt.Id &&
+             !unresolvedStartMayReconcile) ||
+            await db.QueueDispatchOutbox
+                .AsNoTracking()
+                .AnyAsync(
+                    command =>
+                        command.EventType == BackendControlCommandConsumerService.EventType &&
+                        command.AttemptId == attempt.Id &&
+                        (command.Status == QueueOutboxEventStatus.Pending ||
+                         command.Status == QueueOutboxEventStatus.Processing ||
+                         (command.Status == QueueOutboxEventStatus.DeadLettered &&
+                          command.FailureCode == "manual_control_reconciliation_required")),
+                    ct);
+        if (hasOutstandingControl)
+        {
+            logger.LogDebug(
+                "[Reconciliation] Attempt {AttemptId} has an outstanding physical control; lease retained",
+                attempt.Id);
+            return;
+        }
+
         // If no backend service is available, flag for manual reconciliation.
         if (printersSvc is null)
         {
@@ -180,6 +308,7 @@ public sealed class QueueReconciliationService(
             printersSvc, attempt, ct);
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(db, ct);
+        activeState.Revision = Math.Max(1, activeState.Revision) + 1;
         attempt.ReconciliationCount++;
         attempt.LastReconciledAtUtc = DateTime.UtcNow;
 
@@ -193,6 +322,7 @@ public sealed class QueueReconciliationService(
                 attempt.RequiresReconciliation = false;
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Reconciled;
+                ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
                 {
@@ -266,6 +396,7 @@ public sealed class QueueReconciliationService(
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
                 attempt.TerminalAtUtc = DateTime.UtcNow;
+                ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null &&
                     attempt.PrintJob.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
@@ -282,13 +413,11 @@ public sealed class QueueReconciliationService(
                         "Backend history proved completion.");
                 }
 
-                PrinterDispatchState? completedState = await db.PrinterDispatchStates
-                    .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
-                if (completedState is not null && completedState.ActiveDispatchAttemptId == attempt.Id)
+                if (activeState.ActiveDispatchAttemptId == attempt.Id)
                 {
-                    completedState.ActiveJobId = null;
-                    completedState.ActiveDispatchAttemptId = null;
-                    completedState.QueueRevision++;
+                    activeState.ActiveJobId = null;
+                    activeState.ActiveDispatchAttemptId = null;
+                    activeState.QueueRevision++;
                 }
 
                 await SetBedClearCommandStatusAsync(
@@ -355,6 +484,7 @@ public sealed class QueueReconciliationService(
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
                 attempt.TerminalAtUtc = DateTime.UtcNow;
+                ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
                 {
@@ -370,14 +500,11 @@ public sealed class QueueReconciliationService(
                 }
 
                 // Clear the active lease on the printer dispatch state (queue and ad-hoc).
-                PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
-                    .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
-
-                if (dispatchState is not null && dispatchState.ActiveDispatchAttemptId == attempt.Id)
+                if (activeState.ActiveDispatchAttemptId == attempt.Id)
                 {
-                    dispatchState.ActiveJobId = null;
-                    dispatchState.ActiveDispatchAttemptId = null;
-                    dispatchState.QueueRevision++;
+                    activeState.ActiveJobId = null;
+                    activeState.ActiveDispatchAttemptId = null;
+                    activeState.QueueRevision++;
                 }
 
                 await SetBedClearCommandStatusAsync(
@@ -495,6 +622,27 @@ public sealed class QueueReconciliationService(
         attempt.ErrorDetail = reason;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
+    }
+
+    private static void ClearStartBarrier(
+        PrinterDispatchState state,
+        Guid attemptId)
+    {
+        if (state.PhysicalControlCommandId != attemptId ||
+            !string.Equals(
+                state.PhysicalControlOperation,
+                "start",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        state.PhysicalControlCommandId = null;
+        state.PhysicalControlAttemptId = null;
+        state.PhysicalControlOperation = null;
+        state.PhysicalControlActorSubject = null;
+        state.PhysicalControlStartedAtUtc = null;
+        state.PhysicalControlRequiresReconciliation = false;
     }
 
     private static void AddHistory(
@@ -648,42 +796,79 @@ public sealed class QueueReconciliationService(
                 attempt.PrinterId, status.State, attempt.Id);
 
             bool historyProbeFailed = false;
-            foreach (string identity in EnumerateBackendIdentities(attempt))
+            if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
             {
                 try
                 {
                     HistoryJob historyJob = await printersSvc.GetHistoryJobAsync(
-                        attempt.PrinterId, identity, ct);
+                        attempt.PrinterId,
+                        attempt.BackendJobId,
+                        ct);
 
                     if (historyJob is not null)
                     {
+                        attempt.BackendFileIdentity = historyJob.Filename;
                         logger.LogInformation(
-                            "[Reconciliation] Attempt {AttemptId} found in backend history via '{Identity}' — treating as Accepted",
-                            attempt.Id, identity);
+                            "[Reconciliation] Attempt {AttemptId} found by provider history id '{Identity}'",
+                            attempt.Id,
+                            attempt.BackendJobId);
                         return BackendReconciliationOutcome.CompletedOnBackend;
                     }
                 }
                 catch (KeyNotFoundException)
                 {
-                    // The production history contract uses KeyNotFoundException only for
-                    // an authoritative 404/absent result. Exhaust every persisted identity
-                    // before concluding that the attempt never reached the backend.
                     logger.LogDebug(
-                        "[Reconciliation] Identity '{Identity}' is absent from history on printer {PrinterId}",
-                        identity,
+                        "[Reconciliation] Provider history id '{Identity}' is absent on printer {PrinterId}",
+                        attempt.BackendJobId,
                         attempt.PrinterId);
                 }
                 catch (Exception histEx) when (histEx is not OperationCanceledException)
                 {
                     logger.LogDebug(
                         histEx,
-                        "[Reconciliation] History probe failed for identity '{Identity}' on printer {PrinterId}",
-                        identity, attempt.PrinterId);
-
-                    // A failed probe is not evidence of absence. Continue trying every
-                    // persisted identity in case another one can prove completion.
+                        "[Reconciliation] Provider-id probe failed for '{Identity}' on printer {PrinterId}",
+                        attempt.BackendJobId,
+                        attempt.PrinterId);
                     historyProbeFailed = true;
                 }
+            }
+
+            try
+            {
+                HistoryListResponse history = await printersSvc.GetHistoryListAsync(
+                    attempt.PrinterId,
+                    limit: 100,
+                    start: null,
+                    since: attempt.ClaimedAtUtc.AddMinutes(-5),
+                    before: null,
+                    order: "desc",
+                    ct);
+                HistoryJob? exactFileMatch = history.Jobs.FirstOrDefault(candidate =>
+                    MatchesHistoryIdentity(attempt, candidate));
+                if (exactFileMatch is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(exactFileMatch.JobId))
+                    {
+                        attempt.BackendJobId = exactFileMatch.JobId;
+                    }
+
+                    attempt.BackendFileIdentity = exactFileMatch.Filename;
+                    logger.LogInformation(
+                        "[Reconciliation] Attempt {AttemptId} matched provider history file '{FileName}' as id '{HistoryId}'",
+                        attempt.Id,
+                        exactFileMatch.Filename,
+                        exactFileMatch.JobId);
+                    return BackendReconciliationOutcome.CompletedOnBackend;
+                }
+            }
+            catch (Exception histEx) when (histEx is not OperationCanceledException)
+            {
+                logger.LogDebug(
+                    histEx,
+                    "[Reconciliation] History-list probe failed for attempt {AttemptId} on printer {PrinterId}",
+                    attempt.Id,
+                    attempt.PrinterId);
+                historyProbeFailed = true;
             }
 
             if (historyProbeFailed)
@@ -722,7 +907,7 @@ public sealed class QueueReconciliationService(
 
         string normalizedCurrent = NormalizeBackendIdentity(currentFile);
         string currentName = Path.GetFileName(normalizedCurrent);
-        foreach (string identity in EnumerateBackendIdentities(attempt))
+        foreach (string identity in EnumerateBackendFileIdentities(attempt))
         {
             string normalizedIdentity = NormalizeBackendIdentity(identity);
             if (string.Equals(normalizedCurrent, normalizedIdentity, StringComparison.OrdinalIgnoreCase) ||
@@ -748,21 +933,42 @@ public sealed class QueueReconciliationService(
     private static string NormalizeBackendIdentity(string value) =>
         value.Trim().Replace('\\', '/').TrimStart('/');
 
-    private static IEnumerable<string> EnumerateBackendIdentities(QueueDispatchAttempt attempt)
+    private static bool MatchesHistoryIdentity(
+        QueueDispatchAttempt attempt,
+        HistoryJob history)
     {
-        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId) &&
+            string.Equals(
+                history.JobId,
+                attempt.BackendJobId,
+                StringComparison.Ordinal))
         {
-            yield return attempt.BackendJobId;
+            return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(attempt.BackendCommandId))
+        return EnumerateBackendFileIdentities(attempt).Any(identity =>
+            string.Equals(
+                Path.GetFileName(NormalizeBackendIdentity(history.Filename)),
+                Path.GetFileName(NormalizeBackendIdentity(identity)),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> EnumerateBackendFileIdentities(
+        QueueDispatchAttempt attempt)
+    {
+        if (!string.IsNullOrWhiteSpace(attempt.BackendFileIdentity))
         {
-            yield return attempt.BackendCommandId;
+            yield return attempt.BackendFileIdentity;
         }
 
         if (!string.IsNullOrWhiteSpace(attempt.BackendFileName))
         {
             yield return attempt.BackendFileName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(attempt.BackendCorrelationId))
+        {
+            yield return attempt.BackendCorrelationId;
         }
     }
 

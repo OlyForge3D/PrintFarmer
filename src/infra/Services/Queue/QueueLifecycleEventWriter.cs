@@ -67,6 +67,24 @@ public static class QueueLifecycleEventWriter
     /// <summary>Backend confirmed the paused print was resumed.</summary>
     public const string EventTypeJobResumed = "PrintFarmer.Queue.JobResumed.v1";
 
+    public const string EventTypeBedClearAcknowledged =
+        "PrintFarmer.Queue.BedClearAcknowledged.v1";
+
+    public const string EventTypeBedClearConsumed =
+        "PrintFarmer.Queue.BedClearConsumed.v1";
+
+    public const string EventTypeBedClearExpired =
+        "PrintFarmer.Queue.BedClearExpired.v1";
+
+    public const string EventTypeBedClearInvalidated =
+        "PrintFarmer.Queue.BedClearInvalidated.v1";
+
+    public const string EventTypeControlRejected =
+        "PrintFarmer.Queue.BackendControlRejected.v1";
+
+    public const string EventTypeControlUnknown =
+        "PrintFarmer.Queue.BackendControlUnknown.v1";
+
     // ── Shared writer ───────────────────────────────────────────────────────────
 
     /// <summary>
@@ -90,6 +108,39 @@ public static class QueueLifecycleEventWriter
         string? failureCode,
         string payloadJson,
         CancellationToken ct = default) =>
+        AddEventAsync(
+            db,
+            sequenceAllocator,
+            eventType,
+            aggregateId,
+            printerId,
+            attemptId,
+            aggregateRowVersion,
+            failureCode,
+            payloadJson,
+            bedClearState: null,
+            bedClearCommandId: null,
+            bedClearExpiresAtUtc: null,
+            failureRetryable: null,
+            failureRequiresReconciliation: null,
+            ct: ct);
+
+    public static Task AddEventAsync(
+        AppDbContext db,
+        IDbOutboxSequenceAllocator sequenceAllocator,
+        string eventType,
+        Guid aggregateId,
+        Guid? printerId,
+        Guid? attemptId,
+        byte[]? aggregateRowVersion,
+        string? failureCode,
+        string payloadJson,
+        string? bedClearState = null,
+        Guid? bedClearCommandId = null,
+        DateTime? bedClearExpiresAtUtc = null,
+        bool? failureRetryable = null,
+        bool? failureRequiresReconciliation = null,
+        CancellationToken ct = default) =>
         Dispatch.DispatchClaimService.AddLifecycleOutboxEventAsync(
             db,
             sequenceAllocator,
@@ -100,7 +151,12 @@ public static class QueueLifecycleEventWriter
             aggregateRowVersion,
             failureCode,
             payloadJson,
-            ct);
+            ct,
+            bedClearState: bedClearState,
+            bedClearCommandId: bedClearCommandId,
+            bedClearExpiresAtUtc: bedClearExpiresAtUtc,
+            failureRetryable: failureRetryable,
+            failureRequiresReconciliation: failureRequiresReconciliation);
 
     /// <summary>
     /// Builds a minimal canonical lifecycle payload JSON string.

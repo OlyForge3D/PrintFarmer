@@ -105,4 +105,31 @@ public class PrinterDispatchState
     /// Null when no job is Starting/Printing.
     /// </summary>
     public Guid? ActiveDispatchAttemptId { get; set; }
+
+    /// <summary>
+    /// Durable physical-I/O barrier. While present, no new dispatch claim may be acquired
+    /// for this printer. The barrier is acquired before a backend control call and released
+    /// only after its outcome is known or authoritatively reconciled.
+    /// </summary>
+    public Guid? PhysicalControlCommandId { get; set; }
+
+    /// <summary>The dispatch attempt whose physical state the control command may affect.</summary>
+    public Guid? PhysicalControlAttemptId { get; set; }
+
+    /// <summary>Typed physical operation protected by <see cref="PhysicalControlCommandId"/>.</summary>
+    [MaxLength(64)]
+    public string? PhysicalControlOperation { get; set; }
+
+    /// <summary>Actor that acquired the physical-I/O barrier.</summary>
+    [MaxLength(256)]
+    public string? PhysicalControlActorSubject { get; set; }
+
+    /// <summary>UTC timestamp when the physical-I/O barrier was acquired.</summary>
+    public DateTime? PhysicalControlStartedAtUtc { get; set; }
+
+    /// <summary>
+    /// True when a response was lost and the barrier must remain until reconciliation or
+    /// an explicit operator decision proves that releasing it is safe.
+    /// </summary>
+    public bool PhysicalControlRequiresReconciliation { get; set; }
 }

@@ -167,12 +167,23 @@ public sealed class QueueOutboxPublisherService(
                 failureCode: evt.FailureCode,
                 payloadJson: evt.PayloadJson,
                 jobLogicalRevision: evt.JobRevision,
-                dispatchStateLogicalRevision: evt.DispatchStateRevision);
+                dispatchStateLogicalRevision: evt.DispatchStateRevision,
+                attemptNumber: evt.AttemptNumber,
+                attemptOutcome: evt.AttemptOutcome,
+                bedClearCommandId: evt.BedClearCommandId,
+                bedClearExpiresAtUtc: evt.BedClearExpiresAtUtc,
+                failureRetryable: evt.FailureRetryable,
+                failureRequiresReconciliation: evt.FailureRequiresReconciliation);
 
             List<Task> sends = new();
 
             // Job-scoped group: narrower delivery for clients watching this specific job.
-            sends.Add(hub.Clients.Group(AuthorizedHubGroups.QueueJob(evt.AggregateId)).SendAsync("queueevent", envelope, ct));
+            if (string.Equals(evt.AggregateType, nameof(PrintJob), StringComparison.Ordinal))
+            {
+                sends.Add(
+                    hub.Clients.Group(AuthorizedHubGroups.QueueJob(evt.AggregateId))
+                        .SendAsync("queueevent", envelope, ct));
+            }
 
             // Printer-scoped group (when the event is associated with a printer).
             if (evt.PrinterId.HasValue)

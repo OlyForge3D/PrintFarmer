@@ -123,7 +123,9 @@ public sealed record CanonicalCalibrationQueueJob
 
     public required Guid PinnedSpoolId { get; init; }
 
-    public string? PinnedFilamentSku { get; init; }
+    public required string PinnedFilamentSku { get; init; }
+
+    public required string PinnedFilamentLotNumber { get; init; }
 
     public required string FilamentSnapshotSha256 { get; init; }
 
@@ -290,6 +292,19 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
             throw Incompatible("The pinned spool material does not match the calibration project.");
         }
 
+        string filamentSku = RequiredText(project.FilamentSku, "filament SKU");
+        string physicalSpoolSku = RequiredText(spool.Sku, "physical spool SKU");
+        if (!string.Equals(
+                filamentSku,
+                physicalSpoolSku,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw Incompatible(
+                "The physical spool SKU does not match the pinned calibration filament SKU.");
+        }
+
+        string physicalSpoolLot = RequiredText(spool.LotNumber, "physical spool lot");
+
         if (gcode.EstimatedFilamentWeightG is > 0 &&
             spool.WeightGrams < gcode.EstimatedFilamentWeightG.Value)
         {
@@ -399,9 +414,8 @@ public sealed class CalibrationQueueCanonicalizer(AppDbContext db)
             PinnedToolheadId = snapshotToolhead.Id,
             PinnedToolheadIndex = snapshotToolhead.Index,
             PinnedSpoolId = spool.Id,
-            PinnedFilamentSku = string.IsNullOrWhiteSpace(project.FilamentSku)
-                ? null
-                : project.FilamentSku.Trim(),
+            PinnedFilamentSku = filamentSku,
+            PinnedFilamentLotNumber = physicalSpoolLot,
             FilamentSnapshotSha256 = Sha256(
                 RequiredJson(project.FilamentSnapshotJson, "filament snapshot")),
             SourceModelSha256 = sourceModelSha,

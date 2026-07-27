@@ -82,24 +82,32 @@ Generated calibration G-code has one execution path: immutable artifact
 promotion followed by `POST /api/job-queue`. Direct slice send/import and the
 analytics enqueue endpoint reject calibration output. The server derives the
 job kind, project/attempt/snapshot/orchestration lineage, exact
-printer/model/toolhead/spool, capabilities, slicer tuple, hashes, and byte count
-from persisted resources. Client replacements are rejected.
+printer/model/toolhead/spool, physical spool SKU and lot, capabilities, slicer
+tuple, hashes, and byte count from persisted resources. Client replacements and
+same-material spool substitutions are rejected.
 
 Every physical start uses the database dispatch claim. Fresh explicit-idle
 telemetry, database busy state, exact stored-byte SHA-256, compatibility,
 filament sufficiency, current revisions, and exact urgent-first bed-clear
 acknowledgement are fail-closed gates. Unknown backend outcomes retain the
-exclusive lease until reconciliation; cancel and abort are durable fenced
-hardware commands.
+exclusive lease until reconciliation. Every physical control, raw G-code, MMU,
+upload, and cancel route has an explicit queue permission and printer-resource
+check before backend I/O. Idle controls acquire a database physical-I/O barrier;
+active lifecycle controls carry the exact job and attempt. No later dispatch may
+claim the printer until a known outcome releases that barrier.
 
 Public job mutations require the current job `ETag` in `If-Match`. Bed-clear
 also requires `X-Dispatch-State-If-Match`. Missing and stale preconditions
 return `428` and `412`, respectively. Auto-dispatch mutations use the dispatch
 state `If-Match`; skip also uses `X-Job-If-Match`, and enablement uses
-`X-Printer-If-Match`. Event envelopes retain compatibility ETags and include
-provider-independent job and dispatch logical revisions. SignalR queue events
-require explicit authorized printer/project/job subscriptions. Clients detect
-sequence gaps and refetch
+`X-Printer-If-Match`. Printer mutations and dispatch-settings updates also
+require their current `ETag`. These tokens are bound to EF's update predicate,
+not checked only by a prior read. Event envelopes retain compatibility ETags
+and include provider-independent job/dispatch revisions, attempt number and
+outcome, bed-clear command/expiry/state, and typed failure retry/reconciliation
+flags. SignalR queue events require explicit authorized printer/project/job
+subscriptions. Clients proactively drain the change feed on initial connection
+and reconnect, detect later sequence gaps, and refetch
 `GET /api/job-queue/changes?afterSequence={n}` as REST authority.
 
 Pause, resume, cancel, and abort are durable, single-flight hardware commands.
@@ -108,6 +116,9 @@ never resent blindly: it retains the active attempt lease while exact current
 state and history are reconciled. Inconclusive commands become manual-review
 dead letters after 24 hours without releasing ownership. Active pre-upgrade jobs
 without a lease receive persistent synthetic ownership before control is sent.
+Provider history UIDs and provider file identities are stored separately; file
+paths are matched through current state or history lists and are never sent to
+UID-only history endpoints.
 
 Outbox sequence allocation and event insertion share one database transaction,
 so the change-feed cursor cannot advance past a sequence whose event has not
@@ -115,6 +126,13 @@ committed. Printer subscribers receive only a redacted state-change hint; full
 job, attempt, project, revision, and failure details are delivered only to
 authorized job or project subscriptions. Service-boundary authorization checks
 both source G-code and destination printer groups.
+
+Timed schedules authorize the initiating actor against the job, printer, and
+calibration project when created and again when executed. Due schedules use the
+same deterministic `Urgent > High > Normal > Low`, scheduled time, queue
+position, queued time, and ID ordering as the queue. Concurrent external-print
+observers use a nullable unique active-printer key, so only one transaction can
+create the active external job.
 
 ---
 

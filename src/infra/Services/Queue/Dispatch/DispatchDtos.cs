@@ -56,6 +56,10 @@ public class DispatchJobDto
 /// </summary>
 public class DispatchSettingsDto
 {
+    public string? ETag { get; set; }
+
+    public long Revision { get; set; }
+
     public bool AutoDispatchEnabled { get; set; }
 
     public AutoDispatchMode AutoDispatchMode { get; set; }

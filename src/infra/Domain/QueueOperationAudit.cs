@@ -119,6 +119,9 @@ public static class QueueAuditOperations
 
     /// <summary>A queue job's mutable fields were updated.</summary>
     public const string JobUpdate = "queue.update";
+
+    /// <summary>A physical printer control route acquired or used the durable barrier.</summary>
+    public const string PhysicalControl = "printer.physical_control";
 }
 
 /// <summary>Typed outcomes written to <see cref="QueueOperationAudit.Outcome"/>.</summary>

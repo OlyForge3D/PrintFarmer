@@ -16,6 +16,14 @@ public class Spool
 
     public string Material { get; set; } = string.Empty;
 
+    /// <summary>Manufacturer/catalog SKU identifying the physical filament product.</summary>
+    [MaxLength(256)]
+    public string? Sku { get; set; }
+
+    /// <summary>Production lot/batch carried by this physical spool.</summary>
+    [MaxLength(256)]
+    public string? LotNumber { get; set; }
+
     public double WeightGrams { get; set; }
 
     public string ColorHex { get; set; } = "#000000";

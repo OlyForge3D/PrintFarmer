@@ -41,6 +41,11 @@ public interface IQueueResourceAuthorizationService
         Guid printerId,
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
+
+    Task<bool> CanActorAccessProjectAsync(
+        string actorSubject,
+        Guid projectId,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -135,6 +140,27 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         return Guid.TryParse(actorSubject, out Guid userId) &&
             (await IsFarmAdminAsync(userId, ct) ||
              await CanUserAccessPrinterAsync(userId, printerId, minimumAccess, ct));
+    }
+
+    public async Task<bool> CanActorAccessProjectAsync(
+        string actorSubject,
+        Guid projectId,
+        CancellationToken ct = default)
+    {
+        if (QueueActorIdentity.IsTrustedSystemActor(actorSubject))
+        {
+            return true;
+        }
+
+        return Guid.TryParse(actorSubject, out Guid userId) &&
+            (await IsFarmAdminAsync(userId, ct) ||
+             await _db.CalibrationProjects
+                 .AsNoTracking()
+                 .AnyAsync(
+                     project =>
+                         project.Id == projectId &&
+                         project.OwnerUserId == userId,
+                     ct));
     }
 
     private async Task<bool> CanUserAccessJobAsync(

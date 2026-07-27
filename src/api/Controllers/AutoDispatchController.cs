@@ -85,8 +85,16 @@ public class AutoDispatchController(
 
         try
         {
-            var result = await autoDispatchService.MarkReadyAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            var result = await autoDispatchService.MarkReadyAsync(
+                printerId,
+                expectedDispatch,
+                ct);
             return Ok(result);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -133,8 +141,18 @@ public class AutoDispatchController(
 
         try
         {
-            var status = await autoDispatchService.SkipNextJobAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            byte[] expectedJob = DecodeEtag(jobIfMatch!);
+            var status = await autoDispatchService.SkipNextJobAsync(
+                printerId,
+                expectedDispatch,
+                expectedJob,
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -169,8 +187,16 @@ public class AutoDispatchController(
 
         try
         {
-            var status = await autoDispatchService.CancelAutoAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            var status = await autoDispatchService.CancelAutoAsync(
+                printerId,
+                expectedDispatch,
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -210,8 +236,13 @@ public class AutoDispatchController(
             var status = await autoDispatchService.MarkPreClearAsync(
                 printerId,
                 QueueActorIdentity.Resolve(User),
+                DecodeEtag(Request.Headers.IfMatch[0]!),
                 ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -258,8 +289,17 @@ public class AutoDispatchController(
 
         try
         {
-            var status = await autoDispatchService.SetEnabledAsync(printerId, request.Enabled, ct);
+            var status = await autoDispatchService.SetEnabledAsync(
+                printerId,
+                request.Enabled,
+                DecodeEtag(Request.Headers.IfMatch[0]!),
+                DecodeEtag(printerIfMatch!),
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -308,8 +348,45 @@ public class AutoDispatchController(
         [FromBody] SetAutoDispatchEnabledRequest request,
         CancellationToken ct)
     {
-        var statuses = await autoDispatchService.SetAllEnabledAsync(request.Enabled, ct);
-        return Ok(statuses);
+        if (request.ExpectedVersions is null || request.ExpectedVersions.Count == 0)
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "Per-printer dispatch and printer ETags are required.",
+                });
+        }
+
+        try
+        {
+            Dictionary<Guid, AutoDispatchExpectedVersions> expected = request.ExpectedVersions
+                .ToDictionary(
+                    pair => pair.Key,
+                    pair => new AutoDispatchExpectedVersions(
+                        DecodeEtag(pair.Value.DispatchStateETag),
+                        DecodeEtag(pair.Value.PrinterETag)));
+            var statuses = await autoDispatchService.SetAllEnabledAsync(
+                request.Enabled,
+                expected,
+                ct);
+            return Ok(statuses);
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { error = "Expected ETags must be base-64 encoded." });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
+        }
+        catch (QueuePreconditionRequiredException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = exception.Message });
+        }
     }
 
     private async Task<ObjectResult?> CheckDispatchPreconditionAsync(
@@ -458,9 +535,27 @@ public class AutoDispatchController(
             });
         }
     }
+
+    private static byte[] DecodeEtag(string supplied) =>
+        Convert.FromBase64String(
+            supplied.Trim().TrimStart('W', '/').Trim('"'));
+
+    private ObjectResult RevisionConflict() =>
+        StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new { error = "dispatch_revision_conflict" });
 }
 
 public class SetAutoDispatchEnabledRequest
 {
     public bool Enabled { get; set; }
+
+    public Dictionary<Guid, AutoDispatchExpectedVersionRequest>? ExpectedVersions { get; set; }
+}
+
+public sealed class AutoDispatchExpectedVersionRequest
+{
+    public required string DispatchStateETag { get; set; }
+
+    public required string PrinterETag { get; set; }
 }

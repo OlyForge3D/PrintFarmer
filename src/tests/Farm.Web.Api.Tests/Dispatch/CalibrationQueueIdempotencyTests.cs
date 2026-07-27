@@ -177,6 +177,8 @@ public class CalibrationQueueIdempotencyTests
         {
             Id = spoolId,
             Material = "PLA",
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printerId,
@@ -242,6 +244,7 @@ public class CalibrationQueueIdempotencyTests
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
             FilamentMaterial = "PLA",
+            FilamentSku = "PLA-TEST-SKU",
             LocalSpoolId = spoolId,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         };

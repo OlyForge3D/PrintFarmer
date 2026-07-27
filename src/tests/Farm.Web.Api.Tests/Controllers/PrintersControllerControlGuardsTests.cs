@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using FluentValidation;
@@ -31,7 +33,73 @@ public class PrintersControllerControlGuardsTests
     {
         telemetry = new Mock<IPrintFarmerTelemetryService>();
 
-        return new PrintersController(
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        actuation.Setup(service => service.AcquireDirectAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (
+                Guid printerId,
+                string actor,
+                string operation,
+                CancellationToken ct) =>
+            {
+                Printer? printer = await printersService.Object.FindByIdAsync(printerId, ct);
+                if (printer is null)
+                {
+                    return new PrinterActuationResult(
+                        PrinterActuationResultCode.PrinterNotFound);
+                }
+
+                PrinterStatusDto? status = statusCache.Object.GetStatus(printerId);
+                if (PrinterControlGate.IsBusyForControl(status?.State))
+                {
+                    return new PrinterActuationResult(
+                        PrinterActuationResultCode.PrinterBusy,
+                        Detail: $"Printer is currently {status?.State?.ToLowerInvariant()}.");
+                }
+
+                return new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    new PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        null,
+                        operation,
+                        actor));
+            });
+        actuation.Setup(service => service.AcquireActiveAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((
+                Guid printerId,
+                string actor,
+                string operation,
+                CancellationToken _) =>
+                new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    new PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        Guid.NewGuid(),
+                        operation,
+                        actor)));
+        actuation.Setup(service => service.CompleteDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<bool>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        actuation.Setup(service => service.MarkDirectUnknownAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
             catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
@@ -46,7 +114,18 @@ public class PrintersControllerControlGuardsTests
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
-            printerStatusCache: statusCache.Object);
+            physicalActuationService: actuation.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+                ], "test")),
+            },
+        };
+        return controller;
     }
 
     private static Printer SamplePrinter(Guid id) => new()

@@ -64,6 +64,13 @@ public class JobSchedule
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
+    /// Authenticated actor that created or last rescheduled this execution.
+    /// The scheduler reuses this subject so resource ACLs are rechecked at execution time.
+    /// </summary>
+    [MaxLength(256)]
+    public string InitiatingActorSubject { get; set; } = "system:scheduler";
+
+    /// <summary>
     /// Navigation property to execution history (for recurring jobs)
     /// </summary>
     public ICollection<JobExecution> Executions { get; set; } = new List<JobExecution>();

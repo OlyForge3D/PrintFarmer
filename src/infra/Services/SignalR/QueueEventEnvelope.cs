@@ -23,9 +23,15 @@
 /// <param name="JobRevision">Base-64 job row version at write time.</param>
 /// <param name="DispatchStateRevision">Base-64 printer dispatch-state row version at write time.</param>
 /// <param name="AttemptId">Dispatch attempt this event belongs to, when applicable.</param>
+/// <param name="AttemptNumber">Monotonic attempt number within the job.</param>
+/// <param name="AttemptOutcome">Typed dispatch-attempt outcome at write time.</param>
 /// <param name="BedClearState">Bed-clear acknowledgement state at write time.</param>
+/// <param name="BedClearCommandId">Durable exact-job bed-clear command identity.</param>
+/// <param name="BedClearExpiresAtUtc">Acknowledgement expiry, when applicable.</param>
 /// <param name="ErrorCode">Legacy typed error code (kept for wire compatibility).</param>
 /// <param name="FailureCode">Typed failure code for terminal/failure events.</param>
+/// <param name="FailureRetryable">Whether the typed failure is safely retryable.</param>
+/// <param name="FailureRequiresReconciliation">Whether authoritative reconciliation is required.</param>
 /// <param name="PayloadJson">Redacted payload — public identifiers only.</param>
 /// <param name="JobLogicalRevision">Resulting provider-independent job revision.</param>
 /// <param name="DispatchStateLogicalRevision">Resulting provider-independent dispatch revision.</param>
@@ -43,9 +49,15 @@ public sealed record QueueEventEnvelope(
     string? JobRevision,
     string? DispatchStateRevision,
     Guid? AttemptId,
+    int? AttemptNumber,
+    string? AttemptOutcome,
     string? BedClearState,
+    Guid? BedClearCommandId,
+    DateTime? BedClearExpiresAtUtc,
     string? ErrorCode,
     string? FailureCode,
+    bool? FailureRetryable,
+    bool? FailureRequiresReconciliation,
     string? PayloadJson,
     long? JobLogicalRevision,
     long? DispatchStateLogicalRevision)
@@ -67,9 +79,15 @@ public sealed record QueueEventEnvelope(
     /// <param name="jobRevision">Job row version at write time.</param>
     /// <param name="dispatchStateRevision">Dispatch-state row version at write time.</param>
     /// <param name="attemptId">Dispatch attempt id.</param>
+    /// <param name="attemptNumber">Monotonic attempt number within the job.</param>
+    /// <param name="attemptOutcome">Typed attempt outcome at write time.</param>
     /// <param name="bedClearState">Bed-clear acknowledgement state.</param>
+    /// <param name="bedClearCommandId">Durable exact-job bed-clear command identity.</param>
+    /// <param name="bedClearExpiresAtUtc">Acknowledgement expiry, when applicable.</param>
     /// <param name="errorCode">Legacy typed error code.</param>
     /// <param name="failureCode">Typed failure code.</param>
+    /// <param name="failureRetryable">Whether the failure is safely retryable.</param>
+    /// <param name="failureRequiresReconciliation">Whether authoritative reconciliation is required.</param>
     /// <param name="payloadJson">Redacted payload.</param>
     /// <param name="jobLogicalRevision">Provider-independent resulting job revision.</param>
     /// <param name="dispatchStateLogicalRevision">Provider-independent resulting dispatch revision.</param>
@@ -87,9 +105,15 @@ public sealed record QueueEventEnvelope(
         byte[]? jobRevision = null,
         byte[]? dispatchStateRevision = null,
         Guid? attemptId = null,
+        int? attemptNumber = null,
+        string? attemptOutcome = null,
         string? bedClearState = null,
+        Guid? bedClearCommandId = null,
+        DateTime? bedClearExpiresAtUtc = null,
         string? errorCode = null,
         string? failureCode = null,
+        bool? failureRetryable = null,
+        bool? failureRequiresReconciliation = null,
         string? payloadJson = null,
         long? jobLogicalRevision = null,
         long? dispatchStateLogicalRevision = null) =>
@@ -107,9 +131,15 @@ public sealed record QueueEventEnvelope(
             Encode(jobRevision),
             Encode(dispatchStateRevision),
             attemptId,
+            attemptNumber,
+            attemptOutcome,
             bedClearState,
+            bedClearCommandId,
+            bedClearExpiresAtUtc,
             errorCode,
             failureCode,
+            failureRetryable,
+            failureRequiresReconciliation,
             payloadJson,
             jobLogicalRevision,
             dispatchStateLogicalRevision);
@@ -128,9 +158,15 @@ public sealed record QueueEventEnvelope(
             JobRevision = null,
             DispatchStateRevision = null,
             AttemptId = null,
+            AttemptNumber = null,
+            AttemptOutcome = null,
             BedClearState = null,
+            BedClearCommandId = null,
+            BedClearExpiresAtUtc = null,
             ErrorCode = null,
             FailureCode = null,
+            FailureRetryable = null,
+            FailureRequiresReconciliation = null,
             PayloadJson = null,
             JobLogicalRevision = null,
             DispatchStateLogicalRevision = null,

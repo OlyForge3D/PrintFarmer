@@ -89,6 +89,9 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
         builder.HasIndex(pj => pj.DeadlineAtUtc);
         builder.HasIndex(pj => pj.Priority);
         builder.HasIndex(pj => pj.AssignedPrinterId);
+        builder.HasIndex(pj => pj.ActiveExternalPrinterId)
+            .IsUnique()
+            .HasDatabaseName("UX_PrintJobs_ActiveExternalPrinterId");
 
         // Composite index for queue overview batch queries (AssignedPrinterId + Status)
         builder.HasIndex(pj => new { pj.AssignedPrinterId, pj.Status })

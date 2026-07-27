@@ -271,6 +271,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         {
             Id = Guid.NewGuid(),
             Material = CalibrationMaterial,
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printer.Id,
@@ -291,6 +293,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
                 FilamentProductId = "pla",
                 FilamentProductName = "PLA",
                 FilamentMaterial = CalibrationMaterial,
+                FilamentSku = "PLA-TEST-SKU",
                 LocalSpoolId = spool.Id,
                 FilamentSnapshotJson = """{"material":"PLA"}""",
             });
@@ -376,6 +379,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             PinnedToolheadId = isCalibration ? toolhead.Id : null,
             PinnedToolheadIndex = isCalibration ? toolhead.Index : null,
             PinnedSpoolId = isCalibration ? spool.Id : null,
+            PinnedFilamentSku = isCalibration ? "PLA-TEST-SKU" : null,
+            PinnedFilamentLotNumber = isCalibration ? "LOT-TEST" : null,
             FilamentSnapshotSha256 = isCalibration
                 ? ComputeSha256("""{"material":"PLA"}""")
                 : null,

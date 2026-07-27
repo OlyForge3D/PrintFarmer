@@ -11,6 +11,7 @@ public enum BackendControlOperation
     Resume,
     Cancel,
     Abort,
+    EmergencyStop,
 }
 
 /// <summary>Typed delivery result for a backend lifecycle command.</summary>

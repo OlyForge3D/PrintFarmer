@@ -1564,6 +1564,14 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<double>("MinimumScoreThreshold")
                         .HasColumnType("REAL");
 
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("BLOB");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -1585,6 +1593,7 @@ namespace Farm.Migrations.Sqlite.Migrations
                             LoadBalancingStrategy = "BestFit",
                             MaxConcurrentDispatches = 3,
                             MinimumScoreThreshold = 0.5,
+                            Revision = 1L,
                             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             UpdatedDate = new DateTimeOffset(new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
                         });
@@ -2864,6 +2873,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("InitiatingActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsActive")
@@ -4311,6 +4325,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ActiveExternalPrinterId")
+                        .HasColumnType("TEXT");
+
                     b.Property<decimal?>("ActualCost")
                         .HasColumnType("TEXT");
 
@@ -4474,6 +4491,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PinnedFilamentLotNumber")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PinnedFilamentSku")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -4621,6 +4642,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasDefaultValue(false);
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ActiveExternalPrinterId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrintJobs_ActiveExternalPrinterId");
 
                     b.HasIndex("AssignedPrinterId");
 
@@ -5303,7 +5328,7 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("BLOB");
 
                     b.Property<string>("ServerUrl")
@@ -5517,6 +5542,26 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<bool>("BedPreConfirmed")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("PhysicalControlActorSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PhysicalControlAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PhysicalControlCommandId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PhysicalControlOperation")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PhysicalControlRequiresReconciliation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("PhysicalControlStartedAtUtc")
+                        .HasColumnType("TEXT");
 
                     b.Property<long>("QueueRevision")
                         .HasColumnType("INTEGER");
@@ -5970,6 +6015,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("BackendFileIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BackendFileName")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
@@ -6022,6 +6071,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("INTEGER");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("BLOB");
+
                     b.Property<string>("StartPathKind")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -6067,6 +6121,19 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("AttemptId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("AttemptNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AttemptOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BedClearCommandId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("BedClearExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BedClearState")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
@@ -6091,6 +6158,12 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("FailureCode")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
+
+                    b.Property<bool?>("FailureRequiresReconciliation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool?>("FailureRetryable")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("JobKind")
                         .HasMaxLength(32)
@@ -6529,6 +6602,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool>("InUse")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("LotNumber")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Material")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -6538,6 +6615,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("BLOB");
+
+                    b.Property<string>("Sku")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
 
                     b.Property<double>("WeightGrams")
                         .HasColumnType("REAL");

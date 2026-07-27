@@ -133,7 +133,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         (await verify.QueueDispatchOutbox.CountAsync(e =>
             e.AggregateId == fixture.JobId &&
-            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType)).Should().Be(1);
+            e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1")).Should().Be(1);
+        (await verify.QueueDispatchOutbox.CountAsync(e =>
+            e.AggregateId == fixture.JobId &&
+            e.EventType == QueueLifecycleEventWriter.EventTypeBedClearConsumed)).Should().Be(1);
     }
 
     [Fact]
@@ -1055,6 +1058,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("exact history identity absent"));
+        printers.Setup(service => service.GetHistoryListAsync(
+                fixture.PrinterId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse());
 
         await RunReconciliationAsync(printers.Object);
 
@@ -1071,11 +1083,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         state.ActiveDispatchAttemptId.Should().BeNull();
         printers.Verify(service => service.GetHistoryJobAsync(
             fixture.PrinterId,
-            claim.Attempt.BackendCommandId!,
-            It.IsAny<CancellationToken>()), Times.Once);
-        printers.Verify(service => service.GetHistoryJobAsync(
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.GetHistoryListAsync(
             fixture.PrinterId,
-            claim.Attempt.BackendFileName!,
+            It.IsAny<int?>(),
+            It.IsAny<int?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<string?>(),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -1316,13 +1332,19 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext verify = CreateContext();
         QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e =>
             e.AggregateId == fixture.JobId &&
-            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
+            e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
 
         QueueEventEnvelope first = QueueEventEnvelope.FromOutbox(
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
-            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson,
+            attemptId: row.AttemptId, attemptNumber: row.AttemptNumber,
+            attemptOutcome: row.AttemptOutcome, bedClearState: row.BedClearState,
+            bedClearCommandId: row.BedClearCommandId,
+            bedClearExpiresAtUtc: row.BedClearExpiresAtUtc,
+            failureRetryable: row.FailureRetryable,
+            failureRequiresReconciliation: row.FailureRequiresReconciliation,
+            payloadJson: row.PayloadJson,
             jobLogicalRevision: row.JobRevision,
             dispatchStateLogicalRevision: row.DispatchStateRevision);
 
@@ -1330,7 +1352,13 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
-            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson,
+            attemptId: row.AttemptId, attemptNumber: row.AttemptNumber,
+            attemptOutcome: row.AttemptOutcome, bedClearState: row.BedClearState,
+            bedClearCommandId: row.BedClearCommandId,
+            bedClearExpiresAtUtc: row.BedClearExpiresAtUtc,
+            failureRetryable: row.FailureRetryable,
+            failureRequiresReconciliation: row.FailureRequiresReconciliation,
+            payloadJson: row.PayloadJson,
             jobLogicalRevision: row.JobRevision,
             dispatchStateLogicalRevision: row.DispatchStateRevision);
 
@@ -1339,7 +1367,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         first.OccurredAtUtc.Should().Be(row.CreatedAtUtc, "the envelope time is the durable write time");
         first.Sequence.Should().BeGreaterThan(0, "the sequence enables gap detection");
         first.AttemptId.Should().Be(row.AttemptId);
+        first.AttemptNumber.Should().Be(row.AttemptNumber);
+        first.AttemptOutcome.Should().Be(row.AttemptOutcome);
         first.BedClearState.Should().Be("Consumed");
+        first.BedClearCommandId.Should().NotBeNull();
         first.JobLogicalRevision.Should().BeGreaterThan(0);
         first.DispatchStateLogicalRevision.Should().BeGreaterThan(0);
 
@@ -1349,6 +1380,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         printerHint.JobId.Should().BeNull();
         printerHint.ProjectId.Should().BeNull();
         printerHint.AttemptId.Should().BeNull();
+        printerHint.AttemptNumber.Should().BeNull();
+        printerHint.AttemptOutcome.Should().BeNull();
+        printerHint.BedClearCommandId.Should().BeNull();
         printerHint.JobRevision.Should().BeNull();
         printerHint.DispatchStateRevision.Should().BeNull();
         printerHint.PayloadJson.Should().BeNull();
@@ -1388,7 +1422,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         QueueDispatchOutbox queueEvent = await verify.QueueDispatchOutbox
             .SingleAsync(evt =>
                 evt.AggregateId == fixture.JobId &&
-                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
+                evt.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
 
         job.Revision.Should().Be(priorRevision + 1);
         queueEvent.JobRevision.Should().Be(job.Revision);
@@ -1415,7 +1449,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext verify = CreateContext();
         QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e =>
             e.AggregateId == fixture.JobId &&
-            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
+            e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
 
         row.PayloadJson.Should().NotContain("http", "payloads must never carry private URLs");
         row.PayloadJson.Should().NotContain("apiKey", "payloads must never carry credentials");
@@ -2560,6 +2594,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         {
             Id = Guid.NewGuid(),
             Material = Material,
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printer.Id,
@@ -2606,6 +2642,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
             FilamentMaterial = Material,
+            FilamentSku = "PLA-TEST-SKU",
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
@@ -2698,6 +2735,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             PinnedToolheadId = toolhead.Id,
             PinnedToolheadIndex = toolhead.Index,
             PinnedSpoolId = spool.Id,
+            PinnedFilamentSku = "PLA-TEST-SKU",
+            PinnedFilamentLotNumber = "LOT-TEST",
             FilamentSnapshotSha256 = ComputeSha256("""{"material":"PLA"}"""),
             SourceModelSha256 = new string('8', 64),
             CalibrationManifestSha256 = gcode.CalibrationManifestSha256,

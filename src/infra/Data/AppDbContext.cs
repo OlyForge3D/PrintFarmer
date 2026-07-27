@@ -342,6 +342,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // SQL Server uses a native ROWVERSION column that the DB generates and returns.
         if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
         {
+            _ = modelBuilder.Entity<Printer>()
+                .Property(printer => printer.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
             _ = modelBuilder.Entity<PrintJob>()
                 .Property(j => j.RowVersion)
                 .HasMaxLength(16)
@@ -366,6 +371,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasMaxLength(16)
                 .IsConcurrencyToken()
                 .ValueGeneratedNever();
+            _ = modelBuilder.Entity<QueueDispatchAttempt>()
+                .Property(a => a.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<DispatchSettings>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
         }
         else
         {
@@ -374,6 +389,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .Property(o => o.RowVersion)
                 .IsRowVersion();
             _ = modelBuilder.Entity<OutboxSequenceState>()
+                .Property(s => s.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<QueueDispatchAttempt>()
+                .Property(a => a.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<DispatchSettings>()
                 .Property(s => s.RowVersion)
                 .IsRowVersion();
         }
@@ -507,6 +528,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         EnsureCalibrationPrintersTracked();
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        NormalizeActiveExternalPrintKeys();
         AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
@@ -519,6 +541,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        NormalizeActiveExternalPrintKeys();
         AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
@@ -609,6 +632,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             CheckImmutableField(entry, nameof(PrintJob.PinnedToolheadIndex));
             CheckImmutableField(entry, nameof(PrintJob.PinnedSpoolId));
             CheckImmutableField(entry, nameof(PrintJob.PinnedFilamentSku));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedFilamentLotNumber));
             CheckImmutableField(entry, nameof(PrintJob.FilamentSnapshotSha256));
             CheckImmutableField(entry, nameof(PrintJob.SourceModelSha256));
             CheckImmutableField(entry, nameof(PrintJob.CalibrationManifestSha256));
@@ -906,6 +930,39 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     entry.Entity.RowVersion = newVersion;
                 }
             }
+
+            foreach (EntityEntry<QueueDispatchAttempt> entry in ChangeTracker.Entries<QueueDispatchAttempt>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+        }
+    }
+
+    private void NormalizeActiveExternalPrintKeys()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
+                     .Where(candidate => candidate.State is EntityState.Added or EntityState.Modified))
+        {
+            bool activeExternal =
+                entry.Entity.IsExternalPrint &&
+                entry.Entity.AssignedPrinterId.HasValue &&
+                entry.Entity.Status is PrintJobStatus.Starting or
+                    PrintJobStatus.Printing or
+                    PrintJobStatus.Paused;
+            entry.Entity.ActiveExternalPrinterId = activeExternal
+                ? entry.Entity.AssignedPrinterId
+                : null;
         }
     }
 
@@ -937,6 +994,20 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 long originalRevision = entry.Property(state => state.Revision).OriginalValue;
                 entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
                 entry.Property(state => state.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(settings => settings.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(settings => settings.Revision).IsModified = true;
             }
         }
 

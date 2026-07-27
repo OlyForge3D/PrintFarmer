@@ -3005,13 +3005,13 @@ public class MoonrakerClient(
                     $"Moonraker rejected upload and start with HTTP {(int)response.StatusCode}.");
             }
 
-            string? providerIdentity = await ReadMoonrakerUploadIdentityAsync(response, fileName, ct);
+            string? providerFileIdentity = await ReadMoonrakerUploadIdentityAsync(response, fileName, ct);
             _logger.LogInformation(
                 "[Moonraker] UploadAndStartPrint accepted {FileName} as {ProviderIdentity}",
                 fileName,
-                providerIdentity);
+                providerFileIdentity);
             progress?.Report(UploadAndPrintStage.Completed);
-            return UploadAndPrintResult.Ok(providerIdentity);
+            return UploadAndPrintResult.Ok(backendFileIdentity: providerFileIdentity);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

@@ -610,6 +610,8 @@ public class CalibrationQueueDispatchTests
         {
             Id = Guid.NewGuid(),
             Material = "PLA",
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printerId,
@@ -621,6 +623,8 @@ public class CalibrationQueueDispatchTests
         job.PinnedToolheadId = claimToolhead.Id;
         job.PinnedToolheadIndex = claimToolhead.Index;
         job.PinnedSpoolId = claimSpool.Id;
+        job.PinnedFilamentSku = "PLA-TEST-SKU";
+        job.PinnedFilamentLotNumber = "LOT-TEST";
         job.FilamentSnapshotSha256 = new string('7', 64);
         job.SourceModelSha256 = gcode.SourceModelSha256;
         job.CalibrationManifestSha256 = gcode.CalibrationManifestSha256;
@@ -740,6 +744,8 @@ public class CalibrationQueueDispatchTests
         {
             Id = Guid.NewGuid(),
             Material = "PLA",
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printerId,
@@ -758,6 +764,7 @@ public class CalibrationQueueDispatchTests
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
             FilamentMaterial = "PLA",
+            FilamentSku = "PLA-TEST-SKU",
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
@@ -836,6 +843,8 @@ public class CalibrationQueueDispatchTests
             PinnedToolheadId = toolhead.Id,
             PinnedToolheadIndex = toolhead.Index,
             PinnedSpoolId = spool.Id,
+            PinnedFilamentSku = "PLA-TEST-SKU",
+            PinnedFilamentLotNumber = "LOT-TEST",
             FilamentSnapshotSha256 = Convert.ToHexString(
                 SHA256.HashData(Encoding.UTF8.GetBytes("""{"material":"PLA"}""")))
                 .ToLowerInvariant(),

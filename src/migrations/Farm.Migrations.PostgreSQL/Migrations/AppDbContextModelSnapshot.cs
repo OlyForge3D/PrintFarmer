@@ -1575,6 +1575,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double>("MinimumScoreThreshold")
                         .HasColumnType("double precision");
 
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("bytea");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1596,6 +1604,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                             LoadBalancingStrategy = "BestFit",
                             MaxConcurrentDispatches = 3,
                             MinimumScoreThreshold = 0.5,
+                            Revision = 1L,
                             UpdatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             UpdatedDate = new DateTimeOffset(new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0))
                         });
@@ -2876,6 +2885,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InitiatingActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<bool>("IsActive")
                         .ValueGeneratedOnAdd()
@@ -4330,6 +4344,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ActiveExternalPrinterId")
+                        .HasColumnType("uuid");
+
                     b.Property<decimal?>("ActualCost")
                         .HasColumnType("numeric");
 
@@ -4493,6 +4510,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<string>("PinnedFilamentLotNumber")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("PinnedFilamentSku")
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
@@ -4640,6 +4661,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDefaultValue(false);
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ActiveExternalPrinterId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrintJobs_ActiveExternalPrinterId");
 
                     b.HasIndex("AssignedPrinterId");
 
@@ -5322,7 +5347,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
+                        .HasMaxLength(16)
                         .HasColumnType("bytea");
 
                     b.Property<string>("ServerUrl")
@@ -5536,6 +5561,26 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<bool>("BedPreConfirmed")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("PhysicalControlActorSubject")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid?>("PhysicalControlAttemptId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("PhysicalControlCommandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PhysicalControlOperation")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<bool>("PhysicalControlRequiresReconciliation")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("PhysicalControlStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<long>("QueueRevision")
                         .HasColumnType("bigint");
@@ -5989,6 +6034,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<string>("BackendFileIdentity")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
                     b.Property<string>("BackendFileName")
                         .HasMaxLength(512)
                         .HasColumnType("character varying(512)");
@@ -6041,6 +6090,11 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("boolean");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("bytea");
+
                     b.Property<string>("StartPathKind")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -6086,6 +6140,19 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("AttemptId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("AttemptNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AttemptOutcome")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid?>("BedClearCommandId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("BedClearExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("BedClearState")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
@@ -6110,6 +6177,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<string>("FailureCode")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<bool?>("FailureRequiresReconciliation")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("FailureRetryable")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("JobKind")
                         .HasMaxLength(32)
@@ -6548,6 +6621,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("InUse")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LotNumber")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
                     b.Property<string>("Material")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -6557,6 +6634,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("bytea");
+
+                    b.Property<string>("Sku")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
 
                     b.Property<double>("WeightGrams")
                         .HasColumnType("double precision");

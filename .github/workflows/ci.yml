@@ -456,7 +456,8 @@ jobs:
   # ---------------------------------------------------------------------------
   # dotnet-test-providers — runs DbHeavy and Docker-tagged provider tests
   # against real PostgreSQL and SQL Server instances. Provisions each database
-  # service, applies provider migrations, then runs the full DbHeavy test suite.
+  # service, applies provider migrations, then runs DbHeavy production races for
+  # claim, bed-clear, consumer, reconciliation, physical control, and external print.
   # The job fails visibly when a provider is unavailable or migration fails.
   # ---------------------------------------------------------------------------
   dotnet-test-providers:
@@ -552,7 +553,7 @@ jobs:
             --connection "$PFARM_TEST_SQLSERVER_CONN" \
             || { echo "::error::SQL Server Farm migration failed"; exit 1; }
 
-      - name: Run DbHeavy provider and production-call-chain tests
+      - name: Run DbHeavy provider business-race and production-call-chain tests
         working-directory: src
         env:
           PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
@@ -697,4 +698,3 @@ jobs:
           check_conditional dotnet-test-providers "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
 
           exit "$fail"
-

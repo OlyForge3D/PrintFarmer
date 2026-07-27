@@ -99,6 +99,13 @@ public sealed class QueueDispatchOutbox
     /// <summary>Dispatch attempt this event belongs to, when the event was produced by a claim.</summary>
     public Guid? AttemptId { get; set; }
 
+    /// <summary>Monotonic number of the dispatch attempt within its job.</summary>
+    public int? AttemptNumber { get; set; }
+
+    /// <summary>Typed dispatch-attempt outcome at event write time.</summary>
+    [MaxLength(32)]
+    public string? AttemptOutcome { get; set; }
+
     /// <summary>
     /// Bed-clear acknowledgement state at write time
     /// (<c>None</c>, <c>Acknowledged</c>, <c>Consumed</c>, <c>Invalidated</c>).
@@ -106,9 +113,21 @@ public sealed class QueueDispatchOutbox
     [MaxLength(32)]
     public string? BedClearState { get; set; }
 
+    /// <summary>Durable bed-clear command identity, when the event represents that lifecycle.</summary>
+    public Guid? BedClearCommandId { get; set; }
+
+    /// <summary>Expiry of the exact-job acknowledgement represented by the event.</summary>
+    public DateTime? BedClearExpiresAtUtc { get; set; }
+
     /// <summary>Typed failure code carried by terminal/failure events (never free-form text).</summary>
     [MaxLength(128)]
     public string? FailureCode { get; set; }
+
+    /// <summary>Whether the typed failure may be retried without an operator mutation.</summary>
+    public bool? FailureRetryable { get; set; }
+
+    /// <summary>Whether the failure requires authoritative backend reconciliation.</summary>
+    public bool? FailureRequiresReconciliation { get; set; }
 
     /// <summary>
     /// Fully-qualified event type name (e.g., <c>PrintFarmer.Queue.CalibrationJobQueued.v1</c>).
@@ -159,6 +178,10 @@ public sealed class QueueDispatchAttempt
 {
     /// <summary>Unique attempt identity.</summary>
     public Guid Id { get; set; }
+
+    /// <summary>Optimistic concurrency token fencing concurrent outcome/reconciliation writers.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
 
     /// <summary>The print job this attempt belongs to. Null for ad-hoc (non-queue) starts.</summary>
     public Guid? PrintJobId { get; set; }
@@ -219,6 +242,14 @@ public sealed class QueueDispatchAttempt
     /// </summary>
     [MaxLength(512)]
     public string? BackendJobId { get; set; }
+
+    /// <summary>
+    /// Provider file/path identity returned by upload or observed in current/history state.
+    /// This is deliberately distinct from <see cref="BackendJobId"/> and must never be sent
+    /// to a provider endpoint that expects a history UID.
+    /// </summary>
+    [MaxLength(512)]
+    public string? BackendFileIdentity { get; set; }
 
     /// <summary>
     /// Stable identity of the command sent to the backend for this attempt.

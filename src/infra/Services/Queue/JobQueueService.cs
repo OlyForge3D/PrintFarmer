@@ -542,6 +542,7 @@ public class JobQueueService : IJobQueueService
             PinnedToolheadIndex = canonicalCalibration?.PinnedToolheadIndex,
             PinnedSpoolId = canonicalCalibration?.PinnedSpoolId,
             PinnedFilamentSku = canonicalCalibration?.PinnedFilamentSku,
+            PinnedFilamentLotNumber = canonicalCalibration?.PinnedFilamentLotNumber,
             FilamentSnapshotSha256 = canonicalCalibration?.FilamentSnapshotSha256,
             SourceModelSha256 = canonicalCalibration?.SourceModelSha256,
             CalibrationManifestSha256 = canonicalCalibration?.CalibrationManifestSha256,

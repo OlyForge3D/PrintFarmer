@@ -1931,9 +1931,15 @@ export interface QueueEventEnvelope {
   jobRevision?: string | null;
   dispatchStateRevision?: string | null;
   attemptId?: string | null;
+  attemptNumber?: number | null;
+  attemptOutcome?: string | null;
   bedClearState?: string | null;
+  bedClearCommandId?: string | null;
+  bedClearExpiresAtUtc?: string | null;
   errorCode?: string | null;
   failureCode?: string | null;
+  failureRetryable?: boolean | null;
+  failureRequiresReconciliation?: boolean | null;
   payloadJson?: string | null;
   jobLogicalRevision?: number | null;
   dispatchStateLogicalRevision?: number | null;

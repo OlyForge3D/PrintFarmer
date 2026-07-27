@@ -14,6 +14,7 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -717,6 +718,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 elapsed);
 
             Guid printerId = job.AssignedPrinterId.Value;
+            PrinterDispatchState? activeState = await _db.PrinterDispatchStates
+                .FirstOrDefaultAsync(
+                    state => state.PrinterId == printerId,
+                    ct);
+            QueueDispatchAttempt? activeAttempt =
+                activeState?.ActiveDispatchAttemptId is Guid activeAttemptId
+                    ? await _db.QueueDispatchAttempts.FirstOrDefaultAsync(
+                        attempt =>
+                            attempt.Id == activeAttemptId &&
+                            attempt.PrintJobId == job.Id &&
+                            attempt.Outcome == DispatchAttemptOutcome.Accepted,
+                        ct)
+                    : null;
+            if (activeState?.ActiveJobId != job.Id ||
+                activeAttempt is null ||
+                activeState.PhysicalControlCommandId.HasValue)
+            {
+                continue;
+            }
+
             string? currentPrinterState = printerStateLookup(printerId);
 
             _logger.Log(
@@ -747,6 +768,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     currentPrinterState);
 
                 job.Status = PrintJobStatus.Completed;
+                job.ActiveExternalPrinterId = null;
                 job.ActualEndTime = DateTime.UtcNow;
 
                 if (job.ActualStartTime.HasValue)
@@ -777,6 +799,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     currentPrinterState);
 
                 job.Status = PrintJobStatus.Failed;
+                job.ActiveExternalPrinterId = null;
                 job.ActualEndTime = DateTime.UtcNow;
                 job.FailureReason = $"Orphaned job synced - printer was in {currentPrinterState} state after restart";
 
@@ -954,11 +977,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                         command.AggregateId == state.ActiveJobId &&
                         command.AttemptId == activeAttemptId &&
                         command.EventType == BackendControlCommandConsumerService.EventType &&
-                        (command.Status == QueueOutboxEventStatus.Processing ||
+                        (command.Status == QueueOutboxEventStatus.Pending ||
+                         command.Status == QueueOutboxEventStatus.Processing ||
                          (command.Status == QueueOutboxEventStatus.DeadLettered &&
                           command.FailureCode == "manual_control_reconciliation_required")),
                     ct);
-            if (hasUnresolvedControl)
+            if (hasUnresolvedControl ||
+                state.PhysicalControlCommandId.HasValue)
             {
                 _logger.LogInformation(
                     "Deferred terminal callback for printer {PrinterId}; control command for " +
@@ -1038,6 +1063,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             observedIdentity,
             attempt.BackendJobId,
             attempt.BackendCommandId,
+            attempt.BackendFileIdentity,
             attempt.BackendFileName);
 
     private static bool MatchesIdentity(string? observedIdentity, params string?[] expected)
@@ -1140,22 +1166,6 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     /// <inheritdoc />
     public async Task<bool> EnsureExternalPrintJobExistsAsync(Guid printerId, string? fileName, CancellationToken ct = default)
     {
-        bool hasActiveJob = await _db.PrintJobs
-            .AnyAsync(
-                j => j.AssignedPrinterId == printerId &&
-                     (j.Status == PrintJobStatus.Starting ||
-                      j.Status == PrintJobStatus.Printing ||
-                      j.Status == PrintJobStatus.Paused),
-                ct);
-
-        if (hasActiveJob)
-        {
-            _logger.LogDebug(
-                "[PrintJobCompletionService] Active job already exists for printer {PrinterId}, skipping external print creation",
-                printerId);
-            return false;
-        }
-
         string displayName = !string.IsNullOrWhiteSpace(fileName)
             ? Path.GetFileName(fileName)
             : "External Print";
@@ -1174,11 +1184,58 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             UpdatedAt = now,
             QueuedAt = now,
             IsExternalPrint = true,
+            ActiveExternalPrinterId = printerId,
             ExternalJobId = $"ext-{printerId:N}-{now:yyyyMMddHHmmss}",
         };
 
-        _db.PrintJobs.Add(externalJob);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await using IDbContextTransaction? transaction = _db.Database.IsRelational()
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            bool hasActiveJob = await _db.PrintJobs
+                .AnyAsync(
+                    job =>
+                        job.AssignedPrinterId == printerId &&
+                        (job.Status == PrintJobStatus.Starting ||
+                         job.Status == PrintJobStatus.Printing ||
+                         job.Status == PrintJobStatus.Paused),
+                    ct);
+            if (hasActiveJob)
+            {
+                return false;
+            }
+
+            _db.PrintJobs.Add(externalJob);
+            await _db.SaveChangesAsync(ct);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+        }
+        catch (DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            bool winnerExists = await _db.PrintJobs
+                .AsNoTracking()
+                .AnyAsync(
+                    job =>
+                        job.ActiveExternalPrinterId == printerId &&
+                        job.IsExternalPrint &&
+                        (job.Status == PrintJobStatus.Starting ||
+                         job.Status == PrintJobStatus.Printing ||
+                         job.Status == PrintJobStatus.Paused),
+                    ct);
+            if (winnerExists)
+            {
+                _logger.LogDebug(
+                    "[PrintJobCompletionService] Concurrent observer already created the active external print for printer {PrinterId}",
+                    printerId);
+                return false;
+            }
+
+            throw;
+        }
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Created external print job {JobId} for printer {PrinterId} (file: {FileName})",

@@ -311,6 +311,7 @@ public sealed class DispatchClaimService(
             // correlate an unmatched printing backend with this attempt.
             BackendCommandId = $"pf-{attemptId:N}",
             BackendFileName = BuildBackendFileName(attemptId, job.GcodeFile?.Name),
+            BackendFileIdentity = BuildBackendFileName(attemptId, job.GcodeFile?.Name),
             BackendCorrelationId = $"pf-{attemptId:N}",
             BackendCallPhase = DispatchBackendCallPhase.Claimed,
         };
@@ -328,7 +329,11 @@ public sealed class DispatchClaimService(
             AggregateRowVersion = job.RowVersion,
             DispatchStateRowVersion = dispatchState.RowVersion,
             AttemptId = attempt.Id,
+            AttemptNumber = attempt.AttemptNumber,
+            AttemptOutcome = attempt.Outcome.ToString(),
             BedClearState = consumesAcknowledgement ? "Consumed" : "None",
+            BedClearCommandId = bedClearCommand?.Id,
+            BedClearExpiresAtUtc = bedClearCommand?.ExpiresAtUtc,
             PrinterId = request.PrinterId,
             ProjectId = job.CalibrationProjectId ?? job.ProjectId,
             JobStatus = PrintJobStatus.Starting.ToString(),
@@ -406,6 +411,31 @@ public sealed class DispatchClaimService(
             await using QueueOutboxTransactionScope transaction =
                 await QueueOutboxTransactionScope.BeginAsync(_db, ct);
             outboxEvent.Sequence = await _sequenceAllocator.AllocateAsync(_db, ct);
+            if (consumesAcknowledgement && bedClearCommand is not null)
+            {
+                await AddLifecycleOutboxEventAsync(
+                    _db,
+                    _sequenceAllocator,
+                    QueueLifecycleEventWriter.EventTypeBedClearConsumed,
+                    aggregateId: request.JobId,
+                    printerId: request.PrinterId,
+                    attemptId: attempt.Id,
+                    aggregateRowVersion: job.RowVersion,
+                    failureCode: null,
+                    payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        jobId = request.JobId,
+                        printerId = request.PrinterId,
+                        attemptId = attempt.Id,
+                        bedClearCommandId = bedClearCommand.Id,
+                        bedClearState = "Consumed",
+                    }),
+                    ct,
+                    bedClearState: "Consumed",
+                    bedClearCommandId: bedClearCommand.Id,
+                    bedClearExpiresAtUtc: bedClearCommand.ExpiresAtUtc);
+            }
+
             _ = await _db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -559,6 +589,9 @@ public sealed class DispatchClaimService(
             BackendFileName = request.UseDeterministicFileName
                 ? BuildBackendFileName(attemptId, request.BackendFileName)
                 : request.BackendFileName,
+            BackendFileIdentity = request.UseDeterministicFileName
+                ? BuildBackendFileName(attemptId, request.BackendFileName)
+                : request.BackendFileName,
             BackendCorrelationId = $"pf-{attemptId:N}",
             BackendCallPhase = DispatchBackendCallPhase.Claimed,
             DispatchStateRowVersionAtClaim = dispatchState.RowVersion,
@@ -621,12 +654,26 @@ public sealed class DispatchClaimService(
 
         if (attempt.BackendCallPhase != DispatchBackendCallPhase.Claimed)
         {
-            return;
+            throw new QueueSemanticConflictException(
+                "The backend call for this dispatch attempt has already started.");
+        }
+
+        PrinterDispatchState? activeState = await LoadActiveAttemptStateAsync(attempt, ct);
+        if (activeState is null)
+        {
+            throw new QueueSemanticConflictException(
+                "The dispatch attempt is no longer the active physical owner.");
         }
 
         attempt.BackendCallPhase = DispatchBackendCallPhase.InvokingBackend;
         attempt.BackendCallStartedAtUtc = DateTime.UtcNow;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
+        activeState.PhysicalControlCommandId = attempt.Id;
+        activeState.PhysicalControlAttemptId = attempt.Id;
+        activeState.PhysicalControlOperation = "start";
+        activeState.PhysicalControlActorSubject = attempt.ActorSubject;
+        activeState.PhysicalControlStartedAtUtc = attempt.BackendCallStartedAtUtc;
+        activeState.PhysicalControlRequiresReconciliation = false;
         await _db.SaveChangesAsync(ct);
     }
 
@@ -647,8 +694,14 @@ public sealed class DispatchClaimService(
             return;
         }
 
-        PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
-            .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
+        PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
+        if (dispatchState is null)
+        {
+            _logger.LogWarning(
+                "Ignoring late known-failure outcome for inactive attempt {AttemptId}.",
+                attemptId);
+            return;
+        }
 
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
@@ -691,6 +744,7 @@ public sealed class DispatchClaimService(
         {
             dispatchState.ActiveJobId = null;
             dispatchState.ActiveDispatchAttemptId = null;
+            ClearPhysicalBarrier(dispatchState, attemptId);
         }
 
         _ = QueueAuditWriter.Add(
@@ -742,9 +796,17 @@ public sealed class DispatchClaimService(
     }
 
     /// <inheritdoc />
+    public Task RecordBackendAcceptedAsync(
+        Guid attemptId,
+        string? backendJobId,
+        CancellationToken ct = default) =>
+        RecordBackendAcceptedAsync(attemptId, backendJobId, null, ct);
+
+    /// <inheritdoc />
     public async Task RecordBackendAcceptedAsync(
         Guid attemptId,
         string? backendJobId,
+        string? backendFileIdentity,
         CancellationToken ct = default)
     {
         QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
@@ -754,6 +816,15 @@ public sealed class DispatchClaimService(
         if (attempt is null)
         {
             _logger.LogWarning("RecordBackendAccepted: Attempt {AttemptId} not found.", attemptId);
+            return;
+        }
+
+        PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
+        if (dispatchState is null)
+        {
+            _logger.LogWarning(
+                "Ignoring late backend acceptance for inactive attempt {AttemptId}.",
+                attemptId);
             return;
         }
 
@@ -771,6 +842,11 @@ public sealed class DispatchClaimService(
         if (!string.IsNullOrWhiteSpace(backendJobId))
         {
             attempt.BackendJobId = backendJobId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(backendFileIdentity))
+        {
+            attempt.BackendFileIdentity = backendFileIdentity;
         }
 
         attempt.UpdatedAtUtc = nowUtc;
@@ -800,6 +876,8 @@ public sealed class DispatchClaimService(
                 Notes = "Backend accepted dispatch",
             });
         }
+
+        ClearPhysicalBarrier(dispatchState, attemptId);
 
         _ = QueueAuditWriter.Add(
             _db,
@@ -868,6 +946,15 @@ public sealed class DispatchClaimService(
             return;
         }
 
+        PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
+        if (dispatchState is null)
+        {
+            _logger.LogWarning(
+                "Ignoring late unknown outcome for inactive attempt {AttemptId}.",
+                attemptId);
+            return;
+        }
+
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         attempt.Outcome = DispatchAttemptOutcome.Unknown;
@@ -876,6 +963,11 @@ public sealed class DispatchClaimService(
         attempt.RequiresReconciliation = true;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
+        if (dispatchState.PhysicalControlCommandId == attemptId)
+        {
+            dispatchState.PhysicalControlRequiresReconciliation = true;
+        }
+
         BedClearCommandRecord? unknownCommand = await _db.BedClearCommandRecords
             .FirstOrDefaultAsync(record => record.DispatchAttemptId == attemptId, ct);
         if (unknownCommand is not null)
@@ -935,6 +1027,27 @@ public sealed class DispatchClaimService(
     }
 
     // ===== Gate evaluation helpers =====
+    private async Task<PrinterDispatchState?> LoadActiveAttemptStateAsync(
+        QueueDispatchAttempt attempt,
+        CancellationToken ct)
+    {
+        PrinterDispatchState? state = await _db.PrinterDispatchStates
+            .FirstOrDefaultAsync(candidate => candidate.PrinterId == attempt.PrinterId, ct);
+        Guid? expectedJobId = attempt.PrintJobId;
+        if (state is null ||
+            state.ActiveDispatchAttemptId != attempt.Id ||
+            state.ActiveJobId != expectedJobId)
+        {
+            return null;
+        }
+
+        // Force a concurrency-token-bound write even when the outcome does not otherwise
+        // change dispatch-state fields. A competing B claim therefore makes late A fail
+        // instead of mutating B's job through a stale pre-read.
+        state.Revision = Math.Max(1, state.Revision) + 1;
+        return state;
+    }
+
     private static DispatchClaimResult? EvaluatePrinterGates(
         Printer printer,
         PrinterDispatchState dispatchState,
@@ -955,6 +1068,13 @@ public sealed class DispatchClaimService(
         if (!printer.IsAvailable)
         {
             return DispatchClaimResult.Fail("printer_unavailable", $"Printer {printerId} is not available.");
+        }
+
+        if (dispatchState.PhysicalControlCommandId.HasValue)
+        {
+            return DispatchClaimResult.Fail(
+                "printer_physical_control_in_flight",
+                $"Printer {printerId} has an in-flight physical control barrier.");
         }
 
         // Mutual exclusion is strict. Idempotent retries are resolved by the caller from
@@ -1360,6 +1480,22 @@ public sealed class DispatchClaimService(
                 "The exact pinned spool material no longer matches the queued job.");
         }
 
+        if (string.IsNullOrWhiteSpace(job.PinnedFilamentSku) ||
+            string.IsNullOrWhiteSpace(job.PinnedFilamentLotNumber) ||
+            !string.Equals(
+                spool.Sku,
+                job.PinnedFilamentSku,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                spool.LotNumber,
+                job.PinnedFilamentLotNumber,
+                StringComparison.Ordinal))
+        {
+            return DispatchClaimResult.Fail(
+                "filament_spool_identity_mismatch",
+                "The physical spool SKU or lot no longer matches the pinned calibration identity.");
+        }
+
         if (job.EstimatedFilamentUsage is > 0 &&
             spool.WeightGrams < job.EstimatedFilamentUsage.Value)
         {
@@ -1381,6 +1517,23 @@ public sealed class DispatchClaimService(
         dispatchState.AcknowledgedJobRowVersion = null;
         dispatchState.AcknowledgedQueueRevision = null;
         dispatchState.AcknowledgedPrinterConfigRevision = null;
+    }
+
+    private static void ClearPhysicalBarrier(
+        PrinterDispatchState? state,
+        Guid attemptId)
+    {
+        if (state?.PhysicalControlCommandId != attemptId)
+        {
+            return;
+        }
+
+        state.PhysicalControlCommandId = null;
+        state.PhysicalControlAttemptId = null;
+        state.PhysicalControlOperation = null;
+        state.PhysicalControlActorSubject = null;
+        state.PhysicalControlStartedAtUtc = null;
+        state.PhysicalControlRequiresReconciliation = false;
     }
 
     private async Task WriteDeniedAuditAsync(
@@ -1489,13 +1642,24 @@ public sealed class DispatchClaimService(
         CancellationToken ct,
         Guid? projectId = null,
         string? jobStatus = null,
-        string? jobKind = null)
+        string? jobKind = null,
+        string? bedClearState = null,
+        Guid? bedClearCommandId = null,
+        DateTime? bedClearExpiresAtUtc = null,
+        bool? failureRetryable = null,
+        bool? failureRequiresReconciliation = null)
     {
         DateTime nowUtc = DateTime.UtcNow;
         PrintJob? job = db.PrintJobs.Local.FirstOrDefault(candidate => candidate.Id == aggregateId)
             ?? await db.PrintJobs
                 .AsNoTracking()
                 .FirstOrDefaultAsync(candidate => candidate.Id == aggregateId, ct);
+        QueueDispatchAttempt? attempt = attemptId.HasValue
+            ? db.QueueDispatchAttempts.Local.FirstOrDefault(candidate => candidate.Id == attemptId.Value)
+                ?? await db.QueueDispatchAttempts
+                   .AsNoTracking()
+                   .FirstOrDefaultAsync(candidate => candidate.Id == attemptId.Value, ct)
+            : null;
         var outbox = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -1508,9 +1672,17 @@ public sealed class DispatchClaimService(
             JobStatus = jobStatus ?? job?.Status.ToString(),
             JobKind = jobKind ?? job?.JobKind?.ToString() ?? nameof(JobKind.Standard),
             AttemptId = attemptId,
+            AttemptNumber = attempt?.AttemptNumber,
+            AttemptOutcome = attempt?.Outcome.ToString(),
+            BedClearState = bedClearState,
+            BedClearCommandId = bedClearCommandId,
+            BedClearExpiresAtUtc = bedClearExpiresAtUtc,
             EventType = eventType,
             SchemaVersion = "1",
             FailureCode = failureCode,
+            FailureRetryable = failureRetryable ?? attempt?.IsRetryable,
+            FailureRequiresReconciliation =
+                failureRequiresReconciliation ?? attempt?.RequiresReconciliation,
             PayloadJson = payloadJson,
             Status = QueueOutboxEventStatus.Pending,
             CreatedAtUtc = nowUtc,

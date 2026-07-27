@@ -435,6 +435,17 @@ public class PrintJob
     [MaxLength(256)]
     public string? PinnedFilamentSku { get; set; }
 
+    /// <summary>Physical production lot pinned from the selected spool at creation.</summary>
+    [MaxLength(256)]
+    public string? PinnedFilamentLotNumber { get; set; }
+
+    /// <summary>
+    /// Unique nullable key used only while an externally observed print is active.
+    /// Setting this to the printer ID provides provider-independent unique protection
+    /// against concurrent observers creating duplicate active external jobs.
+    /// </summary>
+    public Guid? ActiveExternalPrinterId { get; set; }
+
     /// <summary>SHA-256 of the persisted filament snapshot used for this job.</summary>
     [MaxLength(64)]
     public string? FilamentSnapshotSha256 { get; set; }

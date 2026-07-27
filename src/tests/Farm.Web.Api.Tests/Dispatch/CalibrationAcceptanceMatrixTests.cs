@@ -210,6 +210,8 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         {
             Id = Guid.NewGuid(),
             Material = CalibrationMaterial,
+            Sku = "PLA-TEST-SKU",
+            LotNumber = "LOT-TEST",
             WeightGrams = 1000,
             InUse = true,
             AssignedPrinterId = printer.Id,
@@ -228,6 +230,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             FilamentProductId = "pla",
             FilamentProductName = "PLA",
             FilamentMaterial = CalibrationMaterial,
+            FilamentSku = "PLA-TEST-SKU",
             LocalSpoolId = spool.Id,
             FilamentSnapshotJson = """{"material":"PLA"}""",
         });
@@ -311,6 +314,8 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             PinnedToolheadId = toolhead.Id,
             PinnedToolheadIndex = toolhead.Index,
             PinnedSpoolId = spool.Id,
+            PinnedFilamentSku = "PLA-TEST-SKU",
+            PinnedFilamentLotNumber = "LOT-TEST",
             FilamentSnapshotSha256 = ComputeSha256("""{"material":"PLA"}"""),
             SourceModelSha256 = gcode.SourceModelSha256,
             CalibrationManifestSha256 = gcode.CalibrationManifestSha256,
@@ -1279,7 +1284,10 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         result.Outcome.Should().Be(BedClearAckOutcome.Accepted);
 
         await using AppDbContext verifyCtx = CreateContext();
-        QueueDispatchOutbox? evt = await verifyCtx.QueueDispatchOutbox.SingleAsync();
+        QueueDispatchOutbox? evt = await verifyCtx.QueueDispatchOutbox.SingleAsync(
+            candidate =>
+                candidate.EventType ==
+                BedClearAcknowledgementService.BackendStartCommandEventType);
 
         // Verify required metadata fields (schemaVersion=1, eventType, non-zero sequence).
         evt.SchemaVersion.Should().Be("1", "outbox events must use schemaVersion 1");
@@ -1292,6 +1300,15 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         evt.PayloadJson.Should().NotBeNullOrWhiteSpace("payload must be non-empty");
         evt.Status.Should().Be(QueueOutboxEventStatus.Pending, "new events must start in Pending state");
         evt.CreatedAtUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
+
+        QueueDispatchOutbox acknowledged = await verifyCtx.QueueDispatchOutbox
+            .SingleAsync(candidate =>
+                candidate.EventType ==
+                QueueLifecycleEventWriter.EventTypeBedClearAcknowledged);
+        acknowledged.BedClearState.Should().Be("Acknowledged");
+        acknowledged.BedClearCommandId.Should().NotBeNull();
+        acknowledged.BedClearExpiresAtUtc.Should().NotBeNull();
+        acknowledged.AttemptId.Should().BeNull();
     }
 
     [Fact]
@@ -1457,6 +1474,107 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         PrintJob? claimedJob = await verifyCtx.PrintJobs.FindAsync(job.Id);
         claimedJob!.Status.Should().Be(PrintJobStatus.Starting,
             "successful claim must advance Standard job to Starting via the shared claim path");
+    }
+
+    [Theory]
+    [InlineData("sku")]
+    [InlineData("lot")]
+    public async Task PhysicalSpool_SameMaterialSubstitution_AcknowledgementFailsClosed(
+        string changedIdentity)
+    {
+        await using AppDbContext seed = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seed);
+        Spool spool = await seed.Spools.SingleAsync(
+            candidate => candidate.AssignedPrinterId == printerId);
+        if (changedIdentity == "sku")
+        {
+            spool.Sku = "DIFFERENT-SKU";
+        }
+        else
+        {
+            spool.LotNumber = "DIFFERENT-LOT";
+        }
+
+        await seed.SaveChangesAsync();
+        PrinterDispatchState state = await seed.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
+
+        await using AppDbContext ackContext = CreateContext();
+        AcknowledgeBedClearResult result = await CreateAckService(ackContext)
+            .AcknowledgeAsync(new AcknowledgeBedClearRequest(
+                jobId,
+                printerId,
+                "operator",
+                $"spool-{changedIdentity}",
+                state.RowVersion,
+                1,
+                job.RowVersion));
+
+        result.Outcome.Should().Be(BedClearAckOutcome.FilamentCheckFailed);
+        (await ackContext.QueueDispatchOutbox.CountAsync(candidate =>
+            candidate.EventType ==
+            BedClearAcknowledgementService.BackendStartCommandEventType)).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false, "Invalidated")]
+    [InlineData(true, "Expired")]
+    public async Task BedClearLifecycle_StaleOrExpired_EmitsTypedDurableEvent(
+        bool expire,
+        string expectedState)
+    {
+        await using AppDbContext seed = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seed);
+        PrinterDispatchState state = await seed.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
+        await using (AppDbContext ackContext = CreateContext())
+        {
+            AcknowledgeBedClearResult accepted = await CreateAckService(ackContext)
+                .AcknowledgeAsync(new AcknowledgeBedClearRequest(
+                    jobId,
+                    printerId,
+                    "operator",
+                    "lifecycle-key",
+                    state.RowVersion,
+                    1,
+                    job.RowVersion));
+            accepted.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        }
+
+        await using (AppDbContext mutate = CreateContext())
+        {
+            PrinterDispatchState current = await mutate.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            if (expire)
+            {
+                current.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddSeconds(-1);
+                BedClearCommandRecord command = await mutate.BedClearCommandRecords.SingleAsync();
+                command.ExpiresAtUtc = DateTime.UtcNow.AddSeconds(-1);
+            }
+            else
+            {
+                current.QueueRevision++;
+            }
+
+            await mutate.SaveChangesAsync();
+        }
+
+        await using AppDbContext lifecycleContext = CreateContext();
+        await CreateAckService(lifecycleContext)
+            .InvalidateStaleAcknowledgementsAsync(printerId);
+
+        string expectedType = expire
+            ? QueueLifecycleEventWriter.EventTypeBedClearExpired
+            : QueueLifecycleEventWriter.EventTypeBedClearInvalidated;
+        QueueDispatchOutbox lifecycle = await lifecycleContext.QueueDispatchOutbox
+            .SingleAsync(candidate => candidate.EventType == expectedType);
+        lifecycle.BedClearState.Should().Be(expectedState);
+        lifecycle.BedClearCommandId.Should().NotBeNull();
+        lifecycle.BedClearExpiresAtUtc.Should().NotBeNull();
+        lifecycle.FailureRetryable.Should().BeFalse();
+        lifecycle.FailureRequiresReconciliation.Should().BeFalse();
     }
 
     private static string ComputeSha256(string value) =>

@@ -20,11 +20,13 @@ namespace Farm.Infrastructure.Services;
 public class JobSchedulingService(
     AppDbContext context,
     ILogger<JobSchedulingService> logger,
-    IPrintJobManagementService? printJobManagement = null)
+    IPrintJobManagementService? printJobManagement = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null)
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
     private readonly ILogger<JobSchedulingService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintJobManagementService? _printJobManagement = printJobManagement;
+    private readonly IQueueResourceAuthorizationService? _resourceAuthorization = resourceAuthorization;
 
     /// <summary>
     /// Schedule a print job for a specific date and time in a given timezone
@@ -41,12 +43,30 @@ public class JobSchedulingService(
         string timeZone = "UTC",
         string? recurrencePattern = null,
         DateTime? recurrenceEndDate = null,
+        CancellationToken cancellationToken = default) =>
+        await ScheduleJobAsync(
+            jobId,
+            scheduledStartTime,
+            timeZone,
+            recurrencePattern,
+            recurrenceEndDate,
+            QueueActorIdentity.Scheduler,
+            cancellationToken);
+
+    public async Task<ScheduledJobDto> ScheduleJobAsync(
+        Guid jobId,
+        DateTime scheduledStartTime,
+        string timeZone,
+        string? recurrencePattern,
+        DateTime? recurrenceEndDate,
+        string actorSubject,
         CancellationToken cancellationToken = default)
     {
         // Validate job exists
         PrintJob job = await _context.PrintJobs
             .Include(j => j.Schedule)
             .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken) ?? throw new InvalidOperationException($"Print job '{jobId}' not found");
+        await EnsureActorMayScheduleAsync(job, actorSubject, cancellationToken);
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
@@ -67,6 +87,7 @@ public class JobSchedulingService(
             job.Schedule.IsActive = true;
             job.Schedule.IsPaused = false;
             job.Schedule.UpdatedAt = DateTime.UtcNow;
+            job.Schedule.InitiatingActorSubject = actorSubject;
         }
         else
         {
@@ -80,7 +101,8 @@ public class JobSchedulingService(
                 RecurrenceEndDate = recurrenceEndDate,
                 IsActive = true,
                 IsPaused = false,
-                ScheduledAt = DateTime.UtcNow
+                ScheduledAt = DateTime.UtcNow,
+                InitiatingActorSubject = actorSubject,
             };
             job.Schedule = schedule;
             _context.JobSchedules.Add(schedule);
@@ -105,10 +127,25 @@ public class JobSchedulingService(
         Guid jobId,
         DateTime newScheduledTime,
         string timeZone = "UTC",
+        CancellationToken cancellationToken = default) =>
+        await RescheduleJobAsync(
+            jobId,
+            newScheduledTime,
+            timeZone,
+            QueueActorIdentity.Scheduler,
+            cancellationToken);
+
+    public async Task<ScheduledJobDto> RescheduleJobAsync(
+        Guid jobId,
+        DateTime newScheduledTime,
+        string timeZone,
+        string actorSubject,
         CancellationToken cancellationToken = default)
     {
         JobSchedule schedule = await _context.JobSchedules
+            .Include(candidate => candidate.PrintJob)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         // Validate timezone
         if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
@@ -122,6 +159,7 @@ public class JobSchedulingService(
         schedule.ScheduledStartTime = utcTime;
         schedule.TimeZone = timeZone;
         schedule.UpdatedAt = DateTime.UtcNow;
+        schedule.InitiatingActorSubject = actorSubject;
 
         await _context.SaveChangesAsync(cancellationToken);
 
@@ -136,10 +174,20 @@ public class JobSchedulingService(
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to cancel scheduling for.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public async Task CancelSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
+    public Task CancelSchedulingAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default) =>
+        CancelSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
+
+    public async Task CancelSchedulingAsync(
+        Guid jobId,
+        string actorSubject,
+        CancellationToken cancellationToken = default)
     {
         JobSchedule schedule = await _context.JobSchedules
+            .Include(candidate => candidate.PrintJob)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsActive = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -154,10 +202,20 @@ public class JobSchedulingService(
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to pause.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public async Task PauseSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
+    public Task PauseSchedulingAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default) =>
+        PauseSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
+
+    public async Task PauseSchedulingAsync(
+        Guid jobId,
+        string actorSubject,
+        CancellationToken cancellationToken = default)
     {
         JobSchedule schedule = await _context.JobSchedules
+            .Include(candidate => candidate.PrintJob)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsPaused = true;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -172,10 +230,20 @@ public class JobSchedulingService(
     /// </summary>
     /// <param name="jobId">The unique identifier of the paused job to resume.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public async Task ResumeSchedulingAsync(Guid jobId, CancellationToken cancellationToken = default)
+    public Task ResumeSchedulingAsync(
+        Guid jobId,
+        CancellationToken cancellationToken = default) =>
+        ResumeSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
+
+    public async Task ResumeSchedulingAsync(
+        Guid jobId,
+        string actorSubject,
+        CancellationToken cancellationToken = default)
     {
         JobSchedule schedule = await _context.JobSchedules
+            .Include(candidate => candidate.PrintJob)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+        await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsPaused = false;
         schedule.UpdatedAt = DateTime.UtcNow;
@@ -298,6 +366,11 @@ public class JobSchedulingService(
         List<JobSchedule> dueSchedules = await _context.JobSchedules
             .Where(js => js.IsActive && !js.IsPaused && js.ScheduledStartTime <= now)
             .Include(js => js.PrintJob)
+            .OrderByDescending(js => js.PrintJob.Priority)
+            .ThenBy(js => js.ScheduledStartTime)
+            .ThenBy(js => js.PrintJob.QueuePosition)
+            .ThenBy(js => js.PrintJob.QueuedAt)
+            .ThenBy(js => js.Id)
             .ToListAsync(cancellationToken);
 
         foreach (JobSchedule? schedule in dueSchedules)
@@ -378,7 +451,7 @@ public class JobSchedulingService(
         {
             QueuedPrintJobDto result = await _printJobManagement.DispatchJobAsync(
                 schedule.PrintJobId.ToString(),
-                QueueActorIdentity.Scheduler,
+                schedule.InitiatingActorSubject,
                 ifMatchJobRowVersion: null,
                 cancellationToken);
 
@@ -412,6 +485,38 @@ public class JobSchedulingService(
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+    }
+
+    private async Task EnsureActorMayScheduleAsync(
+        PrintJob job,
+        string actorSubject,
+        CancellationToken ct)
+    {
+        if (_resourceAuthorization is null)
+        {
+            return;
+        }
+
+        bool canAccessJob = await _resourceAuthorization.CanActorAccessJobAsync(
+            actorSubject,
+            job.Id,
+            PrinterGroupAccessLevel.Submit,
+            ct);
+        bool canAccessPrinter = job.AssignedPrinterId.HasValue &&
+            await _resourceAuthorization.CanActorAccessPrinterAsync(
+                actorSubject,
+                job.AssignedPrinterId.Value,
+                PrinterGroupAccessLevel.Submit,
+                ct);
+        bool canAccessProject = !job.CalibrationProjectId.HasValue ||
+            await _resourceAuthorization.CanActorAccessProjectAsync(
+                actorSubject,
+                job.CalibrationProjectId.Value,
+                ct);
+        if (!canAccessJob || !canAccessPrinter || !canAccessProject)
+        {
+            throw new UnauthorizedAccessException("The scheduled queue resource was not found.");
+        }
     }
 
     /// <summary>

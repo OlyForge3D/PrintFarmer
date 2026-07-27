@@ -116,16 +116,24 @@ public enum UploadAndPrintOutcome
 /// <param name="ErrorMessage">Human-readable error message when <paramref name="Success"/> is false.</param>
 /// <param name="Outcome">Typed physical outcome used to decide whether retry is safe.</param>
 /// <param name="BackendJobId">Real provider identity returned by the backend, when available.</param>
+/// <param name="BackendFileIdentity">Provider file/path identity, distinct from a history UID.</param>
 public sealed record UploadAndPrintResult(
     bool Success,
     UploadAndPrintStage FailedStage = UploadAndPrintStage.Completed,
     string? ErrorMessage = null,
     UploadAndPrintOutcome Outcome = UploadAndPrintOutcome.Accepted,
-    string? BackendJobId = null)
+    string? BackendJobId = null,
+    string? BackendFileIdentity = null)
 {
     /// <summary>Creates a successful result.</summary>
-    public static UploadAndPrintResult Ok(string? backendJobId = null) =>
-        new(true, Outcome: UploadAndPrintOutcome.Accepted, BackendJobId: backendJobId);
+    public static UploadAndPrintResult Ok(
+        string? backendJobId = null,
+        string? backendFileIdentity = null) =>
+        new(
+            true,
+            Outcome: UploadAndPrintOutcome.Accepted,
+            BackendJobId: backendJobId,
+            BackendFileIdentity: backendFileIdentity);
 
     /// <summary>Creates an explicit backend rejection.</summary>
     public static UploadAndPrintResult Fail(UploadAndPrintStage stage, string? message = null)

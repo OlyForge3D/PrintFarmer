@@ -139,7 +139,6 @@ public sealed class BackendControlCommandConsumerService(
             }
 
             PrinterDispatchState? dispatchState = await leaseDb.PrinterDispatchStates
-                .AsNoTracking()
                 .SingleOrDefaultAsync(
                     state => state.PrinterId == payload.PrinterId,
                     ct);
@@ -154,6 +153,23 @@ public sealed class BackendControlCommandConsumerService(
                 return;
             }
 
+            if (dispatchState.PhysicalControlCommandId.HasValue &&
+                dispatchState.PhysicalControlCommandId != command.Id)
+            {
+                command.Status = QueueOutboxEventStatus.DeadLettered;
+                command.FailureCode = "physical_control_fence_conflict";
+                command.LastError = "Another physical command owns the printer barrier.";
+                command.CompletedAtUtc = DateTime.UtcNow;
+                await leaseDb.SaveChangesAsync(ct);
+                return;
+            }
+
+            dispatchState.PhysicalControlCommandId = command.Id;
+            dispatchState.PhysicalControlAttemptId = payload.AttemptId;
+            dispatchState.PhysicalControlOperation = payload.Operation;
+            dispatchState.PhysicalControlActorSubject = payload.ActorSubject;
+            dispatchState.PhysicalControlStartedAtUtc = DateTime.UtcNow;
+            dispatchState.PhysicalControlRequiresReconciliation = false;
             command.Status = QueueOutboxEventStatus.Processing;
             command.AttemptCount++;
             command.LastAttemptedAtUtc = DateTime.UtcNow;
@@ -243,8 +259,11 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
-        if (payload.AttemptId.HasValue &&
-            dispatchState.ActiveDispatchAttemptId != payload.AttemptId)
+        if (!payload.AttemptId.HasValue ||
+            dispatchState.ActiveJobId != payload.JobId ||
+            dispatchState.ActiveDispatchAttemptId != payload.AttemptId ||
+            dispatchState.PhysicalControlCommandId != commandId ||
+            dispatchState.PhysicalControlAttemptId != payload.AttemptId)
         {
             command.Status = QueueOutboxEventStatus.DeadLettered;
             command.FailureCode = "control_attempt_fence_conflict";
@@ -280,6 +299,8 @@ public sealed class BackendControlCommandConsumerService(
             dispatchState.QueueRevision++;
             ClearAcknowledgement(dispatchState);
         }
+
+        ClearPhysicalBarrier(dispatchState);
 
         if (payload.AttemptId.HasValue)
         {
@@ -370,6 +391,8 @@ public sealed class BackendControlCommandConsumerService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IDbOutboxSequenceAllocator allocator =
+            scope.ServiceProvider.GetRequiredService<IDbOutboxSequenceAllocator>();
         QueueDispatchOutbox? command = await db.QueueDispatchOutbox
             .FirstOrDefaultAsync(candidate => candidate.Id == commandId, ct);
         if (command is null || command.Status != QueueOutboxEventStatus.Processing)
@@ -377,6 +400,16 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
+        PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
+            .FirstOrDefaultAsync(candidate => candidate.PrinterId == payload.PrinterId, ct);
+        if (dispatchState?.PhysicalControlCommandId == commandId &&
+            dispatchState.ActiveDispatchAttemptId == payload.AttemptId)
+        {
+            ClearPhysicalBarrier(dispatchState);
+        }
+
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db, ct);
         command.LastError = errorDetail[..Math.Min(errorDetail.Length, 2047)];
         command.FailureCode = errorCode;
         command.Status = QueueOutboxEventStatus.DeadLettered;
@@ -393,8 +426,34 @@ public sealed class BackendControlCommandConsumerService(
             dispatchAttemptId: payload.AttemptId,
             reasonCode: errorCode,
             detail: new { commandId });
+        PrintJob? job = await db.PrintJobs
+            .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
+        if (job is not null)
+        {
+            await QueueLifecycleEventWriter.AddEventAsync(
+                db,
+                allocator,
+                QueueLifecycleEventWriter.EventTypeControlRejected,
+                job.Id,
+                payload.PrinterId,
+                payload.AttemptId,
+                job.RowVersion,
+                errorCode,
+                JsonSerializer.Serialize(new
+                {
+                    jobId = job.Id,
+                    printerId = payload.PrinterId,
+                    attemptId = payload.AttemptId,
+                    operation = payload.Operation,
+                    failureCode = errorCode,
+                }),
+                failureRetryable: false,
+                failureRequiresReconciliation: false,
+                ct: ct);
+        }
 
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private async Task ApplyUnknownAsync(
@@ -404,6 +463,8 @@ public sealed class BackendControlCommandConsumerService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IDbOutboxSequenceAllocator allocator =
+            scope.ServiceProvider.GetRequiredService<IDbOutboxSequenceAllocator>();
         QueueDispatchOutbox? command = await db.QueueDispatchOutbox
             .FirstOrDefaultAsync(candidate => candidate.Id == commandId, ct);
         if (command is null || command.Status != QueueOutboxEventStatus.Processing)
@@ -412,6 +473,14 @@ public sealed class BackendControlCommandConsumerService(
         }
 
         DateTime now = DateTime.UtcNow;
+        bool firstUnknown = command.FailureCode != "backend_control_unknown";
+        PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
+            .FirstOrDefaultAsync(candidate => candidate.PrinterId == command.PrinterId, ct);
+        if (dispatchState?.PhysicalControlCommandId == commandId)
+        {
+            dispatchState.PhysicalControlRequiresReconciliation = true;
+        }
+
         command.LastAttemptedAtUtc = now;
         command.RetryAfterUtc = null;
         if (command.CreatedAtUtc <= now - ManualReviewAge)
@@ -434,7 +503,38 @@ public sealed class BackendControlCommandConsumerService(
             command.LastError = errorDetail[..Math.Min(errorDetail.Length, 2047)];
         }
 
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db, ct);
+        if (firstUnknown)
+        {
+            PrintJob? job = await db.PrintJobs
+                .FirstOrDefaultAsync(candidate => candidate.Id == command.AggregateId, ct);
+            if (job is not null)
+            {
+                await QueueLifecycleEventWriter.AddEventAsync(
+                    db,
+                    allocator,
+                    QueueLifecycleEventWriter.EventTypeControlUnknown,
+                    job.Id,
+                    command.PrinterId,
+                    command.AttemptId,
+                    job.RowVersion,
+                    "backend_control_unknown",
+                    JsonSerializer.Serialize(new
+                    {
+                        jobId = job.Id,
+                        printerId = command.PrinterId,
+                        attemptId = command.AttemptId,
+                        failureCode = "backend_control_unknown",
+                    }),
+                    failureRetryable: false,
+                    failureRequiresReconciliation: true,
+                    ct: ct);
+            }
+        }
+
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private async Task ReconcileProcessingCommandAsync(Guid commandId, CancellationToken ct)
@@ -476,7 +576,9 @@ public sealed class BackendControlCommandConsumerService(
                     candidate => candidate.PrinterId == payload.PrinterId,
                     ct);
             if (state?.ActiveJobId != payload.JobId ||
-                state.ActiveDispatchAttemptId != payload.AttemptId)
+                state.ActiveDispatchAttemptId != payload.AttemptId ||
+                state.PhysicalControlCommandId != commandId ||
+                state.PhysicalControlAttemptId != payload.AttemptId)
             {
                 await ApplyRejectedAsync(
                     commandId,
@@ -513,7 +615,9 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
-        bool identityMatches = MatchesBackendIdentity(payload.BackendIdentity, status);
+        bool identityMatches = MatchesBackendIdentity(
+            payload.BackendFileIdentity ?? payload.BackendIdentity,
+            status);
         if (operation == BackendControlOperation.Pause &&
             IsPausedState(status.State) &&
             identityMatches)
@@ -530,15 +634,17 @@ public sealed class BackendControlCommandConsumerService(
             return;
         }
 
-        if (operation is BackendControlOperation.Cancel or BackendControlOperation.Abort &&
+        if (operation is BackendControlOperation.Cancel or
+            BackendControlOperation.Abort or
+            BackendControlOperation.EmergencyStop &&
             !IsActiveState(status.State) &&
-            !string.IsNullOrWhiteSpace(payload.BackendIdentity))
+            !string.IsNullOrWhiteSpace(payload.BackendJobId))
         {
             try
             {
                 HistoryJob history = await printers.GetHistoryJobAsync(
                     payload.PrinterId,
-                    payload.BackendIdentity,
+                    payload.BackendJobId,
                     ct);
                 if (IsCancelledHistoryState(history.Status))
                 {
@@ -633,6 +739,16 @@ public sealed class BackendControlCommandConsumerService(
             _ => QueueAuditOperations.JobCancel,
         };
 
+    private static void ClearPhysicalBarrier(PrinterDispatchState state)
+    {
+        state.PhysicalControlCommandId = null;
+        state.PhysicalControlAttemptId = null;
+        state.PhysicalControlOperation = null;
+        state.PhysicalControlActorSubject = null;
+        state.PhysicalControlStartedAtUtc = null;
+        state.PhysicalControlRequiresReconciliation = false;
+    }
+
     private static void ClearAcknowledgement(PrinterDispatchState state)
     {
         state.AcknowledgedJobId = null;
@@ -649,6 +765,8 @@ public sealed class BackendControlCommandConsumerService(
         Guid JobId,
         Guid PrinterId,
         Guid? AttemptId,
+        string? BackendJobId,
+        string? BackendFileIdentity,
         string? BackendIdentity,
         string Operation,
         string ActorSubject);

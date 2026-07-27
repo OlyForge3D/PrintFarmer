@@ -282,30 +282,53 @@ public class JobQueueController(
         foreach (QueueDispatchOutbox evt in candidates)
         {
             nextSequence = evt.Sequence;
-            if (!await resourceAuthorization.CanAccessJobAsync(
+            bool canAccess = string.Equals(
+                evt.AggregateType,
+                nameof(Printer),
+                StringComparison.Ordinal)
+                ? evt.PrinterId.HasValue &&
+                  await resourceAuthorization.CanAccessPrinterAsync(
+                      User,
+                      evt.PrinterId.Value,
+                      PrinterGroupAccessLevel.View,
+                      ct)
+                : await resourceAuthorization.CanAccessJobAsync(
                     User,
                     evt.AggregateId,
                     PrinterGroupAccessLevel.View,
-                    ct))
+                    ct);
+            if (!canAccess)
             {
                 continue;
             }
 
+            Guid? eventJobId = string.Equals(
+                evt.AggregateType,
+                nameof(PrintJob),
+                StringComparison.Ordinal)
+                ? evt.AggregateId
+                : null;
             events.Add(QueueEventEnvelope.FromOutbox(
-                evt.Id,
-                evt.Sequence,
-                evt.CreatedAtUtc,
-                evt.EventType,
-                evt.AggregateId,
-                evt.PrinterId,
-                evt.ProjectId,
-                evt.JobStatus,
-                evt.JobKind,
-                evt.AggregateRowVersion,
-                evt.DispatchStateRowVersion,
-                evt.AttemptId,
-                evt.BedClearState,
+                eventId: evt.Id,
+                sequence: evt.Sequence,
+                occurredAtUtc: evt.CreatedAtUtc,
+                eventType: evt.EventType,
+                jobId: eventJobId,
+                printerId: evt.PrinterId,
+                projectId: evt.ProjectId,
+                jobStatus: evt.JobStatus,
+                jobKind: evt.JobKind,
+                jobRevision: evt.AggregateRowVersion,
+                dispatchStateRevision: evt.DispatchStateRowVersion,
+                attemptId: evt.AttemptId,
+                attemptNumber: evt.AttemptNumber,
+                attemptOutcome: evt.AttemptOutcome,
+                bedClearState: evt.BedClearState,
+                bedClearCommandId: evt.BedClearCommandId,
+                bedClearExpiresAtUtc: evt.BedClearExpiresAtUtc,
                 failureCode: evt.FailureCode,
+                failureRetryable: evt.FailureRetryable,
+                failureRequiresReconciliation: evt.FailureRequiresReconciliation,
                 payloadJson: evt.PayloadJson,
                 jobLogicalRevision: evt.JobRevision,
                 dispatchStateLogicalRevision: evt.DispatchStateRevision));
