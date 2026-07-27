@@ -526,6 +526,32 @@ public sealed class DispatchClaimService(
             dispatchStateRowVersion: dispatchState?.RowVersion,
             detail: new { startPathKind = attempt.StartPathKind });
 
+        // Emit a durable lifecycle event so the outbox publisher broadcasts the failure to
+        // authorized groups. The event is committed in the SAME SaveChangesAsync call as
+        // the dispatch state changes above.
+        if (attempt.PrintJobId is not null)
+        {
+            await AddLifecycleOutboxEventAsync(
+                _db,
+                _sequenceAllocator,
+                EventTypeKnownFailure,
+                aggregateId: attempt.PrintJobId.Value,
+                printerId: attempt.PrinterId,
+                attemptId: attemptId,
+                aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                failureCode: errorCode,
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    jobId = attempt.PrintJobId,
+                    printerId = attempt.PrinterId,
+                    attemptId,
+                    errorCode,
+                    startPathKind = attempt.StartPathKind,
+                    actorSubject = attempt.ActorSubject,
+                }),
+                ct);
+        }
+
         _ = await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -610,6 +636,33 @@ public sealed class DispatchClaimService(
                 hasBackendJobId = !string.IsNullOrWhiteSpace(attempt.BackendJobId),
             });
 
+        // Emit a durable lifecycle event for backend acceptance so the outbox publisher
+        // broadcasts the Printing state transition to authorized groups.
+        if (attempt.PrintJobId is not null)
+        {
+            await AddLifecycleOutboxEventAsync(
+                _db,
+                _sequenceAllocator,
+                EventTypeBackendAccepted,
+                aggregateId: attempt.PrintJobId.Value,
+                printerId: attempt.PrinterId,
+                attemptId: attemptId,
+                aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                failureCode: null,
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    jobId = attempt.PrintJobId,
+                    printerId = attempt.PrinterId,
+                    attemptId,
+                    backendJobId = attempt.BackendJobId,
+                    backendCommandId = attempt.BackendCommandId,
+                    startPathKind = attempt.StartPathKind,
+                    actorSubject = attempt.ActorSubject,
+                    backendAcceptedAtUtc = attempt.BackendAcceptedAtUtc,
+                }),
+                ct);
+        }
+
         _ = await _db.SaveChangesAsync(ct);
 
         _logger.LogInformation(
@@ -654,6 +707,32 @@ public sealed class DispatchClaimService(
                 startPathKind = attempt.StartPathKind,
                 backendCommandId = attempt.BackendCommandId,
             });
+
+        // Emit a durable lifecycle event for the uncertain outcome so operators can detect
+        // that reconciliation is required via the event stream.
+        if (attempt.PrintJobId is not null)
+        {
+            await AddLifecycleOutboxEventAsync(
+                _db,
+                _sequenceAllocator,
+                EventTypeUnknownOutcome,
+                aggregateId: attempt.PrintJobId.Value,
+                printerId: attempt.PrinterId,
+                attemptId: attemptId,
+                aggregateRowVersion: null,
+                failureCode: "backend_outcome_unknown",
+                payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    jobId = attempt.PrintJobId,
+                    printerId = attempt.PrinterId,
+                    attemptId,
+                    backendCommandId = attempt.BackendCommandId,
+                    startPathKind = attempt.StartPathKind,
+                    actorSubject = attempt.ActorSubject,
+                    requiresReconciliation = true,
+                }),
+                ct);
+        }
 
         _ = await _db.SaveChangesAsync(ct);
 
@@ -909,6 +988,81 @@ public sealed class DispatchClaimService(
             // Audit must never mask the original denial reason.
             _logger.LogWarning(ex, "[Claim] Failed to persist denial audit for Job={JobId}", request.JobId);
         }
+    }
+
+    // ===== Terminal lifecycle event type constants =====
+
+    /// <summary>Event type emitted when a dispatch attempt is rejected due to a known pre-start failure.</summary>
+    internal const string EventTypeKnownFailure = "PrintFarmer.Queue.DispatchKnownFailure.v1";
+
+    /// <summary>Event type emitted when the backend confirms it accepted the job (job transitions to Printing).</summary>
+    internal const string EventTypeBackendAccepted = "PrintFarmer.Queue.DispatchAccepted.v1";
+
+    /// <summary>Event type emitted when the backend outcome is unknown and reconciliation is required.</summary>
+    internal const string EventTypeUnknownOutcome = "PrintFarmer.Queue.DispatchUnknown.v1";
+
+    /// <summary>Event type emitted when a reconciliation scan concludes the backend is actively printing.</summary>
+    internal const string EventTypeReconciliationAccepted = "PrintFarmer.Queue.ReconciliationAccepted.v1";
+
+    /// <summary>Event type emitted when a reconciliation scan finds the job absent from the backend.</summary>
+    internal const string EventTypeReconciliationAbsent = "PrintFarmer.Queue.ReconciliationAbsent.v1";
+
+    /// <summary>Event type emitted when a reconciliation scan cannot determine the backend state.</summary>
+    internal const string EventTypeReconciliationIndeterminate = "PrintFarmer.Queue.ReconciliationIndeterminate.v1";
+
+    /// <summary>Event type emitted when a job is completed (all copies finished successfully).</summary>
+    internal const string EventTypeJobCompleted = "PrintFarmer.Queue.JobCompleted.v1";
+
+    /// <summary>Event type emitted when a job transitions to Failed.</summary>
+    internal const string EventTypeJobFailed = "PrintFarmer.Queue.JobFailed.v1";
+
+    /// <summary>Event type emitted when an orphaned Starting/Printing job is synced to a terminal state.</summary>
+    internal const string EventTypeJobOrphanSynced = "PrintFarmer.Queue.JobOrphanSynced.v1";
+
+    /// <summary>Event type emitted when a job is cancelled (terminal; job removed from active queue).</summary>
+    internal const string EventTypeJobCancelled = "PrintFarmer.Queue.JobCancelled.v1";
+
+    /// <summary>Event type emitted when a job's current print attempt is aborted (job returns to queued).</summary>
+    internal const string EventTypeJobAborted = "PrintFarmer.Queue.JobAborted.v1";
+
+    // ===== Shared outbox helper =====
+
+    /// <summary>
+    /// Adds a durable lifecycle outbox event to the context and allocates a monotonic sequence.
+    /// The event is committed atomically when the caller calls <c>SaveChangesAsync()</c>.
+    /// Allocates a sequence via <see cref="IDbOutboxSequenceAllocator"/> — callers must not
+    /// retry concurrency conflicts unless they also reload the counter.
+    /// </summary>
+    internal static async Task AddLifecycleOutboxEventAsync(
+        AppDbContext db,
+        IDbOutboxSequenceAllocator sequenceAllocator,
+        string eventType,
+        Guid aggregateId,
+        Guid? printerId,
+        Guid? attemptId,
+        byte[]? aggregateRowVersion,
+        string? failureCode,
+        string payloadJson,
+        CancellationToken ct)
+    {
+        DateTime nowUtc = DateTime.UtcNow;
+        var outbox = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            Sequence = await sequenceAllocator.AllocateAsync(db, ct),
+            AggregateType = nameof(PrintJob),
+            AggregateId = aggregateId,
+            AggregateRowVersion = aggregateRowVersion,
+            PrinterId = printerId,
+            AttemptId = attemptId,
+            EventType = eventType,
+            SchemaVersion = "1",
+            FailureCode = failureCode,
+            PayloadJson = payloadJson,
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = nowUtc,
+        };
+        db.QueueDispatchOutbox.Add(outbox);
     }
 
     private static string BuildOutboxPayload(PrintJob job, QueueDispatchAttempt attempt) =>

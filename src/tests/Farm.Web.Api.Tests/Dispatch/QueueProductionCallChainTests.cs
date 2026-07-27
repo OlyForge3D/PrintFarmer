@@ -748,8 +748,227 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     }
 
     // =========================================================================
+    // Terminal lifecycle events — outbox correctness
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvent_Completion_WritesOrderedOutboxEventInSameTransaction()
+    {
+        // Arrange: seed, claim, accept
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+        long startSeq = await GetMaxOutboxSequenceAsync(fixture.JobId);
+
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "bk-1");
+        long afterAcceptSeq = await GetMaxOutboxSequenceAsync(fixture.JobId);
+        afterAcceptSeq.Should().BeGreaterThan(startSeq, "backend-accepted must advance the outbox sequence");
+
+        // Act: mark job completed
+        await using AppDbContext completeCtx = CreateContext();
+        bool completed = await CreateCompletionService(completeCtx)
+            .MarkCurrentJobAsCompletedAsync(fixture.PrinterId, "complete");
+        completed.Should().BeTrue();
+
+        // Assert: completion wrote a new ordered outbox event
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox completionEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId && e.EventType == DispatchClaimService.EventTypeJobCompleted)
+            .OrderByDescending(e => e.Sequence)
+            .FirstAsync();
+
+        completionEvent.Sequence.Should().BeGreaterThan(afterAcceptSeq,
+            "the completion event must have a higher sequence than the backend-accepted event");
+        completionEvent.Status.Should().Be(QueueOutboxEventStatus.Pending,
+            "lifecycle events are Pending so the publisher can broadcast them via SignalR");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvent_Failure_WritesOutboxEventInSameTransaction()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "bk-2");
+
+        // Act
+        await using AppDbContext failCtx = CreateContext();
+        bool failed = await CreateCompletionService(failCtx)
+            .MarkCurrentJobAsFailedAsync(fixture.PrinterId, "nozzle clog");
+        failed.Should().BeTrue();
+
+        // Assert
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox failEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId && e.EventType == DispatchClaimService.EventTypeJobFailed)
+            .SingleAsync();
+
+        failEvent.FailureCode.Should().Be("backend_failure");
+        failEvent.Status.Should().Be(QueueOutboxEventStatus.Pending);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvent_KnownFailure_WritesOutboxEventAtomically()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        long seqBeforeFailure = await GetMaxOutboxSequenceAsync(fixture.JobId);
+
+        // Act: simulate known pre-start failure (artifact missing)
+        await using AppDbContext failCtx = CreateContext();
+        await CreateClaim(failCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .ReleaseClaimOnKnownFailureAsync(claim.Attempt!.Id, "artifact_unavailable", "G-code not found");
+
+        // Assert: known-failure event was written with a higher sequence
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox failEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId && e.EventType == DispatchClaimService.EventTypeKnownFailure)
+            .SingleAsync();
+
+        failEvent.Sequence.Should().BeGreaterThan(seqBeforeFailure,
+            "the known-failure event must be ordered after the dispatch-started event");
+        failEvent.FailureCode.Should().Be("artifact_unavailable");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvent_BackendAccepted_WritesOutboxEventAtomically()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        long seqAfterClaim = await GetMaxOutboxSequenceAsync(fixture.JobId);
+
+        // Act: record backend accepted
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "printer-job-99");
+
+        // Assert
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox acceptEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId && e.EventType == DispatchClaimService.EventTypeBackendAccepted)
+            .SingleAsync();
+
+        acceptEvent.Sequence.Should().BeGreaterThan(seqAfterClaim,
+            "backend-accepted sequence must be greater than claim sequence");
+        acceptEvent.Status.Should().Be(QueueOutboxEventStatus.Pending);
+
+        // Job must be advanced to Printing
+        PrintJob job = await verify.PrintJobs.SingleAsync(j => j.Id == fixture.JobId);
+        job.Status.Should().Be(PrintJobStatus.Printing);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvent_UnknownOutcome_WritesOutboxEventWithFailureCode()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        // Act: record unknown outcome (crash/timeout scenario)
+        await using AppDbContext unknownCtx = CreateContext();
+        await CreateClaim(unknownCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordUnknownOutcomeAsync(claim.Attempt!.Id, "Connection timed out");
+
+        // Assert: unknown-outcome event was written
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox unknownEvent = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId && e.EventType == DispatchClaimService.EventTypeUnknownOutcome)
+            .SingleAsync();
+
+        unknownEvent.FailureCode.Should().Be("backend_outcome_unknown");
+        unknownEvent.Status.Should().Be(QueueOutboxEventStatus.Pending);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalEvents_FullLifecycle_OutboxSequencesAreStrictlyOrdered()
+    {
+        // Prove that claim → backend-accepted → completion produces strictly ordered sequences.
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "bk-seq");
+
+        await using AppDbContext completeCtx = CreateContext();
+        await CreateCompletionService(completeCtx).MarkCurrentJobAsCompletedAsync(fixture.PrinterId, "complete");
+
+        // Assert: all three events exist and sequences are strictly increasing
+        await using AppDbContext verify = CreateContext();
+        List<QueueDispatchOutbox> events = await verify.QueueDispatchOutbox
+            .Where(e => e.AggregateId == fixture.JobId)
+            .OrderBy(e => e.Sequence)
+            .ToListAsync();
+
+        events.Should().HaveCountGreaterThanOrEqualTo(3,
+            "claim + backend-accepted + completion must each produce an outbox event");
+
+        List<long> sequences = events.Select(e => e.Sequence).ToList();
+        for (int i = 1; i < sequences.Count; i++)
+        {
+            sequences[i].Should().BeGreaterThan(sequences[i - 1],
+                $"outbox event at position {i} (seq={sequences[i]}) must have a higher " +
+                $"sequence than the previous (seq={sequences[i - 1]}) — client gap detection requires strict order");
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
+
+    private async Task<long> GetMaxOutboxSequenceAsync(Guid jobId)
+    {
+        await using AppDbContext ctx = CreateContext();
+        return await ctx.QueueDispatchOutbox
+            .Where(e => e.AggregateId == jobId)
+            .MaxAsync(e => (long?)e.Sequence) ?? 0L;
+    }
 
     private sealed record Fixture(Guid PrinterId, Guid JobId, Guid GcodeId, string AckKey);
 

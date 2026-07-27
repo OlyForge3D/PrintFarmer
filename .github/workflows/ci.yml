@@ -492,8 +492,8 @@ jobs:
         ports:
           - 1433:1433
     env:
-      PFARM_TEST_POSTGRES: "Host=localhost;Port=5432;Database=pfarm_test;Username=pfarm;Password=pfarm_ci"
-      PFARM_TEST_SQLSERVER: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
+      PFARM_TEST_POSTGRES_CONN: "Host=localhost;Port=5432;Database=pfarm_test;Username=pfarm;Password=pfarm_ci"
+      PFARM_TEST_SQLSERVER_CONN: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -525,38 +525,38 @@ jobs:
       - name: Verify SQL Server is reachable
         run: |
           set -euo pipefail
-          /opt/mssql-tools18/bin/sqlcmd -S localhost,1433 -U sa -P "Pfarm_CI_2024!" -Q "SELECT 1" -No \
-            || { echo "::error::SQL Server is not reachable — aborting provider tests"; exit 1; }
+          # The service container health-check already verified SQL Server readiness via
+          # sqlcmd inside the container. This step confirms port 1433 is reachable from the runner.
+          timeout 20 bash -c 'until 2>/dev/null >/dev/tcp/localhost/1433; do sleep 2; done' \
+            || { echo "::error::SQL Server TCP port 1433 not reachable — aborting provider tests"; exit 1; }
 
       - name: Apply PostgreSQL migrations (Farm.App)
         working-directory: src
-        env:
-          ConnectionStrings__Default: ${{ env.PFARM_TEST_POSTGRES }}
         run: |
           set -euo pipefail
           dotnet ef database update \
             --project migrations/Farm.Migrations.PostgreSQL \
             --startup-project migrations/Farm.Migrations.PostgreSQL \
             --no-build \
+            --connection "$PFARM_TEST_POSTGRES_CONN" \
             || { echo "::error::PostgreSQL Farm migration failed"; exit 1; }
 
       - name: Apply SQL Server migrations (Farm.App)
         working-directory: src
-        env:
-          ConnectionStrings__Default: ${{ env.PFARM_TEST_SQLSERVER }}
         run: |
           set -euo pipefail
           dotnet ef database update \
             --project migrations/Farm.Migrations.SqlServer \
             --startup-project migrations/Farm.Migrations.SqlServer \
             --no-build \
+            --connection "$PFARM_TEST_SQLSERVER_CONN" \
             || { echo "::error::SQL Server Farm migration failed"; exit 1; }
 
       - name: Run DbHeavy provider and production-call-chain tests
         working-directory: src
         env:
-          PFARM_TEST_POSTGRES: ${{ env.PFARM_TEST_POSTGRES }}
-          PFARM_TEST_SQLSERVER: ${{ env.PFARM_TEST_SQLSERVER }}
+          PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
+          PFARM_TEST_SQLSERVER_CONN: ${{ env.PFARM_TEST_SQLSERVER_CONN }}
         run: |
           set -euo pipefail
           mkdir -p TestResults

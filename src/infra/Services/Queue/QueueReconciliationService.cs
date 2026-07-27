@@ -1,7 +1,9 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -62,6 +64,7 @@ public sealed class QueueReconciliationService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IDbOutboxSequenceAllocator? sequenceAllocator = scope.ServiceProvider.GetService<IDbOutboxSequenceAllocator>();
 
         DateTime staleCutoff = DateTime.UtcNow - StaleAttemptAge;
 
@@ -129,7 +132,7 @@ public sealed class QueueReconciliationService(
 
         foreach (QueueDispatchAttempt attempt in toReconcile)
         {
-            await ReconcileSingleAttemptAsync(db, printersSvc, attempt, ct);
+            await ReconcileSingleAttemptAsync(db, printersSvc, sequenceAllocator, attempt, ct);
         }
 
         await db.SaveChangesAsync(ct);
@@ -138,6 +141,7 @@ public sealed class QueueReconciliationService(
     private async Task ReconcileSingleAttemptAsync(
         AppDbContext db,
         IPrintersService? printersSvc,
+        IDbOutboxSequenceAllocator? sequenceAllocator,
         QueueDispatchAttempt attempt,
         CancellationToken ct)
     {
@@ -205,6 +209,30 @@ public sealed class QueueReconciliationService(
                     reasonCode: "reconciliation_active",
                     detail: new { startPathKind = attempt.StartPathKind });
 
+                // Emit a durable lifecycle event so the outbox publisher broadcasts the
+                // reconciliation result to authorized groups.
+                if (attempt.PrintJobId is not null && sequenceAllocator is not null)
+                {
+                    await DispatchClaimService.AddLifecycleOutboxEventAsync(
+                        db,
+                        sequenceAllocator,
+                        DispatchClaimService.EventTypeReconciliationAccepted,
+                        aggregateId: attempt.PrintJobId.Value,
+                        printerId: attempt.PrinterId,
+                        attemptId: attempt.Id,
+                        aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                        failureCode: null,
+                        payloadJson: JsonSerializer.Serialize(new
+                        {
+                            jobId = attempt.PrintJobId,
+                            printerId = attempt.PrinterId,
+                            attemptId = attempt.Id,
+                            startPathKind = attempt.StartPathKind,
+                            actorSubject = attempt.ActorSubject,
+                        }),
+                        ct);
+                }
+
                 logger.LogInformation(
                     "[Reconciliation] Attempt {AttemptId} confirmed active on backend → advanced to Printing",
                     attempt.Id);
@@ -250,6 +278,30 @@ public sealed class QueueReconciliationService(
                     reasonCode: "reconciliation_absent",
                     detail: new { startPathKind = attempt.StartPathKind });
 
+                // Emit a durable lifecycle event for the absent-from-backend reconciliation
+                // so the outbox publisher broadcasts the lease release to authorized groups.
+                if (attempt.PrintJobId is not null && sequenceAllocator is not null)
+                {
+                    await DispatchClaimService.AddLifecycleOutboxEventAsync(
+                        db,
+                        sequenceAllocator,
+                        DispatchClaimService.EventTypeReconciliationAbsent,
+                        aggregateId: attempt.PrintJobId.Value,
+                        printerId: attempt.PrinterId,
+                        attemptId: attempt.Id,
+                        aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                        failureCode: "reconciliation_absent",
+                        payloadJson: JsonSerializer.Serialize(new
+                        {
+                            jobId = attempt.PrintJobId,
+                            printerId = attempt.PrinterId,
+                            attemptId = attempt.Id,
+                            startPathKind = attempt.StartPathKind,
+                            actorSubject = attempt.ActorSubject,
+                        }),
+                        ct);
+                }
+
                 logger.LogWarning(
                     "[Reconciliation] Attempt {AttemptId} absent from backend → lease released, job re-queued",
                     attempt.Id);
@@ -274,6 +326,31 @@ public sealed class QueueReconciliationService(
                     dispatchAttemptId: attempt.Id,
                     reasonCode: "reconciliation_indeterminate",
                     detail: new { startPathKind = attempt.StartPathKind });
+
+                // Emit a durable lifecycle event for the indeterminate reconciliation state.
+                if (attempt.PrintJobId is not null && sequenceAllocator is not null)
+                {
+                    await DispatchClaimService.AddLifecycleOutboxEventAsync(
+                        db,
+                        sequenceAllocator,
+                        DispatchClaimService.EventTypeReconciliationIndeterminate,
+                        aggregateId: attempt.PrintJobId.Value,
+                        printerId: attempt.PrinterId,
+                        attemptId: attempt.Id,
+                        aggregateRowVersion: null,
+                        failureCode: "reconciliation_indeterminate",
+                        payloadJson: JsonSerializer.Serialize(new
+                        {
+                            jobId = attempt.PrintJobId,
+                            printerId = attempt.PrinterId,
+                            attemptId = attempt.Id,
+                            startPathKind = attempt.StartPathKind,
+                            actorSubject = attempt.ActorSubject,
+                            requiresReconciliation = true,
+                        }),
+                        ct);
+                }
+
                 break;
         }
     }

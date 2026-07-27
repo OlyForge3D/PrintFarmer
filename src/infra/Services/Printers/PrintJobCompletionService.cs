@@ -240,6 +240,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Atomically release the matching queue lease in the same terminal transaction.
         await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.Accepted, ct);
 
+        // Emit a durable lifecycle event so the outbox publisher broadcasts the completion
+        // to authorized groups. Written in the SAME transaction as the status change.
+        await WriteTerminalOutboxEventAsync(
+            primaryJob,
+            printerId,
+            DispatchClaimService.EventTypeJobCompleted,
+            failureCode: null,
+            extraDetails: new { completionState, allCopiesDone = true },
+            ct);
+
         await _db.SaveChangesAsync(ct);
 
         // Calculate detailed cost breakdown after persistence without blocking the status update.
@@ -364,6 +374,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Atomically release the matching queue lease in the same terminal transaction.
         await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.FailedBeforeStart, ct);
+
+        // Emit a durable lifecycle event so the outbox publisher broadcasts the failure
+        // to authorized groups. Written in the SAME transaction as the status change.
+        await WriteTerminalOutboxEventAsync(
+            primaryJob,
+            printerId,
+            DispatchClaimService.EventTypeJobFailed,
+            failureCode: "backend_failure",
+            extraDetails: new { failureReason },
+            ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -770,6 +790,24 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             foreach (KeyValuePair<Guid, (List<PrintJob> jobs, DispatchAttemptOutcome outcome)> kv in terminalJobsByPrinter)
             {
                 await ReleaseLeaseForTerminalJobsAsync(kv.Key, kv.Value.jobs, kv.Value.outcome, ct);
+
+                // Emit one durable lifecycle event per terminal job so the outbox publisher
+                // broadcasts the orphan-sync result to authorized groups. All events are
+                // committed in the SAME SaveChangesAsync call as the lease releases.
+                foreach (PrintJob terminalJob in kv.Value.jobs)
+                {
+                    string eventType = terminalJob.Status == PrintJobStatus.Completed
+                        ? DispatchClaimService.EventTypeJobCompleted
+                        : DispatchClaimService.EventTypeJobOrphanSynced;
+
+                    await WriteTerminalOutboxEventAsync(
+                        terminalJob,
+                        kv.Key,
+                        eventType,
+                        failureCode: terminalJob.Status == PrintJobStatus.Failed ? "orphan_sync_failure" : null,
+                        extraDetails: new { outcome = kv.Value.outcome.ToString(), source = "orphan_sync" },
+                        ct);
+                }
             }
 
             await _db.SaveChangesAsync(ct);
@@ -791,6 +829,46 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         }
 
         return syncedCount;
+    }
+
+    /// <summary>
+    /// Adds a durable terminal lifecycle outbox event to the context in preparation for the
+    /// next <see cref="AppDbContext.SaveChangesAsync"/> call. Only writes when
+    /// <see cref="_sequenceAllocator"/> is available so backward-compatible callers that omit
+    /// the allocator are not affected.
+    /// </summary>
+    private async Task WriteTerminalOutboxEventAsync(
+        PrintJob job,
+        Guid printerId,
+        string eventType,
+        string? failureCode,
+        object extraDetails,
+        CancellationToken ct)
+    {
+        if (_sequenceAllocator is null)
+        {
+            return;
+        }
+
+        await DispatchClaimService.AddLifecycleOutboxEventAsync(
+            _db,
+            _sequenceAllocator,
+            eventType,
+            aggregateId: job.Id,
+            printerId: printerId,
+            attemptId: null,
+            aggregateRowVersion: job.RowVersion,
+            failureCode: failureCode,
+            payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId = job.Id,
+                printerId,
+                jobStatus = job.Status.ToString(),
+                jobKind = job.JobKind?.ToString() ?? "Standard",
+                failureReason = job.FailureReason,
+                details = extraDetails,
+            }),
+            ct);
     }
 
     /// <summary>

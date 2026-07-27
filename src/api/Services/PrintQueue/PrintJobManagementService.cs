@@ -45,7 +45,8 @@ public class PrintJobManagementService(
     IServiceScopeFactory? serviceScopeFactory = null,
     ISettingsService? settingsService = null,
     IDispatchClaimService? dispatchClaimService = null,
-    AppDbContext? appDbContext = null) : IPrintJobManagementService
+    AppDbContext? appDbContext = null,
+    IDbOutboxSequenceAllocator? outboxSequenceAllocator = null) : IPrintJobManagementService
 {
     private const string DispatchArtifactUnavailable =
         "The G-code artifact is unavailable for dispatch.";
@@ -72,6 +73,7 @@ public class PrintJobManagementService(
     private readonly ISettingsService? _settingsService = settingsService;
     private readonly IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private readonly AppDbContext? _appDbContext = appDbContext;
+    private readonly IDbOutboxSequenceAllocator? _outboxSequenceAllocator = outboxSequenceAllocator;
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
     private const int MinimumRemainingPrintMinutes = 5;
@@ -1325,6 +1327,28 @@ public class PrintJobManagementService(
                 QueueAuditOutcomes.Success,
                 job);
 
+            // Emit a durable lifecycle outbox event so the publisher broadcasts the cancellation
+            // to authorized groups. Written in the SAME transaction as the status change.
+            if (_appDbContext is not null && _outboxSequenceAllocator is not null)
+            {
+                await QueueLifecycleEventWriter.AddEventAsync(
+                    _appDbContext,
+                    _outboxSequenceAllocator,
+                    QueueLifecycleEventWriter.EventTypeJobCancelled,
+                    aggregateId: job.Id,
+                    printerId: job.AssignedPrinterId,
+                    attemptId: null,
+                    aggregateRowVersion: job.RowVersion,
+                    failureCode: "job_cancelled",
+                    payloadJson: QueueLifecycleEventWriter.BuildTerminalPayload(
+                        job.Id, job.AssignedPrinterId, null,
+                        PrintJobStatus.Cancelled.ToString(),
+                        job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+                        failureCode: "job_cancelled",
+                        actorSubject: userId),
+                    cancellationToken);
+            }
+
             await _repository.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
 
@@ -1408,6 +1432,28 @@ public class PrintJobManagementService(
             QueueAuditOperations.JobAbort,
             QueueAuditOutcomes.Success,
             job);
+
+        // Emit a durable lifecycle outbox event so the publisher broadcasts the abort
+        // (job returned to queued) to authorized groups. Written in the SAME transaction.
+        if (_appDbContext is not null && _outboxSequenceAllocator is not null)
+        {
+            await QueueLifecycleEventWriter.AddEventAsync(
+                _appDbContext,
+                _outboxSequenceAllocator,
+                QueueLifecycleEventWriter.EventTypeJobAborted,
+                aggregateId: job.Id,
+                printerId: job.AssignedPrinterId,
+                attemptId: null,
+                aggregateRowVersion: job.RowVersion,
+                failureCode: null,
+                payloadJson: QueueLifecycleEventWriter.BuildTerminalPayload(
+                    job.Id, job.AssignedPrinterId, null,
+                    PrintJobStatus.Queued.ToString(), // returned to Queued
+                    job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+                    failureCode: null,
+                    actorSubject: userId),
+                cancellationToken);
+        }
 
         await _repository.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Print aborted for job {JobId} by user {UserId}, job returned to queue", jobId, userId);
