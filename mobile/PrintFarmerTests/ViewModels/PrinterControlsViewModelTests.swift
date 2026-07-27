@@ -6,14 +6,14 @@ final class PrinterControlsViewModelTests: XCTestCase {
 
     private var mockService: MockPrinterService!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockPrinterService()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         mockService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

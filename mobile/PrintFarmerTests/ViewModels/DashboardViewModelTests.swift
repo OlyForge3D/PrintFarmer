@@ -21,8 +21,8 @@ final class DashboardViewModelTests: XCTestCase {
     private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: DashboardViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockPrinterService = MockPrinterService()
         mockJobService = MockJobService()
         mockStatsService = MockStatisticsService()
@@ -36,13 +36,13 @@ final class DashboardViewModelTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockPrinterService = nil
         mockJobService = nil
         mockStatsService = nil
         mockJobAnalyticsService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State
@@ -574,8 +574,8 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
     private let fixedNow = Date(timeIntervalSince1970: 1_700_000_500)
     private let namespace = FarmSnapshotFixtures.namespace(server: UUID(), user: UUID())
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockPrinterService = MockPrinterService()
         mockJobService = MockJobService()
         mockStatsService = MockStatisticsService()
@@ -596,7 +596,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         store = nil
         mockAutoDispatch = nil
@@ -604,7 +604,7 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         mockStatsService = nil
         mockJobService = nil
         mockPrinterService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func cachedEnvelope(printers: [Printer], millis: Int64, pendingReady: Set<UUID> = []) -> FarmSnapshotEnvelope {

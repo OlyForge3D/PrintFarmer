@@ -74,10 +74,10 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
     private var roots: [URL] = []
 
-    override func tearDown() {
+    override func tearDown() async throws {
         roots.forEach { try? FileManager.default.removeItem(at: $0) }
         roots = []
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func newRoot() -> URL {
@@ -580,7 +580,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await barrier.waitUntilArrived()
         _ = container.authOperationEpoch.advance() // newer auth op lands during activation
         barrier.release()
-        await task.value
+        _ = await task.value
 
         let session = await store.currentSession()
         XCTAssertNil(session, "auth-token CAS must block publication when the epoch advanced during activation")
@@ -602,7 +602,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await barrier.waitUntilArrived() // login's snapshot activation parked in readiness
         container.switchToDemo()          // enter demo through the production path
         barrier.release()
-        await task.value
+        _ = await task.value
 
         let demoSession = await store.currentSession()
         XCTAssertNil(demoSession, "no real snapshot session binds while demo is active")

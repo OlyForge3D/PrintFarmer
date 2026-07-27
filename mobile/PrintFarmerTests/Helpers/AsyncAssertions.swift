@@ -11,7 +11,7 @@ import XCTest
 func XCTAssertAwait(
     _ value: Bool,
     _ message: @autoclosure () -> String = "",
-    file: StaticString = #file,
+    file: StaticString = #filePath,
     line: UInt = #line
 ) {
     XCTAssertTrue(value, message(), file: file, line: line)

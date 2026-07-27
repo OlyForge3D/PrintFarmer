@@ -9,17 +9,17 @@ final class JobHistoryViewModelTests: XCTestCase {
     private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: JobHistoryViewModel!
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobAnalyticsService = MockJobAnalyticsService()
         viewModel = JobHistoryViewModel()
         viewModel.configure(jobAnalyticsService: mockJobAnalyticsService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobAnalyticsService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func commitHistory(_ page: QueueHistoryPage) async {

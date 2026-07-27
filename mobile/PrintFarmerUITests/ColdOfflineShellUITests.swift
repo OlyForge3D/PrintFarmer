@@ -14,6 +14,7 @@ import XCTest
 ///
 /// Every wait is gated purely on accessibility state (`waitForExistence`);
 /// there are NO fixed sleeps, polling loops, retries, or test-iteration hacks.
+@MainActor
 final class ColdOfflineShellUITests: PrintFarmerUITestCase {
 
     override var additionalLaunchArguments: [String] {

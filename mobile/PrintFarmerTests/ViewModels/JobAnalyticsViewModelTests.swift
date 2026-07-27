@@ -9,17 +9,17 @@ final class JobAnalyticsViewModelTests: XCTestCase {
     private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: JobAnalyticsViewModel!
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobAnalyticsService = MockJobAnalyticsService()
         viewModel = JobAnalyticsViewModel()
         viewModel.configure(jobAnalyticsService: mockJobAnalyticsService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobAnalyticsService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
     
     // MARK: - Initial State
@@ -225,7 +225,7 @@ final class JobAnalyticsViewModelTests: XCTestCase {
         viewModel.selectedModel = "Prusa MK3S"
         viewModel.selectedMaterial = "PLA"
         
-        await viewModel.clearFilters()
+        viewModel.clearFilters()
         
         XCTAssertNil(viewModel.selectedStatus)
         XCTAssertNil(viewModel.selectedModel)

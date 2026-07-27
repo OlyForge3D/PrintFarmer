@@ -6,18 +6,18 @@ final class ServerManagementViewModelTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         suiteName = "ServerManagementViewModelTests-\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         userDefaults.removePersistentDomain(forName: suiteName)
         userDefaults = nil
         suiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testAddServerNormalizesURLChecksHealthAndPersistsStatus() async throws {

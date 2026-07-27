@@ -1266,16 +1266,16 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
     private var session: URLSession!
     private let testURL = URL(string: "https://signalr-lifecycle.test.invalid")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockSession = MockURLProtocol.makeSession()
         session = mockSession.urlSession
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         session = nil
         mockSession = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func recordStates(_ svc: SignalRService, into recorder: LifecycleStateObserver) -> SignalRSubscription {
@@ -3270,16 +3270,16 @@ final class SignalRServiceBindingHarnessTests: XCTestCase {
     nonisolated(unsafe) private var session: URLSession!
     private let testURL = URL(string: "https://signalr-binding.test.invalid")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockSession = MockURLProtocol.makeSession()
         session = mockSession.urlSession
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         session = nil
         mockSession = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testRealService_immediateReceiveFailureWhileReconnectOwnerAlive_neverCreatesSecondOwner() async {
@@ -4007,16 +4007,16 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
     nonisolated(unsafe) private var session: URLSession!
     private let testURL = URL(string: "https://signalr-handshake.test.invalid")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockSession = MockURLProtocol.makeSession()
         session = mockSession.urlSession
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         session = nil
         mockSession = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testCompleteInvocationTrailingHandshakeIsDeliveredExactlyOnce() async throws {
