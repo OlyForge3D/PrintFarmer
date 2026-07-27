@@ -18,7 +18,8 @@ public class JobDispatchService(
     IPrintJobManagementService printJobManagement,
     ISpoolmanService spoolmanService,
     AppDbContext db,
-    ILogger<JobDispatchService> logger) : IJobDispatchService
+    ILogger<JobDispatchService> logger,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : IJobDispatchService
 {
     public async Task<List<DispatchCandidateDto>> FindCandidatesAsync(Guid jobId, CancellationToken ct = default)
     {
@@ -66,16 +67,52 @@ public class JobDispatchService(
         List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
         DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
 
-        return await DispatchJobCoreAsync(jobId, printerId, userId, printerScore, ct);
+        return await DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            printerScore,
+            ifMatchJobRowVersion: null,
+            ct);
+    }
+
+    public async Task<QueuedPrintJobDto> DispatchJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken ct = default)
+    {
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
+        DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
+        return await DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            printerScore,
+            ifMatchJobRowVersion,
+            ct);
     }
 
     public Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, DispatchScore preComputedScore, CancellationToken ct = default)
     {
         // Caller already scored — skip the redundant scoring pass
-        return DispatchJobCoreAsync(jobId, printerId, userId, preComputedScore, ct);
+        return DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            preComputedScore,
+            ifMatchJobRowVersion: null,
+            ct);
     }
 
-    private async Task<QueuedPrintJobDto> DispatchJobCoreAsync(Guid jobId, Guid printerId, string userId, DispatchScore? printerScore, CancellationToken ct)
+    private async Task<QueuedPrintJobDto> DispatchJobCoreAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        DispatchScore? printerScore,
+        string? ifMatchJobRowVersion,
+        CancellationToken ct)
     {
         PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
             ?? throw new InvalidOperationException($"Print job {jobId} not found");
@@ -83,11 +120,43 @@ public class JobDispatchService(
         Printer? printer = await db.Printers.FirstOrDefaultAsync(p => p.Id == printerId, ct)
             ?? throw new InvalidOperationException($"Printer {printerId} not found");
 
+        if (resourceAuthorization is not null &&
+            (!await resourceAuthorization.CanActorAccessJobAsync(
+                 userId,
+                 jobId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct) ||
+             !await resourceAuthorization.CanActorAccessPrinterAsync(
+                 userId,
+                 printerId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct)))
+        {
+            throw new KeyNotFoundException($"Print job {jobId} not found.");
+        }
+
+        if (ifMatchJobRowVersion is not null)
+        {
+            QueueRevisionGuard.EnsureIfMatch(
+                ifMatchJobRowVersion,
+                job.RowVersion,
+                "scored job dispatch");
+        }
+
         if (printerScore is { Eliminated: true })
         {
             string reasons = string.Join("; ", printerScore.EliminationReasons);
             throw new InvalidOperationException($"Printer '{printer.Name}' is eliminated: {reasons}");
         }
+
+        if (job.JobKind == JobKind.FilamentCalibration &&
+            job.AssignedPrinterId != printerId)
+        {
+            throw new QueueSemanticConflictException(
+                "A calibration job's assigned printer is immutable.");
+        }
+
+        Guid? originalPrinterId = job.AssignedPrinterId;
 
         // Assign the job and log the dispatch in a single batch save
         job.AssignedPrinterId = printerId;
@@ -96,7 +165,7 @@ public class JobDispatchService(
         job.DispatchMode = (int)DispatchMode.Suggested;
 
         // If the job doesn't have a SpoolmanFilamentId, inherit from the printer's active spool
-        if (printer.CurrentSpoolId.HasValue)
+        if (job.JobKind != JobKind.FilamentCalibration && printer.CurrentSpoolId.HasValue)
         {
             try
             {
@@ -131,12 +200,40 @@ public class JobDispatchService(
             CreatedAtUtc = DateTime.UtcNow,
         });
 
+        foreach (Guid affectedPrinterId in new[] { originalPrinterId, (Guid?)printerId }
+                     .Where(value => value.HasValue)
+                     .Select(value => value!.Value)
+                     .Distinct())
+        {
+            PrinterDispatchState? state = await db.PrinterDispatchStates
+                .FirstOrDefaultAsync(
+                    candidate => candidate.PrinterId == affectedPrinterId,
+                    ct);
+            if (state is not null)
+            {
+                state.QueueRevision++;
+                state.AcknowledgedJobId = null;
+                state.AcknowledgedAtUtc = null;
+                state.AcknowledgedBySubject = null;
+                state.AcknowledgementIdempotencyKey = null;
+                state.AcknowledgementExpiresAtUtc = null;
+                state.AcknowledgedJobRowVersion = null;
+                state.AcknowledgedQueueRevision = null;
+                state.AcknowledgedPrinterConfigRevision = null;
+            }
+        }
+
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(
             "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",
             jobId, printer.Name, printerScore?.TotalScore ?? 0);
 
-        return await printJobManagement.DispatchJobAsync(jobId.ToString(), userId, ct);
+        string postAssignmentEtag = Convert.ToBase64String(job.RowVersion ?? []);
+        return await printJobManagement.DispatchJobAsync(
+            jobId.ToString(),
+            userId,
+            postAssignmentEtag,
+            ct);
     }
 }

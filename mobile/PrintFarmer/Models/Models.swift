@@ -558,6 +558,8 @@ struct CommandResult: Codable, Sendable {
 
 struct PrintJob: Codable, Identifiable, Sendable {
     let id: UUID
+    let rowVersion: String?
+    let dispatchStateRowVersion: String?
     let status: PrintJobStatus?
     let priority: Int
     let queuePosition: Int

@@ -77,11 +77,16 @@ public sealed record DispatchClaimRequest(
 /// <param name="ActorSubject">Subject of the operator initiating the start.</param>
 /// <param name="StartPathKind">Classification of the start path (e.g., SliceBridge, PrinterFile).</param>
 /// <param name="BackendFileName">File name that will be presented to the backend.</param>
+/// <param name="UseDeterministicFileName">
+/// Whether the caller uploads bytes and can therefore present the attempt-scoped file name.
+/// Existing printer-local files retain their exact persisted name.
+/// </param>
 public sealed record AdHocDispatchClaimRequest(
     Guid PrinterId,
     string ActorSubject,
     string StartPathKind,
-    string BackendFileName);
+    string BackendFileName,
+    bool UseDeterministicFileName = true);
 
 /// <summary>
 /// Provides the single atomic cross-process dispatch claim used by every start path.
@@ -112,6 +117,9 @@ public interface IDispatchClaimService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Claim result indicating success or a typed failure reason.</returns>
     Task<DispatchClaimResult> AcquireAdHocClaimAsync(AdHocDispatchClaimRequest request, CancellationToken ct = default);
+
+    /// <summary>Persists that the caller is about to invoke the backend.</summary>
+    Task RecordBackendCallStartedAsync(Guid attemptId, CancellationToken ct = default);
 
     /// <summary>
     /// Releases an active claim after a known pre-start failure, clearing the

@@ -1,5 +1,7 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
@@ -10,6 +12,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -41,7 +44,8 @@ public class SlicePrintBridgeController(
     ISliceGcodeImportService? importService = null,
     ISpoolmanService? spoolmanService = null,
     IGcodeFilesService? gcodeFilesService = null,
-    IDispatchClaimService? dispatchClaimService = null) : ControllerBase
+    IDispatchClaimService? dispatchClaimService = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     /// <summary>
     /// Send the completed gcode from a slice job to a printer.
@@ -57,6 +61,7 @@ public class SlicePrintBridgeController(
     /// <response code="502">Upload to printer backend failed.</response>
     /// <response code="503">Slicing module is not enabled.</response>
     [HttpPost("{id:guid}/send-to-printer")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(SendToPrinterResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -85,6 +90,21 @@ public class SlicePrintBridgeController(
         if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
         {
             return Forbid();
+        }
+
+        if (IsCalibrationSlice(job))
+        {
+            return CalibrationSliceRequiresPrimaryQueue();
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                request.PrinterId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound(new { error = "Printer not found.", printerId = request.PrinterId });
         }
 
         // 2. Validate the job is completed
@@ -157,6 +177,7 @@ public class SlicePrintBridgeController(
     /// <response code="404">Slice job not found.</response>
     /// <response code="503">Slicing module or queue services are not enabled.</response>
     [HttpPost("{id:guid}/add-to-queue")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(AddSliceToQueueResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -202,6 +223,11 @@ public class SlicePrintBridgeController(
         if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
         {
             return Forbid();
+        }
+
+        if (IsCalibrationSlice(job))
+        {
+            return CalibrationSliceRequiresPrimaryQueue();
         }
 
         // 2. Validate the job is completed
@@ -382,23 +408,43 @@ public class SlicePrintBridgeController(
         }
 
         Guid attemptId = claim.Attempt.Id;
+        string backendFileName = claim.Attempt.BackendFileName
+            ?? throw new InvalidOperationException("Dispatch claim did not persist a backend file identity.");
 
         UploadAndPrintResult result;
         try
         {
+            await dispatchClaimService.RecordBackendCallStartedAsync(attemptId, ct);
             result = await printersService.UploadAndStartPrintAsync(
-                printerId, fileName, stream, progress: null, ct);
+                printerId, backendFileName, stream, progress: null, ct);
         }
         catch (Exception ex)
         {
             // Unknown outcome: the command may have been delivered. Never release the
             // lease here — reconciliation owns the resolution.
-            await dispatchClaimService.RecordUnknownOutcomeAsync(attemptId, ex.Message, ct);
+            await dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                ex.Message,
+                CancellationToken.None);
 
             logger.LogError(
                 ex,
                 "Slice-bridge start produced an unknown outcome for job {JobId} on printer {PrinterId}",
                 jobId, printerId);
+
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "The printer start outcome could not be determined; reconciliation is required.",
+                code = "backend_outcome_unknown",
+            });
+        }
+
+        if (!result.Success && result.Outcome == UploadAndPrintOutcome.Unknown)
+        {
+            await dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                result.ErrorMessage ?? "The backend response was lost after the start-capable request.",
+                ct);
 
             return StatusCode(StatusCodes.Status502BadGateway, new
             {
@@ -428,7 +474,7 @@ public class SlicePrintBridgeController(
         }
 
         await dispatchClaimService.RecordBackendAcceptedAsync(
-            attemptId, claim.Attempt.BackendCommandId ?? fileName, ct);
+            attemptId, result.BackendJobId, ct);
 
         return Ok(new SendToPrinterResponse
         {
@@ -464,4 +510,18 @@ public class SlicePrintBridgeController(
             Message = "Gcode uploaded successfully."
         });
     }
+
+    private static bool IsCalibrationSlice(SliceJob job) =>
+        job.CalibrationProjectId.HasValue ||
+        job.CalibrationAttemptId.HasValue ||
+        job.CalibrationOrchestrationId.HasValue;
+
+    private UnprocessableEntityObjectResult CalibrationSliceRequiresPrimaryQueue() =>
+        UnprocessableEntity(new
+        {
+            error = "calibration_primary_queue_required",
+            detail =
+                "Calibration slice output must be promoted as an immutable G-code artifact and " +
+                "created through POST /api/job-queue. Direct send and generic slice import are not allowed.",
+        });
 }

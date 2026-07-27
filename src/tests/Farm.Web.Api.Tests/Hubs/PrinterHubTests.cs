@@ -9,6 +9,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public class PrinterHubTests
     private readonly Mock<IClientProxy> _groupMock;
     private readonly Mock<IGroupManager> _groupsMock;
     private readonly Mock<HubCallerContext> _contextMock;
+    private readonly Mock<IQueueResourceAuthorizationService> _resourceAuthorizationMock;
     private readonly Guid _userId = Guid.NewGuid();
     private readonly PrinterHub _hub;
 
@@ -45,6 +47,14 @@ public class PrinterHubTests
         _groupMock = new Mock<IClientProxy>();
         _groupsMock = new Mock<IGroupManager>();
         _contextMock = new Mock<HubCallerContext>();
+        _resourceAuthorizationMock = new Mock<IQueueResourceAuthorizationService>();
+        _resourceAuthorizationMock
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         // Setup hub context
         _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
@@ -79,7 +89,12 @@ public class PrinterHubTests
         _clientsMock.As<IHubCallerClients<IClientProxy>>().Setup(c => c.Caller).Returns(_callerMock.Object);
         _clientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_groupMock.Object);
 
-        _hub = new PrinterHub(_progressCacheMock.Object, _loggerMock.Object, _statusCacheMock.Object, _sessionRegistryMock.Object)
+        _hub = new PrinterHub(
+            _progressCacheMock.Object,
+            _loggerMock.Object,
+            _statusCacheMock.Object,
+            _sessionRegistryMock.Object,
+            _resourceAuthorizationMock.Object)
         {
             Clients = _clientsMock.Object,
             Groups = _groupsMock.Object,
@@ -249,7 +264,7 @@ public class PrinterHubTests
     }
 
     [Fact]
-    public async Task OnConnectedAsync_ReplaysCachedStatusesToCaller()
+    public async Task OnConnectedAsync_DoesNotReplayUnsubscribedPrinterStatuses()
     {
         // Arrange
         Guid printerA = Guid.NewGuid();
@@ -265,13 +280,13 @@ public class PrinterHubTests
         // Act
         await _hub.OnConnectedAsync();
 
-        // Assert
+        // Assert: resource data is never replayed before an explicit authorized subscription.
         _callerMock.Verify(
             c => c.SendCoreAsync(
                 "printerupdated",
                 It.IsAny<object?[]>(),
                 It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+            Times.Never);
     }
 
     [Fact]
@@ -307,6 +322,45 @@ public class PrinterHubTests
                 It.Is<object?[]>(args => ReferenceEquals(args[0], status)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrinterAsync_WithAccess_JoinsAndReplaysOnlyThatPrinter()
+    {
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: printerId, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerId)).Returns(status);
+
+        await _hub.SubscribeToPrinterAsync(printerId.ToString());
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerId),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.Is<object?[]>(arguments => ReferenceEquals(arguments[0], status)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrinterAsync_WithoutResourceAccess_ThrowsAndDoesNotJoin()
+    {
+        _resourceAuthorizationMock
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<HubException>(
+            () => _hub.SubscribeToPrinterAsync(Guid.NewGuid().ToString()));
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            It.IsAny<string>(),
+            It.Is<string>(group => group.StartsWith("Printer-", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

@@ -259,7 +259,13 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         _dispatchServiceMock
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
@@ -271,7 +277,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         // Assert: SignalR event was sent
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("jobautodispatched", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Exactly(2));
     }
 
     [Fact]
@@ -299,7 +305,13 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         _dispatchServiceMock
             .Setup(d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto());
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
         AutoDispatchBackgroundService svc = CreateService();
@@ -478,7 +490,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         // Should send dispatchsuggestion event
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("dispatchsuggestion", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Exactly(2));
     }
 
     [Fact]
@@ -678,7 +690,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         // Should send dispatchfailed SignalR event
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("dispatchfailed", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            Times.Exactly(2));
 
         // Should log failure to DispatchLogs
         List<DispatchLog> logs = await _db.DispatchLogs.ToListAsync();

@@ -27,16 +27,20 @@ public sealed class QueueOutboxPublisherService(
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private const int MaxAttempts = 10;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[OutboxPublisher] Queue outbox publisher (SignalR hints) started");
 
+        await RecoverStaleLeasesAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
+                await RecoverStaleLeasesAsync(stoppingToken);
                 await ProcessPendingEventsAsync(stoppingToken);
             }
             catch (OperationCanceledException)
@@ -52,6 +56,36 @@ public sealed class QueueOutboxPublisherService(
         }
     }
 
+    internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+
+        List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
+            .Where(evt =>
+                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+                evt.EventType != BackendControlCommandConsumerService.EventType &&
+                evt.Status == QueueOutboxEventStatus.Processing &&
+                evt.LastAttemptedAtUtc < staleCutoff)
+            .ToListAsync(ct);
+
+        foreach (QueueDispatchOutbox evt in stale)
+        {
+            evt.Status = QueueOutboxEventStatus.Pending;
+            evt.LastError = "Recovered after the publisher lease expired.";
+            evt.RetryAfterUtc = DateTime.UtcNow;
+        }
+
+        if (stale.Count > 0)
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogWarning(
+                "[OutboxPublisher] Recovered {Count} stale publisher lease(s)",
+                stale.Count);
+        }
+    }
+
     private async Task ProcessPendingEventsAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
@@ -62,6 +96,7 @@ public sealed class QueueOutboxPublisherService(
             .Where(e =>
                 e.Status == QueueOutboxEventStatus.Pending &&
                 e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+                e.EventType != BackendControlCommandConsumerService.EventType &&
                 (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
             .OrderBy(e => e.Sequence)
             .Take(50)
@@ -122,17 +157,19 @@ public sealed class QueueOutboxPublisherService(
                 eventType: evt.EventType,
                 jobId: evt.AggregateId,
                 printerId: evt.PrinterId,
+                projectId: evt.ProjectId,
+                jobStatus: evt.JobStatus,
+                jobKind: evt.JobKind,
                 jobRevision: evt.AggregateRowVersion,
                 dispatchStateRevision: evt.DispatchStateRowVersion,
                 attemptId: evt.AttemptId,
                 bedClearState: evt.BedClearState,
                 failureCode: evt.FailureCode,
-                payloadJson: evt.PayloadJson);
+                payloadJson: evt.PayloadJson,
+                jobLogicalRevision: evt.JobRevision,
+                dispatchStateLogicalRevision: evt.DispatchStateRevision);
 
             List<Task> sends = new();
-
-            // Farm-wide group: all authenticated farm users receive queue lifecycle events.
-            sends.Add(hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("queueevent", envelope, ct));
 
             // Job-scoped group: narrower delivery for clients watching this specific job.
             sends.Add(hub.Clients.Group(AuthorizedHubGroups.QueueJob(evt.AggregateId)).SendAsync("queueevent", envelope, ct));
@@ -141,6 +178,11 @@ public sealed class QueueOutboxPublisherService(
             if (evt.PrinterId.HasValue)
             {
                 sends.Add(hub.Clients.Group(AuthorizedHubGroups.Printer(evt.PrinterId.Value)).SendAsync("queueevent", envelope, ct));
+            }
+
+            if (evt.ProjectId.HasValue)
+            {
+                sends.Add(hub.Clients.Group(AuthorizedHubGroups.Project(evt.ProjectId.Value)).SendAsync("queueevent", envelope, ct));
             }
 
             await Task.WhenAll(sends);

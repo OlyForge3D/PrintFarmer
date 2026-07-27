@@ -200,8 +200,13 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(j => j.AssignedPrinter)
             .AsSplitQuery()
             .Where(j => j.AssignedPrinterId == printerId)
-            .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting ? 0 : 1)
-            .ThenBy(j => j.Priority)
+            .OrderBy(j =>
+                j.Status == PrintJobStatus.Printing ||
+                j.Status == PrintJobStatus.Starting ||
+                j.Status == PrintJobStatus.Paused
+                    ? 0
+                    : 1)
+            .ThenByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt)
             .ToListAsync(ct);
     }
@@ -216,7 +221,12 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     public async Task<PrintJob?> GetCurrentJobForPrinterAsync(Guid printerId, CancellationToken ct)
     {
         return await _db.PrintJobs
-            .FirstOrDefaultAsync(j => j.AssignedPrinterId == printerId && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing), ct);
+            .FirstOrDefaultAsync(
+                j => j.AssignedPrinterId == printerId &&
+                     (j.Status == PrintJobStatus.Starting ||
+                      j.Status == PrintJobStatus.Printing ||
+                      j.Status == PrintJobStatus.Paused),
+                ct);
     }
 
     /// <summary>
@@ -324,8 +334,13 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(j => j.AssignedPrinter)
             .AsSplitQuery()
             .Where(j => j.AssignedPrinterId != null && ids.Contains(j.AssignedPrinterId.Value))
-            .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting ? 0 : 1)
-            .ThenBy(j => j.Priority)
+            .OrderBy(j =>
+                j.Status == PrintJobStatus.Printing ||
+                j.Status == PrintJobStatus.Starting ||
+                j.Status == PrintJobStatus.Paused
+                    ? 0
+                    : 1)
+            .ThenByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt)
             .ToListAsync(ct);
     }

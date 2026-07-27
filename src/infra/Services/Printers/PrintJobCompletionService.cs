@@ -156,7 +156,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             .Include(j => j.AssignedPrinter)
             .Where(j =>
                 j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                (j.Status == PrintJobStatus.Starting ||
+                 j.Status == PrintJobStatus.Printing ||
+                 j.Status == PrintJobStatus.Paused))
             .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
             .ToListAsync(ct);
 
@@ -339,7 +341,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             .Include(j => j.AssignedPrinter)
             .Where(j =>
                 j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                (j.Status == PrintJobStatus.Starting ||
+                 j.Status == PrintJobStatus.Printing ||
+                 j.Status == PrintJobStatus.Paused))
             .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
             .ToListAsync(ct);
 
@@ -639,7 +643,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         List<PrintJob> orphanedJobs = await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
-            .Where(j => j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing)
+            .Where(j =>
+                j.Status == PrintJobStatus.Starting ||
+                j.Status == PrintJobStatus.Printing ||
+                j.Status == PrintJobStatus.Paused)
             .ToListAsync(ct);
 
         if (orphanedJobs.Count == 0)
@@ -993,7 +1000,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         bool hasActiveJob = await _db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId &&
-                     (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     (j.Status == PrintJobStatus.Starting ||
+                      j.Status == PrintJobStatus.Printing ||
+                      j.Status == PrintJobStatus.Paused),
                 ct);
 
         if (hasActiveJob)

@@ -1887,7 +1887,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         if (!success)
         {
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"OctoPrint atomic upload+print failed for {fileName}");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, $"OctoPrint upload+print outcome is unknown for {fileName}");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);

@@ -21,6 +21,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
@@ -61,10 +62,12 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader printerStatusCache,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
     IPrinterVersionCache printerVersionCache = null!,
-    Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? dispatchClaimService = null)
+    Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? dispatchClaimService = null,
+    Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? queueResourceAuthorization = null)
     : ControllerBase
 {
     private readonly Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
+    private readonly Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
@@ -3106,6 +3109,7 @@ public class PrintersController(
 
     // File operations with body-based parameters (handles special characters in filenames)
     [HttpPost("{id:guid}/print")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(StartPrintResultDto), 200)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 409)]
@@ -3115,6 +3119,16 @@ public class PrintersController(
         if (string.IsNullOrEmpty(request?.FileName))
         {
             return BadRequest(new CommandResult(false, "fileName is required"));
+        }
+
+        if (_queueResourceAuthorization is not null &&
+            !await _queueResourceAuthorization.CanAccessPrinterAsync(
+                User,
+                id,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
         }
 
         // =====================================================================
@@ -3130,10 +3144,18 @@ public class PrintersController(
                 new CommandResult(false, "Dispatch claim service is not available."));
         }
 
-        string actorSubject = User?.Identity?.Name ?? "anonymous";
+        string actorSubject =
+            User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User?.FindFirst("sub")?.Value
+            ?? "anonymous";
 
         DispatchClaimResult claim = await _dispatchClaimService.AcquireAdHocClaimAsync(
-            new AdHocDispatchClaimRequest(id, actorSubject, "PrinterFile", request.FileName),
+            new AdHocDispatchClaimRequest(
+                id,
+                actorSubject,
+                "PrinterFile",
+                request.FileName,
+                UseDeterministicFileName: false),
             ct);
 
         if (!claim.Success || claim.Attempt is null)
@@ -3150,28 +3172,36 @@ public class PrintersController(
 
         try
         {
-            bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
+            string backendFileName = claim.Attempt.BackendFileName ?? request.FileName;
+            await _dispatchClaimService.RecordBackendCallStartedAsync(attemptId, ct);
+            bool success = await _printersService.StartPrintFromFileAsync(id, backendFileName, ct);
 
             if (!success)
             {
-                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                await _dispatchClaimService.RecordUnknownOutcomeAsync(
                     attemptId,
-                    "backend_rejected",
-                    "The printer refused to start the requested file.",
-                    ct);
+                    "The legacy backend did not prove whether the start command was accepted.",
+                    CancellationToken.None);
 
-                return Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"));
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new CommandResult(
+                        false,
+                        "The printer start outcome could not be determined; reconciliation is required."));
             }
 
             await _dispatchClaimService.RecordBackendAcceptedAsync(
-                attemptId, claim.Attempt.BackendCommandId ?? request.FileName, ct);
+                attemptId, backendFileName, ct);
 
             return Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
             // Unknown outcome — keep the lease and let reconciliation decide.
-            await _dispatchClaimService.RecordUnknownOutcomeAsync(attemptId, ex.Message, ct);
+            await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                ex.Message,
+                CancellationToken.None);
 
             return StatusCode(
                 StatusCodes.Status500InternalServerError,

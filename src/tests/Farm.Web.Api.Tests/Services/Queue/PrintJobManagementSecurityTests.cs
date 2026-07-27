@@ -93,7 +93,7 @@ public sealed class PrintJobManagementSecurityTests
             _printers
                 .Setup(printers => printers.UploadAndStartPrintAsync(
                     job.AssignedPrinterId!.Value,
-                    job.GcodeFile.Name,
+                    It.IsAny<string>(),
                     It.IsAny<Stream>(),
                     It.IsAny<IProgress<UploadAndPrintStage>?>(),
                     It.IsAny<CancellationToken>()))
@@ -116,6 +116,28 @@ public sealed class PrintJobManagementSecurityTests
         }
     }
 
+    [Fact]
+    public async Task DispatchJobAsync_StoredBytesTampered_ProducesZeroBackendCalls()
+    {
+        PrintJob job = CreateJob();
+        ConfigureJob(job);
+        PrintJobManagementService service = CreateService(
+            DispatchClaimResult.Fail(
+                "gcode_byte_hash_mismatch",
+                "The exact stored G-code bytes changed."));
+
+        Func<Task> dispatch = () => service.DispatchJobAsync(job.Id.ToString(), "user-1");
+
+        _ = await dispatch.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*gcode_byte_hash_mismatch*");
+        _printers.Verify(printers => printers.UploadAndStartPrintAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<Stream>(),
+            It.IsAny<IProgress<UploadAndPrintStage>?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private void ConfigureJob(PrintJob job)
     {
         _repository
@@ -128,21 +150,33 @@ public sealed class PrintJobManagementSecurityTests
             .Returns(Task.CompletedTask);
     }
 
-    private PrintJobManagementService CreateService()
+    private PrintJobManagementService CreateService(DispatchClaimResult? claimResult = null)
     {
         // Claim service must succeed for dispatch to proceed past the claim gate.
         _claimService
             .Setup(s => s.AcquireClaimAsync(It.IsAny<DispatchClaimRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DispatchClaimResult.Ok(new QueueDispatchAttempt
+            .ReturnsAsync(claimResult ?? DispatchClaimResult.Ok(new QueueDispatchAttempt
             {
                 Id = Guid.NewGuid(),
                 PrintJobId = Guid.NewGuid(),
                 PrinterId = Guid.NewGuid(),
+                BackendFileName = "dispatch.gcode",
                 ClaimedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow,
             }));
         _claimService
             .Setup(s => s.ReleaseClaimOnKnownFailureAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _claimService
+            .Setup(s => s.RecordBackendCallStartedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _claimService
+            .Setup(s => s.RecordBackendAcceptedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _claimService
             .Setup(s => s.RecordUnknownOutcomeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))

@@ -20,15 +20,14 @@ public enum BackendStartStatus
     AlreadyStarted = 1,
 
     /// <summary>
-    /// A guard rejected the start deterministically (claim denied, artifact unavailable,
-    /// backend rejected). Retrying without operator action cannot succeed.
+    /// A guard or backend explicitly rejected the start. The backend did not accept it.
     /// </summary>
-    RejectedPermanently = 2,
+    Rejected = 2,
 
     /// <summary>
-    /// A known transient failure occurred. Retrying later may succeed.
+    /// A known failure occurred before any start-capable backend request was sent.
     /// </summary>
-    RejectedTransiently = 3,
+    FailedBeforeStart = 3,
 
     /// <summary>
     /// The backend outcome could not be determined (network/protocol error after the
@@ -45,44 +44,87 @@ public enum BackendStartStatus
 /// <param name="AttemptId">Dispatch attempt created for this command, when a claim was acquired.</param>
 /// <param name="ErrorCode">Typed error code on non-accepted statuses.</param>
 /// <param name="ErrorDetail">Human-readable detail (no credentials or paths).</param>
+/// <param name="BackendAcceptanceProven">
+/// True only when a persisted attempt or provider response proves backend acceptance.
+/// </param>
+/// <param name="IsRetryable">Whether retry is safe and may succeed without operator mutation.</param>
 public sealed record BackendStartOutcome(
     BackendStartStatus Status,
     Guid? AttemptId,
     string? ErrorCode,
-    string? ErrorDetail)
+    string? ErrorDetail,
+    bool BackendAcceptanceProven = false,
+    bool IsRetryable = false)
 {
     /// <summary>Creates an accepted outcome.</summary>
     /// <param name="attemptId">Attempt that was accepted.</param>
     /// <returns>An accepted outcome.</returns>
     public static BackendStartOutcome Accepted(Guid attemptId) =>
-        new(BackendStartStatus.Accepted, attemptId, null, null);
+        new(BackendStartStatus.Accepted, attemptId, null, null, BackendAcceptanceProven: true);
 
     /// <summary>Creates an already-started (idempotent no-op) outcome.</summary>
     /// <param name="detail">Human-readable detail.</param>
+    /// <param name="attemptId">Persisted attempt that may prove acceptance.</param>
+    /// <param name="backendAcceptanceProven">Whether backend acceptance is durably proven.</param>
     /// <returns>An already-started outcome.</returns>
-    public static BackendStartOutcome AlreadyStarted(string detail) =>
-        new(BackendStartStatus.AlreadyStarted, null, "already_started", detail);
+    public static BackendStartOutcome AlreadyStarted(
+        string detail,
+        Guid attemptId,
+        bool backendAcceptanceProven) =>
+        new(
+            BackendStartStatus.AlreadyStarted,
+            attemptId,
+            "already_started",
+            detail,
+            backendAcceptanceProven);
 
-    /// <summary>Creates a permanently-rejected outcome.</summary>
+    /// <summary>Creates an explicit rejection.</summary>
     /// <param name="errorCode">Typed error code.</param>
     /// <param name="detail">Human-readable detail.</param>
     /// <param name="attemptId">Attempt id when a claim had been acquired.</param>
-    /// <returns>A permanently-rejected outcome.</returns>
-    public static BackendStartOutcome RejectedPermanently(string errorCode, string detail, Guid? attemptId = null) =>
-        new(BackendStartStatus.RejectedPermanently, attemptId, errorCode, detail);
+    /// <param name="isRetryable">Whether a safe retry may succeed.</param>
+    /// <returns>A rejected outcome.</returns>
+    public static BackendStartOutcome Rejected(
+        string errorCode,
+        string detail,
+        Guid? attemptId = null,
+        bool isRetryable = false) =>
+        new(
+            BackendStartStatus.Rejected,
+            attemptId,
+            errorCode,
+            detail,
+            BackendAcceptanceProven: false,
+            IsRetryable: isRetryable);
 
-    /// <summary>Creates a transiently-rejected outcome.</summary>
+    /// <summary>Creates a known failure before a start-capable request was sent.</summary>
     /// <param name="errorCode">Typed error code.</param>
     /// <param name="detail">Human-readable detail.</param>
     /// <param name="attemptId">Attempt id when a claim had been acquired.</param>
-    /// <returns>A transiently-rejected outcome.</returns>
-    public static BackendStartOutcome RejectedTransiently(string errorCode, string detail, Guid? attemptId = null) =>
-        new(BackendStartStatus.RejectedTransiently, attemptId, errorCode, detail);
+    /// <param name="isRetryable">Whether a safe retry may succeed.</param>
+    /// <returns>A failed-before-start outcome.</returns>
+    public static BackendStartOutcome FailedBeforeStart(
+        string errorCode,
+        string detail,
+        Guid? attemptId = null,
+        bool isRetryable = false) =>
+        new(
+            BackendStartStatus.FailedBeforeStart,
+            attemptId,
+            errorCode,
+            detail,
+            BackendAcceptanceProven: false,
+            IsRetryable: isRetryable);
 
     /// <summary>Creates an unknown outcome that requires reconciliation.</summary>
     /// <param name="detail">Human-readable detail.</param>
     /// <param name="attemptId">Attempt id that must be reconciled.</param>
     /// <returns>An unknown outcome.</returns>
     public static BackendStartOutcome Unknown(string detail, Guid? attemptId) =>
-        new(BackendStartStatus.Unknown, attemptId, "backend_outcome_unknown", detail);
+        new(
+            BackendStartStatus.Unknown,
+            attemptId,
+            "backend_outcome_unknown",
+            detail,
+            BackendAcceptanceProven: false);
 }

@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -26,7 +28,9 @@ public sealed class BedClearAcknowledgementService(
     AppDbContext db,
     IDbOutboxSequenceAllocator sequenceAllocator,
     IPrinterStatusSnapshotReader statusReader,
-    ILogger<BedClearAcknowledgementService> logger) : IBedClearAcknowledgementService
+    ILogger<BedClearAcknowledgementService> logger,
+    IStoredGcodeIntegrityVerifier? integrityVerifier = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : IBedClearAcknowledgementService
 {
     /// <summary>
     /// Default acknowledgement validity window.
@@ -38,7 +42,7 @@ public sealed class BedClearAcknowledgementService(
     private static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
 
     /// <summary>Event type string for the durable backend-start command written to the outbox.</summary>
-    internal const string BackendStartCommandEventType = "PrintFarmer.Queue.BackendStartCommand.v1";
+    public const string BackendStartCommandEventType = "PrintFarmer.Queue.BackendStartCommand.v1";
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
@@ -46,12 +50,35 @@ public sealed class BedClearAcknowledgementService(
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
 
+    private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
+    private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
+        resourceAuthorization;
+
     /// <inheritdoc />
     public async Task<AcknowledgeBedClearResult> AcknowledgeAsync(
         AcknowledgeBedClearRequest request,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (_resourceAuthorization is not null &&
+            (!await _resourceAuthorization.CanActorAccessJobAsync(
+                 request.ActorSubject,
+                 request.JobId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct) ||
+             !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                 request.ActorSubject,
+                 request.PrinterId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct)))
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.JobNotFound,
+                null,
+                null,
+                "The queue job was not found.");
+        }
 
         if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
         {
@@ -79,32 +106,6 @@ public sealed class BedClearAcknowledgementService(
                 "Job is not assigned to the specified printer.");
         }
 
-        // Short-circuit: job is already Starting or Printing — treat as success.
-        if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
-        {
-            return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.AlreadyStartingOrPrinting,
-                job.RowVersion, null, null);
-        }
-
-        // Job must be in a dispatchable state.
-        if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
-        {
-            return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.JobNotDispatchable,
-                job.RowVersion,
-                null,
-                $"Job is in state {job.Status} and cannot be acknowledged.");
-        }
-
-        if (job.GcodeFile is null)
-        {
-            return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.CalibrationJobIncompatible,
-                job.RowVersion, null,
-                "Job is missing its G-code artifact.");
-        }
-
         PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
             .FirstOrDefaultAsync(s => s.PrinterId == request.PrinterId, ct);
 
@@ -117,13 +118,103 @@ public sealed class BedClearAcknowledgementService(
                 $"Printer dispatch state for {request.PrinterId} not found.");
         }
 
-        // If-Match precondition check.
+        // Public callers provide both tokens. Trusted internal callers may omit the
+        // job token and bind to the revision loaded in this unit of work.
         if (request.IfMatchDispatchState is null)
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PreconditionRequired,
                 job.RowVersion, dispatchState.RowVersion,
-                "If-Match header is required for bed-clear acknowledgements.");
+                "X-Dispatch-State-If-Match is required for bed-clear acknowledgements.");
+        }
+
+        byte[] effectiveJobRevision = request.IfMatchJob ?? job.RowVersion ?? [];
+        string requestSha256 = BuildCommandRequestSha256(request);
+        BedClearCommandRecord? priorCommand = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(
+                record =>
+                    record.PrinterId == request.PrinterId &&
+                    record.IdempotencyKey == request.IdempotencyKey,
+                ct);
+        if (priorCommand is not null)
+        {
+            if (!string.Equals(
+                    priorCommand.RequestSha256,
+                    requestSha256,
+                    StringComparison.Ordinal))
+            {
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.IdempotencyMismatch,
+                    job.RowVersion,
+                    dispatchState.RowVersion,
+                    "Idempotency key was previously used with different job or revision inputs.");
+            }
+
+            if (priorCommand.Status is BedClearCommandStatus.Rejected or
+                BedClearCommandStatus.Expired)
+            {
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.JobNotDispatchable,
+                    job.RowVersion,
+                    dispatchState.RowVersion,
+                    "The prior bed-clear command is terminal and cannot be replayed. Use a new idempotency key.");
+            }
+
+            if (priorCommand.Status == BedClearCommandStatus.Pending)
+            {
+                Guid? currentHeadId = await _db.PrintJobs
+                    .AsNoTracking()
+                    .Where(candidate =>
+                        candidate.AssignedPrinterId == request.PrinterId &&
+                        (candidate.Status == PrintJobStatus.Queued ||
+                         candidate.Status == PrintJobStatus.Assigned))
+                    .OrderByPriorityDescending()
+                    .Select(candidate => (Guid?)candidate.Id)
+                    .FirstOrDefaultAsync(ct);
+                long? currentPrinterRevision = await _db.Printers
+                    .AsNoTracking()
+                    .Where(printer => printer.Id == request.PrinterId)
+                    .Select(printer => (long?)printer.ConfigurationRevision)
+                    .SingleOrDefaultAsync(ct);
+                bool pendingIsStale =
+                    priorCommand.ExpiresAtUtc <= DateTime.UtcNow ||
+                    priorCommand.QueueRevision != dispatchState.QueueRevision ||
+                    !priorCommand.JobRowVersion.SequenceEqual(job.RowVersion ?? []) ||
+                    priorCommand.PrinterConfigRevision != currentPrinterRevision ||
+                    currentHeadId != priorCommand.JobId;
+                if (pendingIsStale)
+                {
+                    priorCommand.Status = BedClearCommandStatus.Expired;
+                    priorCommand.UpdatedAtUtc = DateTime.UtcNow;
+                    await _db.SaveChangesAsync(ct);
+                    return new AcknowledgeBedClearResult(
+                        BedClearAckOutcome.JobNotDispatchable,
+                        job.RowVersion,
+                        dispatchState.RowVersion,
+                        "The pending bed-clear command expired or its exact queue inputs changed. Use a new idempotency key.");
+                }
+            }
+
+            BedClearAckOutcome replayOutcome =
+                priorCommand.Status is BedClearCommandStatus.Claimed or
+                    BedClearCommandStatus.Accepted or
+                    BedClearCommandStatus.Unknown
+                    ? BedClearAckOutcome.AlreadyStartingOrPrinting
+                    : BedClearAckOutcome.Replayed;
+            return new AcknowledgeBedClearResult(
+                replayOutcome,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                null);
+        }
+
+        if (!effectiveJobRevision.SequenceEqual(job.RowVersion ?? []))
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.DispatchRevisionConflict,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "The job changed since the request was prepared. Re-fetch both ETags and retry.");
         }
 
         if (!request.IfMatchDispatchState.SequenceEqual(dispatchState.RowVersion ?? []))
@@ -132,6 +223,25 @@ public sealed class BedClearAcknowledgementService(
                 BedClearAckOutcome.DispatchRevisionConflict,
                 job.RowVersion, dispatchState.RowVersion,
                 "Dispatch state has changed since the request was prepared. Re-fetch and retry.");
+        }
+
+        // Database state cannot be overridden by a stale idle telemetry snapshot.
+        bool hasDatabaseActiveJob = await _db.PrintJobs
+            .AsNoTracking()
+            .AnyAsync(
+                candidate =>
+                candidate.AssignedPrinterId == request.PrinterId &&
+                candidate.Id != request.JobId &&
+                (candidate.Status == PrintJobStatus.Starting ||
+                 candidate.Status == PrintJobStatus.Printing ||
+                 candidate.Status == PrintJobStatus.Paused), ct);
+        if (hasDatabaseActiveJob)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterBusy,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "Another Starting, Printing, or Paused job owns this printer in the database.");
         }
 
         // Check whether the printer is already occupied.
@@ -144,28 +254,51 @@ public sealed class BedClearAcknowledgementService(
                 $"Printer {request.PrinterId} is busy with job {dispatchState.ActiveJobId}.");
         }
 
-        // --- Exact-replay detection ---
-        if (dispatchState.AcknowledgedJobId == request.JobId &&
-            dispatchState.AcknowledgementIdempotencyKey == request.IdempotencyKey)
+        // Short-circuit only after durable idempotency and revision checks.
+        if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
         {
-            // Idempotent re-acknowledgement of the same request.
-            _logger.LogDebug(
-                "Bed-clear acknowledgement replayed: Job={JobId} Key={Key}",
-                request.JobId, request.IdempotencyKey);
-
             return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.Replayed,
-                job.RowVersion, dispatchState.RowVersion, null);
+                BedClearAckOutcome.AlreadyStartingOrPrinting,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                null);
         }
 
-        // Conflict: same key, different job.
-        if (dispatchState.AcknowledgementIdempotencyKey == request.IdempotencyKey &&
-            dispatchState.AcknowledgedJobId != request.JobId)
+        if (job.Status is not (PrintJobStatus.Queued or PrintJobStatus.Assigned))
         {
             return new AcknowledgeBedClearResult(
-                BedClearAckOutcome.IdempotencyMismatch,
-                job.RowVersion, dispatchState.RowVersion,
-                "Idempotency key was previously used for a different job.");
+                BedClearAckOutcome.JobNotDispatchable,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                $"Job is in state {job.Status} and cannot be acknowledged.");
+        }
+
+        // Job must still be the exact urgent-first current queue head.
+        Guid? queueHeadId = await _db.PrintJobs
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.AssignedPrinterId == request.PrinterId &&
+                (candidate.Status == PrintJobStatus.Queued ||
+                 candidate.Status == PrintJobStatus.Assigned))
+            .OrderByPriorityDescending()
+            .Select(candidate => (Guid?)candidate.Id)
+            .FirstOrDefaultAsync(ct);
+        if (queueHeadId != request.JobId)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.WrongJob,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "Only the urgent-first current queue head can be acknowledged.");
+        }
+
+        if (job.GcodeFile is null)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.CalibrationJobIncompatible,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "Job is missing its G-code artifact.");
         }
 
         // For calibration jobs, verify blocked-reason is clear.
@@ -204,10 +337,14 @@ public sealed class BedClearAcknowledgementService(
 
         if (printer.ConfigurationRevision != request.ExpectedPrinterConfigRevision.Value)
         {
-            return new AcknowledgeBedClearResult(
+            return await PersistBlockedAsync(
+                request,
+                job,
+                dispatchState,
                 BedClearAckOutcome.CalibrationJobIncompatible,
-                job.RowVersion, dispatchState.RowVersion,
-                $"Printer configuration revision {printer.ConfigurationRevision} does not match expected {request.ExpectedPrinterConfigRevision}.");
+                "printer_config_revision_stale",
+                $"Printer configuration revision {printer.ConfigurationRevision} does not match expected {request.ExpectedPrinterConfigRevision}.",
+                ct);
         }
 
         // =========================================================================
@@ -240,12 +377,12 @@ public sealed class BedClearAcknowledgementService(
                 "Printer is offline per telemetry; bed-clear cannot be acknowledged.");
         }
 
-        if (snapshot.Status.State is "printing" or "starting" or "paused")
+        if (!IsExplicitlyIdle(snapshot.Status.State))
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PrinterBusy,
                 job.RowVersion, dispatchState.RowVersion,
-                $"Printer is in state '{snapshot.Status.State}' per telemetry; bed-clear cannot be acknowledged.");
+                $"Printer is not explicitly idle (observed '{snapshot.Status.State ?? "unknown"}'); bed-clear cannot be acknowledged.");
         }
 
         // =========================================================================
@@ -255,10 +392,42 @@ public sealed class BedClearAcknowledgementService(
         DispatchClaimResult? filamentFailure = DispatchSafetyGates.EvaluateFilament(job, printer);
         if (filamentFailure is not null)
         {
-            return new AcknowledgeBedClearResult(
+            return await PersistBlockedAsync(
+                request,
+                job,
+                dispatchState,
                 BedClearAckOutcome.FilamentCheckFailed,
-                job.RowVersion, dispatchState.RowVersion,
-                filamentFailure.ErrorDetail);
+                filamentFailure.ErrorCode ?? "filament_material_mismatch",
+                filamentFailure.ErrorDetail,
+                ct);
+        }
+
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            Spool? pinnedSpool = job.PinnedSpoolId.HasValue
+                ? await _db.Spools
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(candidate => candidate.Id == job.PinnedSpoolId.Value, ct)
+                : null;
+            if (pinnedSpool is null ||
+                !pinnedSpool.InUse ||
+                pinnedSpool.AssignedPrinterId != printer.Id ||
+                !string.Equals(
+                    pinnedSpool.Material,
+                    job.RequiredMaterialType,
+                    StringComparison.OrdinalIgnoreCase) ||
+                (job.EstimatedFilamentUsage is > 0 &&
+                 pinnedSpool.WeightGrams < job.EstimatedFilamentUsage.Value))
+            {
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
+                    BedClearAckOutcome.FilamentCheckFailed,
+                    "filament_spool_mismatch",
+                    "The exact pinned physical spool is absent, mismatched, or insufficient.",
+                    ct);
+            }
         }
 
         // =========================================================================
@@ -268,10 +437,14 @@ public sealed class BedClearAcknowledgementService(
         DispatchClaimResult? hardwareFailure = DispatchSafetyGates.EvaluateHardware(job, printer);
         if (hardwareFailure is not null)
         {
-            return new AcknowledgeBedClearResult(
+            return await PersistBlockedAsync(
+                request,
+                job,
+                dispatchState,
                 BedClearAckOutcome.CalibrationJobIncompatible,
-                job.RowVersion, dispatchState.RowVersion,
-                hardwareFailure.ErrorDetail);
+                hardwareFailure.ErrorCode ?? "compatibility_incomplete",
+                hardwareFailure.ErrorDetail,
+                ct);
         }
 
         if (job.JobKind == JobKind.FilamentCalibration)
@@ -279,18 +452,55 @@ public sealed class BedClearAcknowledgementService(
             if (!job.GcodeFile.IsImmutable || job.GcodeFile.PromotedAtUtc is null ||
                 !QueueJobClassifier.IsCalibrationArtifact(job.GcodeFile))
             {
-                return new AcknowledgeBedClearResult(
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
                     BedClearAckOutcome.CalibrationJobIncompatible,
-                    job.RowVersion, dispatchState.RowVersion,
-                    "The calibration job does not reference a promoted immutable calibration artifact.");
+                    "gcode_hash_unverifiable",
+                    "The calibration job does not reference a promoted immutable calibration artifact.",
+                    ct);
             }
 
             if (string.IsNullOrWhiteSpace(job.GcodeContentSha256))
             {
-                return new AcknowledgeBedClearResult(
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
                     BedClearAckOutcome.CalibrationJobIncompatible,
-                    job.RowVersion, dispatchState.RowVersion,
-                    "The calibration job has no pinned G-code content hash.");
+                    "gcode_hash_missing",
+                    "The calibration job has no pinned G-code content hash.",
+                    ct);
+            }
+
+            if (_integrityVerifier is null)
+            {
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    "gcode_hash_unverifiable",
+                    "Stored-byte integrity verification is unavailable; acknowledgement fails closed.",
+                    ct);
+            }
+
+            StoredGcodeIntegrityResult byteIntegrity = await _integrityVerifier.VerifyAsync(
+                job.GcodeFile,
+                job.GcodeContentSha256,
+                job.PinnedGcodeFileSizeBytes,
+                ct);
+            if (!byteIntegrity.Success)
+            {
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    byteIntegrity.ErrorCode ?? "gcode_byte_hash_mismatch",
+                    byteIntegrity.ErrorDetail,
+                    ct);
             }
 
             string? authoritativeHash = !string.IsNullOrWhiteSpace(job.GcodeFile.ContentSha256)
@@ -303,9 +513,14 @@ public sealed class BedClearAcknowledgementService(
                 const string HashMismatchDetail =
                     "The calibration artifact's content hash does not match the job's pinned hash. " +
                     "A new job and idempotency key are required.";
-                return new AcknowledgeBedClearResult(
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
                     BedClearAckOutcome.CalibrationJobIncompatible,
-                    job.RowVersion, dispatchState.RowVersion, HashMismatchDetail);
+                    "gcode_hash_mismatch",
+                    HashMismatchDetail,
+                    ct);
             }
 
             DispatchClaimResult? calibrationFailure =
@@ -313,10 +528,32 @@ public sealed class BedClearAcknowledgementService(
 
             if (calibrationFailure is not null)
             {
-                return new AcknowledgeBedClearResult(
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
                     BedClearAckOutcome.CalibrationJobIncompatible,
-                    job.RowVersion, dispatchState.RowVersion,
-                    calibrationFailure.ErrorDetail);
+                    calibrationFailure.ErrorCode ?? "compatibility_incomplete",
+                    calibrationFailure.ErrorDetail,
+                    ct);
+            }
+
+            DispatchClaimResult? persistedInputFailure =
+                await DispatchClaimService.EvaluatePersistedCalibrationInputsAsync(
+                    _db,
+                    job,
+                    printer,
+                    ct);
+            if (persistedInputFailure is not null)
+            {
+                return await PersistBlockedAsync(
+                    request,
+                    job,
+                    dispatchState,
+                    BedClearAckOutcome.CalibrationJobIncompatible,
+                    persistedInputFailure.ErrorCode ?? "calibration_record_mismatch",
+                    persistedInputFailure.ErrorDetail,
+                    ct);
             }
         }
 
@@ -342,6 +579,10 @@ public sealed class BedClearAcknowledgementService(
         dispatchState.AcknowledgedBySubject = request.ActorSubject;
         dispatchState.AcknowledgementIdempotencyKey = request.IdempotencyKey;
         dispatchState.AcknowledgementExpiresAtUtc = now + DefaultAcknowledgementTtl;
+        dispatchState.AcknowledgedJobRowVersion = effectiveJobRevision.ToArray();
+        dispatchState.AcknowledgedQueueRevision = dispatchState.QueueRevision;
+        dispatchState.AcknowledgedPrinterConfigRevision =
+            request.ExpectedPrinterConfigRevision.Value;
 
         // Write a durable backend-start command to the outbox.
         // Payload has everything the adapter orchestrator needs: jobId, printerId,
@@ -356,6 +597,9 @@ public sealed class BedClearAcknowledgementService(
             DispatchStateRowVersion = dispatchState.RowVersion,
             BedClearState = "Acknowledged",
             PrinterId = request.PrinterId,
+            ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            JobStatus = job.Status.ToString(),
+            JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             PrinterConfigRevision = job.PinnedPrinterConfigRevision,
             EventType = BackendStartCommandEventType,
             SchemaVersion = "1",
@@ -371,6 +615,25 @@ public sealed class BedClearAcknowledgementService(
         };
 
         _ = _db.QueueDispatchOutbox.Add(startCommand);
+        var commandRecord = new BedClearCommandRecord
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = request.PrinterId,
+            JobId = request.JobId,
+            IdempotencyKey = request.IdempotencyKey,
+            RequestSha256 = requestSha256,
+            ActorSubject = request.ActorSubject,
+            JobRowVersion = effectiveJobRevision.ToArray(),
+            DispatchStateRowVersion = request.IfMatchDispatchState.ToArray(),
+            QueueRevision = dispatchState.QueueRevision,
+            PrinterConfigRevision = request.ExpectedPrinterConfigRevision.Value,
+            Status = BedClearCommandStatus.Pending,
+            OutboxEventId = startCommand.Id,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            ExpiresAtUtc = now + DefaultAcknowledgementTtl,
+        };
+        _ = _db.BedClearCommandRecords.Add(commandRecord);
 
         // Durable audit — committed in the SAME transaction as the acknowledgement.
         _ = QueueAuditWriter.Add(
@@ -438,6 +701,36 @@ public sealed class BedClearAcknowledgementService(
                     await _db.Entry(seqState).ReloadAsync(ct);
                 }
             }
+            catch (DbUpdateException)
+            {
+                _db.ChangeTracker.Clear();
+                BedClearCommandRecord? winner = await _db.BedClearCommandRecords
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        record =>
+                            record.PrinterId == request.PrinterId &&
+                            record.IdempotencyKey == request.IdempotencyKey,
+                        ct);
+                if (winner is not null)
+                {
+                    bool isReplay = string.Equals(
+                        winner.RequestSha256,
+                        requestSha256,
+                        StringComparison.Ordinal);
+                    string? replayError = isReplay
+                        ? null
+                        : "Idempotency key was concurrently used with different inputs.";
+                    return new AcknowledgeBedClearResult(
+                        isReplay
+                            ? BedClearAckOutcome.Replayed
+                            : BedClearAckOutcome.IdempotencyMismatch,
+                        null,
+                        null,
+                        replayError);
+                }
+
+                throw;
+            }
         }
 
         if (!saved)
@@ -455,9 +748,9 @@ public sealed class BedClearAcknowledgementService(
 
         _logger.LogInformation(
             "Bed-clear acknowledged and durable backend-start command queued: " +
-            "Job={JobId} Printer={PrinterId} Actor={Actor} Key={Key} Command={CommandId}",
+            "Job={JobId} Printer={PrinterId} Actor={Actor} Command={CommandId}",
             request.JobId, request.PrinterId, request.ActorSubject,
-            request.IdempotencyKey, startCommand.Id);
+            startCommand.Id);
 
         return new AcknowledgeBedClearResult(
             BedClearAckOutcome.Accepted,
@@ -497,6 +790,9 @@ public sealed class BedClearAcknowledgementService(
             dispatchState.AcknowledgedBySubject = null;
             dispatchState.AcknowledgementIdempotencyKey = null;
             dispatchState.AcknowledgementExpiresAtUtc = null;
+            dispatchState.AcknowledgedJobRowVersion = null;
+            dispatchState.AcknowledgedQueueRevision = null;
+            dispatchState.AcknowledgedPrinterConfigRevision = null;
 
             await _db.SaveChangesAsync(ct);
 
@@ -504,5 +800,70 @@ public sealed class BedClearAcknowledgementService(
                 "Invalidated stale bed-clear acknowledgement for Printer={PrinterId} (was for Job={JobId})",
                 printerId, acknowledgedJobId);
         }
+    }
+
+    private static bool IsExplicitlyIdle(string? state) =>
+        !string.IsNullOrWhiteSpace(state) &&
+        (state.Trim().Equals("idle", StringComparison.OrdinalIgnoreCase) ||
+         state.Trim().Equals("ready", StringComparison.OrdinalIgnoreCase) ||
+         state.Trim().Equals("standby", StringComparison.OrdinalIgnoreCase) ||
+         state.Trim().Equals("operational", StringComparison.OrdinalIgnoreCase));
+
+    private async Task<AcknowledgeBedClearResult> PersistBlockedAsync(
+        AcknowledgeBedClearRequest request,
+        PrintJob job,
+        PrinterDispatchState dispatchState,
+        BedClearAckOutcome outcome,
+        string errorCode,
+        string? detail,
+        CancellationToken ct)
+    {
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            job.BlockedReasonCode = DispatchSafetyGates.MapBlockedReason(errorCode)
+                ?? JobBlockedReasonCode.HardCompatibilityFailure;
+            job.BlockedReasonJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                errorCode,
+                detail,
+            });
+            _ = QueueAuditWriter.Add(
+                _db,
+                request.ActorSubject,
+                QueueAuditOperations.BedClearAcknowledge,
+                QueueAuditOutcomes.Denied,
+                nameof(PrintJob),
+                resourceId: job.Id,
+                printerId: request.PrinterId,
+                printJobId: job.Id,
+                reasonCode: errorCode,
+                jobRowVersion: job.RowVersion,
+                dispatchStateRowVersion: dispatchState.RowVersion,
+                idempotencyKey: request.IdempotencyKey,
+                detail: new { blockedReason = job.BlockedReasonCode?.ToString() });
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return new AcknowledgeBedClearResult(
+            outcome,
+            job.RowVersion,
+            dispatchState.RowVersion,
+            detail);
+    }
+
+    private static string BuildCommandRequestSha256(
+        AcknowledgeBedClearRequest request)
+    {
+        string configurationRevision =
+            request.ExpectedPrinterConfigRevision?.ToString(
+                System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+        string canonical = string.Join(
+            '\n',
+            request.JobId.ToString("D"),
+            request.PrinterId.ToString("D"),
+            request.ActorSubject,
+            configurationRevision);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))
+            .ToLowerInvariant();
     }
 }

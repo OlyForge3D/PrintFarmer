@@ -186,6 +186,21 @@ does not fall back to `EnsureCreated` or continue with a partial schema.
 
 Before upgrading, stop writers and take a provider-native backup:
 
+Queue-dispatch schema upgrades require a full quiescence window. Stop every API
+replica, scheduler, outbox publisher, slicer bridge, and background worker that
+can create or mutate queue jobs before applying migrations. Do not run old and
+new application versions against the database at the same time: the canonical
+calibration fields, queue-generation fences, command phases, and provider-native
+outbox ordering are one deployment contract.
+
+Apply the migrations once, deploy all services from the same release artifact,
+verify both context migration sets and readiness, and only then resume queue
+writers. The migration path is forward-only. If startup fails after schema
+upgrade, keep writers stopped and fix forward. A binary rollback requires
+restoring the matching provider-native database backup and blob snapshot before
+starting the old release; never run old binaries on the upgraded schema and
+never use an EF down-migration as an operational rollback.
+
 ```bash
 # SQLite: stop PrintFarmer before copying the database and sidecar files.
 cp farm.db "farm.db.$(date +%Y%m%d%H%M%S).bak"

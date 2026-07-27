@@ -91,22 +91,57 @@ public enum UploadAndPrintStage
 }
 
 /// <summary>
+/// Typed physical outcome of an upload-and-start operation.
+/// </summary>
+public enum UploadAndPrintOutcome
+{
+    /// <summary>The backend confirmed that it accepted the print.</summary>
+    Accepted,
+
+    /// <summary>The backend explicitly rejected the request.</summary>
+    Rejected,
+
+    /// <summary>No request capable of starting a print was sent.</summary>
+    FailedBeforeStart,
+
+    /// <summary>The request may have reached the backend and must be reconciled.</summary>
+    Unknown,
+}
+
+/// <summary>
 /// Result of a combined upload-and-start-print operation.
 /// </summary>
 /// <param name="Success">Whether both upload and start-print succeeded.</param>
 /// <param name="FailedStage">The stage at which the operation failed, or <see cref="UploadAndPrintStage.Completed"/> on success.</param>
 /// <param name="ErrorMessage">Human-readable error message when <paramref name="Success"/> is false.</param>
+/// <param name="Outcome">Typed physical outcome used to decide whether retry is safe.</param>
+/// <param name="BackendJobId">Real provider identity returned by the backend, when available.</param>
 public sealed record UploadAndPrintResult(
     bool Success,
     UploadAndPrintStage FailedStage = UploadAndPrintStage.Completed,
-    string? ErrorMessage = null)
+    string? ErrorMessage = null,
+    UploadAndPrintOutcome Outcome = UploadAndPrintOutcome.Accepted,
+    string? BackendJobId = null)
 {
     /// <summary>Creates a successful result.</summary>
-    public static UploadAndPrintResult Ok() => new(true);
+    public static UploadAndPrintResult Ok(string? backendJobId = null) =>
+        new(true, Outcome: UploadAndPrintOutcome.Accepted, BackendJobId: backendJobId);
 
-    /// <summary>Creates a failure result indicating which stage failed.</summary>
+    /// <summary>Creates an explicit backend rejection.</summary>
     public static UploadAndPrintResult Fail(UploadAndPrintStage stage, string? message = null)
-        => new(false, stage, message);
+        => new(false, stage, message, UploadAndPrintOutcome.Rejected);
+
+    /// <summary>Creates a known failure before a start-capable request was sent.</summary>
+    public static UploadAndPrintResult FailedBeforeStart(
+        UploadAndPrintStage stage,
+        string? message = null) =>
+        new(false, stage, message, UploadAndPrintOutcome.FailedBeforeStart);
+
+    /// <summary>Creates an outcome that may have started a physical print.</summary>
+    public static UploadAndPrintResult Unknown(
+        UploadAndPrintStage stage,
+        string? message = null) =>
+        new(false, stage, message, UploadAndPrintOutcome.Unknown);
 }
 
 /// <summary>

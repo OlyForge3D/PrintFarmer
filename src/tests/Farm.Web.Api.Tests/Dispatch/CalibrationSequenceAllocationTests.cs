@@ -2,9 +2,11 @@
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
@@ -75,7 +77,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             dataService.Object,
             NullLogger<JobQueueService>.Instance,
             db: db,
-            sequenceAllocator: allocator);
+            sequenceAllocator: allocator,
+            positionAllocator: new QueuePositionAllocator(db));
 
         return (sut, db);
     }
@@ -89,6 +92,14 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         db.Manufacturers.Add(mfr);
         var mdl = new PrinterModel { Id = Guid.NewGuid(), ManufacturerId = mfr.Id, Name = "SeqModel" };
         db.PrinterModels.Add(mdl);
+        Guid projectId = Guid.NewGuid();
+        Guid attemptId = Guid.NewGuid();
+        Guid orchestrationId = Guid.NewGuid();
+        Guid snapshotId = Guid.NewGuid();
+        Guid sourceArtifactId = Guid.NewGuid();
+        Guid sliceJobId = Guid.NewGuid();
+        Guid toolheadId = Guid.NewGuid();
+        Guid spoolId = Guid.NewGuid();
 
         var gcode = new GcodeFile
         {
@@ -104,9 +115,12 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             IsImmutable = true,
             PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ContentSha256 = new string('e', 64),
-            CalibrationProjectId = Guid.NewGuid(),
-            CalibrationAttemptId = Guid.NewGuid(),
-            CalibrationOrchestrationId = Guid.NewGuid(),
+            CalibrationProjectId = projectId,
+            CalibrationAttemptId = attemptId,
+            CalibrationOrchestrationId = orchestrationId,
+            SourceArtifactId = sourceArtifactId,
+            SourceSliceJobId = sliceJobId,
+            SourceModelSha256 = new string('8', 64),
             CalibrationManifestSha256 = new string('9', 64),
             SpecificationSha256 = new string('a', 64),
             MachineProfileSha256 = new string('b', 64),
@@ -118,6 +132,11 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             SlicerContainerDigest = "sha256:abc",
             FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
             GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
+            PrinterModelId = mdl.Id,
+            ObjectDimensionX = 20,
+            ObjectDimensionY = 20,
+            ObjectDimensionZ = 20,
+            EstimatedFilamentWeightG = 10,
         };
         db.GcodeFiles.Add(gcode);
 
@@ -137,8 +156,110 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             CalibrationSlicerDistribution = "upstream",
             CalibrationSlicerVersion = "2.3.0",
             ConfigurationRevision = 1,
+            MaxBuildVolumeX = 200,
+            MaxBuildVolumeY = 200,
+            MaxBuildVolumeZ = 200,
         };
+        printer.Toolheads.Add(new Toolhead
+        {
+            Id = toolheadId,
+            PrinterId = printer.Id,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+        });
         db.Printers.Add(printer);
+        db.Spools.Add(new Spool
+        {
+            Id = spoolId,
+            Material = "PLA",
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printer.Id,
+        });
+        PrinterConfigurationSnapshotDto snapshotDocument = new()
+        {
+            PrinterId = printer.Id,
+            ConfigurationRevision = 1,
+            SnapshotSha256 = new string('f', 64),
+            Toolheads =
+            [
+                new CalibrationToolheadDto(
+                    toolheadId,
+                    0,
+                    "Primary",
+                    true,
+                    new CalibrationPoint3DDto(0, 0, 0),
+                    0.4,
+                    "Brass",
+                    "Brass",
+                    300,
+                    false,
+                    300,
+                    20,
+                    "DirectDrive",
+                    true,
+                    null,
+                    ["PLA"]),
+            ],
+        };
+        db.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = projectId,
+            OwnerUserId = Guid.NewGuid(),
+            Name = "Sequence calibration",
+            PrinterId = printer.Id,
+            CurrentPrinterConfigurationSnapshotId = snapshotId,
+            SelectedToolheadId = toolheadId,
+            SelectedToolheadIndex = 0,
+            FilamentProvider = "local",
+            FilamentProductId = "pla",
+            FilamentProductName = "PLA",
+            FilamentMaterial = "PLA",
+            LocalSpoolId = spoolId,
+            FilamentSnapshotJson = """{"material":"PLA"}""",
+        });
+        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
+        {
+            Id = snapshotId,
+            ProjectId = projectId,
+            AttemptId = attemptId,
+            PrinterId = printer.Id,
+            SchemaVersion = "1",
+            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
+            SnapshotSha256 = new string('f', 64),
+            PrinterConfigurationRevision = 1,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            SlicerEngine = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:abc",
+            MachineProfileSha256 = new string('b', 64),
+            ProcessProfileSha256 = new string('c', 64),
+            FilamentProfileSha256 = new string('d', 64),
+        });
+        db.CalibrationAttempts.Add(new CalibrationAttempt
+        {
+            Id = attemptId,
+            ProjectId = projectId,
+            SpecificationSha256 = new string('a', 64),
+            PrinterConfigurationSnapshotId = snapshotId,
+        });
+        db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = orchestrationId,
+            ProjectId = projectId,
+            AttemptId = attemptId,
+            SpecificationSha256 = new string('a', 64),
+            SliceJobId = sliceJobId,
+            FinalArtifactId = sourceArtifactId,
+            GcodeFileId = gcode.Id,
+            GcodeSha256 = gcode.ContentSha256,
+            ManifestSha256 = gcode.CalibrationManifestSha256,
+            SlicerContainerDigest = "sha256:abc",
+        });
 
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printer.Id });
 
@@ -153,25 +274,6 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             AssignedPrinterId = printerId,
             JobKind = JobKind.FilamentCalibration,
             IdempotencyKey = idempotencyKey,
-            IdempotencyScope = "seq-test-scope",
-            CalibrationProjectId = Guid.NewGuid(),
-            CalibrationAttemptId = Guid.NewGuid(),
-            CalibrationConfigSnapshotId = Guid.NewGuid(),
-            CalibrationOrchestrationId = Guid.NewGuid(),
-            SourceArtifactId = Guid.NewGuid(),
-            GcodeContentSha256 = new string('e', 64),
-            RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
-            RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
-            RequiredSlicerEngine = "OrcaSlicer",
-            RequiredSlicerDistribution = "upstream",
-            RequiredSlicerVersion = "2.3.0",
-            RequiredSlicerContainerDigest = "sha256:abc",
-            SpecificationSha256 = new string('a', 64),
-            MachineProfileSha256 = new string('b', 64),
-            ProcessProfileSha256 = new string('c', 64),
-            FilamentProfileSha256 = new string('d', 64),
-            PrinterConfigSnapshotSha256 = new string('f', 64),
-            PinnedPrinterConfigRevision = 1,
             Copies = 1,
             Priority = PrintJobPriority.Normal,
         };
@@ -205,11 +307,10 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                     dataService,
                     NullLogger<JobQueueService>.Instance,
                     db: db,
-                    sequenceAllocator: allocator);
+                    sequenceAllocator: allocator,
+                    positionAllocator: new QueuePositionAllocator(db));
 
                 var req = MakeCalibrationRequest(gcodeId, printerId, $"seq-key-{i}");
-                req.IdempotencyScope = $"seq-scope-{i}"; // Unique scope per job
-
                 JobQueuePrintJobDto? result = await sutWithData.AddJobToQueueAsync(req, null, CancellationToken.None);
                 result.Should().NotBeNull($"job {i} must be added successfully");
             }
@@ -325,7 +426,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 ackCtx,
                 allocator,
                 DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
-                NullLogger<BedClearAcknowledgementService>.Instance);
+                NullLogger<BedClearAcknowledgementService>.Instance,
+                DispatchTestDoubles.ValidByteIntegrityVerifier());
 
             return await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
                 JobId: jobIds[i],
@@ -425,7 +527,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             ackCtx,
             new DbOutboxSequenceAllocator(),
             DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
-            NullLogger<BedClearAcknowledgementService>.Instance);
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
 
         AcknowledgeBedClearResult result = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
             JobId: job.Id,
@@ -516,7 +619,8 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 ackCtx,
                 new DbOutboxSequenceAllocator(),
                 DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
-                NullLogger<BedClearAcknowledgementService>.Instance);
+                NullLogger<BedClearAcknowledgementService>.Instance,
+                DispatchTestDoubles.ValidByteIntegrityVerifier());
 
             var r = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
                 printers[i].JobId, printers[i].PrinterId,

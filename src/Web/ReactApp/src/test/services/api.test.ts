@@ -164,12 +164,21 @@ describe("ApiClient", () => {
       };
 
       const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { dispatchStateETag: "dispatch-etag" },
+      });
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
 
       const result = await apiClient.confirmAutoDispatchReady("printer-1");
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/ready");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/ready",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
       expect(result).toEqual(mockResponse.data);
     });
 
@@ -180,22 +189,48 @@ describe("ApiClient", () => {
 
     it("should post skip requests to the auto-dispatch route", async () => {
       const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+      const mockGet = vi.fn().mockResolvedValue({
+        data: {
+          dispatchStateETag: "dispatch-etag",
+          nextJobETag: "job-etag",
+        },
+      });
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
 
       await apiClient.skipAutoDispatchJob("printer-1");
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/skip");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/skip",
+        undefined,
+        {
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Job-If-Match": '"job-etag"',
+          },
+        }
+      );
     });
 
     it("should post cancel requests to the auto-dispatch route", async () => {
       const mockPost = vi.fn().mockResolvedValue({ data: undefined });
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { dispatchStateETag: "dispatch-etag" },
+      });
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
 
       await apiClient.cancelAutoDispatch("printer-1");
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/cancel");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/cancel",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
     });
 
     it("should post pre-clear requests to the auto-dispatch route", async () => {
@@ -210,23 +245,49 @@ describe("ApiClient", () => {
       };
 
       const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      const mockGet = vi.fn().mockResolvedValue({
+        data: { dispatchStateETag: "dispatch-etag" },
+      });
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
 
       const result = await apiClient.preClearAutoDispatchBed("printer-1");
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/pre-clear");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/pre-clear",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
       expect(result).toEqual(mockResponse.data);
     });
 
     it("should put per-printer enabled changes to the auto-dispatch route", async () => {
       const mockPut = vi.fn().mockResolvedValue({ data: undefined });
+      const mockGet = vi.fn().mockResolvedValue({
+        data: {
+          dispatchStateETag: "dispatch-etag",
+          printerETag: "printer-etag",
+        },
+      });
       (apiClient as unknown as { client: { put: typeof mockPut } }).client.put =
         mockPut;
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+        mockGet;
 
       await apiClient.setAutoDispatchEnabled("printer-1", true);
 
-      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/printer-1/enabled", { enabled: true });
+      expect(mockPut).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/enabled",
+        { enabled: true },
+        {
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Printer-If-Match": '"printer-etag"',
+          },
+        }
+      );
     });
 
     it("should put global enabled changes to the auto-dispatch route", async () => {

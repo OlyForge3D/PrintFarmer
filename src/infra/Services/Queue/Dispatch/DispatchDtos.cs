@@ -159,6 +159,9 @@ public class BatchDispatchRequest
     /// If null, uses the system-wide DispatchSettings.LoadBalancingStrategy.
     /// </summary>
     public LoadBalancingStrategy? Strategy { get; set; }
+
+    /// <summary>Base-64 job ETag for every selected job.</summary>
+    public Dictionary<Guid, string> JobETags { get; set; } = [];
 }
 
 /// <summary>

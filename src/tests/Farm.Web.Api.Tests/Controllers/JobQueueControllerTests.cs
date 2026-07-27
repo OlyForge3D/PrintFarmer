@@ -1,14 +1,18 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -124,6 +128,134 @@ public class JobQueueControllerTests
         ObjectResult problemResult = Assert.IsType<ObjectResult>(actionResult.Result);
         Assert.Equal(500, problemResult.StatusCode);
     }
+
+    [Fact]
+    public async Task GetChangesAsync_CrossResourceEvent_IsNotReturned()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using var db = new AppDbContext(options);
+        Guid allowedJobId = Guid.NewGuid();
+        Guid deniedJobId = Guid.NewGuid();
+        QueueDispatchOutbox command = CreateOutboxEvent(allowedJobId, 1);
+        command.EventType = BedClearAcknowledgementService.BackendStartCommandEventType;
+        command.PayloadJson = """{"actorSubject":"private","acknowledgementKey":"secret"}""";
+        db.QueueDispatchOutbox.AddRange(
+            command,
+            CreateOutboxEvent(allowedJobId, 2),
+            CreateOutboxEvent(deniedJobId, 3));
+        await db.SaveChangesAsync();
+
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization
+            .Setup(service => service.CanAccessJobAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                allowedJobId,
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        authorization
+            .Setup(service => service.CanAccessJobAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                deniedJobId,
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        IActionResult result = await controller.GetChangesAsync(
+            afterSequence: 0,
+            limit: 100,
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        object value = Assert.IsAssignableFrom<object>(ok.Value);
+        object? eventValue = value.GetType().GetProperty("events")?.GetValue(value);
+        List<QueueEventEnvelope> events =
+            Assert.IsType<List<QueueEventEnvelope>>(eventValue);
+        Assert.Single(events);
+        Assert.Equal(allowedJobId, events[0].JobId);
+        Assert.Equal(2, events[0].Sequence);
+        Assert.DoesNotContain(events, evt =>
+            evt.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
+        Assert.Equal(3L, value.GetType().GetProperty("nextSequence")?.GetValue(value));
+        Assert.Equal(false, value.GetType().GetProperty("hasMore")?.GetValue(value));
+    }
+
+    [Fact]
+    public async Task DispatchJobAsync_MissingIfMatch_Returns428()
+    {
+        Guid jobId = Guid.NewGuid();
+        _printJobManagementServiceMock
+            .Setup(service => service.DispatchJobAsync(
+                jobId.ToString(),
+                It.IsAny<string>(),
+                string.Empty,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueuePreconditionRequiredException("If-Match is required."));
+
+        IActionResult result = await _controller.DispatchJobAsync(jobId);
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status428PreconditionRequired, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DispatchJobAsync_StaleIfMatch_Returns412()
+    {
+        Guid jobId = Guid.NewGuid();
+        _controller.ControllerContext.HttpContext.Request.Headers.IfMatch = "\"c3RhbGU=\"";
+        _printJobManagementServiceMock
+            .Setup(service => service.DispatchJobAsync(
+                jobId.ToString(),
+                It.IsAny<string>(),
+                "c3RhbGU=",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new QueueRevisionConflictException("The job changed."));
+
+        IActionResult result = await _controller.DispatchJobAsync(jobId);
+
+        ObjectResult response = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, response.StatusCode);
+    }
+
+    private JobQueueController CreateController(
+        AppDbContext db,
+        IQueueResourceAuthorizationService authorization)
+    {
+        var controller = new JobQueueController(
+            _queueServiceMock.Object,
+            _printJobManagementServiceMock.Object,
+            _printJobCompletionServiceMock.Object,
+            _jobDispatchServiceMock.Object,
+            _batchDispatchServiceMock.Object,
+            _bedClearAcknowledgementServiceMock.Object,
+            _printerStatusCacheMock.Object,
+            _telemetryServiceMock.Object,
+            _loggerMock.Object,
+            db,
+            authorization);
+        controller.ControllerContext = _controller.ControllerContext;
+        return controller;
+    }
+
+    private static QueueDispatchOutbox CreateOutboxEvent(Guid jobId, long sequence) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Sequence = sequence,
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            EventType = QueueLifecycleEventWriter.EventTypeJobCompleted,
+            SchemaVersion = "1",
+            JobStatus = PrintJobStatus.Completed.ToString(),
+            JobKind = JobKind.Standard.ToString(),
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
 
     [Fact]
     public async Task QueueJobAsync_WithNullRequest_ReturnsBadRequest()

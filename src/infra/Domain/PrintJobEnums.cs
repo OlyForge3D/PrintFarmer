@@ -101,3 +101,27 @@ public enum QueueOutboxEventStatus
     /// <summary>All retry attempts exhausted; event is dead-lettered.</summary>
     DeadLettered = 3,
 }
+
+/// <summary>Status of a durable bed-clear command idempotency record.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum BedClearCommandStatus
+{
+    Pending = 0,
+    Claimed = 1,
+    Accepted = 2,
+    Rejected = 3,
+    Unknown = 4,
+    Expired = 5,
+}
+
+/// <summary>Durable phase of a dispatch attempt around backend network I/O.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DispatchBackendCallPhase
+{
+    Claimed = 0,
+    InvokingBackend = 1,
+    AwaitingReconciliation = 2,
+    ResponseReceived = 3,
+    Reconciled = 4,
+    Terminal = 5,
+}

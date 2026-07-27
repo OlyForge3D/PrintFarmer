@@ -247,6 +247,77 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.ToTable("BarcodeScanLogs");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearCommandRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("DispatchStateRowVersion")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("JobRowVersion")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<Guid>("OutboxEventId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PrinterConfigRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("QueueRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RequestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
+
+                    b.HasIndex("Status", "ExpiresAtUtc")
+                        .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+                    b.ToTable("BedClearCommandRecords");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4270,6 +4341,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("CalibrationConfigSnapshotId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CalibrationManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("CalibrationOrchestrationId")
                         .HasColumnType("TEXT");
 
@@ -4342,6 +4417,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FilamentSnapshotSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FilamentVendor")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -4395,7 +4474,35 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("PinnedFilamentSku")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("PinnedGcodeFileSizeBytes")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("PinnedObjectDimensionX")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("PinnedObjectDimensionY")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("PinnedObjectDimensionZ")
+                        .HasColumnType("REAL");
+
                     b.Property<long?>("PinnedPrinterConfigRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid?>("PinnedPrinterModelId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PinnedSpoolId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("PinnedToolheadId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PinnedToolheadIndex")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("PlateIndex")
@@ -4468,6 +4575,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .HasMaxLength(16)
@@ -4477,6 +4587,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("SourceArtifactId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceModelSha256")
+                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<Guid?>("SourcePrinterId")
@@ -4522,6 +4636,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasDatabaseName("IX_PrintJobs_SourcePrinterId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("AssignedPrinterId", "QueuePosition")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrintJobs_Printer_QueuePosition")
+                        .HasFilter("\"AssignedPrinterId\" IS NOT NULL AND \"Status\" IN (0, 1)");
 
                     b.HasIndex("AssignedPrinterId", "Status")
                         .HasDatabaseName("IX_PrintJobs_AssignedPrinterId_Status");
@@ -5371,6 +5490,15 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("AcknowledgedJobId")
                         .HasColumnType("TEXT");
 
+                    b.Property<byte[]>("AcknowledgedJobRowVersion")
+                        .HasColumnType("BLOB");
+
+                    b.Property<long?>("AcknowledgedPrinterConfigRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("AcknowledgedQueueRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTime?>("AcknowledgementExpiresAtUtc")
                         .HasColumnType("TEXT");
 
@@ -5388,6 +5516,12 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("BedPreConfirmed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("QueueRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte[]>("RowVersion")
@@ -5822,7 +5956,17 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("BackendAcceptedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("BackendCallPhase")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("BackendCallStartedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BackendCommandId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BackendCorrelationId")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
@@ -5832,6 +5976,9 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<string>("BackendJobId")
                         .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("BackendResponseAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("ClaimedAtUtc")
@@ -5854,6 +6001,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<byte[]>("JobRowVersionAtClaim")
                         .HasColumnType("BLOB");
 
+                    b.Property<DateTime?>("LastReconciledAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("Outcome")
                         .HasColumnType("INTEGER");
 
@@ -5866,12 +6016,18 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ReconciliationCount")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("StartPathKind")
                         .IsRequired()
                         .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("TerminalAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UpdatedAtUtc")
@@ -5921,6 +6077,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("DispatchStateRevision")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte[]>("DispatchStateRowVersion")
                         .HasColumnType("BLOB");
 
@@ -5931,6 +6090,17 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.Property<string>("FailureCode")
                         .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JobKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("JobRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("JobStatus")
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastAttemptedAtUtc")
@@ -5948,6 +6118,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<Guid?>("PrinterId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ProjectId")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("RetryAfterUtc")
@@ -6052,6 +6225,20 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasDatabaseName("IX_QueueOperationAudits_Resource");
 
                     b.ToTable("QueueOperationAudits");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueuePositionState", b =>
+                {
+                    b.Property<Guid>("ScopeId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("NextPosition")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("ScopeId");
+
+                    b.ToTable("QueuePositionStates");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>

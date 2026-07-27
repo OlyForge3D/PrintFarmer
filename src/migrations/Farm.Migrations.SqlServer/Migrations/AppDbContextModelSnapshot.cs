@@ -256,6 +256,77 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("BarcodeScanLogs");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.BedClearCommandRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActorSubject")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("DispatchStateRowVersion")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("JobRowVersion")
+                        .IsRequired()
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<Guid>("OutboxEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("PrinterConfigRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<long>("QueueRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RequestSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PrinterId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
+
+                    b.HasIndex("Status", "ExpiresAtUtc")
+                        .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+                    b.ToTable("BedClearCommandRecords");
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.BedType", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4292,6 +4363,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("CalibrationConfigSnapshotId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("CalibrationManifestSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("CalibrationOrchestrationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -4364,6 +4439,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<string>("FilamentSnapshotSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("FilamentVendor")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
@@ -4417,8 +4496,36 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PinnedFilamentSku")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<long?>("PinnedGcodeFileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<double?>("PinnedObjectDimensionX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("PinnedObjectDimensionY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("PinnedObjectDimensionZ")
+                        .HasColumnType("float");
+
                     b.Property<long?>("PinnedPrinterConfigRevision")
                         .HasColumnType("bigint");
+
+                    b.Property<Guid?>("PinnedPrinterModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PinnedSpoolId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("PinnedToolheadId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("PinnedToolheadIndex")
+                        .HasColumnType("int");
 
                     b.Property<int?>("PlateIndex")
                         .HasColumnType("int");
@@ -4490,6 +4597,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
+
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -4500,6 +4610,10 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("SourceArtifactId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceModelSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<Guid?>("SourcePrinterId")
                         .HasColumnType("uniqueidentifier");
@@ -4544,6 +4658,11 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasDatabaseName("IX_PrintJobs_SourcePrinterId");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("AssignedPrinterId", "QueuePosition")
+                        .IsUnique()
+                        .HasDatabaseName("UX_PrintJobs_Printer_QueuePosition")
+                        .HasFilter("[AssignedPrinterId] IS NOT NULL AND [Status] IN (0, 1)");
 
                     b.HasIndex("AssignedPrinterId", "Status")
                         .HasDatabaseName("IX_PrintJobs_AssignedPrinterId_Status");
@@ -5395,6 +5514,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("AcknowledgedJobId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<byte[]>("AcknowledgedJobRowVersion")
+                        .HasColumnType("varbinary(max)");
+
+                    b.Property<long?>("AcknowledgedPrinterConfigRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<long?>("AcknowledgedQueueRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime?>("AcknowledgementExpiresAtUtc")
                         .HasColumnType("datetime2");
 
@@ -5413,6 +5541,12 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<bool>("BedPreConfirmed")
                         .HasColumnType("bit");
+
+                    b.Property<long>("QueueRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("bigint");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -5847,7 +5981,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("BackendAcceptedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("BackendCallPhase")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("BackendCallStartedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("BackendCommandId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("BackendCorrelationId")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
@@ -5858,6 +6002,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("BackendJobId")
                         .HasMaxLength(512)
                         .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTime?>("BackendResponseAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("ClaimedAtUtc")
                         .HasColumnType("datetime2");
@@ -5879,6 +6026,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<byte[]>("JobRowVersionAtClaim")
                         .HasColumnType("varbinary(max)");
 
+                    b.Property<DateTime?>("LastReconciledAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("Outcome")
                         .HasColumnType("int");
 
@@ -5891,6 +6041,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ReconciliationCount")
+                        .HasColumnType("int");
+
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("bit");
 
@@ -5898,6 +6051,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("TerminalAtUtc")
+                        .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("datetime2");
@@ -5946,6 +6102,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("datetime2");
 
+                    b.Property<long?>("DispatchStateRevision")
+                        .HasColumnType("bigint");
+
                     b.Property<byte[]>("DispatchStateRowVersion")
                         .HasColumnType("varbinary(max)");
 
@@ -5957,6 +6116,17 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<string>("FailureCode")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("JobKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<long?>("JobRevision")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("JobStatus")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<DateTime?>("LastAttemptedAtUtc")
                         .HasColumnType("datetime2");
@@ -5973,6 +6143,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<Guid?>("PrinterId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ProjectId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("RetryAfterUtc")
@@ -6077,6 +6250,20 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasDatabaseName("IX_QueueOperationAudits_Resource");
 
                     b.ToTable("QueueOperationAudits");
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.QueuePositionState", b =>
+                {
+                    b.Property<Guid>("ScopeId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("NextPosition")
+                        .HasColumnType("int");
+
+                    b.HasKey("ScopeId");
+
+                    b.ToTable("QueuePositionStates");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.RefreshToken", b =>

@@ -27,6 +27,14 @@ public interface IJobDispatchService
     /// <returns>The updated job DTO.</returns>
     Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, CancellationToken ct = default);
 
+    /// <summary>Dispatches a scored job after enforcing its public job ETag.</summary>
+    Task<QueuedPrintJobDto> DispatchJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Assigns a job to the specified printer using a pre-computed dispatch score,
     /// skipping the redundant scoring pass. Use this overload when the caller

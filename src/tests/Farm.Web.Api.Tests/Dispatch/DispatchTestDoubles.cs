@@ -3,7 +3,9 @@
 // </copyright>
 
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 
 namespace Farm.Web.Api.Tests.Dispatch;
 
@@ -49,10 +51,23 @@ internal static class DispatchTestDoubles
             DateTime.UtcNow.AddHours(-2),
             "test"));
 
+    public static IStoredGcodeIntegrityVerifier ValidByteIntegrityVerifier() =>
+        new ValidIntegrityVerifier();
+
     private sealed class StubSnapshotReader(Guid printerId, PrinterStatusSnapshot? snapshot)
         : IPrinterStatusSnapshotReader
     {
         public PrinterStatusSnapshot? GetStatusSnapshot(Guid id) =>
             printerId == Guid.Empty || id == printerId ? snapshot : null;
+    }
+
+    private sealed class ValidIntegrityVerifier : IStoredGcodeIntegrityVerifier
+    {
+        public Task<StoredGcodeIntegrityResult> VerifyAsync(
+            GcodeFile file,
+            string expectedSha256,
+            long? expectedSizeBytes,
+            CancellationToken ct = default) =>
+            Task.FromResult(StoredGcodeIntegrityResult.Valid());
     }
 }

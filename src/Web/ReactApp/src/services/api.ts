@@ -51,6 +51,7 @@ import {
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
+  QueueChangeFeed,
   QueueHistoryPageDto,
   QueueOverviewDto,
   QueueStatsDto,
@@ -2557,6 +2558,25 @@ export class ApiClient {
   // NOTE: This is the simpler job queue API for basic queue management.
   // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
+  private async getQueueJobEtag(jobId: string): Promise<string> {
+    const response = await this.client.get<JobQueuePrintJob>(`/job-queue/${jobId}`);
+    const value = String(response.headers.etag ?? response.data.rowVersion ?? "").trim();
+    if (!value) {
+      throw new Error(`Queue job ${jobId} did not return an ETag`);
+    }
+    return value.startsWith('"') ? value : `"${value}"`;
+  }
+
+  async getQueueChanges(
+    afterSequence = 0,
+    limit = 100
+  ): Promise<QueueChangeFeed> {
+    const response = await this.client.get<QueueChangeFeed>("/job-queue/changes", {
+        params: { afterSequence, limit },
+    });
+    return response.data;
+  }
+
   /**
    * Get queue overview for available printers with compatibility filtering.
    * All filtering is done server-side for consistency with auto-assign.
@@ -2616,7 +2636,10 @@ export class ApiClient {
    * Cannot delete jobs that are currently printing.
    */
   async deletePrintQueueJob(jobId: string): Promise<void> {
-    await this.client.delete(`/job-queue/${jobId}`);
+    const etag = await this.getQueueJobEtag(jobId);
+    await this.client.delete(`/job-queue/${jobId}`, {
+      headers: { "If-Match": etag },
+    });
   }
 
   /**
@@ -2626,11 +2649,12 @@ export class ApiClient {
    * @returns The updated job with Starting/Printing status
    */
   async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const etag = await this.getQueueJobEtag(jobId);
     // Dispatch can take longer than the global Axios timeout due to G-code upload time.
     const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
       `/job-queue/${jobId}/dispatch`,
       undefined,
-      { timeout: 0 }
+      { timeout: 0, headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -2640,10 +2664,11 @@ export class ApiClient {
    * Used when the operator explicitly overrides a material mismatch.
    */
   async dispatchJobToPrinter(jobId: string, printerId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
       `/job-queue/${jobId}/dispatch-to`,
       { printerId },
-      { timeout: 0 }
+      { timeout: 0, headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3998,9 +4023,11 @@ export class ApiClient {
    * Update a print job
    */
   async updateJob(jobId: string, request: unknown): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.put(
       `/job-queue/${jobId}`,
-      request
+      request,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4009,9 +4036,11 @@ export class ApiClient {
    * Update job priority
    */
   async updateJobPriority(jobId: string, newPriority: number): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.put(
-      `/job-queue/${jobId}/priority`,
-      { newPriority }
+      `/job-queue-analytics/jobs/${jobId}/priority`,
+      { newPriority },
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4020,8 +4049,11 @@ export class ApiClient {
    * Pause a print job
    */
   async pauseJob(jobId: string): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.post(
-      `/job-queue/${jobId}/pause`
+      `/job-queue-analytics/jobs/${jobId}/pause`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4030,8 +4062,11 @@ export class ApiClient {
    * Resume a print job
    */
   async resumeJob(jobId: string): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.post(
-      `/job-queue/${jobId}/resume`
+      `/job-queue-analytics/jobs/${jobId}/resume`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4041,7 +4076,12 @@ export class ApiClient {
    * Sends a cancel command to the printer if the job is actively printing.
    */
   async cancelPrintQueueJob(jobId: string): Promise<void> {
-    await this.client.post(`/job-queue/${jobId}/cancel`);
+    const etag = await this.getQueueJobEtag(jobId);
+    await this.client.post(
+      `/job-queue/${jobId}/cancel`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
@@ -4049,15 +4089,23 @@ export class ApiClient {
    * Only works when the job is actively printing (Printing, Starting, or Paused).
    */
   async abortPrint(jobId: string): Promise<void> {
-    await this.client.post(`/job-queue/${jobId}/abort-print`);
+    const etag = await this.getQueueJobEtag(jobId);
+    await this.client.post(
+      `/job-queue/${jobId}/abort-print`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
    * Rerun a completed print queue job (add it back to queue)
    */
   async rerunPrintQueueJob(jobId: string): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.post(
-      `/job-queue/${jobId}/rerun`
+      `/job-queue/${jobId}/rerun`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4065,8 +4113,14 @@ export class ApiClient {
   /**
    * Bulk cancel multiple print jobs
    */
-  async bulkCancelJobs(request: unknown): Promise<unknown> {
-    const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, request);
+  async bulkCancelJobs(request: { jobIds: string[] }): Promise<unknown> {
+    const etags = await Promise.all(
+      request.jobIds.map(async (jobId) => [jobId, await this.getQueueJobEtag(jobId)] as const)
+    );
+    const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, {
+      ...request,
+      jobETags: Object.fromEntries(etags),
+    });
     return response.data;
   }
 
@@ -4074,7 +4128,15 @@ export class ApiClient {
    * Bulk reorder print jobs in queue
    */
   async reorderQueueJobs(moves: { jobId: string; newPosition: number }[]): Promise<unknown> {
-    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, { moves });
+    const fencedMoves = await Promise.all(
+      moves.map(async (move) => ({
+        ...move,
+        ifMatch: await this.getQueueJobEtag(move.jobId),
+      }))
+    );
+    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, {
+      moves: fencedMoves,
+    });
     return response.data;
   }
 
@@ -4101,9 +4163,11 @@ export class ApiClient {
    * Update job details (name, priority, notes, tags, material, nozzle)
    */
   async updateJobDetails(jobId: string, updates: unknown): Promise<unknown> {
+    const etag = await this.getQueueJobEtag(jobId);
     const response = await this.client.put(
       `/job-queue/${jobId}`,
-      updates
+      updates,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -4112,9 +4176,12 @@ export class ApiClient {
    * Update job notes only
    */
   async updateJobNotes(jobId: string, notes: string): Promise<void> {
-    await this.client.put(`/job-queue-analytics/jobs/${jobId}/notes`, {
-      notes: notes || null,
-    });
+    const etag = await this.getQueueJobEtag(jobId);
+    await this.client.put(
+      `/job-queue-analytics/jobs/${jobId}/notes`,
+      { notes: notes || null },
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
@@ -4515,6 +4582,15 @@ export class ApiClient {
   }
 
   // ============ Auto-Dispatch API methods ============
+  private async getAutoDispatchEtag(printerId: string): Promise<string> {
+    const status = await this.getAutoDispatchPrinterStatus(printerId);
+    const value = status.dispatchStateETag?.trim();
+    if (!value) {
+      throw new Error(`Auto-dispatch status for ${printerId} did not return an ETag`);
+    }
+    return value.startsWith('"') ? value : `"${value}"`;
+  }
+
   async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
     const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
     return response.data;
@@ -4526,20 +4602,66 @@ export class ApiClient {
   }
 
   async confirmAutoDispatchReady(printerId: string): Promise<AutoDispatchReadyResult> {
-    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/ready`);
+    const etag = await this.getAutoDispatchEtag(printerId);
+    const response = await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
     return response.data;
   }
 
   async skipAutoDispatchJob(printerId: string): Promise<void> {
-    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/skip`);
+    const status = await this.getAutoDispatchPrinterStatus(printerId);
+    const etagValue = status.dispatchStateETag?.trim();
+    const jobEtagValue = status.nextJobETag?.trim();
+    if (!etagValue || !jobEtagValue) {
+      throw new Error(`Auto-dispatch status for ${printerId} did not return both required ETags`);
+    }
+    const etag = etagValue.startsWith('"') ? etagValue : `"${etagValue}"`;
+    const jobEtag = jobEtagValue.startsWith('"') ? jobEtagValue : `"${jobEtagValue}"`;
+    await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/skip`,
+      undefined,
+      {
+        headers: {
+          "If-Match": etag,
+          "X-Job-If-Match": jobEtag,
+        },
+      }
+    );
   }
 
   async cancelAutoDispatch(printerId: string): Promise<void> {
-    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`);
+    const etag = await this.getAutoDispatchEtag(printerId);
+    await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
   async setAutoDispatchEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`, { enabled });
+    const status = await this.getAutoDispatchPrinterStatus(printerId);
+    const etagValue = status.dispatchStateETag?.trim();
+    const printerEtagValue = status.printerETag?.trim();
+    if (!etagValue || !printerEtagValue) {
+      throw new Error(`Auto-dispatch status for ${printerId} did not return both required ETags`);
+    }
+    const etag = etagValue.startsWith('"') ? etagValue : `"${etagValue}"`;
+    const printerEtag = printerEtagValue.startsWith('"')
+      ? printerEtagValue
+      : `"${printerEtagValue}"`;
+    await this.client.put(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`,
+      { enabled },
+      {
+        headers: {
+          "If-Match": etag,
+          "X-Printer-If-Match": printerEtag,
+        },
+      }
+    );
   }
 
   async setAutoDispatchGlobalEnabled(enabled: boolean): Promise<void> {
@@ -4547,7 +4669,12 @@ export class ApiClient {
   }
 
   async preClearAutoDispatchBed(printerId: string): Promise<AutoDispatchStatus> {
-    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`);
+    const etag = await this.getAutoDispatchEtag(printerId);
+    const response = await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
     return response.data;
   }
 

@@ -2,10 +2,13 @@
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
@@ -16,6 +19,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -45,6 +49,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 {
     private const int SpoolId = 7777;
     private const string Material = "PLA";
+    private static readonly Guid CalibrationOwnerId = Guid.NewGuid();
 
     private readonly SqliteConnection _keepAlive;
     private readonly string _connectionString;
@@ -99,7 +104,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         audit.Outcome.Should().Be(QueueAuditOutcomes.Success);
         audit.ActorSubject.Should().Be("operator-1");
 
-        (await verify.QueueDispatchOutbox.CountAsync(e => e.AggregateId == fixture.JobId)).Should().Be(1);
+        (await verify.QueueDispatchOutbox.CountAsync(e =>
+            e.AggregateId == fixture.JobId &&
+            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType)).Should().Be(1);
     }
 
     [Fact]
@@ -125,6 +132,209 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext verify = CreateContext();
         (await verify.QueueOperationAudits.CountAsync(a => a.Operation == QueueAuditOperations.AdHocStart))
             .Should().Be(2, "both the granted and the denied ad-hoc start must be audited");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task AdHoc_BackendAccepted_RetainsLeaseAndBlocksRepeatedStart()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: false);
+
+        await using (AppDbContext firstContext = CreateContext())
+        {
+            DispatchClaimService firstService = CreateClaim(
+                firstContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            DispatchClaimResult first = await firstService.AcquireAdHocClaimAsync(
+                new AdHocDispatchClaimRequest(
+                    fixture.PrinterId,
+                    "op",
+                    "SliceBridge",
+                    "accepted.gcode"));
+            first.Success.Should().BeTrue(first.ErrorDetail);
+            await firstService.RecordBackendAcceptedAsync(
+                first.Attempt!.Id,
+                first.Attempt.BackendFileName);
+        }
+
+        await using AppDbContext secondContext = CreateContext();
+        DispatchClaimResult second = await CreateClaim(
+                secondContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(
+                fixture.PrinterId,
+                "op",
+                "SliceBridge",
+                "duplicate.gcode"));
+
+        second.Success.Should().BeFalse();
+        second.ErrorCode.Should().Be("printer_busy_active");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Cancel_DurableConsumer_BackendAcceptedTransitionsAndReleasesLeaseAtomically()
+    {
+        Fixture fixture;
+        Guid attemptId;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            DispatchClaimService claimService = CreateClaim(
+                seed,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+                new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "Manual",
+                    fixture.AckKey,
+                    null,
+                    null));
+            claim.Success.Should().BeTrue(claim.ErrorDetail);
+            attemptId = claim.Attempt!.Id;
+            await claimService.RecordBackendAcceptedAsync(
+                attemptId,
+                claim.Attempt.BackendFileName);
+
+            seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = fixture.JobId,
+                PrinterId = fixture.PrinterId,
+                AttemptId = attemptId,
+                EventType = BackendControlCommandConsumerService.EventType,
+                SchemaVersion = "1",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    jobId = fixture.JobId,
+                    printerId = fixture.PrinterId,
+                    attemptId,
+                    operation = "cancel",
+                    actorSubject = "operator-1",
+                }),
+                Status = QueueOutboxEventStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Mock<IPrintersService> printers = new();
+        printers.Setup(service => service.CancelPrintAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .AddScoped<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>()
+            .AddSingleton(printers.Object)
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var consumer = new BackendControlCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendControlCommandConsumerService>.Instance);
+            await consumer.ProcessPendingAsync(CancellationToken.None);
+        }
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob job = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+            candidate => candidate.EventType == BackendControlCommandConsumerService.EventType);
+        printers.Verify(service => service.CancelPrintAsync(
+            fixture.PrinterId,
+            It.IsAny<CancellationToken>()), Times.Once);
+        job.Status.Should().Be(
+            PrintJobStatus.Cancelled,
+            $"command status={command.Status}, error={command.LastError}");
+        state.ActiveJobId.Should().BeNull();
+        state.ActiveDispatchAttemptId.Should().BeNull();
+        command.Status.Should().Be(QueueOutboxEventStatus.Published);
+        (await verify.QueueDispatchOutbox.AnyAsync(candidate =>
+            candidate.EventType == QueueLifecycleEventWriter.EventTypeJobCancelled))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Cancel_DurableConsumer_StaleAttemptFenceMakesZeroBackendCalls()
+    {
+        Fixture fixture;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            DispatchClaimResult claim = await CreateClaim(
+                    seed,
+                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                .AcquireClaimAsync(new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "Manual",
+                    fixture.AckKey,
+                    null,
+                    null));
+            claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+            Guid staleAttemptId = Guid.NewGuid();
+            seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = fixture.JobId,
+                PrinterId = fixture.PrinterId,
+                AttemptId = staleAttemptId,
+                EventType = BackendControlCommandConsumerService.EventType,
+                SchemaVersion = "1",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    jobId = fixture.JobId,
+                    printerId = fixture.PrinterId,
+                    attemptId = staleAttemptId,
+                    operation = "cancel",
+                    actorSubject = "operator-1",
+                }),
+                Status = QueueOutboxEventStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        Mock<IPrintersService> printers = new();
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .AddSingleton(printers.Object)
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var consumer = new BackendControlCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendControlCommandConsumerService>.Instance);
+            await consumer.ProcessPendingAsync(CancellationToken.None);
+        }
+
+        printers.Verify(
+            service => service.CancelPrintAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+            candidate => candidate.EventType == BackendControlCommandConsumerService.EventType);
+        command.Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+        command.FailureCode.Should().Be("control_attempt_fence_conflict");
     }
 
     [Fact]
@@ -164,6 +374,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext swap = CreateContext();
         Printer printer = await swap.Printers.SingleAsync(p => p.Id == fixture.PrinterId);
         printer.CurrentSpoolId = SpoolId + 1; // operator swapped the spool
+        Spool pinnedSpool = await swap.Spools.SingleAsync(
+            spool => spool.AssignedPrinterId == fixture.PrinterId);
+        pinnedSpool.InUse = false;
+        pinnedSpool.AssignedPrinterId = null;
         await swap.SaveChangesAsync();
 
         await using AppDbContext ctx = CreateContext();
@@ -178,6 +392,13 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         QueueOperationAudit denial = await verify.QueueOperationAudits
             .SingleAsync(a => a.PrintJobId == fixture.JobId && a.Outcome == QueueAuditOutcomes.Denied);
         denial.ReasonCode.Should().Be("filament_spool_mismatch");
+        PrintJob blockedJob = await verify.PrintJobs.SingleAsync(job => job.Id == fixture.JobId);
+        blockedJob.BlockedReasonCode.Should().Be(JobBlockedReasonCode.FilamentCheckFailed);
+        PrinterDispatchState dispatchState = await verify.PrinterDispatchStates
+            .SingleAsync(state => state.PrinterId == fixture.PrinterId);
+        dispatchState.AcknowledgedJobId.Should().Be(
+            fixture.JobId,
+            "a failed safety gate must not consume the acknowledgement");
     }
 
     // =========================================================================
@@ -196,7 +417,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             GcodeFileId = fixture.GcodeId,
             AssignedPrinterId = fixture.PrinterId,
             IdempotencyKey = "concurrent-key",
-            IdempotencyScope = "concurrent-scope",
             Copies = 1,
             Priority = PrintJobPriority.High,
         };
@@ -205,12 +425,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext ctxB = CreateContext();
 
         JobQueuePrintJobDto? a = await CreateQueueService(ctxA)
-            .AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
 
         // Second producer performs its own read-then-insert and loses the unique index race
         // in production; it must reread the winner rather than surfacing a 500.
         JobQueuePrintJobDto? b = await CreateQueueService(ctxB)
-            .AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+            .AddJobToQueueAsync(request, CalibrationOwnerId, CancellationToken.None);
 
         a.Should().NotBeNull();
         b.Should().NotBeNull();
@@ -242,7 +462,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         };
 
         Func<Task> act = async () => await CreateQueueService(ctx)
-            .AddJobToQueueAsync(laundered, Guid.NewGuid(), CancellationToken.None);
+            .AddJobToQueueAsync(laundered, CalibrationOwnerId, CancellationToken.None);
 
         await act.Should().ThrowAsync<System.ComponentModel.DataAnnotations.ValidationException>()
             .WithMessage("*promoted calibration artifact*");
@@ -326,21 +546,36 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task AckInvalidationDrift_PriorityChangeInvalidatesAcknowledgement()
+    public async Task AckInvalidationDrift_UrgentInsertionInvalidatesAcknowledgement()
     {
         await using AppDbContext seed = CreateContext();
         Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
 
         await using AppDbContext ctx = CreateContext();
-        PrintJob job = await ctx.PrintJobs.SingleAsync(j => j.Id == fixture.JobId);
+        GcodeFile source = await ctx.GcodeFiles.SingleAsync(file => file.Id == fixture.GcodeId);
+        var standardArtifact = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            FolderId = source.FolderId,
+            Name = "urgent-standard.gcode",
+            FileName = "urgent-standard.gcode",
+            FilePath = "/gcode",
+            FileSizeBytes = 100,
+            FileHash = new string('1', 64),
+            ContentSha256 = new string('1', 64),
+        };
+        ctx.GcodeFiles.Add(standardArtifact);
+        await ctx.SaveChangesAsync();
 
-        _ = await CreateQueueService(ctx).UpdateJobPriorityAsync(
-            fixture.JobId,
-            new UpdateJobPriorityDto
+        _ = await CreateQueueService(ctx).AddJobToQueueAsync(
+            new QueuePrintJobDto
             {
-                Priority = (int)PrintJobPriority.Urgent,
-                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+                GcodeFileId = standardArtifact.Id,
+                AssignedPrinterId = fixture.PrinterId,
+                Priority = PrintJobPriority.Urgent,
+                Copies = 1,
             },
+            CalibrationOwnerId,
             CancellationToken.None);
 
         await using AppDbContext verify = CreateContext();
@@ -433,19 +668,25 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
 
         await using AppDbContext verify = CreateContext();
-        QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e => e.AggregateId == fixture.JobId);
+        QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e =>
+            e.AggregateId == fixture.JobId &&
+            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
 
         QueueEventEnvelope first = QueueEventEnvelope.FromOutbox(
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
-            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson);
+            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson,
+            jobLogicalRevision: row.JobRevision,
+            dispatchStateLogicalRevision: row.DispatchStateRevision);
 
         QueueEventEnvelope redelivery = QueueEventEnvelope.FromOutbox(
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
-            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson);
+            attemptId: row.AttemptId, bedClearState: row.BedClearState, payloadJson: row.PayloadJson,
+            jobLogicalRevision: row.JobRevision,
+            dispatchStateLogicalRevision: row.DispatchStateRevision);
 
         redelivery.Should().Be(first, "a redelivery must be byte-identical so consumers can de-duplicate");
         first.EventId.Should().Be(row.Id, "the envelope id is the durable outbox row id");
@@ -453,6 +694,54 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         first.Sequence.Should().BeGreaterThan(0, "the sequence enables gap detection");
         first.AttemptId.Should().Be(row.AttemptId);
         first.BedClearState.Should().Be("Consumed");
+        first.JobLogicalRevision.Should().BeGreaterThan(0);
+        first.DispatchStateLogicalRevision.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Events_LogicalRevisionsAreServerDerivedAndMatchCommittedAggregates()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext beforeContext = CreateContext();
+        long priorRevision = await beforeContext.PrintJobs
+            .Where(job => job.Id == fixture.JobId)
+            .Select(job => job.Revision)
+            .SingleAsync();
+
+        await using AppDbContext claimContext = CreateContext();
+        DispatchClaimResult result = await CreateClaim(
+                claimContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "op",
+                "Manual",
+                fixture.AckKey,
+                null,
+                null));
+        result.Success.Should().BeTrue(result.ErrorDetail);
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob job = await verify.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState dispatchState = await verify.PrinterDispatchStates
+            .SingleAsync(state => state.PrinterId == fixture.PrinterId);
+        QueueDispatchOutbox queueEvent = await verify.QueueDispatchOutbox
+            .SingleAsync(evt =>
+                evt.AggregateId == fixture.JobId &&
+                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
+
+        job.Revision.Should().Be(priorRevision + 1);
+        queueEvent.JobRevision.Should().Be(job.Revision);
+        queueEvent.DispatchStateRevision.Should().Be(dispatchState.Revision);
+
+        job.Revision = 999_999;
+        job.Name = "caller-cannot-author-revision";
+        await verify.SaveChangesAsync();
+        job.Revision.Should().Be(priorRevision + 2);
     }
 
     [Fact]
@@ -468,7 +757,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
 
         await using AppDbContext verify = CreateContext();
-        QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e => e.AggregateId == fixture.JobId);
+        QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e =>
+            e.AggregateId == fixture.JobId &&
+            e.EventType != BedClearAcknowledgementService.BackendStartCommandEventType);
 
         row.PayloadJson.Should().NotContain("http", "payloads must never carry private URLs");
         row.PayloadJson.Should().NotContain("apiKey", "payloads must never carry credentials");
@@ -504,6 +795,51 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         sequences.Should().OnlyHaveUniqueItems("the unique index fences duplicate sequences");
         sequences.Should().BeInAscendingOrder();
         sequences.First().Should().Be(1, "the counter is seeded at 0 and the first allocation is 1");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OutboxPublisher_CrashAfterLease_RecoversGenericEventForRedelivery()
+    {
+        await using (AppDbContext seed = CreateContext())
+        {
+            await seed.Database.MigrateAsync();
+            seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = Guid.NewGuid(),
+                EventType = QueueLifecycleEventWriter.EventTypeJobCompleted,
+                SchemaVersion = "1",
+                PayloadJson = "{}",
+                Status = QueueOutboxEventStatus.Processing,
+                AttemptCount = 1,
+                LastAttemptedAtUtc = DateTime.UtcNow.AddHours(-1),
+                CreatedAtUtc = DateTime.UtcNow.AddHours(-1),
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var publisher = new QueueOutboxPublisherService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                Mock.Of<IHubContext<PrinterHub>>(),
+                NullLogger<QueueOutboxPublisherService>.Instance);
+
+            await publisher.RecoverStaleLeasesAsync(CancellationToken.None);
+        }
+
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox recovered = await verify.QueueDispatchOutbox.SingleAsync();
+        recovered.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        recovered.RetryAfterUtc.Should().BeOnOrBefore(DateTime.UtcNow);
     }
 
     // =========================================================================
@@ -1001,7 +1337,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     }
 
     private static DispatchClaimService CreateClaim(AppDbContext db, IPrinterStatusSnapshotReader reader) =>
-        new(db, reader, new DbOutboxSequenceAllocator(), NullLogger<DispatchClaimService>.Instance);
+        new(
+            db,
+            reader,
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
 
     private static JobQueueService CreateQueueService(AppDbContext db) =>
         new(
@@ -1009,7 +1350,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             new DirectQueueDataService(db),
             NullLogger<JobQueueService>.Instance,
             db: db,
-            sequenceAllocator: new DbOutboxSequenceAllocator());
+            sequenceAllocator: new DbOutboxSequenceAllocator(),
+            positionAllocator: new QueuePositionAllocator(db));
 
     /// <summary>
     /// Minimal <see cref="IQueueDataService"/> that reads straight from the migrated
@@ -1108,11 +1450,119 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         GcodeFile gcode = BuildPromotedArtifact();
         gcode.FolderId = folder.Id;
+        gcode.PrinterModelId = mdl.Id;
         db.GcodeFiles.Add(gcode);
 
         Printer printer = BuildPrinter(mfr.Id, mdl.Id);
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+            CurrentSpoolId = SpoolId,
+            CurrentMaterial = Material,
+        };
+        printer.Toolheads.Add(toolhead);
         db.Printers.Add(printer);
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printer.Id });
+        var spool = new Spool
+        {
+            Id = Guid.NewGuid(),
+            Material = Material,
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printer.Id,
+        };
+        db.Spools.Add(spool);
+
+        Guid snapshotId = Guid.NewGuid();
+        PrinterConfigurationSnapshotDto snapshotDocument = new()
+        {
+            PrinterId = printer.Id,
+            ConfigurationRevision = printer.ConfigurationRevision,
+            SnapshotSha256 = new string('6', 64),
+            Toolheads =
+            [
+                new CalibrationToolheadDto(
+                    toolhead.Id,
+                    toolhead.Index,
+                    toolhead.Name,
+                    true,
+                    new CalibrationPoint3DDto(0, 0, 0),
+                    toolhead.NozzleDiameter,
+                    "Brass",
+                    "Brass",
+                    300,
+                    false,
+                    300,
+                    20,
+                    "DirectDrive",
+                    true,
+                    null,
+                    [Material]),
+            ],
+        };
+        db.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = gcode.CalibrationProjectId!.Value,
+            OwnerUserId = CalibrationOwnerId,
+            Name = "Production calibration",
+            PrinterId = printer.Id,
+            CurrentPrinterConfigurationSnapshotId = snapshotId,
+            SelectedToolheadId = toolhead.Id,
+            SelectedToolheadIndex = toolhead.Index,
+            FilamentProvider = "local",
+            FilamentProductId = "pla",
+            FilamentProductName = "PLA",
+            FilamentMaterial = Material,
+            LocalSpoolId = spool.Id,
+            FilamentSnapshotJson = """{"material":"PLA"}""",
+        });
+        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
+        {
+            Id = snapshotId,
+            ProjectId = gcode.CalibrationProjectId.Value,
+            AttemptId = gcode.CalibrationAttemptId,
+            PrinterId = printer.Id,
+            SchemaVersion = "1",
+            SanitizedSnapshotJson = JsonSerializer.Serialize(snapshotDocument),
+            SnapshotSha256 = new string('6', 64),
+            PrinterConfigurationRevision = printer.ConfigurationRevision,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            SlicerEngine = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
+            MachineProfileSha256 = gcode.MachineProfileSha256,
+            ProcessProfileSha256 = gcode.ProcessProfileSha256,
+            FilamentProfileSha256 = gcode.FilamentProfileSha256,
+            CapturedAtUtc = DateTime.UtcNow,
+            CapturedBySubject = CalibrationOwnerId.ToString(),
+        });
+        db.CalibrationAttempts.Add(new CalibrationAttempt
+        {
+            Id = gcode.CalibrationAttemptId!.Value,
+            ProjectId = gcode.CalibrationProjectId.Value,
+            SpecificationSha256 = gcode.SpecificationSha256!,
+            PrinterConfigurationSnapshotId = snapshotId,
+        });
+        db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = gcode.CalibrationOrchestrationId!.Value,
+            ProjectId = gcode.CalibrationProjectId.Value,
+            AttemptId = gcode.CalibrationAttemptId.Value,
+            SpecificationSha256 = gcode.SpecificationSha256,
+            SliceJobId = gcode.SourceSliceJobId,
+            FinalArtifactId = gcode.SourceArtifactId,
+            GcodeFileId = gcode.Id,
+            GcodeSha256 = gcode.ContentSha256,
+            ManifestSha256 = gcode.CalibrationManifestSha256,
+            SlicerContainerDigest = gcode.SlicerContainerDigest,
+        });
 
         await db.SaveChangesAsync();
         return new Fixture(printer.Id, Guid.Empty, gcode.Id, string.Empty);
@@ -1123,6 +1573,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(db);
 
         GcodeFile gcode = await db.GcodeFiles.SingleAsync(g => g.Id == baseFixture.GcodeId);
+        Printer printer = await db.Printers
+            .Include(candidate => candidate.Toolheads)
+            .SingleAsync(candidate => candidate.Id == baseFixture.PrinterId);
+        Spool spool = await db.Spools.SingleAsync(
+            candidate => candidate.AssignedPrinterId == baseFixture.PrinterId);
+        Toolhead toolhead = printer.Toolheads.Single();
+        PrinterConfigurationSnapshot snapshot = await db.PrinterConfigurationSnapshots
+            .SingleAsync(candidate => candidate.ProjectId == gcode.CalibrationProjectId);
 
         var job = new PrintJob
         {
@@ -1139,16 +1597,35 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             RequiredSlicerEngine = "OrcaSlicer",
             RequiredSlicerDistribution = "upstream",
             RequiredSlicerVersion = "2.3.0",
+            RequiredSlicerContainerDigest = gcode.SlicerContainerDigest,
             PinnedPrinterConfigRevision = 1,
             GcodeContentSha256 = gcode.ContentSha256,
+            PinnedGcodeFileSizeBytes = gcode.FileSizeBytes,
             SpecificationSha256 = gcode.SpecificationSha256,
             MachineProfileSha256 = gcode.MachineProfileSha256,
             ProcessProfileSha256 = gcode.ProcessProfileSha256,
             FilamentProfileSha256 = gcode.FilamentProfileSha256,
+            PrinterConfigSnapshotSha256 = snapshot.SnapshotSha256,
+            PinnedPrinterModelId = printer.ModelId,
+            PinnedToolheadId = toolhead.Id,
+            PinnedToolheadIndex = toolhead.Index,
+            PinnedSpoolId = spool.Id,
+            FilamentSnapshotSha256 = ComputeSha256("""{"material":"PLA"}"""),
+            SourceModelSha256 = new string('8', 64),
+            CalibrationManifestSha256 = gcode.CalibrationManifestSha256,
+            RequiredNozzleDiameter = 0.4m,
+            RequiredCapabilities = [],
+            PinnedObjectDimensionX = gcode.ObjectDimensionX,
+            PinnedObjectDimensionY = gcode.ObjectDimensionY,
+            PinnedObjectDimensionZ = gcode.ObjectDimensionZ,
+            EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
+            FilamentName = "PLA",
             CalibrationProjectId = gcode.CalibrationProjectId,
             CalibrationAttemptId = gcode.CalibrationAttemptId,
             CalibrationOrchestrationId = gcode.CalibrationOrchestrationId,
-            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = snapshot.Id,
+            SourceArtifactId = gcode.SourceArtifactId,
+            SliceJobId = gcode.SourceSliceJobId,
             SpoolmanSpoolId = SpoolId,
             RequiredMaterialType = Material,
             IdempotencyScope = "prod-scope",
@@ -1159,6 +1636,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             QueuedAt = DateTime.UtcNow,
         };
         db.PrintJobs.Add(job);
+        db.QueuePositionStates.Add(new QueuePositionState
+        {
+            ScopeId = baseFixture.PrinterId,
+            NextPosition = job.QueuePosition,
+        });
         await db.SaveChangesAsync();
 
         const string AckKey = "prod-ack-key";
@@ -1171,6 +1653,50 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             state.AcknowledgedBySubject = "operator-1";
             state.AcknowledgementIdempotencyKey = AckKey;
             state.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(15);
+            state.AcknowledgedJobRowVersion = job.RowVersion;
+            state.AcknowledgedQueueRevision = state.QueueRevision;
+            state.AcknowledgedPrinterConfigRevision = printer.ConfigurationRevision;
+            Guid commandId = Guid.NewGuid();
+            db.BedClearCommandRecords.Add(new BedClearCommandRecord
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                JobId = job.Id,
+                IdempotencyKey = AckKey,
+                RequestSha256 = new string('a', 64),
+                ActorSubject = "operator-1",
+                JobRowVersion = job.RowVersion ?? [],
+                DispatchStateRowVersion = state.RowVersion ?? [],
+                QueueRevision = state.QueueRevision,
+                PrinterConfigRevision = printer.ConfigurationRevision,
+                Status = BedClearCommandStatus.Pending,
+                OutboxEventId = commandId,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15),
+            });
+            db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = commandId,
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(db),
+                AggregateType = nameof(PrintJob),
+                AggregateId = job.Id,
+                PrinterId = printer.Id,
+                ProjectId = job.CalibrationProjectId,
+                JobStatus = job.Status.ToString(),
+                JobKind = job.JobKind?.ToString(),
+                EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+                SchemaVersion = "1",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    jobId = job.Id,
+                    printerId = printer.Id,
+                    actorSubject = "operator-1",
+                    acknowledgementKey = AckKey,
+                }),
+                Status = QueueOutboxEventStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
             await db.SaveChangesAsync();
         }
 
@@ -1184,10 +1710,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         FileName = "calibration.gcode",
         FilePath = "/gcode",
         FileSizeBytes = 2048,
+        EstimatedFilamentWeightG = 10,
         FileHash = new string('a', 64),
         IsImmutable = true,
         PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
         ContentSha256 = new string('a', 64),
+        SourceArtifactId = Guid.NewGuid(),
+        SourceSliceJobId = Guid.NewGuid(),
+        SourceModelSha256 = new string('8', 64),
         CalibrationProjectId = Guid.NewGuid(),
         CalibrationAttemptId = Guid.NewGuid(),
         CalibrationOrchestrationId = Guid.NewGuid(),
@@ -1199,8 +1729,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         SlicerEngineName = "OrcaSlicer",
         SlicerDistribution = "upstream",
         PinnedSlicerVersion = "2.3.0",
+        SlicerContainerDigest = "sha256:test",
         FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
         GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
+        ObjectDimensionX = 20,
+        ObjectDimensionY = 20,
+        ObjectDimensionZ = 20,
     };
 
     private static Printer BuildPrinter(Guid manufacturerId, Guid modelId) => new()
@@ -1221,5 +1755,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         ConfigurationRevision = 1,
         CurrentSpoolId = SpoolId,
         CurrentMaterial = Material,
+        MaxBuildVolumeX = 200,
+        MaxBuildVolumeY = 200,
+        MaxBuildVolumeZ = 200,
     };
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
 }

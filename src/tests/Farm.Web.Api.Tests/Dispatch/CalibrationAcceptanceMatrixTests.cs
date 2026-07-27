@@ -3,6 +3,8 @@
 // </copyright>
 
 using System.ComponentModel.DataAnnotations;
+using System.Security.Cryptography;
+using System.Text;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -95,13 +97,19 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             db,
             new DbOutboxSequenceAllocator(),
             statusReader ?? DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
-            NullLogger<BedClearAcknowledgementService>.Instance);
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
 
     private static DispatchClaimService CreateClaimService(AppDbContext db, IPrinterStatusSnapshotReader? reader = null)
     {
         reader ??= Mock.Of<IPrinterStatusSnapshotReader>(
             r => r.GetStatusSnapshot(It.IsAny<Guid>()) == (PrinterStatusSnapshot?)null);
-        return new(db, reader, new DbOutboxSequenceAllocator(), NullLogger<DispatchClaimService>.Instance);
+        return new(
+            db,
+            reader,
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
     private async Task<(Guid PrinterId, Guid JobId, Guid GcodeId)> SeedFullCalibrationJobAsync(
@@ -113,6 +121,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         Guid calibrationProjectId = Guid.NewGuid();
         Guid calibrationAttemptId = Guid.NewGuid();
         Guid calibrationOrchestrationId = Guid.NewGuid();
+        Guid calibrationSnapshotId = Guid.NewGuid();
+        Guid sourceArtifactId = Guid.NewGuid();
+        Guid sourceSliceJobId = Guid.NewGuid();
 
         var mfr = new Manufacturer { Id = Guid.NewGuid(), Name = "Mfr" };
         db.Manufacturers.Add(mfr);
@@ -133,9 +144,12 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             IsImmutable = true,
             PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ContentSha256 = new string('a', 64),
+            SourceModelSha256 = new string('8', 64),
             CalibrationProjectId = calibrationProjectId,
             CalibrationAttemptId = calibrationAttemptId,
             CalibrationOrchestrationId = calibrationOrchestrationId,
+            SourceArtifactId = sourceArtifactId,
+            SourceSliceJobId = sourceSliceJobId,
             CalibrationManifestSha256 = new string('9', 64),
             SpecificationSha256 = new string('b', 64),
             MachineProfileSha256 = new string('c', 64),
@@ -144,8 +158,14 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             SlicerEngineName = "OrcaSlicer",
             SlicerDistribution = "upstream",
             PinnedSlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
             FirmwareFamily = nameof(PrinterFirmwareFamily.Klipper),
             GcodeDialect = nameof(PrinterGcodeDialect.Klipper),
+            PrinterModelId = mdl.Id,
+            ObjectDimensionX = 20,
+            ObjectDimensionY = 20,
+            ObjectDimensionZ = 20,
+            EstimatedFilamentWeightG = 10,
         };
         db.GcodeFiles.Add(gcode);
 
@@ -169,8 +189,88 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             // Hard filament gate inputs: the exact spool/material the job pins.
             CurrentSpoolId = CalibrationSpoolId,
             CurrentMaterial = CalibrationMaterial,
+            MaxBuildVolumeX = 200,
+            MaxBuildVolumeY = 200,
+            MaxBuildVolumeZ = 200,
         };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+            CurrentSpoolId = CalibrationSpoolId,
+            CurrentMaterial = CalibrationMaterial,
+        };
+        printer.Toolheads.Add(toolhead);
         db.Printers.Add(printer);
+        var spool = new Spool
+        {
+            Id = Guid.NewGuid(),
+            Material = CalibrationMaterial,
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printer.Id,
+        };
+        db.Spools.Add(spool);
+        db.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = calibrationProjectId,
+            OwnerUserId = Guid.NewGuid(),
+            Name = "Acceptance calibration",
+            PrinterId = printer.Id,
+            CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
+            SelectedToolheadId = toolhead.Id,
+            SelectedToolheadIndex = toolhead.Index,
+            FilamentProvider = "local",
+            FilamentProductId = "pla",
+            FilamentProductName = "PLA",
+            FilamentMaterial = CalibrationMaterial,
+            LocalSpoolId = spool.Id,
+            FilamentSnapshotJson = """{"material":"PLA"}""",
+        });
+        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
+        {
+            Id = calibrationSnapshotId,
+            ProjectId = calibrationProjectId,
+            AttemptId = calibrationAttemptId,
+            PrinterId = printer.Id,
+            SchemaVersion = "1",
+            SnapshotSha256 = new string('6', 64),
+            PrinterConfigurationRevision = 1,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            SanitizedSnapshotJson = "{}",
+            SlicerEngine = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
+        });
+        db.CalibrationAttempts.Add(new CalibrationAttempt
+        {
+            Id = calibrationAttemptId,
+            ProjectId = calibrationProjectId,
+            SpecificationSha256 = new string('b', 64),
+            PrinterConfigurationSnapshotId = calibrationSnapshotId,
+        });
+        db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = calibrationOrchestrationId,
+            ProjectId = calibrationProjectId,
+            AttemptId = calibrationAttemptId,
+            SpecificationSha256 = new string('b', 64),
+            SliceJobId = sourceSliceJobId,
+            FinalArtifactId = sourceArtifactId,
+            GcodeFileId = gcode.Id,
+            GcodeSha256 = new string('a', 64),
+            ManifestSha256 = new string('9', 64),
+            SlicerContainerDigest = "sha256:test",
+        });
 
         var ds = new PrinterDispatchState { PrinterId = printer.Id };
         db.PrinterDispatchStates.Add(ds);
@@ -190,18 +290,37 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             RequiredSlicerEngine = "OrcaSlicer",
             RequiredSlicerDistribution = "upstream",
             RequiredSlicerVersion = "2.3.0",
+            RequiredSlicerContainerDigest = "sha256:test",
             PinnedPrinterConfigRevision = 1,
             GcodeContentSha256 = new string('a', 64), // Matches gcode.FileHash
+            PinnedGcodeFileSizeBytes = gcode.FileSizeBytes,
             SpoolmanSpoolId = CalibrationSpoolId,
             RequiredMaterialType = CalibrationMaterial,
             CalibrationProjectId = calibrationProjectId,
             CalibrationAttemptId = calibrationAttemptId,
-            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = calibrationSnapshotId,
             CalibrationOrchestrationId = calibrationOrchestrationId,
+            SourceArtifactId = sourceArtifactId,
+            SliceJobId = sourceSliceJobId,
             SpecificationSha256 = new string('b', 64),
             MachineProfileSha256 = new string('c', 64),
             ProcessProfileSha256 = new string('d', 64),
             FilamentProfileSha256 = new string('e', 64),
+            PrinterConfigSnapshotSha256 = new string('6', 64),
+            PinnedPrinterModelId = printer.ModelId,
+            PinnedToolheadId = toolhead.Id,
+            PinnedToolheadIndex = toolhead.Index,
+            PinnedSpoolId = spool.Id,
+            FilamentSnapshotSha256 = ComputeSha256("""{"material":"PLA"}"""),
+            SourceModelSha256 = gcode.SourceModelSha256,
+            CalibrationManifestSha256 = gcode.CalibrationManifestSha256,
+            RequiredNozzleDiameter = 0.4m,
+            RequiredCapabilities = [],
+            PinnedObjectDimensionX = gcode.ObjectDimensionX,
+            PinnedObjectDimensionY = gcode.ObjectDimensionY,
+            PinnedObjectDimensionZ = gcode.ObjectDimensionZ,
+            EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
+            FilamentName = "PLA",
             IdempotencyScope = "test-scope",
             IdempotencyKey = Guid.NewGuid().ToString(),
             IdempotencyRequestSha256 = new string('f', 64),
@@ -218,6 +337,44 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             ds.AcknowledgedJobId = job.Id;
             ds.AcknowledgementIdempotencyKey = "valid-ack-key";
             ds.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(15);
+            ds.AcknowledgedJobRowVersion = job.RowVersion;
+            ds.AcknowledgedQueueRevision = ds.QueueRevision;
+            ds.AcknowledgedPrinterConfigRevision = printer.ConfigurationRevision;
+            Guid commandId = Guid.NewGuid();
+            db.BedClearCommandRecords.Add(new BedClearCommandRecord
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                JobId = job.Id,
+                IdempotencyKey = "valid-ack-key",
+                RequestSha256 = new string('a', 64),
+                ActorSubject = "actor",
+                JobRowVersion = job.RowVersion ?? [],
+                DispatchStateRowVersion = ds.RowVersion ?? [],
+                QueueRevision = ds.QueueRevision,
+                PrinterConfigRevision = printer.ConfigurationRevision,
+                Status = BedClearCommandStatus.Pending,
+                OutboxEventId = commandId,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15),
+            });
+            db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = commandId,
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(db),
+                AggregateType = nameof(PrintJob),
+                AggregateId = job.Id,
+                PrinterId = printer.Id,
+                ProjectId = job.CalibrationProjectId,
+                JobStatus = job.Status.ToString(),
+                JobKind = job.JobKind?.ToString(),
+                EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+                SchemaVersion = "1",
+                PayloadJson = "{}",
+                Status = QueueOutboxEventStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
             await db.SaveChangesAsync();
         }
 
@@ -303,6 +460,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             AssignedPrinterId = printer.Id,
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 1,
             // Idempotency-key semantics are job-kind agnostic; a Standard job keeps
             // this test focused on the key contract.
             JobKind = JobKind.Standard,
@@ -318,6 +476,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             AssignedPrinterId = printer.Id,
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 2,
             // Idempotency-key semantics are job-kind agnostic; a Standard job keeps
             // this test focused on the key contract.
             JobKind = JobKind.Standard,
@@ -1040,7 +1199,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task G8_PriorityUpdate_ValidUrgentValue_Succeeds()
+    public async Task G8_PriorityUpdate_CalibrationPriorityIsImmutable()
     {
         await using AppDbContext seedCtx = CreateContext();
         (_, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
@@ -1062,9 +1221,10 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         // Priority = 3 (Urgent) is valid.
         var updateRequest = new UpdateJobPriorityDto { Priority = (int)PrintJobPriority.Urgent };
-        var result = await sut.UpdateJobPriorityAsync(jobId, updateRequest, CancellationToken.None);
-        result.Should().NotBeNull("Urgent is a valid priority value");
-        result!.Priority.Should().Be((int)PrintJobPriority.Urgent);
+        Func<Task> act = async () =>
+            await sut.UpdateJobPriorityAsync(jobId, updateRequest, CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "calibration priority is part of the canonical physical queue input");
     }
 
     // =========================================================================
@@ -1245,7 +1405,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         // Standard jobs do NOT require ack — claim with null ack key must succeed.
         await using AppDbContext claimCtx = CreateContext();
-        var claimSvc = CreateClaimService(claimCtx);
+        var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printer.Id));
 
         var result = await claimSvc.AcquireClaimAsync(
             new DispatchClaimRequest(
@@ -1262,4 +1422,8 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         claimedJob!.Status.Should().Be(PrintJobStatus.Starting,
             "successful claim must advance Standard job to Starting via the shared claim path");
     }
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
 }

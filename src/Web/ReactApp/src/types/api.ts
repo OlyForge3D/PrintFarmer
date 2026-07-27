@@ -1882,6 +1882,8 @@ export enum JobQueueStatus {
 
 export interface JobQueuePrintJob {
   id: string;
+  rowVersion?: string | null;
+  dispatchStateRowVersion?: string | null;
   printerId: string;
   printerName?: string;
   gcodeFileId: string;
@@ -1903,6 +1905,45 @@ export interface JobQueuePrintJob {
   updatedAt: Date;
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
+  dispatchResult?: {
+    attemptId?: string | null;
+    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown";
+    backendAcceptedAtUtc?: string | null;
+    errorCode?: string | null;
+    isRetryable: boolean;
+    requiresReconciliation: boolean;
+    jobRevision?: string | null;
+    dispatchStateRevision?: string | null;
+  } | null;
+}
+
+export interface QueueEventEnvelope {
+  schemaVersion: string;
+  eventId: string;
+  sequence: number;
+  eventType: string;
+  occurredAtUtc: string;
+  jobId?: string | null;
+  printerId?: string | null;
+  projectId?: string | null;
+  jobStatus?: string | null;
+  jobKind?: string | null;
+  jobRevision?: string | null;
+  dispatchStateRevision?: string | null;
+  attemptId?: string | null;
+  bedClearState?: string | null;
+  errorCode?: string | null;
+  failureCode?: string | null;
+  payloadJson?: string | null;
+  jobLogicalRevision?: number | null;
+  dispatchStateLogicalRevision?: number | null;
+}
+
+export interface QueueChangeFeed {
+  afterSequence: number;
+  nextSequence: number;
+  hasMore: boolean;
+  events: QueueEventEnvelope[];
 }
 
 /**
@@ -3358,6 +3399,10 @@ export interface AutoDispatchStatus {
   currentJobName?: string;
   lastActivity?: string;
   bedPreConfirmed?: boolean;
+  dispatchStateETag?: string | null;
+  printerETag?: string | null;
+  nextJobId?: string | null;
+  nextJobETag?: string | null;
   readyGateChecks?: ReadyGateCheck[];
   attentionMessage?: string;
   attentionReason?: string;
@@ -3843,6 +3888,10 @@ export interface AutoDispatchDetailedStatus {
   /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
   state: string;
   bedPreConfirmed?: boolean;
+  dispatchStateETag?: string | null;
+  printerETag?: string | null;
+  nextJobId?: string | null;
+  nextJobETag?: string | null;
   attentionMessage?: string;
   attentionReason?: string;
   operatorAction?: string;

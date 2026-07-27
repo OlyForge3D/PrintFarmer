@@ -51,6 +51,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
                 Id = Guid.NewGuid(),
                 PrinterId = Guid.NewGuid(),
                 BackendCommandId = "test-command",
+                BackendFileName = "model.gcode",
             }));
 
         _controller = new SlicePrintBridgeController(
@@ -123,6 +124,54 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         var notFound = result.Should().BeOfType<NotFoundObjectResult>().Subject;
         notFound.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_CalibrationSlice_Returns422WithoutBackendEffect(bool startPrint)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        SliceJob calibrationJob = CreateJob(jobId, SliceJobStatus.Completed);
+        calibrationJob.CalibrationProjectId = Guid.NewGuid();
+        calibrationJob.CalibrationAttemptId = Guid.NewGuid();
+
+        _jobRepoMock
+            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(calibrationJob);
+
+        IActionResult result = await _controller.SendToPrinterAsync(
+            jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint },
+            CancellationToken.None);
+
+        result.Should().BeOfType<UnprocessableEntityObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _artifactsMock.Verify(
+            a => a.ListByJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _dispatchClaimMock.Verify(
+            c => c.AcquireAdHocClaimAsync(
+                It.IsAny<AdHocDispatchClaimRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _printersMock.Verify(
+            p => p.UploadAndStartPrintAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _printersMock.Verify(
+            p => p.UploadGcodeAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // =========================================================================

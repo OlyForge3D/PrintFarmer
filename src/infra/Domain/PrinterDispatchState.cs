@@ -37,6 +37,15 @@ public class PrinterDispatchState
     [Timestamp]
     public byte[]? RowVersion { get; set; }
 
+    /// <summary>Provider-independent logical revision incremented on every mutation.</summary>
+    public long Revision { get; set; } = 1;
+
+    /// <summary>
+    /// Monotonic per-printer queue generation. Every insertion, reorder, reassignment,
+    /// cancellation, or safety-relevant configuration mutation increments this value.
+    /// </summary>
+    public long QueueRevision { get; set; }
+
     // =========================================================================
     // Issue #900: Exact-job bed-clear acknowledgement (one-use, expiring)
     // =========================================================================
@@ -71,6 +80,15 @@ public class PrinterDispatchState
     /// Computed at write time as a configurable offset from <see cref="AcknowledgedAtUtc"/>.
     /// </summary>
     public DateTime? AcknowledgementExpiresAtUtc { get; set; }
+
+    /// <summary>Job revision the operator observed when acknowledging bed clear.</summary>
+    public byte[]? AcknowledgedJobRowVersion { get; set; }
+
+    /// <summary>Queue generation the acknowledged job was the urgent-first head of.</summary>
+    public long? AcknowledgedQueueRevision { get; set; }
+
+    /// <summary>Printer configuration revision observed by the operator.</summary>
+    public long? AcknowledgedPrinterConfigRevision { get; set; }
 
     // =========================================================================
     // Issue #900: Active job / dispatch-attempt tracking

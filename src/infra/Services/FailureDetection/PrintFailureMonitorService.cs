@@ -191,7 +191,9 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     .Where(j =>
                         j.AssignedPrinterId.HasValue
                         && configuredPrinterIds.Contains(j.AssignedPrinterId.Value)
-                        && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                        && (j.Status == PrintJobStatus.Starting ||
+                            j.Status == PrintJobStatus.Printing ||
+                            j.Status == PrintJobStatus.Paused))
                     .ToListAsync(cancellationToken);
             Dictionary<Guid, ActivePrintWindow> activeJobsByPrinter = activeJobs
                 .GroupBy(j => j.AssignedPrinterId!.Value)

@@ -1,7 +1,9 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -18,7 +20,8 @@ public class PrinterHub(
     IDiscoveryProgressCache progressCache,
     ILogger<PrinterHub> logger,
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
-    IDiscoverySessionRegistry discoverySessions) : Hub
+    IDiscoverySessionRegistry discoverySessions,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : Hub
 {
     // Marker hub for broadcasting printer updates and discovery progress.
 
@@ -31,8 +34,6 @@ public class PrinterHub(
     /// </summary>
     public override async Task OnConnectedAsync()
     {
-        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm);
-
         if (PrintFarmerPermissions.TryGetUserId(Context.User!, out Guid userId))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.User(userId));
@@ -44,11 +45,6 @@ public class PrinterHub(
         }
 
         await base.OnConnectedAsync();
-
-        foreach (PrinterStatusDto status in statusCache.GetAllStatuses().Values)
-        {
-            await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
-        }
     }
 
     /// <summary>
@@ -65,10 +61,105 @@ public class PrinterHub(
             return;
         }
 
+        await EnsurePrinterAccessAsync(id);
         PrinterStatusDto? status = statusCache.GetStatus(id);
         if (status != null)
         {
             await Clients.Caller.SendAsync("printerupdated", status, Context.ConnectionAborted);
+        }
+    }
+
+    /// <summary>Subscribes a farm administrator to farm-wide queue hints.</summary>
+    public async Task SubscribeToFarmAsync()
+    {
+        if (!PrintFarmerPermissions.IsFarmAdmin(Context.User!))
+        {
+            throw new HubException("resource_forbidden");
+        }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Farm);
+    }
+
+    /// <summary>Subscribes to one authorized printer's status and queue events.</summary>
+    public async Task SubscribeToPrinterAsync(string printerId)
+    {
+        if (!Guid.TryParse(printerId, out Guid id))
+        {
+            throw new HubException("invalid_resource_id");
+        }
+
+        await EnsurePrinterAccessAsync(id);
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Printer(id));
+
+        PrinterStatusDto? status = statusCache.GetStatus(id);
+        if (status is not null)
+        {
+            await Clients.Caller.SendAsync(
+                "printerupdated",
+                status,
+                Context.ConnectionAborted);
+        }
+    }
+
+    /// <summary>Subscribes to one authorized queue job.</summary>
+    public async Task SubscribeToQueueJobAsync(string jobId)
+    {
+        if (!Guid.TryParse(jobId, out Guid id) ||
+            resourceAuthorization is null ||
+            !await resourceAuthorization.CanAccessJobAsync(
+                Context.User!,
+                id,
+                PrinterGroupAccessLevel.View,
+                Context.ConnectionAborted))
+        {
+            throw new HubException("resource_forbidden");
+        }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.QueueJob(id));
+    }
+
+    /// <summary>Subscribes to one authorized calibration project.</summary>
+    public async Task SubscribeToProjectAsync(string projectId)
+    {
+        if (!Guid.TryParse(projectId, out Guid id) ||
+            resourceAuthorization is null ||
+            !await resourceAuthorization.CanAccessProjectAsync(
+                Context.User!,
+                id,
+                Context.ConnectionAborted))
+        {
+            throw new HubException("resource_forbidden");
+        }
+
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Project(id));
+    }
+
+    /// <summary>Leaves a previously joined queue resource group.</summary>
+    public Task UnsubscribeFromQueueJobAsync(string jobId) =>
+        Guid.TryParse(jobId, out Guid id)
+            ? Groups.RemoveFromGroupAsync(
+                Context.ConnectionId,
+                AuthorizedHubGroups.QueueJob(id))
+            : Task.CompletedTask;
+
+    /// <summary>Leaves a previously joined printer resource group.</summary>
+    public Task UnsubscribeFromPrinterAsync(string printerId) =>
+        Guid.TryParse(printerId, out Guid id)
+            ? Groups.RemoveFromGroupAsync(
+                Context.ConnectionId,
+                AuthorizedHubGroups.Printer(id))
+            : Task.CompletedTask;
+
+    private async Task EnsurePrinterAccessAsync(Guid printerId)
+    {
+        if (resourceAuthorization is null ||
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                Context.User!,
+                printerId,
+                PrinterGroupAccessLevel.View,
+                Context.ConnectionAborted))
+        {
+            throw new HubException("resource_forbidden");
         }
     }
 

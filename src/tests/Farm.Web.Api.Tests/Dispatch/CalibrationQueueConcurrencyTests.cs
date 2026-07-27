@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -72,7 +74,12 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         IPrinterStatusSnapshotReader reader = statusReader ?? Mock.Of<IPrinterStatusSnapshotReader>(
             r => r.GetStatusSnapshot(It.IsAny<Guid>()) == null);
         allocator ??= new DbOutboxSequenceAllocator();
-        return new DispatchClaimService(db, reader, allocator, NullLogger<DispatchClaimService>.Instance);
+        return new DispatchClaimService(
+            db,
+            reader,
+            allocator,
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
     private static IPrinterStatusSnapshotReader MakeOnlineIdleReader(Guid printerId)
@@ -94,7 +101,69 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     {
         allocator ??= new DbOutboxSequenceAllocator();
         statusReader ??= DispatchTestDoubles.OnlineIdleReader(Guid.Empty);
-        return new(db, allocator, statusReader, NullLogger<BedClearAcknowledgementService>.Instance);
+        return new(
+            db,
+            allocator,
+            statusReader,
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
+    }
+
+    private static async Task PersistAcknowledgementAsync(
+        AppDbContext db,
+        Guid printerId,
+        Guid jobId,
+        string key,
+        string actor = "actor")
+    {
+        PrintJob job = await db.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
+        Printer printer = await db.Printers.SingleAsync(candidate => candidate.Id == printerId);
+        PrinterDispatchState state = await db.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        state.AcknowledgedJobId = jobId;
+        state.AcknowledgedAtUtc = DateTime.UtcNow;
+        state.AcknowledgedBySubject = actor;
+        state.AcknowledgementIdempotencyKey = key;
+        state.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
+        state.AcknowledgedJobRowVersion = job.RowVersion;
+        state.AcknowledgedQueueRevision = state.QueueRevision;
+        state.AcknowledgedPrinterConfigRevision = printer.ConfigurationRevision;
+        Guid commandId = Guid.NewGuid();
+        db.BedClearCommandRecords.Add(new BedClearCommandRecord
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            JobId = jobId,
+            IdempotencyKey = key,
+            RequestSha256 = new string('a', 64),
+            ActorSubject = actor,
+            JobRowVersion = job.RowVersion ?? [],
+            DispatchStateRowVersion = state.RowVersion ?? [],
+            QueueRevision = state.QueueRevision,
+            PrinterConfigRevision = printer.ConfigurationRevision,
+            Status = BedClearCommandStatus.Pending,
+            OutboxEventId = commandId,
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
+            ExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
+        });
+        db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = commandId,
+            Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(db),
+            AggregateType = nameof(PrintJob),
+            AggregateId = jobId,
+            PrinterId = printerId,
+            ProjectId = job.CalibrationProjectId,
+            JobStatus = job.Status.ToString(),
+            JobKind = job.JobKind?.ToString(),
+            EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+            SchemaVersion = "1",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Applies migrations and seeds a printer + dispatch state + print job.</summary>
@@ -118,6 +187,9 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         Guid calibrationProjectId = Guid.NewGuid();
         Guid calibrationAttemptId = Guid.NewGuid();
         Guid calibrationOrchestrationId = Guid.NewGuid();
+        Guid calibrationSnapshotId = Guid.NewGuid();
+        Guid sourceArtifactId = Guid.NewGuid();
+        Guid sourceSliceJobId = Guid.NewGuid();
         bool isCalibration = jobKind == JobKind.FilamentCalibration;
 
         var gcode = new GcodeFile
@@ -133,14 +205,26 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             IsImmutable = isCalibration,
             PromotedAtUtc = isCalibration ? DateTime.UtcNow.AddMinutes(-1) : null,
             ContentSha256 = isCalibration ? new string('a', 64) : null,
+            SourceModelSha256 = isCalibration ? new string('8', 64) : null,
             CalibrationProjectId = isCalibration ? calibrationProjectId : null,
             CalibrationAttemptId = isCalibration ? calibrationAttemptId : null,
             CalibrationOrchestrationId = isCalibration ? calibrationOrchestrationId : null,
+            SourceArtifactId = isCalibration ? sourceArtifactId : null,
+            SourceSliceJobId = isCalibration ? sourceSliceJobId : null,
             CalibrationManifestSha256 = isCalibration ? new string('9', 64) : null,
             SpecificationSha256 = isCalibration ? new string('s', 64) : null,
             MachineProfileSha256 = isCalibration ? new string('m', 64) : null,
             ProcessProfileSha256 = isCalibration ? new string('p', 64) : null,
             FilamentProfileSha256 = isCalibration ? new string('f', 64) : null,
+            SlicerEngineName = isCalibration ? "OrcaSlicer" : null,
+            SlicerDistribution = isCalibration ? "upstream" : null,
+            PinnedSlicerVersion = isCalibration ? "2.3.0" : null,
+            SlicerContainerDigest = isCalibration ? "sha256:test" : null,
+            PrinterModelId = isCalibration ? model.Id : null,
+            ObjectDimensionX = isCalibration ? 20 : null,
+            ObjectDimensionY = isCalibration ? 20 : null,
+            ObjectDimensionZ = isCalibration ? 20 : null,
+            EstimatedFilamentWeightG = isCalibration ? 10 : null,
         };
         db.GcodeFiles.Add(gcode);
 
@@ -164,8 +248,91 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             // Hard filament gate inputs.
             CurrentSpoolId = CalibrationSpoolId,
             CurrentMaterial = CalibrationMaterial,
+            MaxBuildVolumeX = 200,
+            MaxBuildVolumeY = 200,
+            MaxBuildVolumeZ = 200,
         };
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printer.Id,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+            CurrentSpoolId = CalibrationSpoolId,
+            CurrentMaterial = CalibrationMaterial,
+        };
+        printer.Toolheads.Add(toolhead);
         db.Printers.Add(printer);
+        var spool = new Spool
+        {
+            Id = Guid.NewGuid(),
+            Material = CalibrationMaterial,
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printer.Id,
+        };
+        db.Spools.Add(spool);
+        if (isCalibration)
+        {
+            db.CalibrationProjects.Add(new CalibrationProject
+            {
+                Id = calibrationProjectId,
+                OwnerUserId = Guid.NewGuid(),
+                Name = "Test calibration",
+                PrinterId = printer.Id,
+                CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
+                SelectedToolheadId = toolhead.Id,
+                SelectedToolheadIndex = toolhead.Index,
+                FilamentProvider = "local",
+                FilamentProductId = "pla",
+                FilamentProductName = "PLA",
+                FilamentMaterial = CalibrationMaterial,
+                LocalSpoolId = spool.Id,
+                FilamentSnapshotJson = """{"material":"PLA"}""",
+            });
+            db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
+            {
+                Id = calibrationSnapshotId,
+                ProjectId = calibrationProjectId,
+                AttemptId = calibrationAttemptId,
+                PrinterId = printer.Id,
+                SchemaVersion = "1",
+                SnapshotSha256 = new string('6', 64),
+                PrinterConfigurationRevision = 1,
+                FirmwareFamily = PrinterFirmwareFamily.Klipper,
+                GcodeDialect = PrinterGcodeDialect.Klipper,
+                SanitizedSnapshotJson = "{}",
+                SlicerEngine = "OrcaSlicer",
+                SlicerDistribution = "upstream",
+                SlicerVersion = "2.3.0",
+                SlicerContainerDigest = "sha256:test",
+                MachineProfileSha256 = new string('m', 64),
+                ProcessProfileSha256 = new string('p', 64),
+                FilamentProfileSha256 = new string('f', 64),
+            });
+            db.CalibrationAttempts.Add(new CalibrationAttempt
+            {
+                Id = calibrationAttemptId,
+                ProjectId = calibrationProjectId,
+                SpecificationSha256 = new string('s', 64),
+                PrinterConfigurationSnapshotId = calibrationSnapshotId,
+            });
+            db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+            {
+                Id = calibrationOrchestrationId,
+                ProjectId = calibrationProjectId,
+                AttemptId = calibrationAttemptId,
+                SpecificationSha256 = new string('s', 64),
+                SliceJobId = sourceSliceJobId,
+                FinalArtifactId = sourceArtifactId,
+                GcodeFileId = gcode.Id,
+                GcodeSha256 = new string('a', 64),
+                ManifestSha256 = new string('9', 64),
+                SlicerContainerDigest = "sha256:test",
+            });
+        }
 
         var ds = new PrinterDispatchState { PrinterId = printer.Id };
         db.PrinterDispatchStates.Add(ds);
@@ -185,19 +352,40 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             RequiredSlicerEngine = isCalibration ? "OrcaSlicer" : null,
             RequiredSlicerDistribution = isCalibration ? "upstream" : null,
             RequiredSlicerVersion = isCalibration ? "2.3.0" : null,
+            RequiredSlicerContainerDigest = isCalibration ? "sha256:test" : null,
             PinnedPrinterConfigRevision = isCalibration ? 1L : null,
             SpoolmanSpoolId = isCalibration ? CalibrationSpoolId : null,
             RequiredMaterialType = isCalibration ? CalibrationMaterial : null,
             // Required by the authoritative claim policy for calibration jobs (#900):
             CalibrationProjectId = isCalibration ? calibrationProjectId : null,
             CalibrationAttemptId = isCalibration ? calibrationAttemptId : null,
-            CalibrationConfigSnapshotId = isCalibration ? Guid.NewGuid() : null,
+            CalibrationConfigSnapshotId = isCalibration ? calibrationSnapshotId : null,
             CalibrationOrchestrationId = isCalibration ? calibrationOrchestrationId : null,
+            SourceArtifactId = isCalibration ? sourceArtifactId : null,
+            SliceJobId = isCalibration ? sourceSliceJobId : null,
             GcodeContentSha256 = isCalibration ? new string('a', 64) : null,
+            PinnedGcodeFileSizeBytes = isCalibration ? gcode.FileSizeBytes : null,
             SpecificationSha256 = isCalibration ? new string('s', 64) : null,
             MachineProfileSha256 = isCalibration ? new string('m', 64) : null,
             ProcessProfileSha256 = isCalibration ? new string('p', 64) : null,
             FilamentProfileSha256 = isCalibration ? new string('f', 64) : null,
+            PrinterConfigSnapshotSha256 = isCalibration ? new string('6', 64) : null,
+            PinnedPrinterModelId = isCalibration ? printer.ModelId : null,
+            PinnedToolheadId = isCalibration ? toolhead.Id : null,
+            PinnedToolheadIndex = isCalibration ? toolhead.Index : null,
+            PinnedSpoolId = isCalibration ? spool.Id : null,
+            FilamentSnapshotSha256 = isCalibration
+                ? ComputeSha256("""{"material":"PLA"}""")
+                : null,
+            SourceModelSha256 = isCalibration ? gcode.SourceModelSha256 : null,
+            CalibrationManifestSha256 = isCalibration ? gcode.CalibrationManifestSha256 : null,
+            RequiredNozzleDiameter = isCalibration ? 0.4m : null,
+            RequiredCapabilities = isCalibration ? [] : null,
+            PinnedObjectDimensionX = isCalibration ? gcode.ObjectDimensionX : null,
+            PinnedObjectDimensionY = isCalibration ? gcode.ObjectDimensionY : null,
+            PinnedObjectDimensionZ = isCalibration ? gcode.ObjectDimensionZ : null,
+            EstimatedFilamentUsage = isCalibration ? gcode.EstimatedFilamentWeightG : null,
+            FilamentName = isCalibration ? "PLA" : null,
             QueuePosition = 1,
             IdempotencyScope = "test-scope",
             IdempotencyKey = Guid.NewGuid().ToString(),
@@ -211,6 +399,10 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         return (printer.Id, job.Id, gcode.Id);
     }
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
 
     // =========================================================================
     // Test 1: Row version fence — two separate contexts claiming the same Standard job
@@ -226,8 +418,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         await using AppDbContext ctx1 = CreateContext();
         await using AppDbContext ctx2 = CreateContext();
 
-        var claimSvc1 = CreateClaimService(ctx1);
-        var claimSvc2 = CreateClaimService(ctx2);
+        var claimSvc1 = CreateClaimService(ctx1, MakeOnlineIdleReader(printerId));
+        var claimSvc2 = CreateClaimService(ctx2, MakeOnlineIdleReader(printerId));
 
         var req = new DispatchClaimRequest(jobId, printerId, "actor-1", "Manual", null, null, null);
         var req2 = new DispatchClaimRequest(jobId, printerId, "actor-2", "Manual", null, null, null);
@@ -426,9 +618,6 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         var ds = new PrinterDispatchState
         {
             PrinterId = printer.Id,
-            AcknowledgedJobId = Guid.NewGuid(), // Will be overridden below
-            AcknowledgementIdempotencyKey = "test-ack-key",
-            AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
         };
         seedCtx.PrinterDispatchStates.Add(ds);
 
@@ -463,9 +652,12 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         };
         seedCtx.PrintJobs.Add(job);
 
-        // Set the ack to point to this job.
-        ds.AcknowledgedJobId = job.Id;
         await seedCtx.SaveChangesAsync();
+        await PersistAcknowledgementAsync(
+            seedCtx,
+            printer.Id,
+            job.Id,
+            "test-ack-key");
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printer.Id));
@@ -492,12 +684,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         // Pre-seed ack so the claim can reach the telemetry check.
         await using AppDbContext ackCtx = CreateContext();
-        PrinterDispatchState? ds = await ackCtx.PrinterDispatchStates
-            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        ds!.AcknowledgedJobId = jobId;
-        ds.AcknowledgementIdempotencyKey = "ack-key-1";
-        ds.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
-        await ackCtx.SaveChangesAsync();
+        await PersistAcknowledgementAsync(
+            ackCtx,
+            printerId,
+            jobId,
+            "ack-key-1");
 
         // Null reader = no telemetry available.
         IPrinterStatusSnapshotReader nullReader = Mock.Of<IPrinterStatusSnapshotReader>(
@@ -623,12 +814,14 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         var ds = new PrinterDispatchState
         {
             PrinterId = printer.Id,
-            AcknowledgedJobId = job.Id,
-            AcknowledgementIdempotencyKey = "ack-key-compat",
-            AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10),
         };
         seedCtx.PrinterDispatchStates.Add(ds);
         await seedCtx.SaveChangesAsync();
+        await PersistAcknowledgementAsync(
+            seedCtx,
+            printer.Id,
+            job.Id,
+            "ack-key-compat");
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printer.Id));
@@ -698,12 +891,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         // Pre-seed the ack.
         await using AppDbContext ackCtx = CreateContext();
-        PrinterDispatchState? ds = await ackCtx.PrinterDispatchStates
-            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        ds!.AcknowledgedJobId = jobId;
-        ds.AcknowledgementIdempotencyKey = "valid-ack-key";
-        ds.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
-        await ackCtx.SaveChangesAsync();
+        await PersistAcknowledgementAsync(
+            ackCtx,
+            printerId,
+            jobId,
+            "valid-ack-key");
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
@@ -715,7 +907,9 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         DispatchClaimResult result = await claimSvc.AcquireClaimAsync(request);
 
         // Assert — claim succeeds: all checks pass.
-        result.Success.Should().BeTrue("calibration with valid ack, fresh telemetry, and all required fields must succeed");
+        result.Success.Should().BeTrue(
+            $"calibration with valid ack, fresh telemetry, and all required fields must succeed: " +
+            $"{result.ErrorCode} {result.ErrorDetail}");
         result.Attempt.Should().NotBeNull();
 
         // Job must now be Starting.
@@ -758,12 +952,11 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
         // Pre-stamp an ack so the claim can fire and write a second outbox event.
         await using AppDbContext ackPreCtx = CreateContext();
-        PrinterDispatchState? dsForClaim = await ackPreCtx.PrinterDispatchStates
-            .FirstOrDefaultAsync(s => s.PrinterId == printerId);
-        dsForClaim!.AcknowledgedJobId = jobId1;
-        dsForClaim.AcknowledgementIdempotencyKey = "claim-key-1";
-        dsForClaim.AcknowledgementExpiresAtUtc = DateTime.UtcNow.AddMinutes(10);
-        await ackPreCtx.SaveChangesAsync();
+        await PersistAcknowledgementAsync(
+            ackPreCtx,
+            printerId,
+            jobId1,
+            "claim-key-1");
 
         await using AppDbContext claimCtx = CreateContext();
         var claimSvc = CreateClaimService(claimCtx, MakeOnlineIdleReader(printerId));
@@ -860,10 +1053,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     /// <summary>
     /// Critical cross-process test: two separate <see cref="AppDbContext"/> instances
     /// (simulating two API processes) both attempt to allocate a sequence and write
-    /// an outbox event concurrently. Only one transaction can commit the
-    /// <c>OutboxSequenceState</c> counter update; the other must receive a
-    /// <c>DbUpdateConcurrencyException</c> and roll back. This proves that the
-    /// DB-backed allocator prevents duplicate sequences across processes.
+    /// an outbox event concurrently. Provider-native allocation assigns adjacent
+    /// values before either event write, so both legitimate producers can commit.
     /// </summary>
     [Fact]
     public async Task DbSequenceAllocator_TwoConcurrentContexts_ProduceUniqueSequences()
@@ -884,15 +1075,14 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         var alloc1 = new DbOutboxSequenceAllocator();
         var alloc2 = new DbOutboxSequenceAllocator();
 
-        // Both allocate a sequence and build an outbox event (before any save).
+        // Both allocate provider-native sequence values before any event save.
         long seq1 = await alloc1.AllocateAsync(ctx1);
         long seq2 = await alloc2.AllocateAsync(ctx2);
 
-        // Both loaded the same counter row with NextSequence=0 → both increment to 1.
         seq1.Should().Be(1, "first allocation from fresh counter should be 1");
-        seq2.Should().Be(1, "second context also starts from the same persisted value");
+        seq2.Should().Be(2, "the second provider-native allocation must not contend or duplicate");
 
-        // Both try to write an outbox event with the same sequence → race condition.
+        // Both write distinct sequence values.
         ctx1.QueueDispatchOutbox.Add(new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -918,44 +1108,18 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             CreatedAtUtc = DateTime.UtcNow,
         });
 
-        // Act: save both concurrently.
-        Task<int> t1 = ctx1.SaveChangesAsync();
-        Task<int> t2 = ctx2.SaveChangesAsync();
+        await ctx1.SaveChangesAsync();
+        await ctx2.SaveChangesAsync();
 
-        // One must succeed, the other must throw DbUpdateConcurrencyException.
-        Exception? exceptionFromLoser = null;
-        try
-        {
-            await Task.WhenAll(t1, t2);
-        }
-        catch (Exception ex)
-        {
-            exceptionFromLoser = ex;
-        }
-
-        int successCount = (t1.Status == TaskStatus.RanToCompletion ? 1 : 0)
-                         + (t2.Status == TaskStatus.RanToCompletion ? 1 : 0);
-
-        // Assert: exactly one succeeded, one failed with concurrency conflict.
-        // (In some rare cases, SQLite serializes the writes at the DB level and both
-        // could succeed IF the unique index on Sequence also enforces uniqueness.
-        // We treat either "one concurrency error" or "one unique constraint violation"
-        // as proof that duplicate sequences cannot be silently committed.)
-        using (new FluentAssertions.Execution.AssertionScope())
-        {
-            successCount.Should().Be(1, "exactly one concurrent allocator must win");
-            exceptionFromLoser.Should().NotBeNull("the losing context must throw an exception");
-        }
-
-        // The winner wrote exactly one event with sequence=1.
         await using AppDbContext verifyCtx = CreateContext();
-        List<long> sequences = await verifyCtx.QueueDispatchOutbox.Select(e => e.Sequence).ToListAsync();
-        sequences.Should().HaveCount(1, "only one outbox event must be committed");
-        sequences[0].Should().Be(1, "the winner's event must have sequence=1");
+        List<long> sequences = await verifyCtx.QueueDispatchOutbox
+            .OrderBy(evt => evt.Sequence)
+            .Select(evt => evt.Sequence)
+            .ToListAsync();
+        sequences.Should().Equal(1, 2);
 
-        // Counter is now at 1.
         OutboxSequenceState? finalState = await verifyCtx.OutboxSequenceStates.SingleAsync();
-        finalState.NextSequence.Should().Be(1, "counter must reflect the one successful increment");
+        finalState.NextSequence.Should().Be(2);
     }
 
     // =========================================================================
@@ -1080,4 +1244,3 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         updated.RowVersion!.Length.Should().Be(16, "RowVersion is a 16-byte GUID-derived token");
     }
 }
-

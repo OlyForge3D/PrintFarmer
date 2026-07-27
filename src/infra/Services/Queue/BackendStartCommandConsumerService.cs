@@ -37,6 +37,11 @@ public sealed class BackendStartCommandConsumerService(
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
+    private static readonly JsonSerializerOptions PayloadOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     private const int MaxAttempts = 10;
     private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
 
@@ -165,7 +170,9 @@ public sealed class BackendStartCommandConsumerService(
         BackendStartPayload? payload;
         try
         {
-            payload = JsonSerializer.Deserialize<BackendStartPayload>(evt.PayloadJson);
+            payload = JsonSerializer.Deserialize<BackendStartPayload>(
+                evt.PayloadJson,
+                PayloadOptions);
         }
         catch (JsonException jsonEx)
         {
@@ -217,11 +224,10 @@ public sealed class BackendStartCommandConsumerService(
         }
 
         logger.LogInformation(
-            "[BackendStartConsumer] Executing backend start: EventId={EventId} Job={JobId} Actor={Actor} AckKey={Key}",
+            "[BackendStartConsumer] Executing backend start: EventId={EventId} Job={JobId} Actor={Actor}",
             evt.Id,
             payload.JobId,
-            payload.ActorSubject ?? "system",
-            payload.AcknowledgementKey);
+            payload.ActorSubject ?? "system");
 
         // ===================================================================
         // Step 3: Awaited backend execution (NOT fire-and-forget).
@@ -295,7 +301,6 @@ public sealed class BackendStartCommandConsumerService(
         switch (outcome.Status)
         {
             case BackendStartStatus.Accepted:
-            case BackendStartStatus.AlreadyStarted:
                 row.Status = QueueOutboxEventStatus.Published;
                 row.CompletedAtUtc = DateTime.UtcNow;
                 row.LastError = null;
@@ -305,6 +310,21 @@ public sealed class BackendStartCommandConsumerService(
                 logger.LogInformation(
                     "[BackendStartConsumer] Backend start confirmed ({Status}): EventId={EventId} Job={JobId}",
                     outcome.Status, eventId, jobId);
+                break;
+            case BackendStartStatus.AlreadyStarted when outcome.BackendAcceptanceProven:
+                row.Status = QueueOutboxEventStatus.Published;
+                row.CompletedAtUtc = DateTime.UtcNow;
+                row.LastError = null;
+                row.FailureCode = null;
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+                break;
+            case BackendStartStatus.AlreadyStarted:
+                row.Status = QueueOutboxEventStatus.Processing;
+                row.FailureCode = UnknownOutcomeFailureCode;
+                row.LastError = Truncate(
+                    "Database state alone does not prove backend acceptance; reconciliation is required.");
+                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
+                row.RetryAfterUtc = null;
                 break;
 
             case BackendStartStatus.Unknown:
@@ -322,30 +342,21 @@ public sealed class BackendStartCommandConsumerService(
                     eventId, jobId);
                 break;
 
-            case BackendStartStatus.RejectedPermanently:
-                row.Status = QueueOutboxEventStatus.DeadLettered;
-                row.CompletedAtUtc = DateTime.UtcNow;
+            case BackendStartStatus.Rejected:
+            case BackendStartStatus.FailedBeforeStart:
                 row.FailureCode = outcome.ErrorCode;
                 row.LastError = Truncate(outcome.ErrorDetail);
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
 
-                logger.LogError(
-                    "[BackendStartConsumer] Backend start permanently rejected ({Code}): EventId={EventId} Job={JobId}",
-                    outcome.ErrorCode, eventId, jobId);
-                break;
-
-            default:
-                row.FailureCode = outcome.ErrorCode;
-                row.LastError = Truncate(outcome.ErrorDetail);
-                row.AttemptId = outcome.AttemptId ?? row.AttemptId;
-
-                if (row.AttemptCount >= MaxAttempts)
+                if (!outcome.IsRetryable || row.AttemptCount >= MaxAttempts)
                 {
                     row.Status = QueueOutboxEventStatus.DeadLettered;
                     row.CompletedAtUtc = DateTime.UtcNow;
                     logger.LogError(
-                        "[BackendStartConsumer] Event {EventId} dead-lettered after {Max} attempts",
-                        eventId, MaxAttempts);
+                        "[BackendStartConsumer] Event {EventId} ended as {Status} after {Count} attempt(s)",
+                        eventId,
+                        outcome.Status,
+                        row.AttemptCount);
                 }
                 else
                 {

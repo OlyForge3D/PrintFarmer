@@ -13,6 +13,10 @@ struct AutoDispatchStatus: Codable, Sendable {
     var lastActivity: String?
     var state: String
     var bedPreConfirmed: Bool = false
+    var dispatchStateETag: String?
+    var printerETag: String?
+    var nextJobId: UUID?
+    var nextJobETag: String?
     var attentionMessage: String?
 }
 

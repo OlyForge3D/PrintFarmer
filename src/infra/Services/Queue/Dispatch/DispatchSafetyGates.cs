@@ -15,6 +15,43 @@ public static class DispatchSafetyGates
     /// <summary>Nozzle diameter comparison tolerance in millimetres.</summary>
     private const decimal NozzleToleranceMm = 0.011m;
 
+    /// <summary>Maps a dispatch failure code to a durable calibration blocked reason.</summary>
+    public static JobBlockedReasonCode? MapBlockedReason(string? errorCode) =>
+        errorCode switch
+        {
+            "firmware_family_mismatch" => JobBlockedReasonCode.FirmwareFamilyMismatch,
+            "gcode_dialect_mismatch" => JobBlockedReasonCode.GcodeDialectMismatch,
+            "slicer_tuple_mismatch" => JobBlockedReasonCode.SlicerTupleMismatch,
+            "gcode_hash_missing" or
+            "gcode_hash_mismatch" or
+            "gcode_hash_unverifiable" or
+            "gcode_byte_hash_mismatch" or
+            "gcode_size_mismatch" or
+            "gcode_byte_size_mismatch" or
+            "gcode_file_missing" => JobBlockedReasonCode.ContentHashMismatch,
+            "printer_config_revision_missing" or
+            "printer_config_revision_stale" => JobBlockedReasonCode.PrinterConfigRevisionStale,
+            "calibration_record_invalid" or
+            "calibration_record_mismatch" => JobBlockedReasonCode.CalibrationRecordInvalid,
+            "filament_spool_missing" or
+            "filament_spool_unknown" or
+            "filament_spool_mismatch" or
+            "filament_material_missing" or
+            "filament_material_unknown" or
+            "filament_material_mismatch" or
+            "filament_insufficient" => JobBlockedReasonCode.FilamentCheckFailed,
+            "capabilities_unsatisfied" => JobBlockedReasonCode.MissingRequiredCapability,
+            "compatibility_incomplete" or
+            "printer_model_mismatch" or
+            "toolhead_mismatch" or
+            "hardware_evidence_incomplete" or
+            "build_volume_exceeded" or
+            "nozzle_unknown" or
+            "nozzle_mismatch" or
+            "gcode_metadata_mismatch" => JobBlockedReasonCode.HardCompatibilityFailure,
+            _ => null,
+        };
+
     /// <summary>
     /// Verifies advertised capabilities, nozzle diameter, printer model and build volume.
     /// </summary>
@@ -75,6 +112,61 @@ public static class DispatchSafetyGates
         // --- Build volume ---
         if (job.GcodeFile is { } gcode)
         {
+            if (job.JobKind == JobKind.FilamentCalibration)
+            {
+                if (!job.PinnedPrinterModelId.HasValue ||
+                    job.PinnedPrinterModelId.Value != printer.ModelId)
+                {
+                    return DispatchClaimResult.Fail(
+                        "printer_model_mismatch",
+                        "The assigned printer model does not match the job's pinned model.");
+                }
+
+                if (!job.PinnedToolheadId.HasValue ||
+                    !job.PinnedToolheadIndex.HasValue ||
+                    !printer.Toolheads.Any(toolhead =>
+                        toolhead.Id == job.PinnedToolheadId.Value &&
+                        toolhead.Index == job.PinnedToolheadIndex.Value))
+                {
+                    return DispatchClaimResult.Fail(
+                        "toolhead_mismatch",
+                        "The assigned printer no longer contains the exact pinned physical toolhead.");
+                }
+
+                if (job.RequiredNozzleDiameter is not > 0 ||
+                    job.RequiredCapabilities is null ||
+                    job.PinnedObjectDimensionX is not > 0 ||
+                    job.PinnedObjectDimensionY is not > 0 ||
+                    job.PinnedObjectDimensionZ is not > 0 ||
+                    gcode.ObjectDimensionX is not > 0 ||
+                    gcode.ObjectDimensionY is not > 0 ||
+                    gcode.ObjectDimensionZ is not > 0 ||
+                    printer.MaxBuildVolumeX is not > 0 ||
+                    printer.MaxBuildVolumeY is not > 0 ||
+                    printer.MaxBuildVolumeZ is not > 0)
+                {
+                    return DispatchClaimResult.Fail(
+                        "hardware_evidence_incomplete",
+                        "Calibration dispatch requires explicit nozzle, capability, object-dimension, and build-volume evidence.");
+                }
+
+                const double DimensionToleranceMm = 0.0001;
+                if (Math.Abs(
+                        gcode.ObjectDimensionX.Value -
+                        job.PinnedObjectDimensionX.Value) > DimensionToleranceMm ||
+                    Math.Abs(
+                        gcode.ObjectDimensionY.Value -
+                        job.PinnedObjectDimensionY.Value) > DimensionToleranceMm ||
+                    Math.Abs(
+                        gcode.ObjectDimensionZ.Value -
+                        job.PinnedObjectDimensionZ.Value) > DimensionToleranceMm)
+                {
+                    return DispatchClaimResult.Fail(
+                        "gcode_metadata_mismatch",
+                        "The G-code object dimensions changed after the job was queued.");
+                }
+            }
+
             if (gcode.ObjectDimensionX is { } dx && printer.MaxBuildVolumeX is { } bx && dx > bx)
             {
                 return DispatchClaimResult.Fail(
@@ -167,11 +259,11 @@ public static class DispatchSafetyGates
                     $"The job pins spool {requiredSpool} but the printer has a different spool loaded.");
             }
         }
-        else if (isCalibration)
+        else if (isCalibration && !job.PinnedSpoolId.HasValue)
         {
             return DispatchClaimResult.Fail(
                 "filament_spool_missing",
-                "Calibration jobs must pin the exact Spoolman spool used to produce the calibration profile.");
+                "Calibration jobs must pin an exact physical spool.");
         }
 
         // --- Material / SKU ---
@@ -316,7 +408,8 @@ public static class DispatchSafetyGates
             return DispatchClaimResult.Fail("calibration_lineage_incomplete", LineageDetail);
         }
 
-        // Specification and profile hashes must all be present for calibration jobs.
+        // Specification and profile hashes are classified before the broader physical
+        // tuple so clients receive the most precise immutable-input failure.
         if (string.IsNullOrWhiteSpace(job.SpecificationSha256) ||
             string.IsNullOrWhiteSpace(job.MachineProfileSha256) ||
             string.IsNullOrWhiteSpace(job.ProcessProfileSha256) ||
@@ -326,6 +419,36 @@ public static class DispatchSafetyGates
                 "Calibration job is missing required specification or profile hashes. " +
                 "All hashes must be provided at job creation time.";
             return DispatchClaimResult.Fail("calibration_hashes_incomplete", HashesDetail);
+        }
+
+        if (!job.PinnedPrinterModelId.HasValue ||
+            !job.PinnedToolheadId.HasValue ||
+            !job.PinnedToolheadIndex.HasValue ||
+            !job.PinnedSpoolId.HasValue ||
+            string.IsNullOrWhiteSpace(job.FilamentSnapshotSha256) ||
+            string.IsNullOrWhiteSpace(job.SourceModelSha256) ||
+            string.IsNullOrWhiteSpace(job.CalibrationManifestSha256) ||
+            !job.PinnedGcodeFileSizeBytes.HasValue)
+        {
+            return DispatchClaimResult.Fail(
+                "physical_inputs_incomplete",
+                "Calibration job is missing pinned model, toolhead, spool, byte-count, or immutable digest inputs.");
+        }
+
+        if (job.GcodeFile is null ||
+            job.PinnedGcodeFileSizeBytes != job.GcodeFile.FileSizeBytes ||
+            !string.Equals(
+                job.SourceModelSha256,
+                job.GcodeFile.SourceModelSha256,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(
+                job.CalibrationManifestSha256,
+                job.GcodeFile.CalibrationManifestSha256,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return DispatchClaimResult.Fail(
+                "gcode_metadata_mismatch",
+                "The promoted G-code size, source-model digest, or manifest digest changed after queue creation.");
         }
 
         // Artifact lineage must agree with the job's pinned lineage — a promoted artifact

@@ -571,13 +571,18 @@ actor APIClient {
         }
     }
 
-    func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "POST")
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String] = [:]
+    ) async throws -> T {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
         return try await execute(request)
     }
 
-    func postVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "POST")
+    func postVoid(_ path: String, headers: [String: String] = [:]) async throws {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
         try await executeVoid(request)
     }
 
@@ -600,10 +605,15 @@ actor APIClient {
         try await executeVoid(request)
     }
 
-    func put<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
+    func put<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String] = [:]
+    ) async throws -> T {
         var request = try buildRequest(path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
         return try await execute(request)
     }
 
@@ -614,8 +624,9 @@ actor APIClient {
         return try await execute(request)
     }
 
-    func delete(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "DELETE")
+    func delete(_ path: String, headers: [String: String] = [:]) async throws {
+        var request = try buildRequest(path: path, method: "DELETE")
+        apply(headers: headers, to: &request)
         try await executeVoid(request)
     }
 
@@ -637,6 +648,12 @@ actor APIClient {
         }
 
         return request
+    }
+
+    private func apply(headers: [String: String], to request: inout URLRequest) {
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
     }
 
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {

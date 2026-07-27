@@ -19,6 +19,9 @@ public class PrintJob
     [Timestamp]
     public byte[]? RowVersion { get; set; }
 
+    /// <summary>Provider-independent logical revision incremented on every mutation.</summary>
+    public long Revision { get; set; } = 1;
+
     public string Name { get; set; } = string.Empty; // Display name for the job
 
     /// <summary>
@@ -334,6 +337,9 @@ public class PrintJob
     [MaxLength(64)]
     public string? GcodeContentSha256 { get; set; }
 
+    /// <summary>Exact promoted G-code byte count pinned when the job was created.</summary>
+    public long? PinnedGcodeFileSizeBytes { get; set; }
+
     /// <summary>Subject (user or system) that created this job.</summary>
     [MaxLength(256)]
     public string? CreatorSubject { get; set; }
@@ -412,6 +418,43 @@ public class PrintJob
     /// Dispatch rejects the job if this value no longer matches the printer's revision.
     /// </summary>
     public long? PinnedPrinterConfigRevision { get; set; }
+
+    /// <summary>Exact printer model pinned from the assigned printer.</summary>
+    public Guid? PinnedPrinterModelId { get; set; }
+
+    /// <summary>Exact physical toolhead selected by the calibration project.</summary>
+    public Guid? PinnedToolheadId { get; set; }
+
+    /// <summary>Zero-based physical toolhead index pinned with <see cref="PinnedToolheadId"/>.</summary>
+    public int? PinnedToolheadIndex { get; set; }
+
+    /// <summary>Exact local physical spool pinned by the calibration project.</summary>
+    public Guid? PinnedSpoolId { get; set; }
+
+    /// <summary>Filament SKU pinned from the persisted calibration project.</summary>
+    [MaxLength(256)]
+    public string? PinnedFilamentSku { get; set; }
+
+    /// <summary>SHA-256 of the persisted filament snapshot used for this job.</summary>
+    [MaxLength(64)]
+    public string? FilamentSnapshotSha256 { get; set; }
+
+    /// <summary>SHA-256 of the immutable source model consumed by the slicer.</summary>
+    [MaxLength(64)]
+    public string? SourceModelSha256 { get; set; }
+
+    /// <summary>SHA-256 of the promoted calibration manifest.</summary>
+    [MaxLength(64)]
+    public string? CalibrationManifestSha256 { get; set; }
+
+    /// <summary>Object X extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionX { get; set; }
+
+    /// <summary>Object Y extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionY { get; set; }
+
+    /// <summary>Object Z extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionZ { get; set; }
 
     // --- Blocked-dispatch state ---
 

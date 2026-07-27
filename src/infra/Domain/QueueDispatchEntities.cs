@@ -67,8 +67,22 @@ public sealed class QueueDispatchOutbox
     /// <summary>Snapshot of the print-job row version at the time of the write (for fencing).</summary>
     public byte[]? AggregateRowVersion { get; set; }
 
+    /// <summary>Resulting logical print-job revision for this event.</summary>
+    public long? JobRevision { get; set; }
+
     /// <summary>Printer the job was dispatched to.</summary>
     public Guid? PrinterId { get; set; }
+
+    /// <summary>Calibration or print project scope, when present.</summary>
+    public Guid? ProjectId { get; set; }
+
+    /// <summary>Print-job status captured when the event was written.</summary>
+    [MaxLength(32)]
+    public string? JobStatus { get; set; }
+
+    /// <summary>Print-job kind captured when the event was written.</summary>
+    [MaxLength(32)]
+    public string? JobKind { get; set; }
 
     /// <summary>Printer configuration revision pinned in the job at creation time.</summary>
     public long? PrinterConfigRevision { get; set; }
@@ -78,6 +92,9 @@ public sealed class QueueDispatchOutbox
     /// detect dispatch-state drift without re-reading the row.
     /// </summary>
     public byte[]? DispatchStateRowVersion { get; set; }
+
+    /// <summary>Resulting logical dispatch-state revision for this event.</summary>
+    public long? DispatchStateRevision { get; set; }
 
     /// <summary>Dispatch attempt this event belongs to, when the event was produced by a claim.</summary>
     public Guid? AttemptId { get; set; }
@@ -218,6 +235,23 @@ public sealed class QueueDispatchAttempt
     [MaxLength(512)]
     public string? BackendFileName { get; set; }
 
+    /// <summary>Durable phase around the backend call and reconciliation.</summary>
+    public DispatchBackendCallPhase BackendCallPhase { get; set; }
+
+    /// <summary>Stable correlation transmitted in the backend-visible filename.</summary>
+    [MaxLength(128)]
+    public string? BackendCorrelationId { get; set; }
+
+    public DateTime? BackendCallStartedAtUtc { get; set; }
+
+    public DateTime? BackendResponseAtUtc { get; set; }
+
+    public int ReconciliationCount { get; set; }
+
+    public DateTime? LastReconciledAtUtc { get; set; }
+
+    public DateTime? TerminalAtUtc { get; set; }
+
     /// <summary>PrintJob.RowVersion at the time the claim was committed.</summary>
     public byte[]? JobRowVersionAtClaim { get; set; }
 
@@ -226,4 +260,57 @@ public sealed class QueueDispatchAttempt
 
     /// <summary>UTC timestamp when this attempt record was last updated.</summary>
     public DateTime UpdatedAtUtc { get; set; }
+}
+
+/// <summary>
+/// Durable one-use idempotency record for an exact job/printer/queue-generation
+/// bed-clear command. Records remain after acknowledgement consumption.
+/// </summary>
+public sealed class BedClearCommandRecord
+{
+    public Guid Id { get; set; }
+
+    public Guid PrinterId { get; set; }
+
+    public Guid JobId { get; set; }
+
+    [MaxLength(512)]
+    public string IdempotencyKey { get; set; } = string.Empty;
+
+    [MaxLength(64)]
+    public string RequestSha256 { get; set; } = string.Empty;
+
+    [MaxLength(256)]
+    public string ActorSubject { get; set; } = string.Empty;
+
+    public byte[] JobRowVersion { get; set; } = [];
+
+    public byte[] DispatchStateRowVersion { get; set; } = [];
+
+    public long QueueRevision { get; set; }
+
+    public long PrinterConfigRevision { get; set; }
+
+    public BedClearCommandStatus Status { get; set; }
+
+    public Guid OutboxEventId { get; set; }
+
+    public Guid? DispatchAttemptId { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; }
+
+    public DateTime UpdatedAtUtc { get; set; }
+
+    public DateTime ExpiresAtUtc { get; set; }
+}
+
+/// <summary>
+/// Provider-native monotonic queue-position counter scoped to one printer.
+/// <see cref="Guid.Empty"/> is the global scope for unassigned jobs.
+/// </summary>
+public sealed class QueuePositionState
+{
+    public Guid ScopeId { get; set; }
+
+    public int NextPosition { get; set; }
 }

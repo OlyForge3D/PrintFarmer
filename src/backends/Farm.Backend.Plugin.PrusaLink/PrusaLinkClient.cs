@@ -403,7 +403,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             if (!success)
             {
                 progress?.Report(UploadAndPrintStage.Failed);
-                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"PrusaLink atomic upload+print failed for {fileName}");
+                return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, $"PrusaLink upload+print outcome is unknown for {fileName}");
             }
 
             progress?.Report(UploadAndPrintStage.Completed);
@@ -413,7 +413,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         {
             _logger?.LogError(ex, "Failed to upload and start print of {FileName} on {BaseUrl}", fileName, baseUrl);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, ex.Message);
         }
     }
 

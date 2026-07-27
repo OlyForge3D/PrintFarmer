@@ -1,5 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
@@ -568,7 +570,36 @@ public class CalibrationQueueDispatchTests
             CurrentSpoolId = 4242,
             CurrentMaterial = "PLA",
         };
+        var claimToolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+        };
+        claimPrinter.Toolheads.Add(claimToolhead);
+        var claimSpool = new Spool
+        {
+            Id = Guid.NewGuid(),
+            Material = "PLA",
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printerId,
+        };
+        gcode.FileSizeBytes = 100;
+        gcode.SourceModelSha256 = new string('8', 64);
+        job.PinnedGcodeFileSizeBytes = gcode.FileSizeBytes;
+        job.PinnedPrinterModelId = claimPrinter.ModelId;
+        job.PinnedToolheadId = claimToolhead.Id;
+        job.PinnedToolheadIndex = claimToolhead.Index;
+        job.PinnedSpoolId = claimSpool.Id;
+        job.FilamentSnapshotSha256 = new string('7', 64);
+        job.SourceModelSha256 = gcode.SourceModelSha256;
+        job.CalibrationManifestSha256 = gcode.CalibrationManifestSha256;
         db.Printers.Add(claimPrinter);
+        db.Spools.Add(claimSpool);
         db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
         await db.SaveChangesAsync();
 
@@ -607,27 +638,43 @@ public class CalibrationQueueDispatchTests
         Guid calibrationProjectId = Guid.NewGuid();
         Guid calibrationAttemptId = Guid.NewGuid();
         Guid calibrationOrchestrationId = Guid.NewGuid();
+        Guid calibrationSnapshotId = Guid.NewGuid();
+        Guid sourceArtifactId = Guid.NewGuid();
+        Guid sourceSliceJobId = Guid.NewGuid();
 
-        db.GcodeFiles.Add(new GcodeFile
+        var gcode = new GcodeFile
         {
             Id = gcodeId,
             Name = "calibration.gcode",
             FileName = "calibration.gcode",
             FileHash = new string('a', 64),
+            FileSizeBytes = 1024,
             IsImmutable = true,
             PromotedAtUtc = DateTime.UtcNow.AddMinutes(-1),
             ContentSha256 = new string('a', 64),
+            SourceModelSha256 = new string('8', 64),
             CalibrationProjectId = calibrationProjectId,
             CalibrationAttemptId = calibrationAttemptId,
             CalibrationOrchestrationId = calibrationOrchestrationId,
+            SourceArtifactId = sourceArtifactId,
+            SourceSliceJobId = sourceSliceJobId,
             CalibrationManifestSha256 = new string('9', 64),
             SpecificationSha256 = new string('b', 64),
             MachineProfileSha256 = new string('c', 64),
             ProcessProfileSha256 = new string('d', 64),
             FilamentProfileSha256 = new string('e', 64),
-        });
+            SlicerEngineName = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            PinnedSlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
+            ObjectDimensionX = 20,
+            ObjectDimensionY = 20,
+            ObjectDimensionZ = 20,
+            EstimatedFilamentWeightG = 10,
+        };
+        db.GcodeFiles.Add(gcode);
 
-        db.Printers.Add(new Printer
+        var printer = new Printer
         {
             Id = printerId,
             Name = "Ack Printer",
@@ -645,6 +692,88 @@ public class CalibrationQueueDispatchTests
             ModelId = Guid.NewGuid(),
             CurrentSpoolId = 4242,
             CurrentMaterial = "PLA",
+            MaxBuildVolumeX = 200,
+            MaxBuildVolumeY = 200,
+            MaxBuildVolumeZ = 200,
+        };
+        gcode.PrinterModelId = printer.ModelId;
+        var toolhead = new Toolhead
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            Name = "Primary",
+            Index = 0,
+            IsPrimary = true,
+            NozzleDiameter = 0.4,
+            CurrentSpoolId = 4242,
+            CurrentMaterial = "PLA",
+        };
+        printer.Toolheads.Add(toolhead);
+        db.Printers.Add(printer);
+        var spool = new Spool
+        {
+            Id = Guid.NewGuid(),
+            Material = "PLA",
+            WeightGrams = 1000,
+            InUse = true,
+            AssignedPrinterId = printerId,
+        };
+        db.Spools.Add(spool);
+        db.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = calibrationProjectId,
+            OwnerUserId = Guid.NewGuid(),
+            Name = "Ack calibration",
+            PrinterId = printerId,
+            CurrentPrinterConfigurationSnapshotId = calibrationSnapshotId,
+            SelectedToolheadId = toolhead.Id,
+            SelectedToolheadIndex = toolhead.Index,
+            FilamentProvider = "local",
+            FilamentProductId = "pla",
+            FilamentProductName = "PLA",
+            FilamentMaterial = "PLA",
+            LocalSpoolId = spool.Id,
+            FilamentSnapshotJson = """{"material":"PLA"}""",
+        });
+        db.PrinterConfigurationSnapshots.Add(new PrinterConfigurationSnapshot
+        {
+            Id = calibrationSnapshotId,
+            ProjectId = calibrationProjectId,
+            AttemptId = calibrationAttemptId,
+            PrinterId = printerId,
+            SchemaVersion = "1",
+            SanitizedSnapshotJson = "{}",
+            SnapshotSha256 = new string('6', 64),
+            PrinterConfigurationRevision = 1,
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            SlicerEngine = "OrcaSlicer",
+            SlicerDistribution = "upstream",
+            SlicerVersion = "2.3.0",
+            SlicerContainerDigest = "sha256:test",
+            MachineProfileSha256 = new string('c', 64),
+            ProcessProfileSha256 = new string('d', 64),
+            FilamentProfileSha256 = new string('e', 64),
+        });
+        db.CalibrationAttempts.Add(new CalibrationAttempt
+        {
+            Id = calibrationAttemptId,
+            ProjectId = calibrationProjectId,
+            SpecificationSha256 = new string('b', 64),
+            PrinterConfigurationSnapshotId = calibrationSnapshotId,
+        });
+        db.CalibrationOrchestrations.Add(new CalibrationOrchestration
+        {
+            Id = calibrationOrchestrationId,
+            ProjectId = calibrationProjectId,
+            AttemptId = calibrationAttemptId,
+            SpecificationSha256 = new string('b', 64),
+            SliceJobId = sourceSliceJobId,
+            FinalArtifactId = sourceArtifactId,
+            GcodeFileId = gcodeId,
+            GcodeSha256 = new string('a', 64),
+            ManifestSha256 = new string('9', 64),
+            SlicerContainerDigest = "sha256:test",
         });
 
         PrintJob job = new()
@@ -660,18 +789,39 @@ public class CalibrationQueueDispatchTests
             RequiredSlicerEngine = "OrcaSlicer",
             RequiredSlicerDistribution = "upstream",
             RequiredSlicerVersion = "2.3.0",
+            RequiredSlicerContainerDigest = "sha256:test",
             PinnedPrinterConfigRevision = 1,
             GcodeContentSha256 = new string('a', 64),
+            PinnedGcodeFileSizeBytes = 1024,
             SpoolmanSpoolId = 4242,
             RequiredMaterialType = "PLA",
             CalibrationProjectId = calibrationProjectId,
             CalibrationAttemptId = calibrationAttemptId,
-            CalibrationConfigSnapshotId = Guid.NewGuid(),
+            CalibrationConfigSnapshotId = calibrationSnapshotId,
             CalibrationOrchestrationId = calibrationOrchestrationId,
+            SourceArtifactId = sourceArtifactId,
+            SliceJobId = sourceSliceJobId,
             SpecificationSha256 = new string('b', 64),
             MachineProfileSha256 = new string('c', 64),
             ProcessProfileSha256 = new string('d', 64),
             FilamentProfileSha256 = new string('e', 64),
+            PrinterConfigSnapshotSha256 = new string('6', 64),
+            PinnedPrinterModelId = printer.ModelId,
+            PinnedToolheadId = toolhead.Id,
+            PinnedToolheadIndex = toolhead.Index,
+            PinnedSpoolId = spool.Id,
+            FilamentSnapshotSha256 = Convert.ToHexString(
+                SHA256.HashData(Encoding.UTF8.GetBytes("""{"material":"PLA"}""")))
+                .ToLowerInvariant(),
+            SourceModelSha256 = new string('8', 64),
+            CalibrationManifestSha256 = new string('9', 64),
+            RequiredNozzleDiameter = 0.4m,
+            RequiredCapabilities = [],
+            PinnedObjectDimensionX = gcode.ObjectDimensionX,
+            PinnedObjectDimensionY = gcode.ObjectDimensionY,
+            PinnedObjectDimensionZ = gcode.ObjectDimensionZ,
+            EstimatedFilamentUsage = gcode.EstimatedFilamentWeightG,
+            FilamentName = "PLA",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             QueuedAt = DateTime.UtcNow,
@@ -797,7 +947,12 @@ public class CalibrationQueueDispatchTests
         long seq = 0;
         allocMock.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Interlocked.Increment(ref seq));
-        return new DispatchClaimService(db, reader, allocMock.Object, Mock.Of<ILogger<DispatchClaimService>>());
+        return new DispatchClaimService(
+            db,
+            reader,
+            allocMock.Object,
+            Mock.Of<ILogger<DispatchClaimService>>(),
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
     /// <summary>Creates a BedClearAcknowledgementService backed by an in-memory context.</summary>
@@ -810,7 +965,12 @@ public class CalibrationQueueDispatchTests
         long seq = 0;
         allocMock.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Interlocked.Increment(ref seq));
-        return new BedClearAcknowledgementService(db, allocMock.Object, statusReader, Mock.Of<ILogger<BedClearAcknowledgementService>>());
+        return new BedClearAcknowledgementService(
+            db,
+            allocMock.Object,
+            statusReader,
+            Mock.Of<ILogger<BedClearAcknowledgementService>>(),
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
     private static AppDbContext CreateDbContext()

@@ -123,6 +123,14 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Updates priority after enforcing a caller-supplied job ETag.</summary>
+    Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
+        string jobId,
+        int newPriority,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Pause a printing job
     /// </summary>
@@ -230,6 +238,13 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Cancels multiple jobs after enforcing each supplied job ETag.</summary>
+    Task<QueueBulkOperationResultDto> BulkCancelJobsAsync(
+        List<string> jobIds,
+        string userId,
+        IReadOnlyDictionary<string, string>? jobEtags,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Reorder multiple jobs in queue
     /// </summary>
@@ -250,6 +265,13 @@ public interface IPrintJobManagementService
     Task<QueuedPrintJobDto> RerunJobAsync(
         string jobId,
         string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reruns a terminal job after enforcing its public ETag.</summary>
+    Task<QueuedPrintJobDto> RerunJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     // ============= JOB DETAILS OPERATIONS (Phase 3) =============

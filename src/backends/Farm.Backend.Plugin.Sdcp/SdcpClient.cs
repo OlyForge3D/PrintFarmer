@@ -1699,7 +1699,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: upload failed for {fileName}");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.Uploading, $"Upload outcome is unknown for {fileName}");
         }
 
         LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for printer to finish file checking");
@@ -1715,7 +1715,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: printer still in file-checking state after {FileCheckingMaxWait.TotalSeconds}s");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Processing, $"Printer was still checking file after {FileCheckingMaxWait.TotalSeconds}s");
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.Processing,
+                $"Printer was still checking file after {FileCheckingMaxWait.TotalSeconds}s");
         }
 
         // Wait 1 second before sending print command (matches OrcaSlicer behavior).
@@ -1731,7 +1733,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for /local/{bareFileName} after successful upload");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of /local/{bareFileName} after successful upload");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, $"Start outcome is unknown for /local/{bareFileName}");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);

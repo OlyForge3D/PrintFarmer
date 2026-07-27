@@ -5,9 +5,12 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Dispatch;
@@ -321,6 +324,25 @@ public class CalibrationProviderMigrationHarnessTests
             "regardless of terminal status; application-level replay logic prevents reaching this path in production");
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task SQLite_GenuinePredecessorUpgrade_BackfillsAndFencesConcurrentProducers()
+    {
+        string dbName = $"pfarm_predecessor_{Guid.NewGuid():N}";
+        string connectionString =
+            $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
+        using var keepAlive = new SqliteConnection(connectionString);
+        keepAlive.Open();
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(
+                    connectionString,
+                    provider => provider.MigrationsAssembly("Farm.Migrations.Sqlite"))
+                .Options;
+
+        await RunProviderSchemaAssertionsAsync(options, "SQLite");
+    }
+
     // =========================================================================
     // PostgreSQL — skipped unless PFARM_TEST_POSTGRES_CONN env var is set
     // =========================================================================
@@ -343,7 +365,9 @@ public class CalibrationProviderMigrationHarnessTests
 
 
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
-            .UseNpgsql(connString)
+            .UseNpgsql(
+                connString,
+                provider => provider.MigrationsAssembly("Farm.Migrations.PostgreSQL"))
             .Options;
 
         await RunProviderSchemaAssertionsAsync(opts, "PostgreSQL");
@@ -368,7 +392,9 @@ public class CalibrationProviderMigrationHarnessTests
 
 
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
-            .UseSqlServer(connString)
+            .UseSqlServer(
+                connString,
+                provider => provider.MigrationsAssembly("Farm.Migrations.SqlServer"))
             .Options;
 
         await RunProviderSchemaAssertionsAsync(opts, "SQL Server");
@@ -384,9 +410,17 @@ public class CalibrationProviderMigrationHarnessTests
     {
         await using var ctx = new AppDbContext(opts);
 
-        // Apply all pending migrations — REAL migrations, never EnsureCreated, so the
-        // generated provider SQL (filtered indexes, ROWVERSION, backfills) is exercised.
-        await ctx.Database.MigrateAsync();
+        await ctx.Database.EnsureDeletedAsync();
+        IMigrator migrator = ctx.Database.GetService<IMigrator>();
+        string predecessor = ctx.Database.GetMigrations()
+            .Single(migration => migration.EndsWith(
+                "AddCalibrationGenerationOrchestration",
+                StringComparison.Ordinal));
+        await migrator.MigrateAsync(predecessor);
+        Guid legacyJobId = Guid.NewGuid();
+        await SeedLegacyPrintJobAsync(ctx, legacyJobId);
+        await migrator.MigrateAsync();
+        ctx.ChangeTracker.Clear();
 
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
         applied.Should().Contain(
@@ -422,6 +456,15 @@ public class CalibrationProviderMigrationHarnessTests
                               (j.IdempotencyKey != null || j.CalibrationAttemptId != null)));
         ambiguousLegacyRows.Should().Be(
             0, $"[{providerName}] backfilled rows must be unambiguously Standard with null calibration fields");
+        PrintJob legacy = await ctx.PrintJobs.SingleAsync(job => job.Id == legacyJobId);
+        legacy.JobKind.Should().Be(JobKind.Standard);
+        legacy.CalibrationAttemptId.Should().BeNull();
+        legacy.PinnedSpoolId.Should().BeNull();
+        legacy.Revision.Should().Be(1);
+        legacy.RowVersion.Should().NotBeNullOrEmpty(
+            $"[{providerName}] legacy queue rows must receive a usable ETag");
+        seqState.RowVersion.Should().NotBeNullOrEmpty(
+            $"[{providerName}] the provider-native sequence fence must receive a usable ETag");
 
         // Fencing: the outbox sequence must be unique at the database level.
         bool duplicateSequences = await ctx.QueueDispatchOutbox
@@ -430,9 +473,90 @@ public class CalibrationProviderMigrationHarnessTests
         duplicateSequences.Should().BeFalse(
             $"[{providerName}] the unique index must prevent duplicate outbox sequences");
 
+        await AssertProviderNativeConcurrencyAsync(opts, providerName);
+
         // No pending migrations must remain.
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();
         pending.Should().BeEmpty(
             $"[{providerName}] no pending migrations must remain after MigrateAsync");
     }
+
+    private static async Task SeedLegacyPrintJobAsync(
+        AppDbContext context,
+        Guid jobId)
+    {
+        DateTime now = DateTime.UtcNow.AddDays(-1);
+        if (context.Database.IsSqlServer())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO [PrintJobs]
+                    ([Id], [Name], [Status], [Priority], [QueuePosition],
+                     [CreatedAt], [UpdatedAt], [QueuedAt],
+                     [WasSeededFromHistory], [IsExternalPrint], [Copies], [CompletedCopies])
+                VALUES
+                    ({jobId}, {"legacy-predecessor"}, {(int)PrintJobStatus.Queued},
+                     {(int)PrintJobPriority.Normal}, {0},
+                     {now}, {now}, {now}, {false}, {false}, {1}, {0})
+                """);
+        }
+        else
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO "PrintJobs"
+                    ("Id", "Name", "Status", "Priority", "QueuePosition",
+                     "CreatedAt", "UpdatedAt", "QueuedAt",
+                     "WasSeededFromHistory", "IsExternalPrint", "Copies", "CompletedCopies")
+                VALUES
+                    ({jobId}, {"legacy-predecessor"}, {(int)PrintJobStatus.Queued},
+                     {(int)PrintJobPriority.Normal}, {0},
+                     {now}, {now}, {now}, {false}, {false}, {1}, {0})
+                """);
+        }
+    }
+
+    private static async Task AssertProviderNativeConcurrencyAsync(
+        DbContextOptions<AppDbContext> options,
+        string providerName)
+    {
+        await using var first = new AppDbContext(options);
+        await using var second = new AppDbContext(options);
+        var firstSequence = new DbOutboxSequenceAllocator();
+        var secondSequence = new DbOutboxSequenceAllocator();
+        long[] sequences = await Task.WhenAll(
+            firstSequence.AllocateAsync(first),
+            secondSequence.AllocateAsync(second));
+        sequences.Should().OnlyHaveUniqueItems(
+            $"[{providerName}] simultaneous producers need distinct provider-native outbox ordering");
+
+        first.QueueDispatchOutbox.Add(CreateTerminalEvent(sequences[0]));
+        second.QueueDispatchOutbox.Add(CreateTerminalEvent(sequences[1]));
+        await Task.WhenAll(first.SaveChangesAsync(), second.SaveChangesAsync());
+
+        await using var firstPositionContext = new AppDbContext(options);
+        await using var secondPositionContext = new AppDbContext(options);
+        Guid printerScope = Guid.NewGuid();
+        int[] positions = await Task.WhenAll(
+            new QueuePositionAllocator(firstPositionContext).AllocateAsync(printerScope),
+            new QueuePositionAllocator(secondPositionContext).AllocateAsync(printerScope));
+        positions.Should().OnlyHaveUniqueItems(
+            $"[{providerName}] simultaneous queue producers need distinct positions");
+    }
+
+    private static QueueDispatchOutbox CreateTerminalEvent(long sequence) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Sequence = sequence,
+            AggregateType = nameof(PrintJob),
+            AggregateId = Guid.NewGuid(),
+            EventType = QueueLifecycleEventWriter.EventTypeJobCompleted,
+            SchemaVersion = "1",
+            JobStatus = PrintJobStatus.Completed.ToString(),
+            JobKind = JobKind.Standard.ToString(),
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Pending,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
 }

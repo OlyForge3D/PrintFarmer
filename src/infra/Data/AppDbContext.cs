@@ -303,6 +303,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     /// </summary>
     public DbSet<QueueOperationAudit> QueueOperationAudits => Set<QueueOperationAudit>();
 
+    /// <summary>Durable exact-job bed-clear command idempotency records.</summary>
+    public DbSet<BedClearCommandRecord> BedClearCommandRecords => Set<BedClearCommandRecord>();
+
+    /// <summary>Provider-native per-printer queue position counters.</summary>
+    public DbSet<QueuePositionState> QueuePositionStates => Set<QueuePositionState>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -471,6 +477,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<QueueOperationAudit>()
             .HasIndex(a => a.OccurredAtUtc)
             .HasDatabaseName("IX_QueueOperationAudits_OccurredAt");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.PrinterId, record.IdempotencyKey })
+            .IsUnique()
+            .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.Status, record.ExpiresAtUtc })
+            .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+        _ = modelBuilder.Entity<QueuePositionState>()
+            .HasKey(state => state.ScopeId);
+
+        string queuePositionFilter = Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer"
+            ? "[AssignedPrinterId] IS NOT NULL AND [Status] IN (0, 1)"
+            : "\"AssignedPrinterId\" IS NOT NULL AND \"Status\" IN (0, 1)";
+        _ = modelBuilder.Entity<PrintJob>()
+            .HasIndex(job => new { job.AssignedPrinterId, job.QueuePosition })
+            .IsUnique()
+            .HasFilter(queuePositionFilter)
+            .HasDatabaseName("UX_PrintJobs_Printer_QueuePosition");
     }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
@@ -480,6 +507,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         EnsureCalibrationPrintersTracked();
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -491,6 +519,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -554,6 +583,13 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             CheckImmutableField(entry, nameof(PrintJob.SourceArtifactId));
             CheckImmutableField(entry, nameof(PrintJob.SliceJobId));
             CheckImmutableField(entry, nameof(PrintJob.CreatorSubject));
+            CheckImmutableField(entry, nameof(PrintJob.GcodeFileId));
+            CheckImmutableField(entry, nameof(PrintJob.AssignedPrinterId));
+            CheckImmutableField(entry, nameof(PrintJob.Priority));
+            CheckImmutableField(entry, nameof(PrintJob.Copies));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredNozzleDiameter));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredMaterialType));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredCapabilities));
             CheckImmutableField(entry, nameof(PrintJob.RequiredFirmwareFamily));
             CheckImmutableField(entry, nameof(PrintJob.RequiredGcodeDialect));
             CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerEngine));
@@ -567,6 +603,22 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             CheckImmutableField(entry, nameof(PrintJob.SpecificationSha256));
             CheckImmutableField(entry, nameof(PrintJob.PrinterConfigSnapshotSha256));
             CheckImmutableField(entry, nameof(PrintJob.PinnedPrinterConfigRevision));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedGcodeFileSizeBytes));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedPrinterModelId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedToolheadId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedToolheadIndex));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedSpoolId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedFilamentSku));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentSnapshotSha256));
+            CheckImmutableField(entry, nameof(PrintJob.SourceModelSha256));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationManifestSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionX));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionY));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionZ));
+            CheckImmutableField(entry, nameof(PrintJob.EstimatedFilamentUsage));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentName));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentVendor));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentColor));
         }
     }
 
@@ -813,6 +865,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // compares NULL == NULL (which would allow multiple concurrent winners).
         if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
         {
+            foreach (EntityEntry<Printer> entry in ChangeTracker.Entries<Printer>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
             foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
             {
                 if (entry.State is EntityState.Added or EntityState.Modified)
@@ -844,6 +904,64 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 if (entry.State is EntityState.Added or EntityState.Modified)
                 {
                     entry.Entity.RowVersion = newVersion;
+                }
+            }
+        }
+    }
+
+    private void AdvanceLogicalQueueRevisions()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(job => job.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(job => job.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<PrinterDispatchState> entry in
+                 ChangeTracker.Entries<PrinterDispatchState>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(state => state.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(state => state.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<QueueDispatchOutbox> eventEntry in
+                 ChangeTracker.Entries<QueueDispatchOutbox>()
+                     .Where(entry => entry.State == EntityState.Added))
+        {
+            PrintJob? job = ChangeTracker.Entries<PrintJob>()
+                .Select(entry => entry.Entity)
+                .FirstOrDefault(candidate => candidate.Id == eventEntry.Entity.AggregateId);
+            if (job is not null)
+            {
+                eventEntry.Entity.JobRevision = job.Revision;
+            }
+
+            if (eventEntry.Entity.PrinterId.HasValue)
+            {
+                PrinterDispatchState? state =
+                    ChangeTracker.Entries<PrinterDispatchState>()
+                        .Select(entry => entry.Entity)
+                        .FirstOrDefault(candidate =>
+                            candidate.PrinterId == eventEntry.Entity.PrinterId.Value);
+                if (state is not null)
+                {
+                    eventEntry.Entity.DispatchStateRevision = state.Revision;
                 }
             }
         }

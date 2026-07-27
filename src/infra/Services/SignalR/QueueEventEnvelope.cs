@@ -17,6 +17,7 @@
 /// <param name="OccurredAtUtc">Durable UTC write timestamp — stable across redeliveries.</param>
 /// <param name="JobId">Aggregate print job, when the event is job-scoped.</param>
 /// <param name="PrinterId">Printer the event relates to, when applicable.</param>
+/// <param name="ProjectId">Project the event relates to, when applicable.</param>
 /// <param name="JobStatus">Print job status at write time.</param>
 /// <param name="JobKind">Print job kind at write time.</param>
 /// <param name="JobRevision">Base-64 job row version at write time.</param>
@@ -26,6 +27,8 @@
 /// <param name="ErrorCode">Legacy typed error code (kept for wire compatibility).</param>
 /// <param name="FailureCode">Typed failure code for terminal/failure events.</param>
 /// <param name="PayloadJson">Redacted payload — public identifiers only.</param>
+/// <param name="JobLogicalRevision">Resulting provider-independent job revision.</param>
+/// <param name="DispatchStateLogicalRevision">Resulting provider-independent dispatch revision.</param>
 public sealed record QueueEventEnvelope(
     string SchemaVersion,
     Guid EventId,
@@ -34,6 +37,7 @@ public sealed record QueueEventEnvelope(
     DateTime OccurredAtUtc,
     Guid? JobId,
     Guid? PrinterId,
+    Guid? ProjectId,
     string? JobStatus,
     string? JobKind,
     string? JobRevision,
@@ -42,7 +46,9 @@ public sealed record QueueEventEnvelope(
     string? BedClearState,
     string? ErrorCode,
     string? FailureCode,
-    string? PayloadJson)
+    string? PayloadJson,
+    long? JobLogicalRevision,
+    long? DispatchStateLogicalRevision)
 {
     /// <summary>
     /// Creates an envelope with a DURABLE identity taken from the persisted outbox row.
@@ -55,6 +61,7 @@ public sealed record QueueEventEnvelope(
     /// <param name="eventType">Fully-qualified event type name.</param>
     /// <param name="jobId">Aggregate print job.</param>
     /// <param name="printerId">Printer the event relates to.</param>
+    /// <param name="projectId">Calibration or print project the event relates to.</param>
     /// <param name="jobStatus">Print job status at write time.</param>
     /// <param name="jobKind">Print job kind at write time.</param>
     /// <param name="jobRevision">Job row version at write time.</param>
@@ -64,6 +71,8 @@ public sealed record QueueEventEnvelope(
     /// <param name="errorCode">Legacy typed error code.</param>
     /// <param name="failureCode">Typed failure code.</param>
     /// <param name="payloadJson">Redacted payload.</param>
+    /// <param name="jobLogicalRevision">Provider-independent resulting job revision.</param>
+    /// <param name="dispatchStateLogicalRevision">Provider-independent resulting dispatch revision.</param>
     /// <returns>A durable, de-duplicable envelope.</returns>
     public static QueueEventEnvelope FromOutbox(
         Guid eventId,
@@ -72,6 +81,7 @@ public sealed record QueueEventEnvelope(
         string eventType,
         Guid? jobId = null,
         Guid? printerId = null,
+        Guid? projectId = null,
         string? jobStatus = null,
         string? jobKind = null,
         byte[]? jobRevision = null,
@@ -80,7 +90,9 @@ public sealed record QueueEventEnvelope(
         string? bedClearState = null,
         string? errorCode = null,
         string? failureCode = null,
-        string? payloadJson = null) =>
+        string? payloadJson = null,
+        long? jobLogicalRevision = null,
+        long? dispatchStateLogicalRevision = null) =>
         new(
             "2",
             eventId,
@@ -89,6 +101,7 @@ public sealed record QueueEventEnvelope(
             occurredAtUtc,
             jobId,
             printerId,
+            projectId,
             jobStatus,
             jobKind,
             Encode(jobRevision),
@@ -97,7 +110,9 @@ public sealed record QueueEventEnvelope(
             bedClearState,
             errorCode,
             failureCode,
-            payloadJson);
+            payloadJson,
+            jobLogicalRevision,
+            dispatchStateLogicalRevision);
 
     private static string? Encode(byte[]? rowVersion) =>
         rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : null;

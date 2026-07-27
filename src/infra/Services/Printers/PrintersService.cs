@@ -3340,7 +3340,9 @@ public class PrintersService(
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p is null)
         {
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Printer not found");
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.Uploading,
+                "Printer not found");
         }
 
         try
@@ -3348,7 +3350,9 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             if (!_capabilityFactory.TryGetUploadAndPrintClientTyped(backend, out ISupportsUploadAndPrint? client))
             {
-                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Backend does not support upload and print");
+                return UploadAndPrintResult.FailedBeforeStart(
+                    UploadAndPrintStage.Uploading,
+                    "Backend does not support upload and print");
             }
 
             return await client!.UploadAndStartPrintAsync(p.BackendUrl, filename, stream, p.Credential, progress, ct).ConfigureAwait(false);
@@ -3359,7 +3363,7 @@ public class PrintersService(
                 "Failed to upload and start print on printer {Id}; exception type {ExceptionType}",
                 id,
                 ex.GetType().Name);
-            return UploadAndPrintResult.Fail(
+            return UploadAndPrintResult.Unknown(
                 UploadAndPrintStage.Uploading,
                 "The printer could not start the dispatched job.");
         }

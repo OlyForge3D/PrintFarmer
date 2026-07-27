@@ -139,6 +139,14 @@ public class AutoDispatchStatusDto
 
     public bool BedPreConfirmed { get; set; }
 
+    public string? DispatchStateETag { get; set; }
+
+    public string? PrinterETag { get; set; }
+
+    public Guid? NextJobId { get; set; }
+
+    public string? NextJobETag { get; set; }
+
     public string? AttentionMessage { get; set; }
 }
 
@@ -208,7 +216,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
 
         if (hasActiveJob)
@@ -241,7 +251,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var readyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
 
             // Trigger immediate dispatch
             dispatchTrigger?.NotifyJobQueued(printerId);
@@ -257,7 +267,7 @@ public class AutoDispatchService(
 
         // Broadcast state change via SignalR
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue(AutoDispatchPendingWebhookEventName, new { printerId, printerName = printer.Name });
     }
@@ -279,7 +289,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
         AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobs.QueueDepth, hasActiveJob);
         bool hasReadyConfirmation = effectiveState == AutoDispatchState.PendingReady
@@ -302,7 +314,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
 
             return new AutoDispatchReadyResult
             {
@@ -310,6 +322,12 @@ public class AutoDispatchService(
                 NextJob = null,
                 FilamentCheck = new FilamentCheckResult { Sufficient = true, Message = "No queued jobs remaining" },
             };
+        }
+
+        if (nextJob.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new InvalidOperationException(
+                "Calibration jobs require the exact-job acknowledge-bed-clear-and-start endpoint.");
         }
 
         // Perform filament pre-flight check
@@ -322,7 +340,7 @@ public class AutoDispatchService(
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         logger.LogInformation(
             ReadyGateLogPrefix + " Printer {PrinterId} marked Ready. Next job: {JobName} (filament sufficient: {Sufficient})",
@@ -381,7 +399,7 @@ public class AutoDispatchService(
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
@@ -400,7 +418,7 @@ public class AutoDispatchService(
         logger.LogInformation(ReadyGateLogPrefix + " Auto-dispatch ready gate cancelled for printer {PrinterId} ({Name})", printerId, printer.Name);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
@@ -422,7 +440,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
 
         if (hasActiveJob)
@@ -431,6 +451,11 @@ public class AutoDispatchService(
         }
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
+        if (queuedJobs.NextJob?.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new InvalidOperationException(
+                "Calibration jobs cannot use generic bed pre-clear; acknowledge the exact job instead.");
+        }
 
         PrinterDispatchState preClearState = EnsureDispatchState(printer);
         preClearState.BedPreConfirmed = true;
@@ -461,7 +486,7 @@ public class AutoDispatchService(
         }
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
 
@@ -521,7 +546,8 @@ public class AutoDispatchService(
                 statuses.Add(BuildStatusDto(
                     printer,
                     queuedJobs.QueueDepth,
-                    currentJobs.GetValueOrDefault(printer.Id)));
+                    currentJobs.GetValueOrDefault(printer.Id),
+                    queuedJobs.NextJob));
             }
             catch (Exception ex)
             {
@@ -570,7 +596,11 @@ public class AutoDispatchService(
         return statuses;
     }
 
-    private static AutoDispatchStatusDto BuildStatusDto(Printer printer, int queuedJobCount, string? currentJobName = null)
+    private static AutoDispatchStatusDto BuildStatusDto(
+        Printer printer,
+        int queuedJobCount,
+        string? currentJobName = null,
+        PrintJob? nextJob = null)
     {
         string now = DateTime.UtcNow.ToString("o");
         bool hasActiveJob = !string.IsNullOrWhiteSpace(currentJobName);
@@ -590,6 +620,16 @@ public class AutoDispatchService(
             ReadyGateChecks = gateChecks,
             State = effectiveState.ToString(),
             BedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false,
+            DispatchStateETag = printer.DispatchState?.RowVersion is { Length: > 0 } rowVersion
+                ? Convert.ToBase64String(rowVersion)
+                : null,
+            PrinterETag = printer.RowVersion is { Length: > 0 } printerRowVersion
+                ? Convert.ToBase64String(printerRowVersion)
+                : null,
+            NextJobId = nextJob?.Id,
+            NextJobETag = nextJob?.RowVersion is { Length: > 0 } jobRowVersion
+                ? Convert.ToBase64String(jobRowVersion)
+                : null,
             AttentionMessage = attentionMessage,
         };
     }
@@ -604,7 +644,11 @@ public class AutoDispatchService(
             .Select(j => j.Name ?? j.GcodeFile!.Name)
             .FirstOrDefaultAsync(ct);
 
-        return BuildStatusDto(printer, queuedJobs.QueueDepth, currentJobName);
+        return BuildStatusDto(
+            printer,
+            queuedJobs.QueueDepth,
+            currentJobName,
+            queuedJobs.NextJob);
     }
 
     private static AutoDispatchState ResolveEffectiveState(Printer printer, int queuedJobCount, bool hasActiveJob)

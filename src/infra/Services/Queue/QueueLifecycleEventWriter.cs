@@ -106,8 +106,7 @@ public static class QueueLifecycleEventWriter
         Guid? attemptId,
         string jobStatus,
         string jobKind,
-        string? failureCode,
-        string? actorSubject) =>
+        string? failureCode) =>
         JsonSerializer.Serialize(new
         {
             jobId,
@@ -116,6 +115,5 @@ public static class QueueLifecycleEventWriter
             jobStatus,
             jobKind,
             failureCode,
-            actorSubject,
         });
 }

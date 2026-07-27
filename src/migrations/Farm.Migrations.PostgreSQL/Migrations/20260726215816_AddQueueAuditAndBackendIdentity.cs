@@ -155,12 +155,14 @@ public partial class AddQueueAuditAndBackendIdentity : Migration
             name: "SliceJobId",
             table: "PrintJobs");
 
+        migrationBuilder.Sql(
+            "DELETE FROM \"QueueDispatchAttempts\" WHERE \"PrintJobId\" IS NULL;");
+
         migrationBuilder.AlterColumn<Guid>(
             name: "PrintJobId",
             table: "QueueDispatchAttempts",
             type: "uuid",
             nullable: false,
-            defaultValue: Guid.Empty,
             oldClrType: typeof(Guid),
             oldType: "uuid",
             oldNullable: true);

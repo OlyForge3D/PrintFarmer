@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
@@ -17,15 +19,28 @@ public sealed class DispatchClaimService(
     AppDbContext db,
     IPrinterStatusSnapshotReader statusReader,
     IDbOutboxSequenceAllocator sequenceAllocator,
-    ILogger<DispatchClaimService> logger) : IDispatchClaimService
+    ILogger<DispatchClaimService> logger,
+    IStoredGcodeIntegrityVerifier? integrityVerifier = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : IDispatchClaimService
 {
     /// <summary>Maximum age of a telemetry snapshot for calibration dispatch.</summary>
     internal static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
+
+    private static readonly HashSet<string> ExplicitIdleStates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "idle",
+        "ready",
+        "standby",
+        "operational",
+    };
 
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
     private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
     private readonly ILogger<DispatchClaimService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
+    private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
+        resourceAuthorization;
 
     /// <inheritdoc />
     public async Task<DispatchClaimResult> AcquireClaimAsync(
@@ -33,6 +48,23 @@ public sealed class DispatchClaimService(
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (_resourceAuthorization is not null &&
+            (!await _resourceAuthorization.CanActorAccessJobAsync(
+                 request.ActorSubject,
+                 request.JobId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct) ||
+             !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                 request.ActorSubject,
+                 request.PrinterId,
+                 PrinterGroupAccessLevel.Submit,
+                 ct)))
+        {
+            return DispatchClaimResult.Fail(
+                "job_not_found",
+                "The queue job was not found.");
+        }
 
         PrintJob? job = await _db.PrintJobs
             .Include(j => j.GcodeFile)
@@ -80,7 +112,7 @@ public sealed class DispatchClaimService(
                 "The printer dispatch state has changed since the request was prepared. Re-fetch and retry.");
         }
 
-        DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId, request.JobId);
+        DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId);
         if (printerGate is not null)
         {
             await WriteDeniedAuditAsync(request, printerGate, job, dispatchState, ct);
@@ -105,6 +137,25 @@ public sealed class DispatchClaimService(
             return mismatch;
         }
 
+        bool hasDatabaseActiveJob = await _db.PrintJobs
+            .AsNoTracking()
+            .AnyAsync(
+                candidate =>
+                    candidate.AssignedPrinterId == request.PrinterId &&
+                    candidate.Id != request.JobId &&
+                    (candidate.Status == PrintJobStatus.Starting ||
+                     candidate.Status == PrintJobStatus.Printing ||
+                     candidate.Status == PrintJobStatus.Paused),
+                ct);
+        if (hasDatabaseActiveJob)
+        {
+            DispatchClaimResult busy = DispatchClaimResult.Fail(
+                "printer_busy_database",
+                $"Printer {request.PrinterId} has another Starting, Printing, or Paused job in the database.");
+            await WriteDeniedAuditAsync(request, busy, job, dispatchState, ct);
+            return busy;
+        }
+
         DispatchClaimResult? artifactGate = EvaluateArtifactGates(job, request.JobId);
         if (artifactGate is not null)
         {
@@ -112,9 +163,35 @@ public sealed class DispatchClaimService(
             return artifactGate;
         }
 
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            if (_integrityVerifier is null)
+            {
+                DispatchClaimResult unavailable = DispatchClaimResult.Fail(
+                    "gcode_byte_verifier_unavailable",
+                    "Stored-byte integrity verification is unavailable; calibration dispatch fails closed.");
+                await WriteDeniedAuditAsync(request, unavailable, job, dispatchState, ct);
+                return unavailable;
+            }
+
+            StoredGcodeIntegrityResult integrity = await _integrityVerifier.VerifyAsync(
+                job.GcodeFile!,
+                job.GcodeContentSha256!,
+                job.PinnedGcodeFileSizeBytes,
+                ct);
+            if (!integrity.Success)
+            {
+                DispatchClaimResult tampered = DispatchClaimResult.Fail(
+                    integrity.ErrorCode ?? "gcode_byte_hash_mismatch",
+                    integrity.ErrorDetail ?? "Stored G-code byte integrity verification failed.");
+                await WriteDeniedAuditAsync(request, tampered, job, dispatchState, ct);
+                return tampered;
+            }
+        }
+
         // --- Telemetry freshness and online/idle check ---
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
-        DispatchClaimResult? telemetryGate = EvaluateTelemetryGates(job, snapshot, request.PrinterId);
+        DispatchClaimResult? telemetryGate = EvaluateTelemetryGates(snapshot, request.PrinterId);
         if (telemetryGate is not null)
         {
             await WriteDeniedAuditAsync(request, telemetryGate, job, dispatchState, ct);
@@ -125,16 +202,55 @@ public sealed class DispatchClaimService(
         // Evaluated BEFORE the physical hardware/filament gates so an incompletely
         // specified job reports the precise definition defect rather than a downstream
         // symptom of that incompleteness.
+        BedClearCommandRecord? bedClearCommand = null;
+        QueueDispatchOutbox? backendStartCommand = null;
         if (job.JobKind == JobKind.FilamentCalibration)
         {
+            (DispatchClaimResult? acknowledgementFailure, BedClearCommandRecord? command) =
+                await EvaluateAcknowledgementGatesAsync(
+                    job,
+                    printer,
+                    dispatchState,
+                    request,
+                    ct);
+            bedClearCommand = command;
             DispatchClaimResult? calibrationGate =
-                DispatchSafetyGates.EvaluateCalibrationCompatibility(job, printer) ??
-                EvaluateAcknowledgementGates(job, dispatchState, request);
+                DispatchSafetyGates.EvaluateCalibrationCompatibility(job, printer);
+            calibrationGate ??= acknowledgementFailure;
+            if (calibrationGate is null)
+            {
+                calibrationGate =
+                    await EvaluatePersistedCalibrationInputsAsync(_db, job, printer, ct);
+            }
 
             if (calibrationGate is not null)
             {
                 await WriteDeniedAuditAsync(request, calibrationGate, job, dispatchState, ct);
                 return calibrationGate;
+            }
+
+            if (bedClearCommand is not null)
+            {
+                backendStartCommand = await _db.QueueDispatchOutbox
+                    .SingleOrDefaultAsync(
+                        command =>
+                            command.Id == bedClearCommand.OutboxEventId &&
+                            command.EventType ==
+                                BedClearAcknowledgementService.BackendStartCommandEventType,
+                        ct);
+                if (backendStartCommand is null)
+                {
+                    DispatchClaimResult missingCommand = DispatchClaimResult.Fail(
+                        "bed_clear_command_invalid",
+                        "The durable bed-clear start command is missing.");
+                    await WriteDeniedAuditAsync(
+                        request,
+                        missingCommand,
+                        job,
+                        dispatchState,
+                        ct);
+                    return missingCommand;
+                }
             }
         }
 
@@ -153,6 +269,16 @@ public sealed class DispatchClaimService(
             return filamentGate;
         }
 
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
+            DispatchClaimResult? pinnedSpoolGate = await EvaluatePinnedSpoolAsync(job, printer, ct);
+            if (pinnedSpoolGate is not null)
+            {
+                await WriteDeniedAuditAsync(request, pinnedSpoolGate, job, dispatchState, ct);
+                return pinnedSpoolGate;
+            }
+        }
+
         int attemptNumber = await _db.QueueDispatchAttempts
             .Where(a => a.PrintJobId == request.JobId)
             .CountAsync(ct) + 1;
@@ -160,9 +286,10 @@ public sealed class DispatchClaimService(
         DateTime nowUtc = DateTime.UtcNow;
         PrintJobStatus previousStatus = job.Status;
 
+        Guid attemptId = Guid.NewGuid();
         var attempt = new QueueDispatchAttempt
         {
-            Id = Guid.NewGuid(),
+            Id = attemptId,
             PrintJobId = request.JobId,
             PrinterId = request.PrinterId,
             PrinterConfigRevision = job.PinnedPrinterConfigRevision ?? printer.ConfigurationRevision,
@@ -176,8 +303,10 @@ public sealed class DispatchClaimService(
 
             // Backend identity is persisted BEFORE any network I/O so reconciliation can
             // correlate an unmatched printing backend with this attempt.
-            BackendCommandId = Guid.NewGuid().ToString("N"),
-            BackendFileName = job.GcodeFile?.Name,
+            BackendCommandId = $"pf-{attemptId:N}",
+            BackendFileName = BuildBackendFileName(attemptId, job.GcodeFile?.Name),
+            BackendCorrelationId = $"pf-{attemptId:N}",
+            BackendCallPhase = DispatchBackendCallPhase.Claimed,
         };
 
         bool consumesAcknowledgement =
@@ -195,6 +324,9 @@ public sealed class DispatchClaimService(
             AttemptId = attempt.Id,
             BedClearState = consumesAcknowledgement ? "Consumed" : "None",
             PrinterId = request.PrinterId,
+            ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            JobStatus = PrintJobStatus.Starting.ToString(),
+            JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             PrinterConfigRevision = job.PinnedPrinterConfigRevision,
             EventType = "PrintFarmer.Queue.JobDispatchStarted.v1",
             SchemaVersion = "1",
@@ -214,6 +346,13 @@ public sealed class DispatchClaimService(
 
         dispatchState.ActiveJobId = request.JobId;
         dispatchState.ActiveDispatchAttemptId = attempt.Id;
+        if (bedClearCommand is not null)
+        {
+            bedClearCommand.Status = BedClearCommandStatus.Claimed;
+            bedClearCommand.DispatchAttemptId = attempt.Id;
+            bedClearCommand.UpdatedAtUtc = nowUtc;
+            backendStartCommand!.AttemptId = attempt.Id;
+        }
 
         attempt.JobRowVersionAtClaim = job.RowVersion;
         attempt.DispatchStateRowVersionAtClaim = dispatchState.RowVersion;
@@ -323,6 +462,18 @@ public sealed class DispatchClaimService(
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        if (_resourceAuthorization is not null &&
+            !await _resourceAuthorization.CanActorAccessPrinterAsync(
+                request.ActorSubject,
+                request.PrinterId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return DispatchClaimResult.Fail(
+                "printer_not_found",
+                "The printer was not found.");
+        }
+
         Printer? printer = await _db.Printers
             .FirstOrDefaultAsync(p => p.Id == request.PrinterId, ct);
 
@@ -341,7 +492,7 @@ public sealed class DispatchClaimService(
                 $"Printer dispatch state for {request.PrinterId} not found.");
         }
 
-        DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId, jobId: null);
+        DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId);
         if (printerGate is not null)
         {
             _ = QueueAuditWriter.Add(
@@ -357,6 +508,22 @@ public sealed class DispatchClaimService(
                 detail: new { startPathKind = request.StartPathKind });
             _ = await _db.SaveChangesAsync(ct);
             return printerGate;
+        }
+
+        bool hasDatabaseActiveJob = await _db.PrintJobs
+            .AsNoTracking()
+            .AnyAsync(
+                candidate =>
+                    candidate.AssignedPrinterId == request.PrinterId &&
+                    (candidate.Status == PrintJobStatus.Starting ||
+                     candidate.Status == PrintJobStatus.Printing ||
+                     candidate.Status == PrintJobStatus.Paused),
+                ct);
+        if (hasDatabaseActiveJob)
+        {
+            return DispatchClaimResult.Fail(
+                "printer_busy_database",
+                $"Printer {request.PrinterId} has a Starting, Printing, or Paused job in the database.");
         }
 
         // An ad-hoc start applies the same fail-closed telemetry gate as queue claims:
@@ -387,11 +554,14 @@ public sealed class DispatchClaimService(
                 $"Printer {request.PrinterId} is not online per telemetry.");
         }
 
-        if (snapshot.Status.State is "printing" or "starting" or "paused")
+        if (!IsExplicitlyIdle(snapshot.Status.State))
         {
+            string busyDetail =
+                $"Printer {request.PrinterId} is not in an explicitly idle state per telemetry " +
+                $"(observed '{snapshot.Status.State ?? "unknown"}').";
             return DispatchClaimResult.Fail(
                 "printer_busy_telemetry",
-                $"Printer {request.PrinterId} is in state '{snapshot.Status.State}' per telemetry; cannot start an ad-hoc job.");
+                busyDetail);
         }
 
         DateTime nowUtc = DateTime.UtcNow;
@@ -399,9 +569,10 @@ public sealed class DispatchClaimService(
             .Where(a => a.PrinterId == request.PrinterId && a.PrintJobId == null)
             .CountAsync(ct) + 1;
 
+        Guid attemptId = Guid.NewGuid();
         var attempt = new QueueDispatchAttempt
         {
-            Id = Guid.NewGuid(),
+            Id = attemptId,
             PrintJobId = null,
             PrinterId = request.PrinterId,
             PrinterConfigRevision = printer.ConfigurationRevision,
@@ -411,8 +582,12 @@ public sealed class DispatchClaimService(
             ClaimedAtUtc = nowUtc,
             Outcome = DispatchAttemptOutcome.InProgress,
             UpdatedAtUtc = nowUtc,
-            BackendCommandId = Guid.NewGuid().ToString("N"),
-            BackendFileName = request.BackendFileName,
+            BackendCommandId = $"pf-{attemptId:N}",
+            BackendFileName = request.UseDeterministicFileName
+                ? BuildBackendFileName(attemptId, request.BackendFileName)
+                : request.BackendFileName,
+            BackendCorrelationId = $"pf-{attemptId:N}",
+            BackendCallPhase = DispatchBackendCallPhase.Claimed,
             DispatchStateRowVersionAtClaim = dispatchState.RowVersion,
         };
 
@@ -460,6 +635,29 @@ public sealed class DispatchClaimService(
     }
 
     /// <inheritdoc />
+    public async Task RecordBackendCallStartedAsync(
+        Guid attemptId,
+        CancellationToken ct = default)
+    {
+        QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+            .FirstOrDefaultAsync(candidate => candidate.Id == attemptId, ct);
+        if (attempt is null)
+        {
+            throw new InvalidOperationException($"Dispatch attempt {attemptId} was not found.");
+        }
+
+        if (attempt.BackendCallPhase != DispatchBackendCallPhase.Claimed)
+        {
+            return;
+        }
+
+        attempt.BackendCallPhase = DispatchBackendCallPhase.InvokingBackend;
+        attempt.BackendCallStartedAtUtc = DateTime.UtcNow;
+        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <inheritdoc />
     public async Task ReleaseClaimOnKnownFailureAsync(
         Guid attemptId,
         string errorCode,
@@ -485,7 +683,16 @@ public sealed class DispatchClaimService(
         attempt.ErrorCode = errorCode;
         attempt.ErrorDetail = errorDetail;
         attempt.IsRetryable = true;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
+        attempt.TerminalAtUtc = nowUtc;
         attempt.UpdatedAtUtc = nowUtc;
+        BedClearCommandRecord? failedCommand = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(record => record.DispatchAttemptId == attemptId, ct);
+        if (failedCommand is not null)
+        {
+            failedCommand.Status = BedClearCommandStatus.Rejected;
+            failedCommand.UpdatedAtUtc = nowUtc;
+        }
 
         if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
         {
@@ -547,7 +754,6 @@ public sealed class DispatchClaimService(
                     attemptId,
                     errorCode,
                     startPathKind = attempt.StartPathKind,
-                    actorSubject = attempt.ActorSubject,
                 }),
                 ct);
         }
@@ -579,6 +785,8 @@ public sealed class DispatchClaimService(
 
         attempt.Outcome = DispatchAttemptOutcome.Accepted;
         attempt.BackendAcceptedAtUtc = nowUtc;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.ResponseReceived;
+        attempt.BackendResponseAtUtc = nowUtc;
 
         // Never overwrite a persisted backend identity with null: the identity written
         // before the network call remains the reconciliation key.
@@ -588,6 +796,15 @@ public sealed class DispatchClaimService(
         }
 
         attempt.UpdatedAtUtc = nowUtc;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
+        attempt.TerminalAtUtc = nowUtc;
+        BedClearCommandRecord? acceptedCommand = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(record => record.DispatchAttemptId == attemptId, ct);
+        if (acceptedCommand is not null)
+        {
+            acceptedCommand.Status = BedClearCommandStatus.Accepted;
+            acceptedCommand.UpdatedAtUtc = nowUtc;
+        }
 
         if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
         {
@@ -604,18 +821,6 @@ public sealed class DispatchClaimService(
                 CreatedAt = nowUtc,
                 Notes = "Backend accepted dispatch",
             });
-        }
-
-        if (attempt.PrintJobId is null)
-        {
-            // Ad-hoc start completed — release the printer lease.
-            PrinterDispatchState? adHocState = await _db.PrinterDispatchStates
-                .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
-
-            if (adHocState is not null && adHocState.ActiveDispatchAttemptId == attemptId)
-            {
-                adHocState.ActiveDispatchAttemptId = null;
-            }
         }
 
         _ = QueueAuditWriter.Add(
@@ -657,7 +862,6 @@ public sealed class DispatchClaimService(
                     backendJobId = attempt.BackendJobId,
                     backendCommandId = attempt.BackendCommandId,
                     startPathKind = attempt.StartPathKind,
-                    actorSubject = attempt.ActorSubject,
                     backendAcceptedAtUtc = attempt.BackendAcceptedAtUtc,
                 }),
                 ct);
@@ -689,7 +893,15 @@ public sealed class DispatchClaimService(
         attempt.ErrorDetail = errorDetail;
         attempt.IsRetryable = false;
         attempt.RequiresReconciliation = true;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
+        BedClearCommandRecord? unknownCommand = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(record => record.DispatchAttemptId == attemptId, ct);
+        if (unknownCommand is not null)
+        {
+            unknownCommand.Status = BedClearCommandStatus.Unknown;
+            unknownCommand.UpdatedAtUtc = DateTime.UtcNow;
+        }
 
         _ = QueueAuditWriter.Add(
             _db,
@@ -728,7 +940,6 @@ public sealed class DispatchClaimService(
                     attemptId,
                     backendCommandId = attempt.BackendCommandId,
                     startPathKind = attempt.StartPathKind,
-                    actorSubject = attempt.ActorSubject,
                     requiresReconciliation = true,
                 }),
                 ct);
@@ -745,8 +956,7 @@ public sealed class DispatchClaimService(
     private static DispatchClaimResult? EvaluatePrinterGates(
         Printer printer,
         PrinterDispatchState dispatchState,
-        Guid printerId,
-        Guid? jobId)
+        Guid printerId)
     {
         if (!printer.IsEnabled)
         {
@@ -765,22 +975,17 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail("printer_unavailable", $"Printer {printerId} is not available.");
         }
 
-        // Mutual exclusion: block if any active attempt (queue or ad-hoc) is in-flight for a
-        // different entity. Re-entry is allowed only when the SAME queue job already owns the lease
-        // (idempotent retry after a partial commit). Ad-hoc-vs-queue, queue-vs-ad-hoc, and
-        // ad-hoc-vs-ad-hoc all conflict unconditionally.
+        // Mutual exclusion is strict. Idempotent retries are resolved by the caller from
+        // the persisted attempt; acquiring a second attempt for the same job could still
+        // produce a second physical start after a lost response.
         if (dispatchState.ActiveDispatchAttemptId.HasValue)
         {
-            bool sameQueueJobOwnsLease = jobId.HasValue && dispatchState.ActiveJobId == jobId;
-            if (!sameQueueJobOwnsLease)
-            {
-                string ownerDesc = dispatchState.ActiveJobId.HasValue
-                    ? $"queue job {dispatchState.ActiveJobId}"
-                    : "an ad-hoc start";
-                return DispatchClaimResult.Fail(
-                    "printer_busy_active",
-                    $"Printer {printerId} already has an in-flight dispatch attempt for {ownerDesc}.");
-            }
+            string ownerDesc = dispatchState.ActiveJobId.HasValue
+                ? $"queue job {dispatchState.ActiveJobId}"
+                : "an ad-hoc start";
+            return DispatchClaimResult.Fail(
+                "printer_busy_active",
+                $"Printer {printerId} already has an in-flight dispatch attempt for {ownerDesc}.");
         }
 
         return null;
@@ -847,21 +1052,105 @@ public sealed class DispatchClaimService(
         return null;
     }
 
-    private static DispatchClaimResult? EvaluateTelemetryGates(
+    internal static async Task<DispatchClaimResult?> EvaluatePersistedCalibrationInputsAsync(
+        AppDbContext db,
         PrintJob job,
+        Printer printer,
+        CancellationToken ct)
+    {
+        CalibrationProject? project = await db.CalibrationProjects
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationProjectId, ct);
+        CalibrationAttempt? attempt = await db.CalibrationAttempts
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationAttemptId, ct);
+        PrinterConfigurationSnapshot? snapshot = await db.PrinterConfigurationSnapshots
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationConfigSnapshotId, ct);
+        CalibrationOrchestration? orchestration = await db.CalibrationOrchestrations
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == job.CalibrationOrchestrationId, ct);
+        if (project is null || attempt is null || snapshot is null || orchestration is null)
+        {
+            return DispatchClaimResult.Fail(
+                "calibration_record_invalid",
+                "An authoritative calibration project, attempt, snapshot, or orchestration record is missing.");
+        }
+
+        bool mismatch =
+            project.PrinterId != printer.Id ||
+            (project.LocalSpoolId ?? project.SpoolmanSpoolId) != job.PinnedSpoolId ||
+            project.CurrentPrinterConfigurationSnapshotId != snapshot.Id ||
+            project.SelectedToolheadId != job.PinnedToolheadId ||
+            project.SelectedToolheadIndex != job.PinnedToolheadIndex ||
+            !string.Equals(project.FilamentSku, job.PinnedFilamentSku, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(project.FilamentProductName, job.FilamentName, StringComparison.Ordinal) ||
+            !string.Equals(project.FilamentVendor, job.FilamentVendor, StringComparison.Ordinal) ||
+            !string.Equals(project.FilamentColor, job.FilamentColor, StringComparison.Ordinal) ||
+            !string.Equals(
+                ComputeSha256(project.FilamentSnapshotJson),
+                job.FilamentSnapshotSha256,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(project.FilamentMaterial, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase) ||
+            attempt.ProjectId != project.Id ||
+            attempt.PrinterConfigurationSnapshotId != snapshot.Id ||
+            !string.Equals(attempt.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
+            snapshot.ProjectId != project.Id ||
+            snapshot.PrinterId != printer.Id ||
+            snapshot.PrinterConfigurationRevision != job.PinnedPrinterConfigRevision ||
+            snapshot.FirmwareFamily != job.RequiredFirmwareFamily ||
+            snapshot.GcodeDialect != job.RequiredGcodeDialect ||
+            !string.Equals(snapshot.SlicerEngine, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.SlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.SlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.SnapshotSha256, job.PrinterConfigSnapshotSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.MachineProfileSha256, job.MachineProfileSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.ProcessProfileSha256, job.ProcessProfileSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(snapshot.FilamentProfileSha256, job.FilamentProfileSha256, StringComparison.OrdinalIgnoreCase) ||
+            orchestration.ProjectId != project.Id ||
+            orchestration.AttemptId != attempt.Id ||
+            !string.Equals(orchestration.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(orchestration.ManifestSha256, job.CalibrationManifestSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(orchestration.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
+            orchestration.GcodeFileId != job.GcodeFileId ||
+            orchestration.SliceJobId != job.SliceJobId ||
+            orchestration.FinalArtifactId != job.SourceArtifactId ||
+            !string.Equals(orchestration.GcodeSha256, job.GcodeContentSha256, StringComparison.OrdinalIgnoreCase) ||
+            job.GcodeFile is null ||
+            job.GcodeFile.PrinterModelId != job.PinnedPrinterModelId ||
+            job.GcodeFile.FileSizeBytes != job.PinnedGcodeFileSizeBytes ||
+            !string.Equals(job.GcodeFile.SourceModelSha256, job.SourceModelSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.CalibrationManifestSha256, job.CalibrationManifestSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.SlicerEngineName, job.RequiredSlicerEngine, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.SlicerDistribution, job.RequiredSlicerDistribution, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.PinnedSlicerVersion, job.RequiredSlicerVersion, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.SlicerContainerDigest, job.RequiredSlicerContainerDigest, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.SpecificationSha256, job.SpecificationSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.MachineProfileSha256, job.MachineProfileSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.ProcessProfileSha256, job.ProcessProfileSha256, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(job.GcodeFile.FilamentProfileSha256, job.FilamentProfileSha256, StringComparison.OrdinalIgnoreCase);
+        return mismatch
+            ? DispatchClaimResult.Fail(
+                "calibration_record_mismatch",
+                "Authoritative calibration records no longer match the immutable queue inputs.")
+            : null;
+    }
+
+    private static string ComputeSha256(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))
+            .ToLowerInvariant();
+
+    private static DispatchClaimResult? EvaluateTelemetryGates(
         PrinterStatusSnapshot? snapshot,
         Guid printerId)
     {
-        bool isCalibration = job.JobKind == JobKind.FilamentCalibration;
-
-        // Calibration FAILS CLOSED: fresh telemetry is mandatory, no snapshot is a hard stop.
+        // Every physical start fails closed without authoritative telemetry.
         if (snapshot is null)
         {
-            return isCalibration
-                ? DispatchClaimResult.Fail(
-                    "telemetry_unavailable",
-                    $"Fresh telemetry is required for calibration dispatch. No snapshot is available for printer {printerId}.")
-                : null;
+            return DispatchClaimResult.Fail(
+                "telemetry_unavailable",
+                $"Fresh telemetry is required for dispatch. No snapshot is available for printer {printerId}.");
         }
 
         // Capability-advertised freshness: once a backend HAS advertised telemetry (a snapshot
@@ -886,27 +1175,66 @@ public sealed class DispatchClaimService(
                 $"Printer {printerId} is not online per telemetry.");
         }
 
-        if (snapshot.Status.State is "printing" or "starting" or "paused")
+        if (!IsExplicitlyIdle(snapshot.Status.State))
         {
+            string busyDetail =
+                $"Printer {printerId} is not in an explicitly idle state per telemetry " +
+                $"(observed '{snapshot.Status.State ?? "unknown"}').";
             return DispatchClaimResult.Fail(
                 "printer_busy_telemetry",
-                $"Printer {printerId} is in state '{snapshot.Status.State}' per telemetry; cannot start a new job.");
+                busyDetail);
         }
 
         return null;
     }
 
-    private static DispatchClaimResult? EvaluateAcknowledgementGates(
+    private static bool IsExplicitlyIdle(string? state) =>
+        !string.IsNullOrWhiteSpace(state) && ExplicitIdleStates.Contains(state.Trim());
+
+    private static string BuildBackendFileName(Guid attemptId, string? requestedName)
+    {
+        string safeName = Path.GetFileName(string.IsNullOrWhiteSpace(requestedName)
+            ? "print.gcode"
+            : requestedName);
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+        {
+            safeName = safeName.Replace(invalid, '_');
+        }
+
+        string prefix = $"pf-{attemptId:N}-";
+        int available = Math.Max(1, 240 - prefix.Length);
+        if (safeName.Length > available)
+        {
+            string extension = Path.GetExtension(safeName);
+            int stemLength = Math.Max(1, available - extension.Length);
+            string stem = Path.GetFileNameWithoutExtension(safeName);
+            if (string.IsNullOrEmpty(stem))
+            {
+                stem = "print";
+            }
+
+            safeName = $"{stem[..Math.Min(stem.Length, stemLength)]}{extension}";
+        }
+
+        return $"{prefix}{safeName}";
+    }
+
+    private async Task<(DispatchClaimResult? Failure, BedClearCommandRecord? Command)>
+        EvaluateAcknowledgementGatesAsync(
         PrintJob job,
+        Printer printer,
         PrinterDispatchState dispatchState,
-        DispatchClaimRequest request)
+        DispatchClaimRequest request,
+        CancellationToken ct)
     {
         // Ack key is required in the claim request.
         if (string.IsNullOrWhiteSpace(request.AcknowledgementIdempotencyKey))
         {
-            return DispatchClaimResult.Fail(
-                "acknowledgement_required",
-                "Calibration jobs require a valid bed-clear acknowledgement idempotency key.");
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_required",
+                    "Calibration jobs require a valid bed-clear acknowledgement idempotency key."),
+                null);
         }
 
         // A persisted ack MUST exist — fail closed. An ack key in the request with no
@@ -916,29 +1244,146 @@ public sealed class DispatchClaimService(
             const string MissingAckDetail =
                 "No persisted bed-clear acknowledgement found for this printer. " +
                 "The operator must acknowledge bed-clear before calibration dispatch.";
-            return DispatchClaimResult.Fail("acknowledgement_missing", MissingAckDetail);
+            return (DispatchClaimResult.Fail("acknowledgement_missing", MissingAckDetail), null);
         }
 
         if (dispatchState.AcknowledgedJobId != job.Id)
         {
-            return DispatchClaimResult.Fail(
-                "wrong_acknowledgement_job",
-                $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {job.Id}.");
+            return (
+                DispatchClaimResult.Fail(
+                    "wrong_acknowledgement_job",
+                    $"Acknowledgement was for job {dispatchState.AcknowledgedJobId}, not {job.Id}."),
+                null);
         }
 
         if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
             dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
         {
-            return DispatchClaimResult.Fail(
-                "acknowledgement_expired",
-                $"Bed-clear acknowledgement for job {job.Id} has expired.");
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_expired",
+                    $"Bed-clear acknowledgement for job {job.Id} has expired."),
+                null);
         }
 
         if (dispatchState.AcknowledgementIdempotencyKey != request.AcknowledgementIdempotencyKey)
         {
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_key_mismatch",
+                    "Acknowledgement idempotency key does not match the persisted value."),
+                null);
+        }
+
+        if (dispatchState.AcknowledgedQueueRevision != dispatchState.QueueRevision)
+        {
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_queue_revision_stale",
+                    "The queue changed after bed-clear acknowledgement."),
+                null);
+        }
+
+        if (dispatchState.AcknowledgedPrinterConfigRevision != printer.ConfigurationRevision)
+        {
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_printer_revision_stale",
+                    "The printer configuration changed after bed-clear acknowledgement."),
+                null);
+        }
+
+        if (dispatchState.AcknowledgedJobRowVersion is null ||
+            !dispatchState.AcknowledgedJobRowVersion.SequenceEqual(job.RowVersion ?? []))
+        {
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_job_revision_stale",
+                    "The job changed after bed-clear acknowledgement."),
+                null);
+        }
+
+        Guid? queueHeadId = await _db.PrintJobs
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.AssignedPrinterId == printer.Id &&
+                (candidate.Status == PrintJobStatus.Queued ||
+                 candidate.Status == PrintJobStatus.Assigned))
+            .OrderByPriorityDescending()
+            .Select(candidate => (Guid?)candidate.Id)
+            .FirstOrDefaultAsync(ct);
+        if (queueHeadId != job.Id)
+        {
+            return (
+                DispatchClaimResult.Fail(
+                    "wrong_job",
+                    "The acknowledged job is no longer the urgent-first current queue head."),
+                null);
+        }
+
+        BedClearCommandRecord? command = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(
+                record =>
+                    record.PrinterId == printer.Id &&
+                    record.IdempotencyKey == request.AcknowledgementIdempotencyKey,
+                ct);
+        if (command is null ||
+            command.JobId != job.Id ||
+            command.Status != BedClearCommandStatus.Pending ||
+            command.ExpiresAtUtc <= DateTime.UtcNow ||
+            command.QueueRevision != dispatchState.QueueRevision ||
+            command.PrinterConfigRevision != printer.ConfigurationRevision)
+        {
+            return (
+                DispatchClaimResult.Fail(
+                    "acknowledgement_command_invalid",
+                    "The durable bed-clear command is absent, consumed, expired, or stale."),
+                null);
+        }
+
+        return (null, command);
+    }
+
+    private async Task<DispatchClaimResult?> EvaluatePinnedSpoolAsync(
+        PrintJob job,
+        Printer printer,
+        CancellationToken ct)
+    {
+        if (!job.PinnedSpoolId.HasValue)
+        {
             return DispatchClaimResult.Fail(
-                "acknowledgement_key_mismatch",
-                "Acknowledgement idempotency key does not match the persisted value.");
+                "filament_spool_missing",
+                "Calibration dispatch requires an exact pinned physical spool.");
+        }
+
+        Spool? spool = await _db.Spools
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.Id == job.PinnedSpoolId.Value, ct);
+        if (spool is null ||
+            !spool.InUse ||
+            spool.AssignedPrinterId != printer.Id)
+        {
+            return DispatchClaimResult.Fail(
+                "filament_spool_mismatch",
+                "The exact pinned physical spool is not loaded on the assigned printer.");
+        }
+
+        if (!string.Equals(
+                spool.Material,
+                job.RequiredMaterialType,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return DispatchClaimResult.Fail(
+                "filament_material_mismatch",
+                "The exact pinned spool material no longer matches the queued job.");
+        }
+
+        if (job.EstimatedFilamentUsage is > 0 &&
+            spool.WeightGrams < job.EstimatedFilamentUsage.Value)
+        {
+            return DispatchClaimResult.Fail(
+                "filament_insufficient",
+                "The exact pinned spool no longer contains enough filament for the job.");
         }
 
         return null;
@@ -951,6 +1396,9 @@ public sealed class DispatchClaimService(
         dispatchState.AcknowledgedBySubject = null;
         dispatchState.AcknowledgementIdempotencyKey = null;
         dispatchState.AcknowledgementExpiresAtUtc = null;
+        dispatchState.AcknowledgedJobRowVersion = null;
+        dispatchState.AcknowledgedQueueRevision = null;
+        dispatchState.AcknowledgedPrinterConfigRevision = null;
     }
 
     private async Task WriteDeniedAuditAsync(
@@ -960,6 +1408,19 @@ public sealed class DispatchClaimService(
         PrinterDispatchState dispatchState,
         CancellationToken ct)
     {
+        JobBlockedReasonCode? blockedReason = job.JobKind == JobKind.FilamentCalibration
+            ? DispatchSafetyGates.MapBlockedReason(denial.ErrorCode)
+            : null;
+        if (blockedReason.HasValue)
+        {
+            job.BlockedReasonCode = blockedReason;
+            job.BlockedReasonJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                errorCode = denial.ErrorCode,
+                detail = denial.ErrorDetail,
+            });
+        }
+
         _ = QueueAuditWriter.Add(
             _db,
             request.ActorSubject,
@@ -1043,9 +1504,16 @@ public sealed class DispatchClaimService(
         byte[]? aggregateRowVersion,
         string? failureCode,
         string payloadJson,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? projectId = null,
+        string? jobStatus = null,
+        string? jobKind = null)
     {
         DateTime nowUtc = DateTime.UtcNow;
+        PrintJob? job = db.PrintJobs.Local.FirstOrDefault(candidate => candidate.Id == aggregateId)
+            ?? await db.PrintJobs
+                .AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.Id == aggregateId, ct);
         var outbox = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -1054,6 +1522,9 @@ public sealed class DispatchClaimService(
             AggregateId = aggregateId,
             AggregateRowVersion = aggregateRowVersion,
             PrinterId = printerId,
+            ProjectId = projectId ?? job?.CalibrationProjectId ?? job?.ProjectId,
+            JobStatus = jobStatus ?? job?.Status.ToString(),
+            JobKind = jobKind ?? job?.JobKind?.ToString() ?? nameof(JobKind.Standard),
             AttemptId = attemptId,
             EventType = eventType,
             SchemaVersion = "1",
@@ -1074,7 +1545,6 @@ public sealed class DispatchClaimService(
             attemptId = attempt.Id,
             attemptNumber = attempt.AttemptNumber,
             startPathKind = attempt.StartPathKind,
-            actorSubject = attempt.ActorSubject,
             backendCommandId = attempt.BackendCommandId,
             calibrationProjectId = job.CalibrationProjectId,
             calibrationAttemptId = job.CalibrationAttemptId,

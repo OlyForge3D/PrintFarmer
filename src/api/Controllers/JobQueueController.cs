@@ -1,5 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Security;
@@ -7,11 +9,13 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Controllers;
@@ -32,7 +36,9 @@ public class JobQueueController(
     IBedClearAcknowledgementService bedClearAcknowledgementService,
     IPrinterStatusCacheReader printerStatusCache,
     IPrintFarmerTelemetryService telemetryService,
-    ILogger<JobQueueController> logger) : ControllerBase
+    ILogger<JobQueueController> logger,
+    AppDbContext? db = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     /// <summary>
     /// Get queue overview with optional compatibility filtering.
@@ -54,7 +60,25 @@ public class JobQueueController(
         try
         {
             IReadOnlyList<QueueOverviewDto> dtos = await queueService.GetQueueOverviewAsync(model, nozzle, material, CancellationToken.None);
-            return Ok(dtos);
+            if (resourceAuthorization is null)
+            {
+                return Ok(dtos);
+            }
+
+            var authorized = new List<QueueOverviewDto>(dtos.Count);
+            foreach (QueueOverviewDto dto in dtos)
+            {
+                if (await resourceAuthorization.CanAccessPrinterAsync(
+                    User,
+                    dto.PrinterId,
+                    PrinterGroupAccessLevel.View,
+                    CancellationToken.None))
+                {
+                    authorized.Add(dto);
+                }
+            }
+
+            return Ok(authorized);
         }
         catch (Exception ex)
         {
@@ -67,13 +91,16 @@ public class JobQueueController(
     /// Add a new job to the queue
     /// </summary>
     /// <param name="request">The print job request containing G-code file ID and optional settings.</param>
+    /// <param name="idempotencyKey">Stable calibration command key from the HTTP header.</param>
     [HttpPost]
     [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(JobQueuePrintJobDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<JobQueuePrintJobDto>> QueueJobAsync([FromBody] QueuePrintJobDto request)
+    public async Task<ActionResult<JobQueuePrintJobDto>> QueueJobAsync(
+        [FromBody] QueuePrintJobDto request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
     {
         if (request is null)
         {
@@ -82,6 +109,10 @@ public class JobQueueController(
 
         try
         {
+            // Calibration idempotency is an HTTP command concern. Always overwrite the
+            // body field so a promoted calibration artifact cannot launder a body-only key.
+            request.IdempotencyKey = idempotencyKey;
+
             // Parse userId from claims for ACL enforcement — fail closed for authenticated requests
             string? userIdStr = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
                 ?? User?.FindFirst("sub")?.Value;
@@ -130,6 +161,22 @@ public class JobQueueController(
                 StatusCodes.Status403Forbidden,
                 new { error = "You do not have permission to submit jobs to this printer group." });
         }
+        catch (CalibrationQueueResourceNotFoundException ex)
+        {
+            return NotFound(new { error = "calibration_resource_not_found", detail = ex.Message });
+        }
+        catch (CalibrationQueueIncompatibleException ex)
+        {
+            return UnprocessableEntity(new
+            {
+                error = "calibration_job_incompatible",
+                detail = ex.Message,
+            });
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return NotFound(new { error = "queue_job_not_found" });
+        }
         catch (ValidationException ex)
         {
             return BadRequest(new { error = ex.Message });
@@ -154,6 +201,16 @@ public class JobQueueController(
     {
         try
         {
+            if (resourceAuthorization is not null &&
+                !await resourceAuthorization.CanAccessJobAsync(
+                    User,
+                    id,
+                    PrinterGroupAccessLevel.View,
+                    CancellationToken.None))
+            {
+                return NotFound();
+            }
+
             JobQueuePrintJobDto? dto = await queueService.GetJobAsync(id, CancellationToken.None);
 
             if (dto is null)
@@ -181,6 +238,99 @@ public class JobQueueController(
             logger.LogError(ex, "Error retrieving print job {Id}", id);
             return Problem("An error occurred while retrieving the job", statusCode: 500);
         }
+    }
+
+    /// <summary>
+    /// Returns authorized durable queue events after a monotonic sequence cursor.
+    /// SignalR events are hints; this endpoint is the refetch authority after gaps.
+    /// </summary>
+    [HttpGet("changes")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetChangesAsync(
+        [FromQuery] long afterSequence = 0,
+        [FromQuery] int limit = 100,
+        CancellationToken ct = default)
+    {
+        if (afterSequence < 0 || limit is < 1 or > 500)
+        {
+            return BadRequest(new
+            {
+                error = "invalid_cursor",
+                detail = "afterSequence must be non-negative and limit must be between 1 and 500.",
+            });
+        }
+
+        if (db is null || resourceAuthorization is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "queue_change_feed_unavailable" });
+        }
+
+        List<QueueDispatchOutbox> candidates = await db.QueueDispatchOutbox
+            .AsNoTracking()
+            .Where(evt =>
+                evt.Sequence > afterSequence &&
+                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+                evt.EventType != BackendControlCommandConsumerService.EventType)
+            .OrderBy(evt => evt.Sequence)
+            .Take(Math.Min(2000, limit * 4))
+            .ToListAsync(ct);
+
+        var events = new List<QueueEventEnvelope>(limit);
+        long nextSequence = afterSequence;
+        foreach (QueueDispatchOutbox evt in candidates)
+        {
+            nextSequence = evt.Sequence;
+            if (!await resourceAuthorization.CanAccessJobAsync(
+                    User,
+                    evt.AggregateId,
+                    PrinterGroupAccessLevel.View,
+                    ct))
+            {
+                continue;
+            }
+
+            events.Add(QueueEventEnvelope.FromOutbox(
+                evt.Id,
+                evt.Sequence,
+                evt.CreatedAtUtc,
+                evt.EventType,
+                evt.AggregateId,
+                evt.PrinterId,
+                evt.ProjectId,
+                evt.JobStatus,
+                evt.JobKind,
+                evt.AggregateRowVersion,
+                evt.DispatchStateRowVersion,
+                evt.AttemptId,
+                evt.BedClearState,
+                failureCode: evt.FailureCode,
+                payloadJson: evt.PayloadJson,
+                jobLogicalRevision: evt.JobRevision,
+                dispatchStateLogicalRevision: evt.DispatchStateRevision));
+            if (events.Count == limit)
+            {
+                break;
+            }
+        }
+
+        bool hasMore = await db.QueueDispatchOutbox
+            .AsNoTracking()
+            .AnyAsync(
+                evt =>
+                evt.Sequence > nextSequence &&
+                evt.EventType != BedClearAcknowledgementService.BackendStartCommandEventType &&
+                evt.EventType != BackendControlCommandConsumerService.EventType,
+                ct);
+        return Ok(new
+        {
+            afterSequence,
+            nextSequence,
+            hasMore,
+            events,
+        });
     }
 
     /// <summary>
@@ -301,11 +451,16 @@ public class JobQueueController(
     {
         try
         {
-            string? userId = User.Identity?.Name ?? "anonymous";
+            string userId = GetActorSubject();
             QueuedPrintJobDto result = await printJobManagementService.DispatchJobAsync(
-                id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
-            telemetryService.RecordPrinterOperation("dispatch", result.AssignedPrinterId ?? id.ToString(), true);
-            return Ok(result);
+                id.ToString(), userId, ReadIfMatch() ?? string.Empty, CancellationToken.None);
+            bool accepted = result.DispatchResult?.Outcome == DispatchAttemptOutcome.Accepted;
+            telemetryService.RecordPrinterOperation(
+                "dispatch",
+                result.AssignedPrinterId ?? id.ToString(),
+                accepted);
+            WriteJobEtag(result.RowVersion);
+            return MapDispatchResponse(result);
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
                                          QueueRevisionConflictException or
@@ -344,10 +499,14 @@ public class JobQueueController(
     {
         try
         {
-            string? userId = User.Identity?.Name ?? "anonymous";
-            await printJobManagementService.CancelJobAsync(id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
+            string userId = GetActorSubject();
+            await printJobManagementService.CancelJobAsync(
+                id.ToString(),
+                userId,
+                ReadIfMatch() ?? string.Empty,
+                CancellationToken.None);
             telemetryService.RecordPrinterOperation("cancel_job", id.ToString(), true);
-            return NoContent();
+            return Accepted(new { jobId = id, status = "control_command_queued" });
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
                                          QueueRevisionConflictException or
@@ -386,10 +545,14 @@ public class JobQueueController(
     {
         try
         {
-            string? userId = User.Identity?.Name ?? "anonymous";
-            await printJobManagementService.AbortPrintAsync(id.ToString(), userId, ReadIfMatch(), CancellationToken.None);
+            string userId = GetActorSubject();
+            await printJobManagementService.AbortPrintAsync(
+                id.ToString(),
+                userId,
+                ReadIfMatch() ?? string.Empty,
+                CancellationToken.None);
             telemetryService.RecordPrinterOperation("abort", id.ToString(), true);
-            return NoContent();
+            return Accepted(new { jobId = id, status = "control_command_queued" });
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
                                          QueueRevisionConflictException or
@@ -427,10 +590,23 @@ public class JobQueueController(
     {
         try
         {
-            string userId = User.Identity?.Name ?? "anonymous";
-            QueuedPrintJobDto result = await printJobManagementService.RerunJobAsync(id.ToString(), userId, CancellationToken.None);
+            string userId = GetActorSubject();
+            QueuedPrintJobDto result = await printJobManagementService.RerunJobAsync(
+                id.ToString(),
+                userId,
+                ReadIfMatch() ?? string.Empty,
+                CancellationToken.None);
             telemetryService.RecordPrinterOperation("rerun", result.AssignedPrinterId ?? id.ToString(), true);
+            WriteJobEtag(result.RowVersion);
             return Ok(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            telemetryService.RecordPrinterOperation("rerun", id.ToString(), false);
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -527,6 +703,16 @@ public class JobQueueController(
     {
         try
         {
+            if (resourceAuthorization is not null &&
+                !await resourceAuthorization.CanAccessJobAsync(
+                    User,
+                    id,
+                    PrinterGroupAccessLevel.View,
+                    CancellationToken.None))
+            {
+                return NotFound();
+            }
+
             List<DispatchCandidateDto> candidates = await jobDispatchService.FindCandidatesAsync(id, CancellationToken.None);
             return Ok(candidates);
         }
@@ -563,9 +749,22 @@ public class JobQueueController(
 
         try
         {
-            string userId = User.Identity?.Name ?? "anonymous";
-            QueuedPrintJobDto result = await jobDispatchService.DispatchJobAsync(id, request.PrinterId, userId, CancellationToken.None);
-            return Ok(result);
+            string userId = GetActorSubject();
+            QueuedPrintJobDto result = await jobDispatchService.DispatchJobAsync(
+                id,
+                request.PrinterId,
+                userId,
+                ReadIfMatch() ?? string.Empty,
+                CancellationToken.None);
+            WriteJobEtag(result.RowVersion);
+            return MapDispatchResponse(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -604,9 +803,16 @@ public class JobQueueController(
 
         try
         {
-            string userId = User.Identity?.Name ?? "anonymous";
+            string userId = GetActorSubject();
             BatchDispatchResult result = await batchDispatchService.BatchDispatchAsync(request, userId, ct);
             return Ok(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                         QueueRevisionConflictException or
+                                         QueueSemanticConflictException or
+                                         Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -671,21 +877,24 @@ public class JobQueueController(
                 new { error = "precondition_required", detail = "A stable Idempotency-Key header is required for bed-clear acknowledgements." });
         }
 
-        // Require If-Match for optimistic concurrency on the dispatch state.
+        // Require independent preconditions for the exact job and dispatch-state rows.
         string? ifMatchHeader = Request.Headers["If-Match"].FirstOrDefault();
+        string? dispatchIfMatchHeader =
+            Request.Headers["X-Dispatch-State-If-Match"].FirstOrDefault();
 #pragma warning restore S6932
-        byte[]? ifMatchBytes = null;
-        if (!string.IsNullOrWhiteSpace(ifMatchHeader))
+        byte[]? ifMatchJobBytes;
+        byte[]? ifMatchDispatchBytes;
+        try
         {
-            string etag = ifMatchHeader.Trim('"', ' ');
-            try
+            ifMatchJobBytes = DecodeEtag(ifMatchHeader);
+            ifMatchDispatchBytes = DecodeEtag(dispatchIfMatchHeader);
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new
             {
-                ifMatchBytes = Convert.FromBase64String(etag);
-            }
-            catch (FormatException)
-            {
-                return BadRequest(new { error = "If-Match header must be a base-64 encoded ETag." });
-            }
+                error = "If-Match headers must contain base-64 encoded ETags.",
+            });
         }
 
         if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
@@ -704,8 +913,9 @@ public class JobQueueController(
             PrinterId: request.PrinterId,
             ActorSubject: actorSubject,
             IdempotencyKey: idempotencyKey,
-            IfMatchDispatchState: ifMatchBytes,
-            ExpectedPrinterConfigRevision: request.ExpectedPrinterConfigRevision);
+            IfMatchDispatchState: ifMatchDispatchBytes,
+            ExpectedPrinterConfigRevision: request.ExpectedPrinterConfigRevision,
+            IfMatchJob: ifMatchJobBytes);
 
         try
         {
@@ -775,4 +985,33 @@ public class JobQueueController(
             jobETag = result.JobETag is not null ? Convert.ToBase64String(result.JobETag) : null,
             dispatchStateETag = result.DispatchStateETag is not null ? Convert.ToBase64String(result.DispatchStateETag) : null,
         };
+
+    private ObjectResult MapDispatchResponse(QueuedPrintJobDto result) =>
+        result.DispatchResult?.Outcome switch
+        {
+            DispatchAttemptOutcome.Accepted => Ok(result),
+            DispatchAttemptOutcome.Unknown => StatusCode(StatusCodes.Status202Accepted, result),
+            DispatchAttemptOutcome.Rejected or DispatchAttemptOutcome.FailedBeforeStart => Conflict(result),
+            _ => StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "dispatch_outcome_unavailable", job = result }),
+        };
+
+    private void WriteJobEtag(string? rowVersion)
+    {
+        if (!string.IsNullOrWhiteSpace(rowVersion))
+        {
+            Response.Headers.ETag = $"\"{rowVersion}\"";
+        }
+    }
+
+    private static byte[]? DecodeEtag(string? value) =>
+        string.IsNullOrWhiteSpace(value)
+            ? null
+            : Convert.FromBase64String(value.Trim('"', ' '));
+
+    private string GetActorSubject() =>
+        User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+        ?? User.FindFirst("sub")?.Value
+        ?? "anonymous";
 }

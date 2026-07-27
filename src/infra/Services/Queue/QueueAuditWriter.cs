@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 
@@ -70,7 +72,7 @@ public static class QueueAuditWriter
             ReasonCode = reasonCode is null ? null : Truncate(reasonCode, 128),
             JobRowVersion = jobRowVersion,
             DispatchStateRowVersion = dispatchStateRowVersion,
-            IdempotencyKey = idempotencyKey is null ? null : Truncate(idempotencyKey, 512),
+            IdempotencyKey = idempotencyKey is null ? null : HashIdempotencyKey(idempotencyKey),
             DetailJson = detail is null ? null : Truncate(JsonSerializer.Serialize(detail, DetailOptions), 2048),
         };
 
@@ -80,4 +82,7 @@ public static class QueueAuditWriter
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength];
+
+    private static string HashIdempotencyKey(string value) =>
+        $"sha256:{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant()}";
 }

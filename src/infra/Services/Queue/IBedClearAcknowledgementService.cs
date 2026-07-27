@@ -60,6 +60,7 @@ public enum BedClearAckOutcome
 /// <param name="PrinterId">Printer the job is assigned to.</param>
 /// <param name="ActorSubject">Authenticated subject of the operator.</param>
 /// <param name="IdempotencyKey">Stable caller-supplied key for exact-replay detection.</param>
+/// <param name="IfMatchJob">ETag of the exact urgent-head job.</param>
 /// <param name="IfMatchDispatchState">
 /// ETag of the printer dispatch state row (from a prior GET); required for
 /// optimistic concurrency (If-Match).
@@ -74,7 +75,8 @@ public sealed record AcknowledgeBedClearRequest(
     string ActorSubject,
     string IdempotencyKey,
     byte[]? IfMatchDispatchState,
-    long? ExpectedPrinterConfigRevision);
+    long? ExpectedPrinterConfigRevision,
+    byte[]? IfMatchJob = null);
 
 /// <summary>
 /// Result of a bed-clear acknowledgement request.

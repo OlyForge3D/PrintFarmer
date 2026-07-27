@@ -276,11 +276,15 @@ public class JobQueuePrintJobDto
 
     public string? RowVersion { get; set; }
 
+    public long Revision { get; set; }
+
     /// <summary>
     /// Current ETag of the assigned printer's dispatch state, when a printer is assigned.
     /// Callers must echo this as <c>If-Match</c> on dispatch-state mutations.
     /// </summary>
     public string? DispatchStateRowVersion { get; set; }
+
+    public long? DispatchStateRevision { get; set; }
 
     /// <summary>Server-derived job classification (never client-supplied).</summary>
     public JobKind? JobKind { get; set; }

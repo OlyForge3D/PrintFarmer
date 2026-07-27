@@ -28,6 +28,9 @@ public class QueuedPrintJobDto
 {
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>Base-64 job revision used as the public ETag.</summary>
+    public string? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
@@ -172,6 +175,31 @@ public class QueuedPrintJobDto
     /// Empty for single-extruder jobs.
     /// </summary>
     public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
+
+    /// <summary>Typed result of the most recent physical dispatch invocation.</summary>
+    public DispatchAttemptResultDto? DispatchResult { get; set; }
+}
+
+/// <summary>
+/// Typed physical dispatch result carried by manual, scored, batch, and automatic callers.
+/// </summary>
+public sealed class DispatchAttemptResultDto
+{
+    public Guid? AttemptId { get; set; }
+
+    public DispatchAttemptOutcome Outcome { get; set; }
+
+    public DateTime? BackendAcceptedAtUtc { get; set; }
+
+    public string? ErrorCode { get; set; }
+
+    public bool IsRetryable { get; set; }
+
+    public bool RequiresReconciliation { get; set; }
+
+    public string? JobRevision { get; set; }
+
+    public string? DispatchStateRevision { get; set; }
 }
 
 /// <summary>
@@ -274,6 +302,8 @@ public class UpdateQueueJobPriorityRequest
 public class BulkCancelQueueJobsRequest
 {
     public List<string> JobIds { get; set; } = new();
+
+    public Dictionary<string, string> JobETags { get; set; } = new();
 }
 
 /// <summary>
@@ -292,6 +322,8 @@ public class QueueJobReorderMove
     public string JobId { get; set; } = null!;
 
     public int NewPosition { get; set; }
+
+    public string? IfMatch { get; set; }
 }
 
 /// <summary>

@@ -64,7 +64,7 @@ public sealed class QueueOperationAudit
     /// <summary>Dispatch-state row version observed when the operation committed.</summary>
     public byte[]? DispatchStateRowVersion { get; set; }
 
-    /// <summary>Idempotency key associated with the operation, when applicable.</summary>
+    /// <summary>SHA-256 fingerprint of the idempotency key, when applicable.</summary>
     [MaxLength(512)]
     public string? IdempotencyKey { get; set; }
 

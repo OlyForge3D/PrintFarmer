@@ -13,6 +13,7 @@ import {
   DiscoveryCompletedDto,
   DispatchUploadProgressDto,
   FailureDetectionEvent,
+  QueueEventEnvelope,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
 import { getHubUrl } from "@/common/utils/apiUrlHelpers";
@@ -28,6 +29,7 @@ type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+type QueueEventCallback = (event: QueueEventEnvelope) => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -170,6 +172,9 @@ export class PrinterSignalRService {
         }
       });
     });
+    this.connection.on("queueevent", (event: QueueEventEnvelope) => {
+      void this.handleQueueEvent(event);
+    });
     // Discovery events - register only lowercase names for consistency
     const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
       if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
@@ -273,6 +278,7 @@ export class PrinterSignalRService {
     this.connection.onreconnected(() => {
       this.reconnectAttempts = 0;
       this.notifyConnectionState(true);
+      void this.restoreResourceSubscriptions();
     });
     // Add debug hooks for connection lifecycle (gated behind debug flag)
     if (
@@ -312,6 +318,11 @@ export class PrinterSignalRService {
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
+  private queueEventCallbacks: QueueEventCallback[] = [];
+  private subscribedPrinters = new Set<string>();
+  private subscribedQueueJobs = new Set<string>();
+  private subscribedProjects = new Set<string>();
+  private lastQueueSequence = 0;
 
   constructor() {
     this.loadSettings().then(() => {
@@ -467,6 +478,7 @@ export class PrinterSignalRService {
         console.info("[printerSignalR] starting connection");
       }
       await this.connection!.start();
+      await this.restoreResourceSubscriptions();
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
           .PrintFarmerDebug?.printerSignalR
@@ -499,6 +511,7 @@ export class PrinterSignalRService {
         this.connection &&
         this.connection.state === HubConnectionState.Connected
       ) {
+        await this.subscribeToPrinter(printerId);
         await this.connection.invoke("RequestPrinterStatus", printerId);
       } else {
         // try to connect then invoke
@@ -507,6 +520,7 @@ export class PrinterSignalRService {
           this.connection &&
           this.connection.state === HubConnectionState.Connected
         ) {
+          await this.subscribeToPrinter(printerId);
           await this.connection.invoke("RequestPrinterStatus", printerId);
         }
       }
@@ -514,6 +528,97 @@ export class PrinterSignalRService {
       console.warn("[printerSignalR] requestPrinterStatus failed", err);
       throw err;
     }
+  }
+
+  public async subscribeToPrinter(printerId: string): Promise<void> {
+    this.subscribedPrinters.add(printerId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("SubscribeToPrinterAsync", printerId);
+    }
+  }
+
+  public async unsubscribeFromPrinter(printerId: string): Promise<void> {
+    this.subscribedPrinters.delete(printerId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("UnsubscribeFromPrinterAsync", printerId);
+    }
+  }
+
+  public async subscribeToQueueJob(jobId: string): Promise<void> {
+    this.subscribedQueueJobs.add(jobId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("SubscribeToQueueJobAsync", jobId);
+    }
+  }
+
+  public async subscribeToProject(projectId: string): Promise<void> {
+    this.subscribedProjects.add(projectId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("SubscribeToProjectAsync", projectId);
+    }
+  }
+
+  public onQueueEvent(callback: QueueEventCallback): () => void {
+    this.queueEventCallbacks.push(callback);
+    return () => {
+      const index = this.queueEventCallbacks.indexOf(callback);
+      if (index >= 0) this.queueEventCallbacks.splice(index, 1);
+    };
+  }
+
+  private async handleQueueEvent(event: QueueEventEnvelope): Promise<void> {
+    if (
+      this.lastQueueSequence > 0 &&
+      event.sequence > this.lastQueueSequence + 1
+    ) {
+      let cursor = this.lastQueueSequence;
+      let hasMore = true;
+      while (hasMore && cursor < event.sequence) {
+        const feed = await apiClient.getQueueChanges(cursor);
+        for (const missed of feed.events) {
+          if (missed.sequence > this.lastQueueSequence) {
+            this.emitQueueEvent(missed);
+            this.lastQueueSequence = missed.sequence;
+          }
+        }
+        if (feed.nextSequence <= cursor) {
+          break;
+        }
+        cursor = feed.nextSequence;
+        this.lastQueueSequence = Math.max(this.lastQueueSequence, cursor);
+        hasMore = feed.hasMore;
+      }
+    }
+
+    if (event.sequence > this.lastQueueSequence) {
+      this.emitQueueEvent(event);
+      this.lastQueueSequence = event.sequence;
+    }
+  }
+
+  private emitQueueEvent(event: QueueEventEnvelope): void {
+    this.queueEventCallbacks.forEach((callback) => {
+      try {
+        callback(event);
+      } catch (error) {
+        console.error("Queue event callback error:", error);
+      }
+    });
+  }
+
+  private async restoreResourceSubscriptions(): Promise<void> {
+    if (this.connection?.state !== HubConnectionState.Connected) return;
+    await Promise.all([
+      ...Array.from(this.subscribedPrinters, (id) =>
+        this.connection!.invoke("SubscribeToPrinterAsync", id)
+      ),
+      ...Array.from(this.subscribedQueueJobs, (id) =>
+        this.connection!.invoke("SubscribeToQueueJobAsync", id)
+      ),
+      ...Array.from(this.subscribedProjects, (id) =>
+        this.connection!.invoke("SubscribeToProjectAsync", id)
+      ),
+    ]);
   }
 
   // Discovery event subscriptions
@@ -676,6 +781,10 @@ export class PrinterSignalRService {
     this.dispatchUploadProgressCallbacks = [];
     this.failureDetectionCallbacks = [];
     this.autoDispatchStatusCallbacks = [];
+    this.queueEventCallbacks = [];
+    this.subscribedPrinters.clear();
+    this.subscribedQueueJobs.clear();
+    this.subscribedProjects.clear();
     if (this.connection) {
       this.connection.stop();
       this.connection = null;

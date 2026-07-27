@@ -76,6 +76,32 @@ The job queue system manages the lifecycle of print jobs in PrintFarmer:
 - **Analytics:** Historical data, duration trends, queue statistics
 - **Scheduling:** Deferred execution with recurrence patterns
 
+### Calibration dispatch safety contract
+
+Generated calibration G-code has one execution path: immutable artifact
+promotion followed by `POST /api/job-queue`. Direct slice send/import and the
+analytics enqueue endpoint reject calibration output. The server derives the
+job kind, project/attempt/snapshot/orchestration lineage, exact
+printer/model/toolhead/spool, capabilities, slicer tuple, hashes, and byte count
+from persisted resources. Client replacements are rejected.
+
+Every physical start uses the database dispatch claim. Fresh explicit-idle
+telemetry, database busy state, exact stored-byte SHA-256, compatibility,
+filament sufficiency, current revisions, and exact urgent-first bed-clear
+acknowledgement are fail-closed gates. Unknown backend outcomes retain the
+exclusive lease until reconciliation; cancel and abort are durable fenced
+hardware commands.
+
+Public job mutations require the current job `ETag` in `If-Match`. Bed-clear
+also requires `X-Dispatch-State-If-Match`. Missing and stale preconditions
+return `428` and `412`, respectively. Auto-dispatch mutations use the dispatch
+state `If-Match`; skip also uses `X-Job-If-Match`, and enablement uses
+`X-Printer-If-Match`. Event envelopes retain compatibility ETags and include
+provider-independent job and dispatch logical revisions. SignalR queue events
+require explicit authorized printer/project/job subscriptions. Clients detect
+sequence gaps and refetch
+`GET /api/job-queue/changes?afterSequence={n}` as REST authority.
+
 ---
 
 ## Components Overview
@@ -141,7 +167,7 @@ public record JobQueuePrintJobDto(
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/` | Enqueue new job with metadata |
+| POST | `/` | Rejected; create through primary `/api/job-queue` |
 | PUT | `/jobs/{jobId}/priority` | Update queue priority |
 | POST | `/jobs/{jobId}/pause` | Pause printing job |
 | POST | `/jobs/{jobId}/resume` | Resume paused job |
