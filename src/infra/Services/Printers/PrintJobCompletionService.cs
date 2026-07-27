@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
@@ -37,6 +38,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoTagService? _autoTagService;
     private readonly ICameraSnapshotService? _cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory;
+    private readonly IDbOutboxSequenceAllocator? _sequenceAllocator;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -100,7 +102,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         IJobCostCalculationService? jobCostCalculationService = null,
         IAutoTagService? autoTagService = null,
         ICameraSnapshotService? cameraSnapshotService = null,
-        IServiceScopeFactory? serviceScopeFactory = null)
+        IServiceScopeFactory? serviceScopeFactory = null,
+        IDbOutboxSequenceAllocator? sequenceAllocator = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -116,6 +119,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoTagService = autoTagService;
         _cameraSnapshotService = cameraSnapshotService;
         _serviceScopeFactory = serviceScopeFactory;
+        _sequenceAllocator = sequenceAllocator;
     }
 
     /// <summary>
@@ -232,6 +236,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 _logger.LogWarning(ex, "[PrintJobCompletionService] Auto-tagging failed for job {JobId}", primaryJob.Id);
             }
         }
+
+        // Atomically release the matching queue lease in the same terminal transaction.
+        await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.Accepted, ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -354,6 +361,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Record partial filament consumption for failed/cancelled prints
         await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
+        // Atomically release the matching queue lease in the same terminal transaction.
+        await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.FailedBeforeStart, ct);
 
         await _db.SaveChangesAsync(ct);
 
@@ -626,6 +636,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         HashSet<Guid> printersToNotify = [];
         List<Guid> completedJobIds = [];
 
+        // Track which jobs went terminal on each printer so we can release leases atomically.
+        // Key = printerId; Value = (list of terminal jobs, outcome to record)
+        var terminalJobsByPrinter = new Dictionary<Guid, (List<PrintJob> jobs, DispatchAttemptOutcome outcome)>();
+
         foreach (PrintJob job in orphanedJobs)
         {
             if (!job.AssignedPrinterId.HasValue)
@@ -705,6 +719,15 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 syncedCount++;
                 printersToNotify.Add(printerId);
                 completedJobIds.Add(job.Id);
+
+                if (!terminalJobsByPrinter.TryGetValue(printerId, out var completedEntry))
+                {
+                    terminalJobsByPrinter[printerId] = ([job], DispatchAttemptOutcome.Accepted);
+                }
+                else
+                {
+                    completedEntry.jobs.Add(job);
+                }
             }
             else if (IsFailureState(currentPrinterState))
             {
@@ -721,6 +744,15 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
+
+                if (!terminalJobsByPrinter.TryGetValue(printerId, out var failedEntry))
+                {
+                    terminalJobsByPrinter[printerId] = ([job], DispatchAttemptOutcome.FailedBeforeStart);
+                }
+                else
+                {
+                    failedEntry.jobs.Add(job);
+                }
             }
             else if (IsPrintingState(currentPrinterState))
             {
@@ -733,6 +765,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         if (syncedCount > 0)
         {
+            // Release the matching dispatch lease for each terminal printer atomically
+            // in the same SaveChangesAsync call as the job status changes.
+            foreach (KeyValuePair<Guid, (List<PrintJob> jobs, DispatchAttemptOutcome outcome)> kv in terminalJobsByPrinter)
+            {
+                await ReleaseLeaseForTerminalJobsAsync(kv.Key, kv.Value.jobs, kv.Value.outcome, ct);
+            }
+
             await _db.SaveChangesAsync(ct);
 
             _logger.LogInformation(
@@ -794,6 +833,80 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
             }
         });
+    }
+
+    /// <summary>
+    /// Releases the dispatch lease when the active job on the printer matches one of the
+    /// terminal jobs. Runs within the same <see cref="AppDbContext"/> transaction as the
+    /// job-status update so the lease is never left dangling after a completion or failure.
+    /// </summary>
+    private async Task ReleaseLeaseForTerminalJobsAsync(
+        Guid printerId,
+        IEnumerable<PrintJob> terminalJobs,
+        DispatchAttemptOutcome terminalOutcome,
+        CancellationToken ct)
+    {
+        PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId, ct);
+
+        if (dispatchState is null || !dispatchState.ActiveDispatchAttemptId.HasValue)
+        {
+            return; // No lease to release.
+        }
+
+        // Only release when the active job is one of the jobs going terminal.
+        Guid? activeJobId = dispatchState.ActiveJobId;
+        bool matchesTerminal = activeJobId.HasValue &&
+            terminalJobs.Any(j => j.Id == activeJobId.Value);
+
+        if (!matchesTerminal)
+        {
+            return;
+        }
+
+        Guid attemptId = dispatchState.ActiveDispatchAttemptId.Value;
+
+        // Release the exclusive printer lease.
+        dispatchState.ActiveJobId = null;
+        dispatchState.ActiveDispatchAttemptId = null;
+
+        // Close the dispatch attempt (if still InProgress or Accepted — do not overwrite a
+        // FailedBeforeStart that was set by ReleaseClaimOnKnownFailureAsync).
+        QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+            .FirstOrDefaultAsync(a => a.Id == attemptId, ct);
+
+        if (attempt is not null &&
+            attempt.Outcome is DispatchAttemptOutcome.InProgress or DispatchAttemptOutcome.Accepted)
+        {
+            attempt.Outcome = terminalOutcome;
+            attempt.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        string reasonCode = terminalOutcome == DispatchAttemptOutcome.Accepted
+            ? "job_completed"
+            : "job_failed";
+
+        _ = QueueAuditWriter.Add(
+            _db,
+            actorSubject: attempt?.ActorSubject ?? "system",
+            QueueAuditOperations.DispatchRelease,
+            QueueAuditOutcomes.Success,
+            nameof(PrintJob),
+            resourceId: activeJobId,
+            printerId: printerId,
+            printJobId: activeJobId,
+            dispatchAttemptId: attemptId,
+            reasonCode: reasonCode,
+            dispatchStateRowVersion: dispatchState.RowVersion,
+            detail: new
+            {
+                terminalOutcome = terminalOutcome.ToString(),
+                leaseReleasedAtTerminal = true,
+            });
+
+        _logger.LogInformation(
+            "[PrintJobCompletionService] Released dispatch lease for printer {PrinterId} attempt {AttemptId} (outcome={Outcome})",
+            printerId, attemptId, terminalOutcome);
     }
 
     /// <inheritdoc />

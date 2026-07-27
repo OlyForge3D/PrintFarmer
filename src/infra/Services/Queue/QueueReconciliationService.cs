@@ -88,8 +88,29 @@ public sealed class QueueReconciliationService(
             .Take(20)
             .ToListAsync(ct);
 
+        // Ad-hoc attempts (PrintJobId == null) that are stale InProgress — these pin the
+        // printer lease forever if never reconciled. Reconcile through adapter identity/state.
+        List<QueueDispatchAttempt> staleAdHocAttempts = await db.QueueDispatchAttempts
+            .Where(a =>
+                a.PrintJobId == null &&
+                a.Outcome == DispatchAttemptOutcome.InProgress &&
+                a.ClaimedAtUtc < staleCutoff)
+            .Take(20)
+            .ToListAsync(ct);
+
+        // Ad-hoc attempts already flagged for reconciliation.
+        List<QueueDispatchAttempt> flaggedAdHocAttempts = await db.QueueDispatchAttempts
+            .Where(a =>
+                a.PrintJobId == null &&
+                a.Outcome == DispatchAttemptOutcome.Unknown &&
+                a.RequiresReconciliation)
+            .Take(20)
+            .ToListAsync(ct);
+
         List<QueueDispatchAttempt> toReconcile = staleAttempts
             .Concat(flaggedAttempts)
+            .Concat(staleAdHocAttempts)
+            .Concat(flaggedAdHocAttempts)
             .GroupBy(a => a.Id)
             .Select(g => g.First())
             .ToList();
@@ -146,7 +167,8 @@ public sealed class QueueReconciliationService(
         switch (outcome)
         {
             case BackendReconciliationOutcome.ActiveOnBackend:
-                // The backend is actively printing this job — advance to Printing.
+                // The backend is actively printing — advance to Printing for queue jobs.
+                // For ad-hoc, just accept and release the lease (no PrintJob to advance).
                 attempt.Outcome = DispatchAttemptOutcome.Accepted;
                 attempt.BackendAcceptedAtUtc ??= DateTime.UtcNow;
                 attempt.RequiresReconciliation = false;
@@ -157,14 +179,26 @@ public sealed class QueueReconciliationService(
                     attempt.PrintJob.Status = PrintJobStatus.Printing;
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
                 }
+                else if (attempt.PrintJobId is null)
+                {
+                    // Ad-hoc confirmed active — release the lease so the printer is not
+                    // permanently pinned. The backend is printing; no queue job to track.
+                    PrinterDispatchState? adHocActiveState = await db.PrinterDispatchStates
+                        .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
+                    if (adHocActiveState is not null && adHocActiveState.ActiveDispatchAttemptId == attempt.Id)
+                    {
+                        adHocActiveState.ActiveJobId = null;
+                        adHocActiveState.ActiveDispatchAttemptId = null;
+                    }
+                }
 
                 _ = QueueAuditWriter.Add(
                     db,
                     attempt.ActorSubject,
                     QueueAuditOperations.Reconciliation,
                     QueueAuditOutcomes.Success,
-                    nameof(PrintJob),
-                    resourceId: attempt.PrintJobId,
+                    attempt.PrintJobId is null ? nameof(Printer) : nameof(PrintJob),
+                    resourceId: attempt.PrintJobId ?? (Guid?)attempt.PrinterId,
                     printerId: attempt.PrinterId,
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
@@ -177,12 +211,12 @@ public sealed class QueueReconciliationService(
                 break;
 
             case BackendReconciliationOutcome.AbsentFromBackend:
-                // The backend has no record of this job — it failed or was never accepted.
-                // Release the lease so the job can be re-dispatched.
+                // The backend has no record of this job/start — it failed or was never accepted.
+                // Release the lease so the job can be re-dispatched (queue) or the printer is freed (ad-hoc).
                 attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
                 attempt.ErrorCode = "reconciliation_absent";
                 attempt.ErrorDetail = "Backend reconciliation found no active or historical record of this job.";
-                attempt.IsRetryable = true;
+                attempt.IsRetryable = attempt.PrintJobId is not null; // queue jobs are retryable; ad-hoc are not
                 attempt.RequiresReconciliation = false;
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
 
@@ -193,7 +227,7 @@ public sealed class QueueReconciliationService(
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
                 }
 
-                // Clear the active lease on the printer dispatch state.
+                // Clear the active lease on the printer dispatch state (queue and ad-hoc).
                 PrinterDispatchState? dispatchState = await db.PrinterDispatchStates
                     .FirstOrDefaultAsync(s => s.PrinterId == attempt.PrinterId, ct);
 
@@ -208,8 +242,8 @@ public sealed class QueueReconciliationService(
                     attempt.ActorSubject,
                     QueueAuditOperations.Reconciliation,
                     QueueAuditOutcomes.Failed,
-                    nameof(PrintJob),
-                    resourceId: attempt.PrintJobId,
+                    attempt.PrintJobId is null ? nameof(Printer) : nameof(PrintJob),
+                    resourceId: attempt.PrintJobId ?? (Guid?)attempt.PrinterId,
                     printerId: attempt.PrinterId,
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
@@ -233,8 +267,8 @@ public sealed class QueueReconciliationService(
                     attempt.ActorSubject,
                     QueueAuditOperations.Reconciliation,
                     QueueAuditOutcomes.Unknown,
-                    nameof(PrintJob),
-                    resourceId: attempt.PrintJobId,
+                    attempt.PrintJobId is null ? nameof(Printer) : nameof(PrintJob),
+                    resourceId: attempt.PrintJobId ?? (Guid?)attempt.PrinterId,
                     printerId: attempt.PrinterId,
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,

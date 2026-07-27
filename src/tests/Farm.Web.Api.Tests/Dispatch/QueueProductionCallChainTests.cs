@@ -13,9 +13,11 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using FluentAssertions;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Dispatch;
@@ -533,6 +535,172 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     }
 
     // =========================================================================
+    // Concurrency / lifecycle: terminal completion releases lease
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalCleanup_Completed_ReleasesLeaseAndNextClaimSucceeds()
+    {
+        // claim → backend accepted → job completed → next claim on same printer must succeed
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        // Step 1: Acquire claim
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimService claimSvc = CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+        DispatchClaimResult claim = await claimSvc.AcquireClaimAsync(new DispatchClaimRequest(
+            fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        // Step 2: Backend accepted (advances to Printing, preserves lease)
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "backend-job-1");
+
+        // Step 3: Completion service marks job completed — must atomically release the lease.
+        await using AppDbContext completeCtx = CreateContext();
+        bool completed = await CreateCompletionService(completeCtx)
+            .MarkCurrentJobAsCompletedAsync(fixture.PrinterId, "complete");
+        completed.Should().BeTrue();
+
+        // Step 4: Dispatch state must have no active lease.
+        await using AppDbContext verify = CreateContext();
+        PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(s => s.PrinterId == fixture.PrinterId);
+        state.ActiveJobId.Should().BeNull("completing a job must release the ActiveJobId lease");
+        state.ActiveDispatchAttemptId.Should().BeNull("completing a job must release the ActiveDispatchAttemptId");
+
+        // Step 5: An ad-hoc claim on the same printer must now succeed (lease is free).
+        await using AppDbContext ctx2 = CreateContext();
+        DispatchClaimResult unblocked = await CreateClaim(ctx2, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(fixture.PrinterId, "op", "PrinterFile", "next.gcode"));
+        unblocked.Success.Should().BeTrue("after completion the printer lease must be free for a new start");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task TerminalCleanup_Failed_ReleasesLeaseAndNextClaimSucceeds()
+    {
+        // claim → backend accepted → job failed → next claim must succeed
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimService claimSvc = CreateClaim(claimCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+        DispatchClaimResult claim = await claimSvc.AcquireClaimAsync(new DispatchClaimRequest(
+            fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+
+        await using AppDbContext acceptCtx = CreateContext();
+        await CreateClaim(acceptCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .RecordBackendAcceptedAsync(claim.Attempt!.Id, "backend-job-2");
+
+        await using AppDbContext failCtx = CreateContext();
+        bool failed = await CreateCompletionService(failCtx)
+            .MarkCurrentJobAsFailedAsync(fixture.PrinterId, "nozzle clog");
+        failed.Should().BeTrue();
+
+        await using AppDbContext verify = CreateContext();
+        PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(s => s.PrinterId == fixture.PrinterId);
+        state.ActiveJobId.Should().BeNull("failing a job must release the ActiveJobId lease");
+        state.ActiveDispatchAttemptId.Should().BeNull("failing a job must release the ActiveDispatchAttemptId");
+    }
+
+    // =========================================================================
+    // Concurrency / lifecycle: mutual exclusion ad-hoc vs queue
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task MutualExclusion_AdHocVsQueue_AdHocInFlightBlocksQueueClaim()
+    {
+        // An active ad-hoc claim must prevent a queue claim on the same printer.
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        // Ad-hoc claim first.
+        await using AppDbContext adHocCtx = CreateContext();
+        DispatchClaimResult adHocResult = await CreateClaim(adHocCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(fixture.PrinterId, "op", "SliceBridge", "file.gcode"));
+        adHocResult.Success.Should().BeTrue(adHocResult.ErrorDetail);
+
+        // Queue claim on the same printer must now fail with printer_busy_active.
+        await using AppDbContext queueCtx = CreateContext();
+        DispatchClaimResult queueResult = await CreateClaim(queueCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+
+        queueResult.Success.Should().BeFalse("an ad-hoc claim must block a queue claim on the same printer");
+        queueResult.ErrorCode.Should().Be("printer_busy_active");
+
+        // Both operations must be audited.
+        await using AppDbContext verify = CreateContext();
+        (await verify.QueueOperationAudits.CountAsync(a =>
+                a.Operation == QueueAuditOperations.AdHocStart &&
+                a.Outcome == QueueAuditOutcomes.Success))
+            .Should().BeGreaterThanOrEqualTo(1, "the granted ad-hoc start must be audited");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task MutualExclusion_QueueVsAdHoc_QueueClaimBlocksAdHoc()
+    {
+        // An active queue claim must prevent an ad-hoc claim on the same printer.
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+
+        // Queue claim first.
+        await using AppDbContext queueCtx = CreateContext();
+        DispatchClaimResult queueResult = await CreateClaim(queueCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId, fixture.PrinterId, "op", "Manual", fixture.AckKey, null, null));
+        queueResult.Success.Should().BeTrue(queueResult.ErrorDetail);
+
+        // Ad-hoc claim on the same printer must now fail.
+        await using AppDbContext adHocCtx = CreateContext();
+        DispatchClaimResult adHocResult = await CreateClaim(adHocCtx, DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(fixture.PrinterId, "op", "PrinterFile", "other.gcode"));
+
+        adHocResult.Success.Should().BeFalse("a queue claim must block an ad-hoc claim on the same printer");
+        adHocResult.ErrorCode.Should().Be("printer_busy_active");
+    }
+
+    // =========================================================================
+    // Ad-hoc telemetry gate: fail-closed
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task AdHoc_MissingTelemetry_FailsClosed()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: false);
+
+        await using AppDbContext ctx = CreateContext();
+        // NoTelemetryReader simulates a printer that has never reported status.
+        DispatchClaimResult result = await CreateClaim(ctx, DispatchTestDoubles.NoTelemetryReader())
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(fixture.PrinterId, "op", "SliceBridge", "file.gcode"));
+
+        result.Success.Should().BeFalse("ad-hoc dispatch must fail closed when no telemetry is available");
+        result.ErrorCode.Should().Be("telemetry_unavailable");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task AdHoc_StaleTelemetry_FailsClosed()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: false);
+
+        await using AppDbContext ctx = CreateContext();
+        DispatchClaimResult result = await CreateClaim(ctx, DispatchTestDoubles.StaleReader(fixture.PrinterId))
+            .AcquireAdHocClaimAsync(new AdHocDispatchClaimRequest(fixture.PrinterId, "op", "SliceBridge", "file.gcode"));
+
+        result.Success.Should().BeFalse("ad-hoc dispatch must fail closed when telemetry is stale");
+        result.ErrorCode.Should().Be("telemetry_stale");
+    }
+
+    // =========================================================================
     // Shared ordering selector
     // =========================================================================
 
@@ -584,6 +752,24 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     // =========================================================================
 
     private sealed record Fixture(Guid PrinterId, Guid JobId, Guid GcodeId, string AckKey);
+
+    private static PrintJobCompletionService CreateCompletionService(AppDbContext db)
+    {
+        // Minimal hub mock: BroadcastJobQueueUpdateAsync wraps hub calls in try-catch so
+        // a non-null stub that does nothing is sufficient for completion tests.
+        var hubClientsMock = new Mock<IHubClients>();
+        var groupProxy = new Mock<IClientProxy>();
+        hubClientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(groupProxy.Object);
+        hubClientsMock.Setup(c => c.All).Returns(groupProxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(h => h.Clients).Returns(hubClientsMock.Object);
+
+        return new PrintJobCompletionService(
+            db,
+            hub.Object,
+            NullLogger<PrintJobCompletionService>.Instance,
+            sequenceAllocator: new DbOutboxSequenceAllocator());
+    }
 
     private AppDbContext CreateContext()
     {

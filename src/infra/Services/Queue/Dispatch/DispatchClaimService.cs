@@ -359,23 +359,39 @@ public sealed class DispatchClaimService(
             return printerGate;
         }
 
-        // An ad-hoc start must never race a physically printing backend.
+        // An ad-hoc start applies the same fail-closed telemetry gate as queue claims:
+        // missing or stale telemetry is a hard stop (never permitted to pass on absence of data).
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
-        if (snapshot is not null)
+        if (snapshot is null)
         {
-            if (!snapshot.Status.IsOnline)
-            {
-                return DispatchClaimResult.Fail(
-                    "printer_offline",
-                    $"Printer {request.PrinterId} is not online per telemetry.");
-            }
+            return DispatchClaimResult.Fail(
+                "telemetry_unavailable",
+                $"Fresh telemetry is required for ad-hoc dispatch. No snapshot is available for printer {request.PrinterId}.");
+        }
 
-            if (snapshot.Status.State is "printing" or "starting" or "paused")
-            {
-                return DispatchClaimResult.Fail(
-                    "printer_busy_telemetry",
-                    $"Printer {request.PrinterId} is in state '{snapshot.Status.State}' per telemetry; cannot start a new job.");
-            }
+        DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
+        bool isFresh = observedAt.HasValue &&
+                       (DateTime.UtcNow - observedAt.Value) <= TelemetryFreshnessLimit;
+        if (!isFresh)
+        {
+            string staleMsg =
+                $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes. " +
+                "Ad-hoc dispatch requires a fresh online+idle observation.";
+            return DispatchClaimResult.Fail("telemetry_stale", staleMsg);
+        }
+
+        if (!snapshot.Status.IsOnline)
+        {
+            return DispatchClaimResult.Fail(
+                "printer_offline",
+                $"Printer {request.PrinterId} is not online per telemetry.");
+        }
+
+        if (snapshot.Status.State is "printing" or "starting" or "paused")
+        {
+            return DispatchClaimResult.Fail(
+                "printer_busy_telemetry",
+                $"Printer {request.PrinterId} is in state '{snapshot.Status.State}' per telemetry; cannot start an ad-hoc job.");
         }
 
         DateTime nowUtc = DateTime.UtcNow;
@@ -670,18 +686,22 @@ public sealed class DispatchClaimService(
             return DispatchClaimResult.Fail("printer_unavailable", $"Printer {printerId} is not available.");
         }
 
-        if (dispatchState.ActiveJobId.HasValue && dispatchState.ActiveJobId != jobId)
+        // Mutual exclusion: block if any active attempt (queue or ad-hoc) is in-flight for a
+        // different entity. Re-entry is allowed only when the SAME queue job already owns the lease
+        // (idempotent retry after a partial commit). Ad-hoc-vs-queue, queue-vs-ad-hoc, and
+        // ad-hoc-vs-ad-hoc all conflict unconditionally.
+        if (dispatchState.ActiveDispatchAttemptId.HasValue)
         {
-            return DispatchClaimResult.Fail(
-                "printer_busy_active",
-                $"Printer {printerId} already has an active job {dispatchState.ActiveJobId}.");
-        }
-
-        if (jobId is null && dispatchState.ActiveDispatchAttemptId.HasValue)
-        {
-            return DispatchClaimResult.Fail(
-                "printer_busy_active",
-                $"Printer {printerId} already has an in-flight dispatch attempt {dispatchState.ActiveDispatchAttemptId}.");
+            bool sameQueueJobOwnsLease = jobId.HasValue && dispatchState.ActiveJobId == jobId;
+            if (!sameQueueJobOwnsLease)
+            {
+                string ownerDesc = dispatchState.ActiveJobId.HasValue
+                    ? $"queue job {dispatchState.ActiveJobId}"
+                    : "an ad-hoc start";
+                return DispatchClaimResult.Fail(
+                    "printer_busy_active",
+                    $"Printer {printerId} already has an in-flight dispatch attempt for {ownerDesc}.");
+            }
         }
 
         return null;
