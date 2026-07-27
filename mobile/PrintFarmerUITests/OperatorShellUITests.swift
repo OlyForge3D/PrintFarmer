@@ -18,26 +18,56 @@ import XCTest
 @MainActor
 final class OperatorShellUITests: PrintFarmerUITestCase {
 
-    private let expectedTabsInOrder = ["Attention", "Farm", "Tasks", "Scan", "Inventory"]
-
-    // MARK: - Tab bar shape
+    // MARK: - Shell shape (tab bar on iPhone, sidebar on iPad)
 
     func testAppLaunchesOnAttentionTab() {
-        let attentionTab = app.tabBars.buttons["Attention"]
-        XCTAssertTrue(attentionTab.waitForExistence(timeout: 5),
-                      "Attention tab should exist in the tab bar")
-        XCTAssertTrue(attentionTab.isSelected,
-                      "Attention should be the initial selected tab")
+        let attention = operatorDestinationButton(
+            tabTitle: "Attention",
+            sidebarIdentifier: "sidebar.attention",
+            timeout: 5
+        )
+        XCTAssertTrue(
+            attention.exists,
+            "Attention destination should be present in the operator shell — tab bar 'Attention' on iPhone or 'sidebar.attention' on iPad"
+        )
+        XCTAssertTrue(
+            attention.isSelected,
+            "Attention should be the initial selected destination"
+        )
     }
 
     func testTabBarShowsFiveOperatorDestinations() {
+        // Operator shell must present a navigation container: iPhone
+        // TabView bottom bar OR iPad NavigationSplitView sidebar.
         let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 5), "Tab bar should exist")
+        let sidebarAttention = app.buttons["sidebar.attention"]
+        let hasTabBar = tabBar.waitForExistence(timeout: 3)
+        let hasSidebar = hasTabBar ? false : sidebarAttention.waitForExistence(timeout: 3)
+        if !hasTabBar && !hasSidebar {
+            revealSidebarIfCollapsed()
+        }
+        XCTAssertTrue(
+            hasTabBar || sidebarAttention.exists,
+            "Operator shell must expose either a compact tab bar or an iPad sidebar"
+        )
 
-        for title in expectedTabsInOrder {
-            let tab = app.tabBars.buttons[title]
-            XCTAssertTrue(tab.waitForExistence(timeout: 2),
-                          "Tab '\(title)' should be present in operator shell")
+        let expectedDestinations: [(tabTitle: String, sidebarIdentifier: String)] = [
+            ("Attention", "sidebar.attention"),
+            ("Farm", "sidebar.farm"),
+            ("Tasks", "sidebar.tasks"),
+            ("Scan", "sidebar.scan"),
+            ("Inventory", "sidebar.inventory")
+        ]
+        for destination in expectedDestinations {
+            let button = operatorDestinationButton(
+                tabTitle: destination.tabTitle,
+                sidebarIdentifier: destination.sidebarIdentifier,
+                timeout: 2
+            )
+            XCTAssertTrue(
+                button.exists,
+                "Destination '\(destination.tabTitle)' should be present in the operator shell — tab bar '\(destination.tabTitle)' or sidebar '\(destination.sidebarIdentifier)'"
+            )
         }
     }
 
