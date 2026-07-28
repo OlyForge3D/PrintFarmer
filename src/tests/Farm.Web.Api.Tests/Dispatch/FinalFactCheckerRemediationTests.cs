@@ -140,6 +140,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
     [InlineData("accepted")]
     [InlineData("failed")]
     [InlineData("unknown")]
+    [InlineData("started")]
     public async Task LateAttemptAOutcome_AfterAttemptBOwnsPrinter_DoesNotMutateB(
         string outcome)
     {
@@ -148,26 +149,22 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         await using AppDbContext mutate = CreateContext();
         DispatchClaimService service = CreateClaimService(mutate, fixture.PrinterId);
 
-        switch (outcome)
+        bool applied = outcome switch
         {
-            case "accepted":
-                await service.RecordBackendAcceptedAsync(
+            "accepted" => await service.RecordBackendAcceptedAsync(
                     fixture.AttemptAId,
                     "provider-a",
-                    "a.gcode");
-                break;
-            case "failed":
-                await service.ReleaseClaimOnKnownFailureAsync(
+                    "a.gcode"),
+            "failed" => await service.ReleaseClaimOnKnownFailureAsync(
                     fixture.AttemptAId,
                     "late_failure",
-                    "late A failure");
-                break;
-            default:
-                await service.RecordUnknownOutcomeAsync(
+                    "late A failure"),
+            "started" => await service.RecordBackendCallStartedAsync(
+                    fixture.AttemptAId),
+            _ => await service.RecordUnknownOutcomeAsync(
                     fixture.AttemptAId,
-                    "late A unknown");
-                break;
-        }
+                    "late A unknown"),
+        };
 
         await using AppDbContext verify = CreateContext();
         PrinterDispatchState state = await verify.PrinterDispatchStates
@@ -176,6 +173,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             .SingleAsync(candidate => candidate.Id == fixture.JobAId);
         QueueDispatchAttempt attemptA = await verify.QueueDispatchAttempts
             .SingleAsync(candidate => candidate.Id == fixture.AttemptAId);
+        applied.Should().BeFalse();
         state.ActiveDispatchAttemptId.Should().Be(fixture.AttemptBId);
         state.ActiveJobId.Should().Be(fixture.JobAId);
         job.Status.Should().Be(PrintJobStatus.Starting);
@@ -446,13 +444,13 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         authorization.Setup(service => service.CanActorAccessJobAsync(
                 actor,
                 jobId,
-                PrinterGroupAccessLevel.Submit,
+                It.IsAny<PrinterGroupAccessLevel>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         authorization.Setup(service => service.CanActorAccessPrinterAsync(
                 actor,
                 printerId,
-                PrinterGroupAccessLevel.Submit,
+                It.IsAny<PrinterGroupAccessLevel>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
         authorization.Setup(service => service.CanActorAccessProjectAsync(
@@ -467,9 +465,10 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
 
         Func<Task> denied = () => service.ScheduleJobAsync(
             jobId,
-            DateTime.UtcNow.AddMinutes(5),
+            DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(5), DateTimeKind.Unspecified),
             "UTC",
             null,
+            1,
             null,
             actor);
         await denied.Should().ThrowAsync<UnauthorizedAccessException>();
@@ -482,9 +481,10 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             .ReturnsAsync(true);
         await service.ScheduleJobAsync(
             jobId,
-            DateTime.UtcNow.AddMinutes(5),
+            DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(5), DateTimeKind.Unspecified),
             "UTC",
             null,
+            1,
             null,
             actor);
 
@@ -498,12 +498,19 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         await using AppDbContext db = CreateContext();
         await db.Database.EnsureCreatedAsync();
         DateTime due = DateTime.UtcNow.AddMinutes(-1);
+        Guid[] printerIds =
+        [
+            await SeedPrinterAsync(db),
+            await SeedPrinterAsync(db),
+            await SeedPrinterAsync(db),
+            await SeedPrinterAsync(db),
+        ];
         var jobs = new[]
         {
-            CreateScheduledJob(PrintJobPriority.Low, queuePosition: 1, due),
-            CreateScheduledJob(PrintJobPriority.Urgent, queuePosition: 2, due),
-            CreateScheduledJob(PrintJobPriority.High, queuePosition: 1, due),
-            CreateScheduledJob(PrintJobPriority.Urgent, queuePosition: 1, due),
+            CreateScheduledJob(PrintJobPriority.Low, queuePosition: 1, due, printerIds[0]),
+            CreateScheduledJob(PrintJobPriority.Urgent, queuePosition: 2, due, printerIds[1]),
+            CreateScheduledJob(PrintJobPriority.High, queuePosition: 1, due, printerIds[2]),
+            CreateScheduledJob(PrintJobPriority.Urgent, queuePosition: 1, due, printerIds[3]),
         };
         db.PrintJobs.AddRange(jobs);
         await db.SaveChangesAsync();
@@ -533,7 +540,8 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         var scheduler = new JobSchedulingService(
             db,
             NullLogger<JobSchedulingService>.Instance,
-            management.Object);
+            management.Object,
+            AllowAllSchedulingAuthorization());
 
         await scheduler.TriggerScheduledJobsAsync();
 
@@ -542,6 +550,117 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             jobs[1].Id,
             jobs[2].Id,
             jobs[0].Id);
+    }
+
+    [Fact]
+    public async Task SchedulingWallTime_NonUtcDailyRecurrence_PreservesLocalTimeAcrossDst()
+    {
+        await using AppDbContext db = CreateContext();
+        await db.Database.EnsureCreatedAsync();
+        Guid printerId = await SeedPrinterAsync(db);
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "DST recurrence",
+            AssignedPrinterId = printerId,
+            Status = PrintJobStatus.Assigned,
+            Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        string actor = Guid.NewGuid().ToString();
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobAsync(
+                job.Id.ToString(),
+                actor,
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto
+            {
+                DispatchResult = new DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+        var service = new JobSchedulingService(
+            db,
+            NullLogger<JobSchedulingService>.Instance,
+            management.Object,
+            AllowAllSchedulingAuthorization());
+
+        ScheduledJobDto created = await service.ScheduleJobAsync(
+            job.Id,
+            new DateTime(2026, 3, 7, 9, 30, 0, DateTimeKind.Unspecified),
+            "America/New_York",
+            "Daily",
+            1,
+            null,
+            actor);
+
+        created.ScheduledStartTimeUtc.Should().Be(
+            new DateTime(2026, 3, 7, 14, 30, 0, DateTimeKind.Utc));
+        created.ScheduledLocalTime.Should().Be(
+            new DateTime(2026, 3, 7, 9, 30, 0, DateTimeKind.Unspecified));
+
+        await service.TriggerScheduledJobsAsync();
+        db.ChangeTracker.Clear();
+        JobSchedule advanced = await db.JobSchedules.SingleAsync(
+            schedule => schedule.PrintJobId == job.Id);
+        advanced.ScheduledStartTime.Should().Be(
+            new DateTime(2026, 3, 8, 13, 30, 0, DateTimeKind.Utc));
+        service.ConvertFromUtc(
+                advanced.ScheduledStartTime,
+                "America/New_York")
+            .Should().Be(new DateTime(2026, 3, 8, 9, 30, 0));
+    }
+
+    [Theory]
+    [InlineData(2026, 3, 8, 2, 30)]
+    [InlineData(2026, 11, 1, 1, 30)]
+    public async Task SchedulingWallTime_InvalidOrAmbiguousDstInput_FailsClosed(
+        int year,
+        int month,
+        int day,
+        int hour,
+        int minute)
+    {
+        await using AppDbContext db = CreateContext();
+        await db.Database.EnsureCreatedAsync();
+        Guid printerId = await SeedPrinterAsync(db);
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "DST invalid",
+            AssignedPrinterId = printerId,
+            Status = PrintJobStatus.Assigned,
+            Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        var service = new JobSchedulingService(
+            db,
+            NullLogger<JobSchedulingService>.Instance,
+            resourceAuthorization: AllowAllSchedulingAuthorization());
+
+        Func<Task> schedule = () => service.ScheduleJobAsync(
+            job.Id,
+            new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Unspecified),
+            "America/New_York",
+            null,
+            1,
+            null,
+            Guid.NewGuid().ToString());
+
+        await schedule.Should().ThrowAsync<ArgumentException>();
+        (await db.JobSchedules.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -844,17 +963,22 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
     private static async Task<Guid> SeedPrinterAsync(AppDbContext db)
     {
         await db.Database.EnsureCreatedAsync();
-        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Race maker" };
+        string token = Guid.NewGuid().ToString("N");
+        var manufacturer = new Manufacturer
+        {
+            Id = Guid.NewGuid(),
+            Name = $"Race maker {token}",
+        };
         var model = new PrinterModel
         {
             Id = Guid.NewGuid(),
             ManufacturerId = manufacturer.Id,
-            Name = "Race model",
+            Name = $"Race model {token}",
         };
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
-            Name = "Race printer",
+            Name = $"Race printer {token}",
             ServerUrl = $"http://race-{Guid.NewGuid():N}",
             ManufacturerId = manufacturer.Id,
             ModelId = model.Id,
@@ -913,7 +1037,8 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
     private static PrintJob CreateScheduledJob(
         PrintJobPriority priority,
         int queuePosition,
-        DateTime due)
+        DateTime due,
+        Guid printerId)
     {
         var job = new PrintJob
         {
@@ -922,6 +1047,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             Status = PrintJobStatus.Assigned,
             Priority = (int)priority,
             QueuePosition = queuePosition,
+            AssignedPrinterId = printerId,
             CreatedAt = due.AddMinutes(-1),
             UpdatedAt = due.AddMinutes(-1),
             QueuedAt = due.AddMinutes(-1),
@@ -933,8 +1059,34 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             PrintJob = job,
             ScheduledStartTime = due,
             InitiatingActorSubject = Guid.NewGuid().ToString(),
+            RequiresOperatorReauthorization = false,
+            RecurrenceInterval = 1,
         };
         return job;
+    }
+
+    private static IQueueResourceAuthorizationService
+        AllowAllSchedulingAuthorization()
+    {
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization.Setup(service => service.CanActorAccessJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        authorization.Setup(service => service.CanActorAccessPrinterAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        authorization.Setup(service => service.CanActorAccessProjectAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        return authorization.Object;
     }
 
     private static IHubContext<PrinterHub> CreateHub()

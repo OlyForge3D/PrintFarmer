@@ -6,6 +6,17 @@ public sealed record DispatchUploadProgressDto
 {
     public required string JobId { get; init; }
 
+    public required Guid AttemptId { get; init; }
+
+    public required int AttemptNumber { get; init; }
+
+    /// <summary>Monotonic sequence within this exact dispatch attempt.</summary>
+    public required long Sequence { get; init; }
+
+    public string? JobRevision { get; init; }
+
+    public string? DispatchStateRevision { get; init; }
+
     public required string PrinterId { get; init; }
 
     public required string FileName { get; init; }

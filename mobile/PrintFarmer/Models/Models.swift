@@ -175,6 +175,8 @@ struct Printer: Codable, Identifiable, Sendable {
     let frontendPort: Int?
     let inMaintenance: Bool
     let isEnabled: Bool
+    let rowVersion: String?
+    let configurationRevision: Int64
 
     // Live status (from SignalR cache)
     var isOnline: Bool
@@ -213,7 +215,7 @@ struct Printer: Codable, Identifiable, Sendable {
         case id, name, notes
         case manufacturerId, manufacturerName, modelId, modelName, motionType
         case backend, apiKey, originalServerUrl, backendPort, frontendPort
-        case inMaintenance, isEnabled
+        case inMaintenance, isEnabled, rowVersion, configurationRevision
         case isOnline, state, progress, jobName, fileName, thumbnailUrl
         case cameraStreamUrl, cameraSnapshotUrl
         case cameraAccessMode, cameraStreamFormat, cameraSnapshotStrategy
@@ -241,6 +243,11 @@ struct Printer: Codable, Identifiable, Sendable {
         frontendPort = try c.decodeIfPresent(Int.self, forKey: .frontendPort)
         inMaintenance = try c.decodeIfPresent(Bool.self, forKey: .inMaintenance) ?? false
         isEnabled = try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        rowVersion = try c.decodeIfPresent(String.self, forKey: .rowVersion)
+        configurationRevision = try c.decodeIfPresent(
+            Int64.self,
+            forKey: .configurationRevision
+        ) ?? 0
 
         isOnline = try c.decodeIfPresent(Bool.self, forKey: .isOnline) ?? false
         state = try c.decodeIfPresent(String.self, forKey: .state)
@@ -560,6 +567,9 @@ struct PrintJob: Codable, Identifiable, Sendable {
     let id: UUID
     let rowVersion: String?
     let dispatchStateRowVersion: String?
+    var jobKind: String? = nil
+    var calibrationProjectId: UUID? = nil
+    var pinnedPrinterConfigRevision: Int64? = nil
     let status: PrintJobStatus?
     let priority: Int
     let queuePosition: Int
@@ -629,6 +639,7 @@ struct QueuedPrintJobResponse: Codable, Identifiable, Sendable {
 
 struct QueuedJobInfo: Codable, Identifiable, Sendable {
     let id: String
+    var rowVersion: String? = nil
     let name: String
     let fileName: String?
     let assignedPrinterId: String?
@@ -650,6 +661,8 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
     let copies: Int
     let completedCopies: Int
     let remainingCopies: Int
+    var jobKind: String? = nil
+    var calibrationProjectId: String? = nil
 
     var jobStatus: PrintJobStatus? {
         PrintJobStatus(rawValue: status)

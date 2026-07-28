@@ -54,6 +54,7 @@ final class PrinterDetailViewModel {
     var nfcScannedData: ScannedSpoolData?
     var showScannedDataSheet = false
     var showNFCReadyConfirmation = false
+    var reviewedReadyStatus: AutoDispatchStatus?
 
     private var nfcScanner: (any SpoolScannerProtocol)?
     private var autoDispatchService: (any AutoDispatchServiceProtocol)?
@@ -204,16 +205,31 @@ final class PrinterDetailViewModel {
 
     // MARK: - Mark Ready (NFC Deep Link)
 
+    func prepareReadyConfirmation() async {
+        guard isViewActive, let autoDispatchService else { return }
+        do {
+            reviewedReadyStatus = try await autoDispatchService.getStatus(
+                printerId: printerId
+            )
+            showNFCReadyConfirmation = true
+        } catch {
+            actionError = error.localizedDescription
+        }
+    }
+
     func markPrinterReady() async {
         guard isViewActive else { return }
-        guard let autoDispatchService else {
-            actionError = "Auto-dispatch service not available."
+        guard let autoDispatchService, let reviewedReadyStatus else {
+            actionError = "Refresh the auto-dispatch status before confirming."
             return
         }
+        self.reviewedReadyStatus = nil
         isPerformingAction = true
         actionError = nil
         do {
-            _ = try await autoDispatchService.markReady(printerId: printerId)
+            _ = try await autoDispatchService.markReady(
+                status: reviewedReadyStatus
+            )
             guard isViewActive else { return }
             await loadPrinter()
         } catch {
@@ -265,8 +281,13 @@ final class PrinterDetailViewModel {
         isPerformingAction = true
         actionError = nil
         do {
+            let rowVersion = try reviewedPrinterRowVersion()
             print("📡 loadSpoolById: printer=\(printerId) spool=\(id)")
-            _ = try await printerService.setActiveSpool(printerId: printerId, spoolId: id)
+            _ = try await printerService.setActiveSpool(
+                printerId: printerId,
+                spoolId: id,
+                reviewedRowVersion: rowVersion
+            )
             guard isViewActive else { return }
             print("✅ loadSpoolById: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
@@ -289,7 +310,11 @@ final class PrinterDetailViewModel {
         isPerformingAction = true
         actionError = nil
         do {
-            _ = try await printerService.setActiveSpool(printerId: printerId, spoolId: nil)
+            _ = try await printerService.setActiveSpool(
+                printerId: printerId,
+                spoolId: nil,
+                reviewedRowVersion: try reviewedPrinterRowVersion()
+            )
             guard isViewActive else { return }
             _ = try await printerService.unloadFilament(printerId: printerId)
             guard isViewActive else { return }
@@ -313,8 +338,13 @@ final class PrinterDetailViewModel {
         isPerformingAction = true
         actionError = nil
         do {
+            let rowVersion = try reviewedPrinterRowVersion()
             print("📡 setActiveSpool: printer=\(printerId) spool=\(spool.id)")
-            _ = try await printerService.setActiveSpool(printerId: printerId, spoolId: spool.id)
+            _ = try await printerService.setActiveSpool(
+                printerId: printerId,
+                spoolId: spool.id,
+                reviewedRowVersion: rowVersion
+            )
             guard isViewActive else { return }
             print("✅ setActiveSpool: success")
             lastSetSpoolInfo = PrinterSpoolInfo(
@@ -508,7 +538,8 @@ final class PrinterDetailViewModel {
         do {
             let updated = try await printerService.setMaintenanceMode(
                 id: printerId,
-                inMaintenance: !printer.inMaintenance
+                inMaintenance: !printer.inMaintenance,
+                reviewedRowVersion: try reviewedPrinterRowVersion()
             )
             guard isViewActive else { return }
             self.printer = updated
@@ -516,6 +547,13 @@ final class PrinterDetailViewModel {
             guard isViewActive else { return }
             actionError = error.localizedDescription
         }
+    }
+
+    private func reviewedPrinterRowVersion() throws -> String {
+        guard let rowVersion = printer?.rowVersion, !rowVersion.isEmpty else {
+            throw NetworkError.invalidResponse
+        }
+        return rowVersion
     }
 
     @discardableResult

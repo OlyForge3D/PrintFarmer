@@ -119,7 +119,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
-    func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
+    func setMaintenanceMode(
+        id: UUID,
+        inMaintenance: Bool,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
         maintenanceCalledWith = (id, inMaintenance)
         if let error = errorToThrow { throw error }
         guard let printer = printerToReturn else { throw NetworkError.notFound }
@@ -132,7 +136,11 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return queueOverviewToReturn
     }
 
-    func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult {
+    func setActiveSpool(
+        printerId: UUID,
+        spoolId: Int?,
+        reviewedRowVersion: String
+    ) async throws -> CommandResult {
         setActiveSpoolCalledWith = (printerId, spoolId)
         if let error = errorToThrow { throw error }
         return commandResultToReturn

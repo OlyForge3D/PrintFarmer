@@ -55,4 +55,5 @@ public record PrinterDetailsDto(
     bool UsernameConfigured = false,
     bool PasswordConfigured = false,
     bool CameraStreamConfigured = false,
-    bool CameraSnapshotConfigured = false);
+    bool CameraSnapshotConfigured = false,
+    string? RowVersion = null);

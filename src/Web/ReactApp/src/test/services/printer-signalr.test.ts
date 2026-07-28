@@ -66,8 +66,8 @@ vi.mock("@microsoft/signalr", () => ({
     None: 6,
   },
   HubConnectionBuilder: class {
-    withUrl(url: string) {
-      signalr.builder.withUrl(url);
+    withUrl(url: string, options: unknown) {
+      signalr.builder.withUrl(url, options);
       return this;
     }
 
@@ -110,10 +110,27 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     signalr.connection.state = "Disconnected";
     signalr.connection.start.mockClear();
     signalr.connection.stop.mockClear();
-    signalr.connection.invoke.mockClear();
+    signalr.connection.invoke.mockReset();
+    signalr.connection.invoke.mockResolvedValue(undefined);
     signalr.builder.build.mockClear();
     signalr.eventHandlers.clear();
     api.getQueueChanges.mockReset();
+    localStorage.clear();
+  });
+
+  it("authenticates the browser connection with the current local-storage JWT", async () => {
+    localStorage.setItem("auth-token", "jwt-for-websocket");
+    const service = new PrinterSignalRService();
+    await vi.waitFor(() =>
+      expect(signalr.builder.withUrl).toHaveBeenCalled()
+    );
+
+    const [, options] = signalr.builder.withUrl.mock.calls.at(-1) as [
+      string,
+      { accessTokenFactory: () => string },
+    ];
+    expect(options.accessTokenFactory()).toBe("jwt-for-websocket");
+    service.dispose();
   });
 
   it("drains on initial connect and again from the cursor on reconnect", async () => {
@@ -170,6 +187,84 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       expect(received.map((event) => event.sequence)).toEqual([1, 2, 3])
     );
     expect(api.getQueueChanges).toHaveBeenCalledWith(0);
+    service.dispose();
+  });
+
+  it("restores authorized printer, job, and project scopes after reconnect", async () => {
+    api.getQueueChanges.mockResolvedValue({
+      afterSequence: 0,
+      nextSequence: 0,
+      hasMore: false,
+      events: [],
+    });
+    const service = new PrinterSignalRService();
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+    await service.connect();
+    await service.replaceQueueResourceSubscriptions({
+      printerIds: ["printer-1"],
+      jobIds: ["job-1"],
+      projectIds: ["project-1"],
+    });
+    signalr.connection.invoke.mockClear();
+
+    signalr.getReconnectHandler()?.();
+
+    await vi.waitFor(() => {
+      expect(signalr.connection.invoke).toHaveBeenCalledWith(
+        "SubscribeToPrinterAsync",
+        "printer-1"
+      );
+      expect(signalr.connection.invoke).toHaveBeenCalledWith(
+        "SubscribeToQueueJobAsync",
+        "job-1"
+      );
+      expect(signalr.connection.invoke).toHaveBeenCalledWith(
+        "SubscribeToProjectAsync",
+        "project-1"
+      );
+    });
+    service.dispose();
+  });
+
+  it("prunes a revoked scope and still drains the REST cursor on reconnect", async () => {
+    api.getQueueChanges
+      .mockResolvedValueOnce({
+        afterSequence: 0,
+        nextSequence: 1,
+        hasMore: false,
+        events: [queueEvent(1)],
+      })
+      .mockResolvedValueOnce({
+        afterSequence: 1,
+        nextSequence: 2,
+        hasMore: false,
+        events: [queueEvent(2)],
+      });
+    const service = new PrinterSignalRService();
+    const received: QueueEventEnvelope[] = [];
+    service.onQueueEvent((event) => received.push(event));
+    await vi.waitFor(() =>
+      expect(signalr.eventHandlers.has("queueevent")).toBe(true)
+    );
+    await service.connect();
+    await service.subscribeToQueueJob("job-revoked");
+    signalr.connection.invoke.mockImplementation(async (
+      method: string
+    ): Promise<undefined> => {
+      if (method === "SubscribeToQueueJobAsync") {
+        throw new Error("resource_forbidden");
+      }
+      return undefined;
+    });
+
+    signalr.getReconnectHandler()?.();
+
+    await vi.waitFor(() =>
+      expect(received.map((event) => event.sequence)).toEqual([1, 2])
+    );
+    expect(api.getQueueChanges).toHaveBeenNthCalledWith(2, 1);
     service.dispose();
   });
 });

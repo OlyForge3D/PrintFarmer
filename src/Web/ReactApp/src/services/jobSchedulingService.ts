@@ -1,87 +1,63 @@
 import { apiClient } from '@/services/api';
+import type {
+  JobExecution,
+  RescheduleJobRequest,
+  ScheduleJobRequest,
+  ScheduledJob,
+  TimezoneInfo,
+} from '@/types/api';
 
-export interface ScheduleJobRequest {
-  scheduledStartTime: Date;
-  timeZone?: string;
-  recurrencePattern?: string;
-  recurrenceEndDate?: Date;
-}
-
-export interface RescheduleJobRequest {
-  newScheduledTime: Date;
-  timeZone?: string;
-}
-
-export interface ScheduledJobDto {
-  jobId: string;
-  jobName: string;
-  printerName: string;
-  scheduledStartTime: string; // ISO string
-  scheduledStartTimeInTimeZone: string; // ISO string in user's timezone
-  timeZone: string;
-  recurrencePattern?: string;
-  isActive: boolean;
-  isPaused: boolean;
-}
-
-export interface JobExecutionDto {
-  id: string;
-  scheduledExecutionTime: string; // ISO string
-  actualStartTime?: string; // ISO string
-  status: string;
-  message?: string;
-  durationSeconds?: number;
-}
-
-export interface TimeZoneDto {
-  id: string;
-  displayName: string;
-  offset: string;
-}
+export type {
+  JobExecution as JobExecutionDto,
+  RescheduleJobRequest,
+  ScheduleJobRequest,
+  ScheduledJob as ScheduledJobDto,
+  TimezoneInfo as TimeZoneDto,
+};
 
 export const jobSchedulingService = {
   async scheduleJob(
     jobId: string,
     request: ScheduleJobRequest
-  ): Promise<ScheduledJobDto> {
+  ): Promise<ScheduledJob> {
     return apiClient.scheduleJob(jobId, request);
   },
 
   async rescheduleJob(
     jobId: string,
     request: RescheduleJobRequest
-  ): Promise<ScheduledJobDto> {
+  ): Promise<ScheduledJob> {
     return apiClient.rescheduleJob(jobId, request);
   },
 
   async cancelScheduling(jobId: string): Promise<void> {
-    return apiClient.cancelScheduling(jobId);
+    return apiClient.cancelSchedule(jobId);
   },
 
   async pauseScheduling(jobId: string): Promise<void> {
-    return apiClient.pauseScheduling(jobId);
+    return apiClient.pauseSchedule(jobId);
   },
 
   async resumeScheduling(jobId: string): Promise<void> {
-    return apiClient.resumeScheduling(jobId);
+    return apiClient.resumeSchedule(jobId);
   },
 
-  async getScheduledJob(jobId: string): Promise<ScheduledJobDto | null> {
+  async getScheduledJob(jobId: string): Promise<ScheduledJob> {
     return apiClient.getScheduledJob(jobId);
   },
 
   async getScheduledJobs(
     dateFrom?: Date,
     dateTo?: Date
-  ): Promise<ScheduledJobDto[]> {
+  ): Promise<ScheduledJob[]> {
     return apiClient.getScheduledJobs(dateFrom, dateTo);
   },
 
-  async getExecutionHistory(jobId: string): Promise<JobExecutionDto[]> {
-    return apiClient.getExecutionHistory(jobId);
+  async getExecutionHistory(jobId: string): Promise<JobExecution[]> {
+    return apiClient.getJobExecutions(jobId);
   },
 
-  async getAvailableTimeZones(): Promise<TimeZoneDto[]> {
-    return apiClient.getAvailableTimeZones();
+  async getAvailableTimeZones(): Promise<TimezoneInfo[]> {
+    return apiClient.getTimezones();
   },
 };

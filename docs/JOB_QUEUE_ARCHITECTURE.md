@@ -96,6 +96,11 @@ check before backend I/O. Idle controls acquire a database physical-I/O barrier;
 active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer until a known outcome releases that barrier.
 
+The generic `/api/printers/{id}/gcode` surface is retired and always returns
+`410 Gone`. Macros, multiline scripts, case variants, and firmware-specific
+aliases cannot be proven non-starting. Operators and clients must use typed
+home, move, temperature, filament, MMU, lifecycle, or queue-dispatch routes.
+
 Public job mutations require the current job `ETag` in `If-Match`. Bed-clear
 also requires `X-Dispatch-State-If-Match`. Missing and stale preconditions
 return `428` and `412`, respectively. Auto-dispatch mutations use the dispatch
@@ -133,6 +138,13 @@ same deterministic `Urgent > High > Normal > Low`, scheduled time, queue
 position, queued time, and ID ordering as the queue. Concurrent external-print
 observers use a nullable unique active-printer key, so only one transaction can
 create the active external job.
+
+Schedule requests use an offset-free `scheduledLocalTime` paired with
+`timeZone`. Recurrence preserves wall time across daylight-saving changes;
+invalid or ambiguous initial times are rejected. Legacy schedules are never
+assigned a trusted system actor. Missing or revoked provenance disables the
+schedule for operator reauthorization before dispatch, and list/detail/history
+reads are scoped by job, printer, and calibration-project access.
 
 ---
 

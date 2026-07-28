@@ -33,37 +33,38 @@ final class AutoDispatchViewModel {
     }
 
     func markReady(printerId: UUID) async {
-        guard let autoDispatchService, !isMarkingReady else {
+        guard let autoDispatchService,
+              let reviewedStatus = status,
+              !isMarkingReady else {
             return
         }
         isMarkingReady = true
         error = nil
         do {
-            readyResult = try await autoDispatchService.markReady(printerId: printerId)
+            readyResult = try await autoDispatchService.markReady(
+                status: reviewedStatus
+            )
             guard isViewActive else { isMarkingReady = false; return }
             // Optimistically transition away from PendingReady — the backend
             // processes the state machine asynchronously so an immediate reload
             // often still returns PendingReady even though the action succeeded.
-            if let s = status {
-                status = AutoDispatchStatus(
-                    printerId: s.printerId,
-                    printerName: s.printerName,
-                    enabled: s.enabled,
-                    isReady: true,
-                    currentJobName: s.currentJobName,
-                    queueDepth: max(s.queueDepth - 1, 0),
-                    readyGateChecks: s.readyGateChecks,
-                    lastActivity: s.lastActivity,
-                    state: "Ready",
-                    bedPreConfirmed: s.bedPreConfirmed,
-                    attentionMessage: s.attentionMessage
-                )
+            if var optimistic = status {
+                optimistic.isReady = true
+                optimistic.queueDepth = max(optimistic.queueDepth - 1, 0)
+                optimistic.state = "Ready"
+                status = optimistic
             }
             // Keep button disabled through the reload cycle so the user sees
             // sustained feedback. Re-enable only after the authoritative reload.
             try? await Task.sleep(for: .seconds(2))
             guard isViewActive else { isMarkingReady = false; return }
             await loadStatus(printerId: printerId)
+            isMarkingReady = false
+        } catch let acknowledgementError as BedClearAcknowledgementError {
+            if acknowledgementError.requiresReview {
+                await loadStatus(printerId: printerId)
+            }
+            self.error = acknowledgementError.localizedDescription
             isMarkingReady = false
         } catch {
             self.error = error.localizedDescription
@@ -79,7 +80,10 @@ final class AutoDispatchViewModel {
         // isSkipping is set synchronously by the caller before this Task starts
         error = nil
         do {
-            status = try await autoDispatchService.skip(printerId: printerId)
+            guard let reviewedStatus = status else {
+                throw NetworkError.invalidResponse
+            }
+            status = try await autoDispatchService.skip(status: reviewedStatus)
         } catch {
             self.error = error.localizedDescription
         }
@@ -87,11 +91,14 @@ final class AutoDispatchViewModel {
     }
 
     func toggleEnabled(printerId: UUID) async {
-        guard let autoDispatchService, let currentlyEnabled = status?.enabled else { return }
+        guard let autoDispatchService,
+              let reviewedStatus = status else { return }
         do {
             status = try await autoDispatchService.setEnabled(
-                printerId: printerId,
-                request: SetAutoDispatchEnabledRequest(enabled: !currentlyEnabled)
+                status: reviewedStatus,
+                request: SetAutoDispatchEnabledRequest(
+                    enabled: !reviewedStatus.enabled
+                )
             )
         } catch {
             self.error = error.localizedDescription

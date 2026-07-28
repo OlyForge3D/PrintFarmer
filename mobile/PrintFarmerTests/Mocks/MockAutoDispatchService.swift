@@ -28,32 +28,35 @@ final class MockAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
         return statusToReturn!
     }
 
-    func markReady(printerId: UUID) async throws -> AutoDispatchReadyResult {
-        markReadyCalledWith = printerId
+    func markReady(status: AutoDispatchStatus) async throws -> AutoDispatchReadyResult {
+        markReadyCalledWith = status.printerId
         if let error = errorToThrow { throw error }
         return readyResultToReturn!
     }
 
-    func skip(printerId: UUID) async throws -> AutoDispatchStatus {
-        skipCalledWith = printerId
+    func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        skipCalledWith = status.printerId
         if let error = errorToThrow { throw error }
         return statusToReturn!
     }
 
-    func cancel(printerId: UUID) async throws -> AutoDispatchStatus {
-        cancelCalledWith = printerId
+    func cancel(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        cancelCalledWith = status.printerId
         if let error = errorToThrow { throw error }
         return statusToReturn!
     }
 
-    func preClear(printerId: UUID) async throws -> AutoDispatchStatus {
-        preClearCalledWith = printerId
+    func preClear(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        preClearCalledWith = status.printerId
         if let error = errorToThrow { throw error }
         return statusToReturn!
     }
 
-    func setEnabled(printerId: UUID, request: SetAutoDispatchEnabledRequest) async throws -> AutoDispatchStatus {
-        setEnabledCalledWith = (printerId, request)
+    func setEnabled(
+        status: AutoDispatchStatus,
+        request: SetAutoDispatchEnabledRequest
+    ) async throws -> AutoDispatchStatus {
+        setEnabledCalledWith = (status.printerId, request)
         if let error = errorToThrow { throw error }
         return statusToReturn!
     }

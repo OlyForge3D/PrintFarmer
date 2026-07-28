@@ -32,33 +32,20 @@ public class JobSchedulingService(
     /// Schedule a print job for a specific date and time in a given timezone
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job to schedule.</param>
-    /// <param name="scheduledStartTime">The desired start time for the job.</param>
+    /// <param name="scheduledLocalTime">Offset-free wall time in the selected timezone.</param>
     /// <param name="timeZone">The timezone for the scheduled time (default: UTC).</param>
     /// <param name="recurrencePattern">Optional recurrence pattern for repeating jobs.</param>
-    /// <param name="recurrenceEndDate">Optional end date for recurring jobs.</param>
+    /// <param name="recurrenceInterval">Number of recurrence units between executions.</param>
+    /// <param name="recurrenceEndLocalTime">Optional wall-time end for recurring jobs.</param>
+    /// <param name="actorSubject">Authenticated initiating user subject.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ScheduledJobDto> ScheduleJobAsync(
         Guid jobId,
-        DateTime scheduledStartTime,
-        string timeZone = "UTC",
-        string? recurrencePattern = null,
-        DateTime? recurrenceEndDate = null,
-        CancellationToken cancellationToken = default) =>
-        await ScheduleJobAsync(
-            jobId,
-            scheduledStartTime,
-            timeZone,
-            recurrencePattern,
-            recurrenceEndDate,
-            QueueActorIdentity.Scheduler,
-            cancellationToken);
-
-    public async Task<ScheduledJobDto> ScheduleJobAsync(
-        Guid jobId,
-        DateTime scheduledStartTime,
+        DateTime scheduledLocalTime,
         string timeZone,
         string? recurrencePattern,
-        DateTime? recurrenceEndDate,
+        int recurrenceInterval,
+        DateTime? recurrenceEndLocalTime,
         string actorSubject,
         CancellationToken cancellationToken = default)
     {
@@ -68,26 +55,41 @@ public class JobSchedulingService(
             .FirstOrDefaultAsync(j => j.Id == jobId, cancellationToken) ?? throw new InvalidOperationException($"Print job '{jobId}' not found");
         await EnsureActorMayScheduleAsync(job, actorSubject, cancellationToken);
 
-        // Validate timezone
-        if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
+        TimeZoneInfo timeZoneInfo = GetTimeZoneInfo(timeZone);
+        DateTime utcTime = ConvertReviewedWallTimeToUtc(
+            scheduledLocalTime,
+            timeZoneInfo,
+            nameof(scheduledLocalTime));
+        string? normalizedRecurrence = NormalizeRecurrence(recurrencePattern);
+        int normalizedInterval = ValidateRecurrenceInterval(
+            normalizedRecurrence,
+            recurrenceInterval);
+        DateTime? recurrenceEndUtc = recurrenceEndLocalTime.HasValue
+            ? ConvertReviewedWallTimeToUtc(
+                recurrenceEndLocalTime.Value,
+                timeZoneInfo,
+                nameof(recurrenceEndLocalTime))
+            : null;
+        if (recurrenceEndUtc.HasValue && recurrenceEndUtc.Value < utcTime)
         {
-            throw new ArgumentException($"Invalid timezone: {timeZone}");
+            throw new ArgumentException(
+                "Recurrence end must not be earlier than the first scheduled execution.",
+                nameof(recurrenceEndLocalTime));
         }
-
-        // Convert input time from user timezone to UTC
-        DateTime utcTime = ConvertToUtc(scheduledStartTime, tzInfo);
 
         // If job already has a schedule, update it
         if (job.Schedule != null)
         {
             job.Schedule.ScheduledStartTime = utcTime;
             job.Schedule.TimeZone = timeZone;
-            job.Schedule.RecurrencePattern = recurrencePattern;
-            job.Schedule.RecurrenceEndDate = recurrenceEndDate;
+            job.Schedule.RecurrencePattern = normalizedRecurrence;
+            job.Schedule.RecurrenceInterval = normalizedInterval;
+            job.Schedule.RecurrenceEndDate = recurrenceEndUtc;
             job.Schedule.IsActive = true;
             job.Schedule.IsPaused = false;
             job.Schedule.UpdatedAt = DateTime.UtcNow;
             job.Schedule.InitiatingActorSubject = actorSubject;
+            job.Schedule.RequiresOperatorReauthorization = false;
         }
         else
         {
@@ -97,12 +99,14 @@ public class JobSchedulingService(
                 PrintJobId = jobId,
                 ScheduledStartTime = utcTime,
                 TimeZone = timeZone,
-                RecurrencePattern = recurrencePattern,
-                RecurrenceEndDate = recurrenceEndDate,
+                RecurrencePattern = normalizedRecurrence,
+                RecurrenceInterval = normalizedInterval,
+                RecurrenceEndDate = recurrenceEndUtc,
                 IsActive = true,
                 IsPaused = false,
                 ScheduledAt = DateTime.UtcNow,
                 InitiatingActorSubject = actorSubject,
+                RequiresOperatorReauthorization = false,
             };
             job.Schedule = schedule;
             _context.JobSchedules.Add(schedule);
@@ -112,7 +116,7 @@ public class JobSchedulingService(
 
         _logger.LogInformation("[JobScheduling] Scheduled job '{JobId}' for {ScheduledTime} (timezone: {TimeZone})", jobId, utcTime, timeZone);
 
-        return await GetScheduledJobAsync(jobId, cancellationToken)
+        return await GetScheduledJobAsync(jobId, actorSubject, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve scheduled job");
     }
 
@@ -120,25 +124,20 @@ public class JobSchedulingService(
     /// Reschedule an existing scheduled job to a different time
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to reschedule.</param>
-    /// <param name="newScheduledTime">The new scheduled start time.</param>
+    /// <param name="scheduledLocalTime">New offset-free wall time.</param>
     /// <param name="timeZone">The timezone for the new scheduled time (default: UTC).</param>
+    /// <param name="recurrencePattern">Optional recurrence pattern.</param>
+    /// <param name="recurrenceInterval">Number of recurrence units between executions.</param>
+    /// <param name="recurrenceEndLocalTime">Optional wall-time recurrence end.</param>
+    /// <param name="actorSubject">Authenticated initiating user subject.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<ScheduledJobDto> RescheduleJobAsync(
         Guid jobId,
-        DateTime newScheduledTime,
-        string timeZone = "UTC",
-        CancellationToken cancellationToken = default) =>
-        await RescheduleJobAsync(
-            jobId,
-            newScheduledTime,
-            timeZone,
-            QueueActorIdentity.Scheduler,
-            cancellationToken);
-
-    public async Task<ScheduledJobDto> RescheduleJobAsync(
-        Guid jobId,
-        DateTime newScheduledTime,
+        DateTime scheduledLocalTime,
         string timeZone,
+        string? recurrencePattern,
+        int recurrenceInterval,
+        DateTime? recurrenceEndLocalTime,
         string actorSubject,
         CancellationToken cancellationToken = default)
     {
@@ -147,25 +146,44 @@ public class JobSchedulingService(
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
         await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
-        // Validate timezone
-        if (!TryGetTimeZoneInfo(timeZone, out TimeZoneInfo? tzInfo))
+        TimeZoneInfo timeZoneInfo = GetTimeZoneInfo(timeZone);
+        DateTime utcTime = ConvertReviewedWallTimeToUtc(
+            scheduledLocalTime,
+            timeZoneInfo,
+            nameof(scheduledLocalTime));
+        string? normalizedRecurrence = NormalizeRecurrence(recurrencePattern);
+        int normalizedInterval = ValidateRecurrenceInterval(
+            normalizedRecurrence,
+            recurrenceInterval);
+        DateTime? recurrenceEndUtc = recurrenceEndLocalTime.HasValue
+            ? ConvertReviewedWallTimeToUtc(
+                recurrenceEndLocalTime.Value,
+                timeZoneInfo,
+                nameof(recurrenceEndLocalTime))
+            : null;
+        if (recurrenceEndUtc.HasValue && recurrenceEndUtc.Value < utcTime)
         {
-            throw new ArgumentException($"Invalid timezone: {timeZone}");
+            throw new ArgumentException(
+                "Recurrence end must not be earlier than the scheduled execution.",
+                nameof(recurrenceEndLocalTime));
         }
-
-        // Convert to UTC
-        DateTime utcTime = ConvertToUtc(newScheduledTime, tzInfo);
 
         schedule.ScheduledStartTime = utcTime;
         schedule.TimeZone = timeZone;
+        schedule.RecurrencePattern = normalizedRecurrence;
+        schedule.RecurrenceInterval = normalizedInterval;
+        schedule.RecurrenceEndDate = recurrenceEndUtc;
+        schedule.IsActive = true;
+        schedule.IsPaused = false;
         schedule.UpdatedAt = DateTime.UtcNow;
         schedule.InitiatingActorSubject = actorSubject;
+        schedule.RequiresOperatorReauthorization = false;
 
         await _context.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("[JobScheduling] Rescheduled job '{JobId}' to {ScheduledTime}", jobId, utcTime);
 
-        return await GetScheduledJobAsync(jobId, cancellationToken)
+        return await GetScheduledJobAsync(jobId, actorSubject, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve scheduled job");
     }
 
@@ -173,12 +191,8 @@ public class JobSchedulingService(
     /// Cancel scheduling for a job (deactivates but keeps history)
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to cancel scheduling for.</param>
+    /// <param name="actorSubject">Authenticated actor requesting cancellation.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public Task CancelSchedulingAsync(
-        Guid jobId,
-        CancellationToken cancellationToken = default) =>
-        CancelSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
-
     public async Task CancelSchedulingAsync(
         Guid jobId,
         string actorSubject,
@@ -201,12 +215,8 @@ public class JobSchedulingService(
     /// Pause a scheduled job (can be resumed later)
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to pause.</param>
+    /// <param name="actorSubject">Authenticated actor requesting the pause.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public Task PauseSchedulingAsync(
-        Guid jobId,
-        CancellationToken cancellationToken = default) =>
-        PauseSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
-
     public async Task PauseSchedulingAsync(
         Guid jobId,
         string actorSubject,
@@ -229,12 +239,8 @@ public class JobSchedulingService(
     /// Resume a paused scheduled job
     /// </summary>
     /// <param name="jobId">The unique identifier of the paused job to resume.</param>
+    /// <param name="actorSubject">Authenticated actor requesting the resume.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public Task ResumeSchedulingAsync(
-        Guid jobId,
-        CancellationToken cancellationToken = default) =>
-        ResumeSchedulingAsync(jobId, QueueActorIdentity.Scheduler, cancellationToken);
-
     public async Task ResumeSchedulingAsync(
         Guid jobId,
         string actorSubject,
@@ -256,16 +262,20 @@ public class JobSchedulingService(
     /// <summary>
     /// Get all scheduled jobs (active and not paused)
     /// </summary>
+    /// <param name="actorSubject">Authenticated actor whose visible schedules are returned.</param>
     /// <param name="dateFrom">Optional filter for jobs scheduled on or after this date.</param>
     /// <param name="dateTo">Optional filter for jobs scheduled on or before this date.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
     public async Task<IEnumerable<ScheduledJobDto>> GetScheduledJobsAsync(
+        string actorSubject,
         DateTime? dateFrom = null,
         DateTime? dateTo = null,
         CancellationToken cancellationToken = default)
     {
         IQueryable<JobSchedule> query = _context.JobSchedules
-            .Where(js => js.IsActive && !js.IsPaused)
+            .Where(js =>
+                (js.IsActive && !js.IsPaused) ||
+                js.RequiresOperatorReauthorization)
             .Include(js => js.PrintJob)
             .ThenInclude(j => j.AssignedPrinter)
             .AsQueryable();
@@ -284,57 +294,75 @@ public class JobSchedulingService(
             .OrderBy(js => js.ScheduledStartTime)
             .ToListAsync(cancellationToken);
 
-        return schedules.Select(js => new ScheduledJobDto
+        var authorized = new List<ScheduledJobDto>();
+        foreach (JobSchedule schedule in schedules)
         {
-            JobId = js.PrintJobId,
-            PrinterName = js.PrintJob?.AssignedPrinter?.Name ?? "Unassigned",
-            JobName = js.PrintJob?.Name ?? "Unknown",
-            ScheduledStartTime = js.ScheduledStartTime,
-            ScheduledStartTimeInTimeZone = ConvertFromUtc(js.ScheduledStartTime, js.TimeZone),
-            TimeZone = js.TimeZone,
-            RecurrencePattern = js.RecurrencePattern,
-            IsActive = js.IsActive,
-            IsPaused = js.IsPaused
-        });
+            if (await ActorMayAccessJobAsync(
+                schedule.PrintJob,
+                actorSubject,
+                PrinterGroupAccessLevel.View,
+                cancellationToken))
+            {
+                authorized.Add(ToDto(schedule));
+            }
+        }
+
+        return authorized;
     }
 
     /// <summary>
     /// Get a specific scheduled job
     /// </summary>
     /// <param name="jobId">The unique identifier of the scheduled job.</param>
+    /// <param name="actorSubject">Authenticated actor requesting the schedule.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public async Task<ScheduledJobDto?> GetScheduledJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+    public async Task<ScheduledJobDto?> GetScheduledJobAsync(
+        Guid jobId,
+        string actorSubject,
+        CancellationToken cancellationToken = default)
     {
         JobSchedule? schedule = await _context.JobSchedules
             .Include(js => js.PrintJob)
             .ThenInclude(j => j.AssignedPrinter)
             .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
 
-        return schedule == null
-            ? null
-            : new ScheduledJobDto
-            {
-                JobId = schedule.PrintJobId,
-                PrinterName = schedule.PrintJob?.AssignedPrinter?.Name ?? "Unassigned",
-                JobName = schedule.PrintJob?.Name ?? "Unknown",
-                ScheduledStartTime = schedule.ScheduledStartTime,
-                ScheduledStartTimeInTimeZone = ConvertFromUtc(schedule.ScheduledStartTime, schedule.TimeZone),
-                TimeZone = schedule.TimeZone,
-                RecurrencePattern = schedule.RecurrencePattern,
-                IsActive = schedule.IsActive,
-                IsPaused = schedule.IsPaused
-            };
+        return schedule is not null &&
+            await ActorMayAccessJobAsync(
+                schedule.PrintJob,
+                actorSubject,
+                PrinterGroupAccessLevel.View,
+                cancellationToken)
+                ? ToDto(schedule)
+                : null;
     }
 
     /// <summary>
     /// Get execution history for a scheduled job
     /// </summary>
     /// <param name="jobId">The unique identifier of the job to get history for.</param>
+    /// <param name="actorSubject">Authenticated actor requesting execution history.</param>
     /// <param name="cancellationToken">Cancellation token for the operation.</param>
-    public async Task<IEnumerable<JobExecutionDto>> GetExecutionHistoryAsync(
+    public async Task<IReadOnlyList<JobExecutionDto>?> GetExecutionHistoryAsync(
         Guid jobId,
+        string actorSubject,
         CancellationToken cancellationToken = default)
     {
+        JobSchedule? schedule = await _context.JobSchedules
+            .AsNoTracking()
+            .Include(candidate => candidate.PrintJob)
+            .FirstOrDefaultAsync(
+                candidate => candidate.PrintJobId == jobId,
+                cancellationToken);
+        if (schedule is null ||
+            !await ActorMayAccessJobAsync(
+                schedule.PrintJob,
+                actorSubject,
+                PrinterGroupAccessLevel.View,
+                cancellationToken))
+        {
+            return null;
+        }
+
         List<JobExecution> executions = await _context.JobExecutions
             .Where(je => je.JobSchedule.PrintJobId == jobId)
             .OrderByDescending(je => je.ScheduledExecutionTime)
@@ -350,7 +378,7 @@ public class JobSchedulingService(
             DurationSeconds = je.ActualStartTime.HasValue
                 ? (int)(DateTime.UtcNow - je.ActualStartTime.Value).TotalSeconds
                 : null
-        });
+        }).ToList();
     }
 
     /// <summary>
@@ -377,6 +405,22 @@ public class JobSchedulingService(
         {
             try
             {
+                if (schedule.PrintJob is null ||
+                    schedule.RequiresOperatorReauthorization ||
+                    string.IsNullOrWhiteSpace(schedule.InitiatingActorSubject) ||
+                    !await ActorMayAccessJobAsync(
+                        schedule.PrintJob,
+                        schedule.InitiatingActorSubject,
+                        PrinterGroupAccessLevel.Submit,
+                        cancellationToken))
+                {
+                    await MarkRequiresOperatorReauthorizationAsync(
+                        schedule,
+                        now,
+                        cancellationToken);
+                    continue;
+                }
+
                 // Create execution record
                 var execution = new JobExecution
                 {
@@ -401,12 +445,8 @@ public class JobSchedulingService(
                 _logger.LogInformation(
                     "[JobScheduling] Triggered scheduled job '{JobId}' at {ExecutionTime}", schedule.PrintJobId, now);
 
-                // If no recurrence, mark as inactive
-                if (string.IsNullOrEmpty(schedule.RecurrencePattern))
-                {
-                    schedule.IsActive = false;
-                    await _context.SaveChangesAsync(cancellationToken);
-                }
+                AdvanceSchedule(schedule);
+                await _context.SaveChangesAsync(cancellationToken);
             }
             catch (Exception ex)
             {
@@ -451,7 +491,7 @@ public class JobSchedulingService(
         {
             QueuedPrintJobDto result = await _printJobManagement.DispatchJobAsync(
                 schedule.PrintJobId.ToString(),
-                schedule.InitiatingActorSubject,
+                schedule.InitiatingActorSubject!,
                 ifMatchJobRowVersion: null,
                 cancellationToken);
 
@@ -492,31 +532,138 @@ public class JobSchedulingService(
         string actorSubject,
         CancellationToken ct)
     {
-        if (_resourceAuthorization is null)
+        if (!await ActorMayAccessJobAsync(
+            job,
+            actorSubject,
+            PrinterGroupAccessLevel.Submit,
+            ct))
         {
-            return;
+            throw new UnauthorizedAccessException("The scheduled queue resource was not found.");
+        }
+    }
+
+    private async Task<bool> ActorMayAccessJobAsync(
+        PrintJob job,
+        string actorSubject,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct)
+    {
+        if (_resourceAuthorization is null ||
+            !Guid.TryParse(actorSubject, out _))
+        {
+            return false;
         }
 
         bool canAccessJob = await _resourceAuthorization.CanActorAccessJobAsync(
             actorSubject,
             job.Id,
-            PrinterGroupAccessLevel.Submit,
+            minimumAccess,
             ct);
         bool canAccessPrinter = job.AssignedPrinterId.HasValue &&
             await _resourceAuthorization.CanActorAccessPrinterAsync(
                 actorSubject,
                 job.AssignedPrinterId.Value,
-                PrinterGroupAccessLevel.Submit,
+                minimumAccess,
                 ct);
         bool canAccessProject = !job.CalibrationProjectId.HasValue ||
             await _resourceAuthorization.CanActorAccessProjectAsync(
                 actorSubject,
                 job.CalibrationProjectId.Value,
                 ct);
-        if (!canAccessJob || !canAccessPrinter || !canAccessProject)
+        return canAccessJob && canAccessPrinter && canAccessProject;
+    }
+
+    private async Task MarkRequiresOperatorReauthorizationAsync(
+        JobSchedule schedule,
+        DateTime now,
+        CancellationToken ct)
+    {
+        schedule.IsActive = false;
+        schedule.IsPaused = true;
+        schedule.RequiresOperatorReauthorization = true;
+        schedule.UpdatedAt = now;
+        _context.JobExecutions.Add(new JobExecution
         {
-            throw new UnauthorizedAccessException("The scheduled queue resource was not found.");
+            JobScheduleId = schedule.Id,
+            ScheduledExecutionTime = schedule.ScheduledStartTime,
+            ActualStartTime = now,
+            Status = "ReauthorizationRequired",
+            Message =
+                "The originating actor is missing or no longer has access to the job, printer, and project.",
+        });
+        await _context.SaveChangesAsync(ct);
+        _logger.LogWarning(
+            "[JobScheduling] Disabled schedule {ScheduleId} for job {JobId}; operator reauthorization is required",
+            schedule.Id,
+            schedule.PrintJobId);
+    }
+
+    private void AdvanceSchedule(JobSchedule schedule)
+    {
+        if (string.IsNullOrWhiteSpace(schedule.RecurrencePattern))
+        {
+            schedule.IsActive = false;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            return;
         }
+
+        TimeZoneInfo timeZone = GetTimeZoneInfo(schedule.TimeZone);
+        DateTime local = DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(
+                DateTime.SpecifyKind(schedule.ScheduledStartTime, DateTimeKind.Utc),
+                timeZone),
+            DateTimeKind.Unspecified);
+        int interval = Math.Max(1, schedule.RecurrenceInterval);
+        DateTime nextLocal = schedule.RecurrencePattern switch
+        {
+            "Daily" => local.AddDays(interval),
+            "Weekly" => local.AddDays(7 * interval),
+            "Monthly" => local.AddMonths(interval),
+            _ => throw new InvalidOperationException(
+                $"Unsupported recurrence pattern '{schedule.RecurrencePattern}'."),
+        };
+        DateTime nextUtc = ConvertRecurringWallTimeToUtc(nextLocal, timeZone);
+        if (schedule.RecurrenceEndDate.HasValue &&
+            nextUtc > schedule.RecurrenceEndDate.Value)
+        {
+            schedule.IsActive = false;
+            schedule.UpdatedAt = DateTime.UtcNow;
+            return;
+        }
+
+        schedule.ScheduledStartTime = nextUtc;
+        schedule.UpdatedAt = DateTime.UtcNow;
+    }
+
+    private ScheduledJobDto ToDto(JobSchedule schedule)
+    {
+        DateTime utc = DateTime.SpecifyKind(
+            schedule.ScheduledStartTime,
+            DateTimeKind.Utc);
+        return new ScheduledJobDto
+        {
+            Id = schedule.Id,
+            JobId = schedule.PrintJobId,
+            PrinterId = schedule.PrintJob.AssignedPrinterId,
+            PrinterName = schedule.PrintJob.AssignedPrinter?.Name ?? "Unassigned",
+            JobName = schedule.PrintJob.Name ?? "Unknown",
+            ScheduledStartTimeUtc = utc,
+            ScheduledLocalTime = DateTime.SpecifyKind(
+                ConvertFromUtc(utc, schedule.TimeZone),
+                DateTimeKind.Unspecified),
+            TimeZone = schedule.TimeZone,
+            RecurrencePattern = schedule.RecurrencePattern,
+            RecurrenceInterval = schedule.RecurrenceInterval,
+            RecurrenceEndTimeUtc = schedule.RecurrenceEndDate.HasValue
+                ? DateTime.SpecifyKind(
+                    schedule.RecurrenceEndDate.Value,
+                    DateTimeKind.Utc)
+                : null,
+            IsActive = schedule.IsActive,
+            IsPaused = schedule.IsPaused,
+            RequiresOperatorReauthorization =
+                schedule.RequiresOperatorReauthorization,
+        };
     }
 
     /// <summary>
@@ -542,7 +689,7 @@ public class JobSchedulingService(
     /// <param name="timeZone">The timezone information for the user's time.</param>
     public DateTime ConvertToUtc(DateTime userTime, TimeZoneInfo timeZone)
     {
-        return TimeZoneInfo.ConvertTimeToUtc(userTime, timeZone);
+        return ConvertReviewedWallTimeToUtc(userTime, timeZone, nameof(userTime));
     }
 
     /// <summary>
@@ -580,6 +727,119 @@ public class JobSchedulingService(
             return false;
         }
     }
+
+    private static TimeZoneInfo GetTimeZoneInfo(string timeZoneId)
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById(timeZoneId);
+        }
+        catch (TimeZoneNotFoundException exception)
+        {
+            throw new ArgumentException(
+                $"Invalid timezone: {timeZoneId}",
+                nameof(timeZoneId),
+                exception);
+        }
+        catch (InvalidTimeZoneException exception)
+        {
+            throw new ArgumentException(
+                $"Invalid timezone: {timeZoneId}",
+                nameof(timeZoneId),
+                exception);
+        }
+    }
+
+    private static DateTime ConvertReviewedWallTimeToUtc(
+        DateTime localTime,
+        TimeZoneInfo timeZone,
+        string parameterName)
+    {
+        if (localTime.Kind != DateTimeKind.Unspecified)
+        {
+            throw new ArgumentException(
+                "Scheduled wall time must omit an offset and UTC designator; pair it with timeZone.",
+                parameterName);
+        }
+
+        if (timeZone.IsInvalidTime(localTime))
+        {
+            throw new ArgumentException(
+                "Scheduled wall time does not exist because of a daylight-saving transition.",
+                parameterName);
+        }
+
+        if (timeZone.IsAmbiguousTime(localTime))
+        {
+            throw new ArgumentException(
+                "Scheduled wall time is ambiguous because of a daylight-saving transition.",
+                parameterName);
+        }
+
+        return TimeZoneInfo.ConvertTimeToUtc(localTime, timeZone);
+    }
+
+    private static DateTime ConvertRecurringWallTimeToUtc(
+        DateTime localTime,
+        TimeZoneInfo timeZone)
+    {
+        DateTime candidate = DateTime.SpecifyKind(localTime, DateTimeKind.Unspecified);
+        for (int minute = 0; minute <= 180 && timeZone.IsInvalidTime(candidate); minute++)
+        {
+            candidate = candidate.AddMinutes(1);
+        }
+
+        if (timeZone.IsInvalidTime(candidate))
+        {
+            throw new InvalidOperationException(
+                "Could not resolve the next recurring execution across the daylight-saving gap.");
+        }
+
+        if (timeZone.IsAmbiguousTime(candidate))
+        {
+            TimeSpan selectedOffset = timeZone
+                .GetAmbiguousTimeOffsets(candidate)
+                .Max();
+            return new DateTimeOffset(candidate, selectedOffset).UtcDateTime;
+        }
+
+        return TimeZoneInfo.ConvertTimeToUtc(candidate, timeZone);
+    }
+
+    private static string? NormalizeRecurrence(string? recurrencePattern)
+    {
+        if (string.IsNullOrWhiteSpace(recurrencePattern) ||
+            string.Equals(recurrencePattern, "Once", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return recurrencePattern.Trim().ToLowerInvariant() switch
+        {
+            "daily" => "Daily",
+            "weekly" => "Weekly",
+            "monthly" => "Monthly",
+            _ => throw new ArgumentException(
+                "Recurrence pattern must be Once, Daily, Weekly, or Monthly.",
+                nameof(recurrencePattern)),
+        };
+    }
+
+    private static int ValidateRecurrenceInterval(
+        string? recurrencePattern,
+        int recurrenceInterval)
+    {
+        if (recurrencePattern is null)
+        {
+            return 1;
+        }
+
+        return recurrenceInterval is >= 1 and <= 365
+            ? recurrenceInterval
+            : throw new ArgumentOutOfRangeException(
+                nameof(recurrenceInterval),
+                "Recurrence interval must be between 1 and 365.");
+    }
 }
 
 /// <summary>
@@ -587,23 +847,41 @@ public class JobSchedulingService(
 /// </summary>
 public class ScheduledJobDto
 {
+    public Guid Id { get; set; }
+
     public Guid JobId { get; set; }
 
     public string JobName { get; set; } = string.Empty;
 
     public string PrinterName { get; set; } = string.Empty;
 
-    public DateTime ScheduledStartTime { get; set; } // UTC
+    public Guid? PrinterId { get; set; }
 
-    public DateTime ScheduledStartTimeInTimeZone { get; set; } // In user's timezone
+    public DateTime ScheduledStartTimeUtc { get; set; }
+
+    public DateTime ScheduledLocalTime { get; set; }
 
     public string TimeZone { get; set; } = "UTC";
 
     public string? RecurrencePattern { get; set; }
 
+    public int RecurrenceInterval { get; set; } = 1;
+
+    public DateTime? RecurrenceEndTimeUtc { get; set; }
+
     public bool IsActive { get; set; }
 
     public bool IsPaused { get; set; }
+
+    public bool RequiresOperatorReauthorization { get; set; }
+
+    public string Status => RequiresOperatorReauthorization
+        ? "reauthorizationRequired"
+        : !IsActive
+            ? "completed"
+            : IsPaused
+                ? "paused"
+                : "active";
 }
 
 /// <summary>

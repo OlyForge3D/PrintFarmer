@@ -67,6 +67,7 @@ enum TestJSON {
     static let printerMinimal = """
     {
         "id": "660e8400-e29b-41d4-a716-446655440001",
+        "rowVersion": "AQIDBA==",
         "name": "Ender 3",
         "backend": "Moonraker",
         "backendPort": 7125,
@@ -116,6 +117,7 @@ enum TestJSON {
     static let printJob = """
     {
         "id": "770e8400-e29b-41d4-a716-446655440002",
+        "rowVersion": "AQIDBQ==",
         "status": "Printing",
         "priority": 1,
         "queuePosition": 1,
@@ -259,6 +261,7 @@ enum TestJSON {
     {
         "job": {
             "id": "770e8400-e29b-41d4-a716-446655440002",
+            "rowVersion": "AQIDBg==",
             "name": "benchy.gcode",
             "fileName": "benchy.gcode",
             "assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000",
@@ -286,6 +289,7 @@ enum TestJSON {
     {
         "job": {
             "id": "880e8400-e29b-41d4-a716-446655440003",
+            "rowVersion": "AQIDBw==",
             "name": "phone_case.gcode",
             "fileName": "phone_case.gcode",
             "status": "Queued",
@@ -307,6 +311,7 @@ enum TestJSON {
     {
         "job": {
             "id": "990e8400-e29b-41d4-a716-446655440004",
+            "rowVersion": "AQIDCA==",
             "name": "vase.gcode",
             "fileName": "vase.gcode",
             "status": "Completed",
@@ -330,6 +335,7 @@ enum TestJSON {
     {
         "job": {
             "id": "aa0e8400-e29b-41d4-a716-446655440005",
+            "rowVersion": "AQIDCQ==",
             "name": "failed_part.gcode",
             "fileName": "failed_part.gcode",
             "status": "Failed",
@@ -352,6 +358,7 @@ enum TestJSON {
     {
         "job": {
             "id": "bb0e8400-e29b-41d4-a716-446655440006",
+            "rowVersion": "AQIDCg==",
             "name": "paused_model.gcode",
             "fileName": "paused_model.gcode",
             "status": "Paused",
@@ -374,6 +381,7 @@ enum TestJSON {
     {
         "job": {
             "id": "cc0e8400-e29b-41d4-a716-446655440007",
+            "rowVersion": "AQIDCw==",
             "name": "assigned_job.gcode",
             "fileName": "assigned_job.gcode",
             "assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000",

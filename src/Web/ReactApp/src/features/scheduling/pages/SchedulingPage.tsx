@@ -44,6 +44,8 @@ export function SchedulingPage() {
         return 'error';
       case 'completed':
         return 'default';
+      case 'reauthorizationRequired':
+        return 'error';
       default:
         return 'default';
     }
@@ -63,16 +65,19 @@ export function SchedulingPage() {
       render: (job: ScheduledJob) => job.printerName,
     },
     {
-      key: 'scheduledTime',
+      key: 'scheduledStartTimeUtc',
       header: 'Scheduled Time',
       sortable: true,
-      render: (job: ScheduledJob) => new Date(job.scheduledTime).toLocaleString(),
+      render: (job: ScheduledJob) => new Date(job.scheduledStartTimeUtc).toLocaleString(),
     },
     {
-      key: 'recurrence',
+      key: 'recurrencePattern',
       header: 'Recurrence',
       sortable: true,
-      render: (job: ScheduledJob) => job.recurrence || 'Once',
+      render: (job: ScheduledJob) =>
+        job.recurrencePattern
+          ? `${job.recurrencePattern} × ${job.recurrenceInterval}`
+          : 'Once',
     },
     {
       key: 'status',

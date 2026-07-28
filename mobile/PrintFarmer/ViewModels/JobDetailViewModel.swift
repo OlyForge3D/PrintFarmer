@@ -43,29 +43,54 @@ final class JobDetailViewModel {
     // MARK: - Actions
 
     func dispatchJob() async {
-        await performAction { try await $0.dispatch(id: self.jobId) }
+        await performAction {
+            try await $0.dispatch(
+                id: self.jobId,
+                reviewedRowVersion: $1
+            )
+        }
     }
 
     func cancelJob() async {
-        await performAction { try await $0.cancel(id: self.jobId) }
+        await performAction {
+            try await $0.cancel(
+                id: self.jobId,
+                reviewedRowVersion: $1
+            )
+        }
         #if os(iOS)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
         #endif
     }
 
     func abortJob() async {
-        await performAction { try await $0.abort(id: self.jobId) }
+        await performAction {
+            try await $0.abort(
+                id: self.jobId,
+                reviewedRowVersion: $1
+            )
+        }
         #if os(iOS)
         UINotificationFeedbackGenerator().notificationOccurred(.warning)
         #endif
     }
 
     func pauseJob() async {
-        await performAction { try await $0.pause(id: self.jobId) }
+        await performAction {
+            try await $0.pause(
+                id: self.jobId,
+                reviewedRowVersion: $1
+            )
+        }
     }
 
     func resumeJob() async {
-        await performAction { try await $0.resume(id: self.jobId) }
+        await performAction {
+            try await $0.resume(
+                id: self.jobId,
+                reviewedRowVersion: $1
+            )
+        }
     }
 
     // MARK: - Computed
@@ -99,22 +124,47 @@ final class JobDetailViewModel {
 
     // MARK: - Private
 
-    private func performAction(_ action: @escaping (any JobServiceProtocol) async throws -> Void) async {
+    private func performAction(
+        _ action: @escaping (any JobServiceProtocol, String) async throws -> Void
+    ) async {
         guard isViewActive else { return }
-        guard let jobService else { return }
+        guard let jobService,
+              let reviewedRowVersion = job?.rowVersion,
+              !reviewedRowVersion.isEmpty else {
+            actionError = "Refresh and review this job before confirming the action."
+            return
+        }
         isPerformingAction = true
         actionError = nil
 
         do {
-            try await action(jobService)
+            try await action(jobService, reviewedRowVersion)
             guard isViewActive else { return }
             await loadJob()
         } catch {
             guard isViewActive else { return }
-            actionError = error.localizedDescription
+            if isStaleRevision(error) {
+                await loadJob()
+                actionError =
+                    "This job changed after you reviewed it. Review the refreshed details and confirm again."
+            } else {
+                actionError = error.localizedDescription
+            }
         }
 
         guard isViewActive else { return }
         isPerformingAction = false
+    }
+
+    private func isStaleRevision(_ error: Error) -> Bool {
+        guard let networkError = error as? NetworkError else { return false }
+        switch networkError {
+        case .preconditionFailed, .preconditionRequired:
+            return true
+        case .clientError(let code, _):
+            return code == 412 || code == 428
+        default:
+            return false
+        }
     }
 }

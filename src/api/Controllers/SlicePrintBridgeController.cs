@@ -412,7 +412,17 @@ public class SlicePrintBridgeController(
         UploadAndPrintResult result;
         try
         {
-            await dispatchClaimService.RecordBackendCallStartedAsync(attemptId, ct);
+            if (!await dispatchClaimService.RecordBackendCallStartedAsync(
+                    attemptId,
+                    ct))
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
+
             result = await printersService.UploadAndStartPrintAsync(
                 printerId, backendFileName, stream, progress: null, ct);
         }
@@ -420,10 +430,18 @@ public class SlicePrintBridgeController(
         {
             // Unknown outcome: the command may have been delivered. Never release the
             // lease here — reconciliation owns the resolution.
-            await dispatchClaimService.RecordUnknownOutcomeAsync(
+            bool applied = await dispatchClaimService.RecordUnknownOutcomeAsync(
                 attemptId,
                 ex.Message,
                 CancellationToken.None);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
 
             logger.LogError(
                 ex,
@@ -439,10 +457,18 @@ public class SlicePrintBridgeController(
 
         if (!result.Success && result.Outcome == UploadAndPrintOutcome.Unknown)
         {
-            await dispatchClaimService.RecordUnknownOutcomeAsync(
+            bool applied = await dispatchClaimService.RecordUnknownOutcomeAsync(
                 attemptId,
                 result.ErrorMessage ?? "The backend response was lost after the start-capable request.",
                 ct);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
 
             return StatusCode(StatusCodes.Status502BadGateway, new
             {
@@ -453,11 +479,19 @@ public class SlicePrintBridgeController(
 
         if (!result.Success)
         {
-            await dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+            bool applied = await dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                 attemptId,
                 "backend_rejected",
                 result.ErrorMessage ?? "The printer rejected the start command.",
                 ct);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
 
             logger.LogWarning(
                 "Upload-and-print failed for job {JobId} to printer {PrinterId}: stage={Stage}",
@@ -471,8 +505,17 @@ public class SlicePrintBridgeController(
             });
         }
 
-        await dispatchClaimService.RecordBackendAcceptedAsync(
-            attemptId, result.BackendJobId, ct);
+        if (!await dispatchClaimService.RecordBackendAcceptedAsync(
+                attemptId,
+                result.BackendJobId,
+                ct))
+        {
+            return Conflict(new
+            {
+                error = "The dispatch attempt no longer owns the printer.",
+                code = "attempt_superseded",
+            });
+        }
 
         return Ok(new SendToPrinterResponse
         {

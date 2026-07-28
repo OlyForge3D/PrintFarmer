@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Controllers.Requests;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -134,6 +135,37 @@ public class PrintersControllerControlGuardsTests
         Name = "printer-1",
         ServerUrl = "http://printer-1.local",
     };
+
+    [Theory]
+    [InlineData("M23 plate.gcode\nM24")]
+    [InlineData("m23 plate.gcode\nm24")]
+    [InlineData("START_PRINT FILE=plate.gcode")]
+    [InlineData("SDCARD_PRINT_FILE FILENAME=plate.gcode")]
+    [InlineData("G28\nRUN_SHELL_COMMAND CMD=start_print\nM24")]
+    public async Task SendGcodeAsync_StartingPayloadVariants_ReturnGoneWithZeroBackendIo(
+        string payload)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.SendGcodeAsync(
+            id,
+            new GcodeCommandRequest { Command = payload },
+            CancellationToken.None);
+
+        ObjectResult gone = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status410Gone, gone.StatusCode);
+        CommandResult body = Assert.IsType<CommandResult>(gone.Value);
+        Assert.False(body.Success);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+        telemetry.VerifyNoOtherCalls();
+    }
 
     [Fact]
     public async Task SetTempsAsync_ReturnsConflict_WhenPrinterIsPrinting()

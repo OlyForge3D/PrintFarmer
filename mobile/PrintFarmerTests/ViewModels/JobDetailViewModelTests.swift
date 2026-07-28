@@ -68,6 +68,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testDispatchJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.dispatchJob()
 
@@ -76,7 +77,9 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testDispatchJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.dispatchJob()
 
@@ -87,6 +90,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testDispatchReloadsJobOnSuccess() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.dispatchJob()
 
@@ -98,6 +102,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testCancelJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.cancelJob()
 
@@ -105,11 +110,26 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testCancelJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.cancelJob()
 
         XCTAssertNotNil(viewModel.actionError)
+    }
+
+    func testCancelJobStaleRevisionReloadsAndRequiresReconfirmation() async throws {
+        mockJobService.jobToReturn = try TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.preconditionRequired(nil)
+
+        await viewModel.cancelJob()
+
+        XCTAssertEqual(
+            viewModel.actionError,
+            "This job changed after you reviewed it. Review the refreshed details and confirm again."
+        )
     }
 
     // MARK: - Abort
@@ -117,6 +137,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testAbortJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.abortJob()
 
@@ -124,7 +145,9 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testAbortJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.abortJob()
 

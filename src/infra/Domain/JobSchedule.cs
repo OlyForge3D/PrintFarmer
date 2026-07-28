@@ -40,6 +40,11 @@ public class JobSchedule
     public string? RecurrencePattern { get; set; }
 
     /// <summary>
+    /// Number of recurrence units between executions. One means every day/week/month.
+    /// </summary>
+    public int RecurrenceInterval { get; set; } = 1;
+
+    /// <summary>
     /// When recurrence should end (null = indefinite for recurring jobs)
     /// </summary>
     public DateTime? RecurrenceEndDate { get; set; }
@@ -68,7 +73,13 @@ public class JobSchedule
     /// The scheduler reuses this subject so resource ACLs are rechecked at execution time.
     /// </summary>
     [MaxLength(256)]
-    public string InitiatingActorSubject { get; set; } = "system:scheduler";
+    public string? InitiatingActorSubject { get; set; }
+
+    /// <summary>
+    /// True when the schedule has no provable originating user or that user's resource access
+    /// was revoked. Such schedules are disabled until an authorized operator reschedules them.
+    /// </summary>
+    public bool RequiresOperatorReauthorization { get; set; } = true;
 
     /// <summary>
     /// Navigation property to execution history (for recurring jobs)

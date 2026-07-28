@@ -142,6 +142,14 @@ public class PrinterHub(
                 AuthorizedHubGroups.QueueJob(id))
             : Task.CompletedTask;
 
+    /// <summary>Leaves a previously joined project resource group.</summary>
+    public Task UnsubscribeFromProjectAsync(string projectId) =>
+        Guid.TryParse(projectId, out Guid id)
+            ? Groups.RemoveFromGroupAsync(
+                Context.ConnectionId,
+                AuthorizedHubGroups.Project(id))
+            : Task.CompletedTask;
+
     /// <summary>Leaves a previously joined printer resource group.</summary>
     public Task UnsubscribeFromPrinterAsync(string printerId) =>
         Guid.TryParse(printerId, out Guid id)

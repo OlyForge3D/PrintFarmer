@@ -142,6 +142,13 @@ public class NextJobDto
     public string? RequiredMaterialType { get; set; }
 
     public TimeSpan? EstimatedPrintTime { get; set; }
+
+    public string JobKind { get; set; } =
+        nameof(Farm.Infrastructure.Domain.JobKind.Standard);
+
+    public string? JobETag { get; set; }
+
+    public long? ExpectedPrinterConfigRevision { get; set; }
 }
 
 public class FilamentCheckResult
@@ -189,7 +196,13 @@ public class AutoDispatchStatusDto
 
     public Guid? NextJobId { get; set; }
 
+    public string? NextJobName { get; set; }
+
     public string? NextJobETag { get; set; }
+
+    public string? NextJobKind { get; set; }
+
+    public long? NextJobPrinterConfigRevision { get; set; }
 
     public string? AttentionMessage { get; set; }
 }
@@ -419,6 +432,14 @@ public class AutoDispatchService(
                 EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
                 RequiredMaterialType = nextJob.RequiredMaterialType,
                 EstimatedPrintTime = nextJob.EstimatedPrintTime,
+                JobKind = (
+                    nextJob.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+                JobETag = nextJob.RowVersion is { Length: > 0 }
+                    ? Convert.ToBase64String(nextJob.RowVersion)
+                    : null,
+                ExpectedPrinterConfigRevision =
+                    nextJob.PinnedPrinterConfigRevision,
             },
             FilamentCheck = filamentCheck,
         };
@@ -858,9 +879,17 @@ public class AutoDispatchService(
                 ? Convert.ToBase64String(printerRowVersion)
                 : null,
             NextJobId = nextJob?.Id,
+            NextJobName = nextJob?.Name ?? nextJob?.GcodeFile?.Name,
             NextJobETag = nextJob?.RowVersion is { Length: > 0 } jobRowVersion
                 ? Convert.ToBase64String(jobRowVersion)
                 : null,
+            NextJobKind = nextJob is null
+                ? null
+                : (
+                    nextJob.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+            NextJobPrinterConfigRevision =
+                nextJob?.PinnedPrinterConfigRevision,
             AttentionMessage = attentionMessage,
         };
     }

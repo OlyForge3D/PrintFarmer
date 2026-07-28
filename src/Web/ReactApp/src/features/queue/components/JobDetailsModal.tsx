@@ -87,6 +87,9 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
     startTransition(async () => {
       try {
         setError(null);
+        if (!jobDetails.rowVersion) {
+          throw new Error('This job has no reviewed revision. Refresh and review again.');
+        }
 
         // React 19: Optimistic update - show new details immediately
         addOptimisticUpdate(editedDetails);
@@ -94,7 +97,8 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         // Call update endpoint with changed fields
         const updatedJob = await apiClient.updateJobDetails(
           jobDetails.id,
-          editedDetails
+          editedDetails,
+          jobDetails.rowVersion
         );
 
         const jobDetailsData = updatedJob as unknown as JobDetails;
@@ -111,12 +115,23 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         // Show success message
         if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
-        setError(errorMessage);
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        if (status === 412) {
+          const refreshed = await fetchJobDetails(jobDetails.id);
+          setJobDetails(refreshed);
+          setEditedDetails(refreshed);
+          setHasChanges(false);
+          setError(
+            'This job changed after you reviewed it. Review the refreshed details before saving again.'
+          );
+        } else {
+          const errorMessage = err instanceof Error ? err.message : 'Failed to update job';
+          setError(errorMessage);
+        }
         console.error('Failed to save job details:', err);
       }
     });
-  }, [jobDetails.id, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
+  }, [jobDetails, editedDetails, hasChanges, onSave, addOptimisticUpdate]);
 
   const doClose = useCallback(() => {
     setIsEditing(false);

@@ -53,6 +53,29 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
                 BackendCommandId = "test-command",
                 BackendFileName = "model.gcode",
             }));
+        _dispatchClaimMock
+            .Setup(s => s.RecordBackendCallStartedAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.RecordBackendAcceptedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.ReleaseClaimOnKnownFailureAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.RecordUnknownOutcomeAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         _controller = new SlicePrintBridgeController(
             _printersMock.Object,

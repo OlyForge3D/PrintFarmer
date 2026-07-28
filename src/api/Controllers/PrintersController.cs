@@ -994,6 +994,9 @@ public class PrintersController(
             t.CurrentMaterial,
             t.CurrentFilamentColor)).ToArray();
 
+        string? rowVersion = p.RowVersion is { Length: > 0 }
+            ? Convert.ToBase64String(p.RowVersion)
+            : null;
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
@@ -1035,7 +1038,8 @@ public class PrintersController(
             !string.IsNullOrWhiteSpace(p.Username),
             !string.IsNullOrWhiteSpace(p.Password),
             false,
-            false);
+            false,
+            rowVersion);
     }
 
     /// <summary>
@@ -2632,6 +2636,12 @@ public class PrintersController(
             return BadRequest(new { error = "If-Match must be a base-64 encoded ETag." });
         }
 
+        if (printer.RowVersion is not { Length: > 0 } actual ||
+            !expected.SequenceEqual(actual))
+        {
+            return PrinterRevisionConflict();
+        }
+
         db.Entry(printer)
             .Property(candidate => candidate.RowVersion)
             .OriginalValue = expected;
@@ -2802,40 +2812,37 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Sends a raw G-code command to the specified printer.
+    /// Rejects the retired generic raw G-code surface.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="request">The G-code command request containing the script to execute.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Result indicating success or failure of the G-code command.</returns>
-    /// <response code="200">Returns the command execution result.</response>
+    /// <returns>A typed error directing callers to bounded printer-control endpoints.</returns>
     /// <response code="400">If the request body is missing or the gcode string is empty.</response>
-    /// <response code="404">If the printer with the specified ID was not found.</response>
-    /// <response code="500">If there was an error sending the G-code command.</response>
+    /// <response code="410">The generic raw G-code route is permanently disabled.</response>
     /// <remarks>
-    /// Sends arbitrary G-code commands to the printer firmware.
-    /// Commonly used for Klipper macros (LOAD_FILAMENT, UNLOAD_FILAMENT) and standard commands (M600).
-    /// Requires the backend to support G-code execution capability.
+    /// Raw scripts cannot be proven non-starting across firmware dialects, macros, case variants,
+    /// comments, or multiline payloads. Use typed home, movement, temperature, filament, MMU,
+    /// lifecycle, and dispatch endpoints instead.
     /// </remarks>
     [HttpPost("{id:guid}/gcode")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
-    [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status410Gone)]
+    public Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Command))
         {
-            return BadRequest(new CommandResult(false, "G-code command is required."));
+            return Task.FromResult<ActionResult<CommandResult>>(
+                BadRequest(new CommandResult(false, "G-code command is required.")));
         }
 
-        return await ExecuteDirectBooleanControlAsync(
-            id,
-            "raw_gcode",
-            "send_gcode",
-            token => _printersService.SendGcodeAsync(id, request.Command.Trim(), token),
-            ct);
+        return Task.FromResult<ActionResult<CommandResult>>(
+            StatusCode(
+                StatusCodes.Status410Gone,
+                new CommandResult(
+                    false,
+                    "Generic raw G-code is disabled. Use a typed printer-control or queue dispatch endpoint.")));
     }
 
     // Z-offset calibration endpoint
@@ -3196,12 +3203,18 @@ public class PrintersController(
             return precondition;
         }
 
-        return await ExecuteDirectCommandControlAsync(
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
             id,
             "set_active_spool",
             "set_active_spool",
             token => _printersService.SetActiveSpoolAsync(id, request?.SpoolId, token),
             ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -3267,7 +3280,7 @@ public class PrintersController(
             return precondition;
         }
 
-        return await ExecuteDirectCommandControlAsync(
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
             id,
             "set_toolhead_spool",
             "set_toolhead_spool",
@@ -3277,6 +3290,12 @@ public class PrintersController(
                 spoolId,
                 token),
             ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -3309,7 +3328,7 @@ public class PrintersController(
             return precondition;
         }
 
-        return await ExecuteDirectCommandControlAsync(
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
             id,
             "clear_toolhead_spool",
             "clear_toolhead_spool",
@@ -3318,6 +3337,12 @@ public class PrintersController(
                 toolheadIndex,
                 token),
             ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -3349,12 +3374,18 @@ public class PrintersController(
             return precondition;
         }
 
-        return await ExecuteDirectCommandControlAsync(
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
             id,
             "ensure_mmu_toolheads",
             "ensure_mmu_toolheads",
             token => _printersService.EnsureMmuToolheadsAsync(id, token),
             ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     // Camera control endpoints
@@ -3724,15 +3755,29 @@ public class PrintersController(
         try
         {
             string backendFileName = claim.Attempt.BackendFileName ?? request.FileName;
-            await _dispatchClaimService.RecordBackendCallStartedAsync(attemptId, ct);
+            if (!await _dispatchClaimService.RecordBackendCallStartedAsync(
+                    attemptId,
+                    ct))
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
+
             bool success = await _printersService.StartPrintFromFileAsync(id, backendFileName, ct);
 
             if (!success)
             {
-                await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
                     attemptId,
                     "The legacy backend did not prove whether the start command was accepted.",
                     CancellationToken.None);
+                if (!applied)
+                {
+                    return Conflict(new CommandResult(
+                        false,
+                        "attempt_superseded: The dispatch attempt no longer owns the printer."));
+                }
 
                 return StatusCode(
                     StatusCodes.Status503ServiceUnavailable,
@@ -3741,21 +3786,32 @@ public class PrintersController(
                         "The printer start outcome could not be determined; reconciliation is required."));
             }
 
-            await _dispatchClaimService.RecordBackendAcceptedAsync(
-                attemptId,
-                backendJobId: null,
-                backendFileIdentity: backendFileName,
-                ct);
+            if (!await _dispatchClaimService.RecordBackendAcceptedAsync(
+                    attemptId,
+                    backendJobId: null,
+                    backendFileIdentity: backendFileName,
+                    ct))
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
 
             return Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
             // Unknown outcome — keep the lease and let reconciliation decide.
-            await _dispatchClaimService.RecordUnknownOutcomeAsync(
+            bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
                 attemptId,
                 ex.Message,
                 CancellationToken.None);
+            if (!applied)
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
 
             return StatusCode(
                 StatusCodes.Status500InternalServerError,

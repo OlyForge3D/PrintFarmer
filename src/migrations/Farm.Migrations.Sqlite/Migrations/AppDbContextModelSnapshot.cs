@@ -2876,7 +2876,6 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("InitiatingActorSubject")
-                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -2896,8 +2895,14 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("RecurrenceEndDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("RecurrenceInterval")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("RecurrencePattern")
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("RequiresOperatorReauthorization")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("TEXT");

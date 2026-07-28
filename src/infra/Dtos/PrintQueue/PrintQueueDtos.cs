@@ -16,6 +16,9 @@ public class QueuedPrintJobWithFileMetaDto
 
     public QueuePrinterMetaDto? AssignedPrinter { get; set; }
 
+    /// <summary>Base-64 dispatch-state revision displayed with the assigned printer.</summary>
+    public string? DispatchStateRowVersion { get; set; }
+
     public DateTime? EstimatedStartTime { get; set; }
 
     public DateTime? EstimatedCompletionTime { get; set; }
@@ -42,6 +45,11 @@ public class QueuedPrintJobDto
     public string? FileName { get; set; } // Original G-code filename for display
 
     public string? AssignedPrinterId { get; set; }
+
+    public string JobKind { get; set; } =
+        nameof(Farm.Infrastructure.Domain.JobKind.Standard);
+
+    public Guid? CalibrationProjectId { get; set; }
 
     /// <summary>
     /// Name of the assigned printer (denormalized for display)
@@ -187,6 +195,8 @@ public sealed class DispatchAttemptResultDto
 {
     public Guid? AttemptId { get; set; }
 
+    public int? AttemptNumber { get; set; }
+
     public DispatchAttemptOutcome Outcome { get; set; }
 
     public DateTime? BackendAcceptedAtUtc { get; set; }
@@ -236,6 +246,8 @@ public class QueueGcodeFileMetaDto
 public class QueuePrinterMetaDto
 {
     public string Id { get; set; } = string.Empty;
+
+    public string? RowVersion { get; set; }
 
     public string Name { get; set; } = string.Empty;
 

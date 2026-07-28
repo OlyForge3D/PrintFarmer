@@ -166,21 +166,21 @@ public sealed class PrintJobManagementSecurityTests
             }));
         _claimService
             .Setup(s => s.ReleaseClaimOnKnownFailureAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _claimService
             .Setup(s => s.RecordBackendCallStartedAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _claimService
             .Setup(s => s.RecordBackendAcceptedAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
         _claimService
             .Setup(s => s.RecordUnknownOutcomeAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(true);
 
         return new(
             _repository.Object,

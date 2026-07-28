@@ -2889,7 +2889,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("InitiatingActorSubject")
-                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
@@ -2909,8 +2908,14 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("RecurrenceEndDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<int>("RecurrenceInterval")
+                        .HasColumnType("int");
+
                     b.Property<string>("RecurrencePattern")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("RequiresOperatorReauthorization")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("datetime2");

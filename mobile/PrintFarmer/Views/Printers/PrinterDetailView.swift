@@ -80,7 +80,7 @@ struct PrinterDetailView: View {
 
             // Handle NFC "mark ready" deep link
             if let pendingId = router.pendingNFCReadyPrinterId, pendingId == viewModel.printerId {
-                viewModel.showNFCReadyConfirmation = true
+                await viewModel.prepareReadyConfirmation()
                 router.pendingNFCReadyPrinterId = nil
             }
         }
@@ -125,13 +125,17 @@ struct PrinterDetailView: View {
             }
         }
         .alert("Mark Printer Ready?", isPresented: $viewModel.showNFCReadyConfirmation) {
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) {
+                viewModel.reviewedReadyStatus = nil
+            }
             Button("Mark Ready") {
                 let task = Task { await viewModel.markPrinterReady() }
                 activeTasks.append(task)
             }
         } message: {
-            Text("Clear the bed and mark this printer as ready for the next print job?")
+            Text(
+                "Clear the bed and confirm \(viewModel.reviewedReadyStatus?.nextJobName ?? "the reviewed next job")?"
+            )
         }
     }
 

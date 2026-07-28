@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
@@ -425,9 +426,23 @@ public class CalibrationProviderMigrationHarnessTests
             .Single(migration => migration.EndsWith(
                 "AddCalibrationGenerationOrchestration",
                 StringComparison.Ordinal));
+        string frozenParent = ctx.Database.GetMigrations()
+            .Single(migration => migration.EndsWith(
+                "CompleteCalibrationDispatchFencing",
+                StringComparison.Ordinal));
         await migrator.MigrateAsync(predecessor);
         Guid legacyJobId = Guid.NewGuid();
+        Guid legacyScheduleId = Guid.NewGuid();
         await SeedLegacyPrintJobAsync(ctx, legacyJobId);
+        await SeedLegacyScheduleAsync(ctx, legacyScheduleId, legacyJobId);
+        await migrator.MigrateAsync(frozenParent);
+        if (!string.Equals(providerName, "SQLite", StringComparison.Ordinal))
+        {
+            await SetLegacyScheduleActorAsync(
+                ctx,
+                legacyScheduleId,
+                Guid.NewGuid());
+        }
         await migrator.MigrateAsync();
         ctx.ChangeTracker.Clear();
 
@@ -474,6 +489,37 @@ public class CalibrationProviderMigrationHarnessTests
             $"[{providerName}] legacy queue rows must receive a usable ETag");
         seqState.RowVersion.Should().NotBeNullOrEmpty(
             $"[{providerName}] the provider-native sequence fence must receive a usable ETag");
+
+        var management = new Mock<IPrintJobManagementService>(MockBehavior.Strict);
+        var scheduler = new JobSchedulingService(
+            ctx,
+            NullLogger<JobSchedulingService>.Instance,
+            management.Object,
+            new QueueResourceAuthorizationService(ctx));
+
+        await scheduler.TriggerScheduledJobsAsync();
+        ctx.ChangeTracker.Clear();
+
+        management.Verify(service => service.DispatchJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never,
+            $"[{providerName}] migration-disabled legacy schedules must produce zero adapter effects");
+        JobSchedule legacySchedule = await ctx.JobSchedules
+            .SingleAsync(schedule => schedule.Id == legacyScheduleId);
+        legacySchedule.IsActive.Should().BeFalse(
+            $"[{providerName}] a legacy schedule without current job/printer/project ACL must be disabled");
+        legacySchedule.IsPaused.Should().BeTrue();
+        legacySchedule.RequiresOperatorReauthorization.Should().BeTrue();
+        legacySchedule.RecurrenceInterval.Should().Be(1);
+        (await ctx.JobExecutions.CountAsync(execution =>
+            execution.JobScheduleId == legacyScheduleId &&
+            execution.Status == "ReauthorizationRequired")).Should().Be(
+            string.Equals(providerName, "SQLite", StringComparison.Ordinal)
+                ? 0
+                : 1);
 
         // Fencing: the outbox sequence must be unique at the database level.
         bool duplicateSequences = await ctx.QueueDispatchOutbox
@@ -522,6 +568,69 @@ public class CalibrationProviderMigrationHarnessTests
                     ({jobId}, {"legacy-predecessor"}, {(int)PrintJobStatus.Queued},
                      {(int)PrintJobPriority.Normal}, {0},
                      {now}, {now}, {now}, {false}, {false}, {1}, {0})
+                """);
+        }
+    }
+
+    private static async Task SeedLegacyScheduleAsync(
+        AppDbContext context,
+        Guid scheduleId,
+        Guid jobId)
+    {
+        DateTime due = DateTime.UtcNow.AddHours(-1);
+        DateTime created = DateTime.UtcNow.AddDays(-1);
+        if (context.Database.IsSqlServer())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO [JobSchedules]
+                    ([Id], [PrintJobId], [ScheduledStartTime], [TimeZone],
+                     [RecurrencePattern], [RecurrenceEndDate], [IsActive], [IsPaused],
+                     [ScheduledAt], [CreatedAt], [UpdatedAt])
+                VALUES
+                    ({scheduleId}, {jobId}, {due}, {"UTC"},
+                     {(string?)null}, {(DateTime?)null}, {true}, {false},
+                     {created}, {created}, {created})
+                """);
+        }
+        else
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO "JobSchedules"
+                    ("Id", "PrintJobId", "ScheduledStartTime", "TimeZone",
+                     "RecurrencePattern", "RecurrenceEndDate", "IsActive", "IsPaused",
+                     "ScheduledAt", "CreatedAt", "UpdatedAt")
+                VALUES
+                    ({scheduleId}, {jobId}, {due}, {"UTC"},
+                     {(string?)null}, {(DateTime?)null}, {true}, {false},
+                     {created}, {created}, {created})
+                """);
+        }
+    }
+
+    private static async Task SetLegacyScheduleActorAsync(
+        AppDbContext context,
+        Guid scheduleId,
+        Guid actorId)
+    {
+        string actor = actorId.ToString();
+        if (context.Database.IsSqlServer())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE [JobSchedules]
+                SET [InitiatingActorSubject] = {actor}
+                WHERE [Id] = {scheduleId}
+                """);
+        }
+        else
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                UPDATE "JobSchedules"
+                SET "InitiatingActorSubject" = {actor}
+                WHERE "Id" = {scheduleId}
                 """);
         }
     }

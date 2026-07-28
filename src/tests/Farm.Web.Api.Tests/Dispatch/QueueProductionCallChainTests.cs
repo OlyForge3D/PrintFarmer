@@ -611,13 +611,30 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             ScheduledStartTime = DateTime.UtcNow.AddMinutes(-1),
             IsActive = true,
             IsPaused = false,
+            InitiatingActorSubject = CalibrationOwnerId.ToString(),
+            RequiresOperatorReauthorization = false,
         });
         await context.SaveChangesAsync();
+        var authorization = new QueueResourceAuthorizationService(context);
+        string actorSubject = CalibrationOwnerId.ToString();
+        (await authorization.CanActorAccessJobAsync(
+            actorSubject,
+            fixture.JobId,
+            PrinterGroupAccessLevel.Submit)).Should().BeTrue();
+        (await authorization.CanActorAccessPrinterAsync(
+            actorSubject,
+            fixture.PrinterId,
+            PrinterGroupAccessLevel.Submit)).Should().BeTrue();
+        PrintJob scheduledJob = await context.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        (await authorization.CanActorAccessProjectAsync(
+            actorSubject,
+            scheduledJob.CalibrationProjectId!.Value)).Should().BeTrue();
 
         var management = new Mock<IPrintJobManagementService>();
         management.Setup(service => service.DispatchJobAsync(
                 fixture.JobId.ToString(),
-                QueueActorIdentity.Scheduler,
+                CalibrationOwnerId.ToString(),
                 null,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new QueuedPrintJobDto
@@ -633,7 +650,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         var scheduler = new JobSchedulingService(
             context,
             NullLogger<JobSchedulingService>.Instance,
-            management.Object);
+            management.Object,
+            authorization);
 
         await scheduler.TriggerScheduledJobsAsync();
 
@@ -642,7 +660,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         execution.Message.Should().Contain("already owned");
         management.Verify(service => service.DispatchJobAsync(
             fixture.JobId.ToString(),
-            QueueActorIdentity.Scheduler,
+            CalibrationOwnerId.ToString(),
             null,
             It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -793,6 +811,13 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         result.Success.Should().BeFalse();
         result.IsPreconditionFailure.Should().BeTrue("a stale If-Match maps to 412, not 409");
         result.ErrorCode.Should().Be("job_revision_conflict");
+        ctx.ChangeTracker.Clear();
+        (await ctx.PrintJobs.FindAsync(fixture.JobId))!.Status
+            .Should().Be(PrintJobStatus.Assigned);
+        (await ctx.PrinterDispatchStates.FindAsync(fixture.PrinterId))!
+            .ActiveDispatchAttemptId.Should().BeNull();
+        (await ctx.QueueDispatchAttempts.CountAsync(attempt =>
+            attempt.PrintJobId == fixture.JobId)).Should().Be(0);
     }
 
     // =========================================================================

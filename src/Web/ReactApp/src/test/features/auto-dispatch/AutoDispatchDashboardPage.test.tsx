@@ -50,6 +50,9 @@ describe('AutoDispatchDashboardPage', () => {
     enabled: true,
     isReady: false,
     queueDepth: 3,
+    dispatchStateETag: 'dispatch-v1',
+    printerETag: 'printer-v1',
+    nextJobETag: 'job-v1',
     readyGateChecks: [
       { name: 'Printer Online', passed: true, message: 'Printer is online', checkedAt: '2025-01-15T10:00:00Z' },
       { name: 'Not Printing', passed: true, message: 'Printer is idle', checkedAt: '2025-01-15T10:00:00Z' },
@@ -236,7 +239,12 @@ describe('AutoDispatchDashboardPage', () => {
     await user.click(printerToggle);
 
     await waitFor(() => {
-      expect(mockSetEnabledMutation.mutate).toHaveBeenCalled();
+      expect(mockSetEnabledMutation.mutate).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        enabled: false,
+        dispatchStateETag: 'dispatch-v1',
+        printerETag: 'printer-v1',
+      });
     });
   });
 
@@ -257,7 +265,7 @@ describe('AutoDispatchDashboardPage', () => {
     const markReadyButton = screen.getByText('Mark Ready');
     await user.click(markReadyButton);
 
-    expect(mockMarkReadyMutation.mutate).toHaveBeenCalledWith('printer-1');
+    expect(mockMarkReadyMutation.mutate).toHaveBeenCalledWith(mockPrinterStatus);
   });
 
   it('skip button calls skip mutation', async () => {
@@ -277,7 +285,7 @@ describe('AutoDispatchDashboardPage', () => {
     const skipButton = screen.getByText('Skip');
     await user.click(skipButton);
 
-    expect(mockSkipMutation.mutate).toHaveBeenCalledWith('printer-1');
+    expect(mockSkipMutation.mutate).toHaveBeenCalledWith(mockPrinterStatus);
   });
 
   it('cancel button calls cancel mutation', async () => {
@@ -297,7 +305,7 @@ describe('AutoDispatchDashboardPage', () => {
     const cancelButton = screen.getByText('Cancel');
     await user.click(cancelButton);
 
-    expect(mockCancelMutation.mutate).toHaveBeenCalledWith('printer-1');
+    expect(mockCancelMutation.mutate).toHaveBeenCalledWith(mockPrintingStatus);
   });
 
   it('ready-gate check items show pass indicator for passed checks', () => {

@@ -16,7 +16,10 @@ struct AutoDispatchStatus: Codable, Sendable {
     var dispatchStateETag: String?
     var printerETag: String?
     var nextJobId: UUID?
+    var nextJobName: String?
     var nextJobETag: String?
+    var nextJobKind: String?
+    var nextJobPrinterConfigRevision: Int64?
     var attentionMessage: String?
 }
 
@@ -43,6 +46,42 @@ struct AutoDispatchReadyResult: Codable, Sendable {
     let status: AutoDispatchStatus
     let nextJob: AutoDispatchNextJob?
     let filamentCheck: FilamentCheckResult?
+    var acknowledgementOutcome: BedClearAcknowledgementOutcome? = nil
+}
+
+enum BedClearAcknowledgementOutcome: String, Codable, Sendable {
+    case accepted
+    case replayed
+}
+
+enum BedClearAcknowledgementError: LocalizedError, Sendable {
+    case conflict(code: String, detail: String?)
+    case stale(code: String, detail: String?)
+    case preconditionRequired(code: String, detail: String?)
+    case incompatible(code: String, detail: String?)
+    case unavailable(code: String, detail: String?)
+
+    var requiresReview: Bool {
+        switch self {
+        case .stale, .preconditionRequired: return true
+        default: return false
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .conflict(let code, let detail):
+            return detail ?? "Bed-clear conflict (\(code)). Review the current job before retrying."
+        case .stale(_, let detail):
+            return detail ?? "The job changed after review. Refresh and confirm again."
+        case .preconditionRequired(_, let detail):
+            return detail ?? "A reviewed job revision is required. Refresh and confirm again."
+        case .incompatible(let code, let detail):
+            return detail ?? "Calibration cannot start (\(code))."
+        case .unavailable(let code, let detail):
+            return detail ?? "The printer is unavailable (\(code)). Retry after its status is current."
+        }
+    }
 }
 
 // MARK: - AutoDispatch Next Job
@@ -53,6 +92,9 @@ struct AutoDispatchNextJob: Codable, Sendable, Identifiable {
     let estimatedFilamentUsageG: Double?
     let requiredMaterialType: String?
     let estimatedPrintTime: TimeInterval?
+    var jobKind: String = "Standard"
+    var jobETag: String?
+    var expectedPrinterConfigRevision: Int64?
 }
 
 // MARK: - Filament Check Result

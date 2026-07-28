@@ -2887,7 +2887,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("InitiatingActorSubject")
-                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("character varying(256)");
 
@@ -2907,8 +2906,14 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("RecurrenceEndDate")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("RecurrenceInterval")
+                        .HasColumnType("integer");
+
                     b.Property<string>("RecurrencePattern")
                         .HasColumnType("text");
+
+                    b.Property<bool>("RequiresOperatorReauthorization")
+                        .HasColumnType("boolean");
 
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");

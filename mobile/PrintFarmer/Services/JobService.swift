@@ -25,62 +25,85 @@ actor JobService: JobServiceProtocol {
         try await apiClient.post("/api/job-queue", body: request)
     }
 
-    func update(id: UUID, _ request: UpdatePrintJobRequest) async throws -> PrintJob {
+    func update(
+        id: UUID,
+        _ request: UpdatePrintJobRequest,
+        reviewedRowVersion: String
+    ) async throws -> PrintJob {
         try await apiClient.put(
             "/api/job-queue/\(id)",
             body: request,
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func delete(id: UUID) async throws {
+    func delete(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.delete(
             "/api/job-queue/\(id)",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func cancel(id: UUID) async throws {
+    func cancel(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue/\(id)/cancel",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func dispatch(id: UUID) async throws {
+    func dispatch(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue/\(id)/dispatch",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func abort(id: UUID) async throws {
+    func abort(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue/\(id)/abort-print",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func pause(id: UUID) async throws {
+    func pause(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue-analytics/jobs/\(id)/pause",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    func resume(id: UUID) async throws {
+    func resume(id: UUID, reviewedRowVersion: String) async throws {
         try await apiClient.postVoid(
             "/api/job-queue-analytics/jobs/\(id)/resume",
-            headers: try await preconditionHeaders(id: id)
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 
-    private func preconditionHeaders(id: UUID) async throws -> [String: String] {
-        let job: PrintJob = try await apiClient.get("/api/job-queue/\(id)")
+    func acknowledgeBedClearAndStart(
+        job: PrintJob,
+        printerId: UUID,
+        dispatchStateETag: String,
+        idempotencyKey: String
+    ) async throws -> AcknowledgeBedClearResponse {
         guard let rowVersion = job.rowVersion, !rowVersion.isEmpty else {
             throw NetworkError.invalidResponse
         }
+        let request = AcknowledgeBedClearRequest(
+            printerId: printerId,
+            expectedPrinterConfigRevision: job.pinnedPrinterConfigRevision
+        )
+        return try await apiClient.post(
+            "/api/job-queue/\(job.id)/acknowledge-bed-clear-and-start",
+            body: request,
+            headers: [
+                "If-Match": "\"\(rowVersion)\"",
+                "X-Dispatch-State-If-Match": "\"\(dispatchStateETag)\"",
+                "Idempotency-Key": idempotencyKey
+            ]
+        )
+    }
 
+    private func preconditionHeaders(_ rowVersion: String) -> [String: String] {
         return ["If-Match": "\"\(rowVersion)\""]
     }
 }

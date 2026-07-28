@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useSearchParams, useParams, useNavigate } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,6 +22,11 @@ import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
+import {
+  advanceDispatchUploadFence,
+  fenceDispatchAttempt,
+} from "../utils/dispatchUploadFence";
+import type { DispatchUploadFence } from "../utils/dispatchUploadFence";
 import { ScheduleModal } from "@/features/scheduling/components/ScheduleModal";
 import { apiClient } from "@/services/api";
 import { printerSignalRService } from "@/services/printer-signalr";
@@ -44,6 +49,7 @@ const VALID_QUEUE_VIEW_MODES: QueueViewMode[] = ["table", "list", "cards"];
 const DISPATCH_SETTINGS_KEY = ['dispatch-settings'] as const;
 
 interface DispatchSettingsResponse {
+  eTag?: string | null;
   autoDispatchEnabled: boolean;
   autoDispatchMode: string;
   idleThresholdSeconds: number;
@@ -68,11 +74,18 @@ function AutoDispatchGlobalToggle() {
   const toggleMutation = useMutation({
     mutationFn: async (enabled: boolean) => {
       if (!settings) return;
-      const res = await apiClient.put<DispatchSettingsResponse>('/dispatch-settings', {
-        ...settings,
-        autoDispatchEnabled: enabled,
-        autoDispatchMode: enabled ? 'Auto' : 'Manual',
-      });
+      if (!settings.eTag) {
+        throw new Error('Dispatch settings changed. Refresh before confirming.');
+      }
+      const res = await apiClient.put<DispatchSettingsResponse>(
+        '/dispatch-settings',
+        {
+          ...settings,
+          autoDispatchEnabled: enabled,
+          autoDispatchMode: enabled ? 'Auto' : 'Manual',
+        },
+        { headers: { 'If-Match': `"${settings.eTag}"` } }
+      );
       return res.data;
     },
     onSuccess: () => {
@@ -136,7 +149,10 @@ export function PrintQueueDashboardPage() {
   const [sortBy, setSortBy] = useState<"priority" | "deadline" | "deadline_desc">("priority");
   const [dateRange, setDateRange] = useState<DateRange>(defaultDateRange);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
-  const [jobToCancel, setJobToCancel] = useState<string | null>(null);
+  const [jobToCancel, setJobToCancel] = useState<{
+    jobId: string;
+    rowVersion: string;
+  } | null>(null);
   const [cancelingJobId, setCancelingJobId] = useState<string | null>(null);
   const [queueViewMode, setQueueViewModeState] = useState<QueueViewMode>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_QUEUE_VIEW_MODE);
@@ -170,9 +186,14 @@ export function PrintQueueDashboardPage() {
   const [dispatchUploadProgressByJobId, setDispatchUploadProgressByJobId] = useState<
     Record<string, DispatchUploadProgressDto>
   >({});
+  const uploadAttemptFenceByJobId = useRef<
+    Record<string, DispatchUploadFence>
+  >({});
   const [printProgressByPrinterId, setPrintProgressByPrinterId] = useState<Record<string, number>>({});
   const [printThumbnailByPrinterId, setPrintThumbnailByPrinterId] = useState<Record<string, string>>({});
   const [scheduleModalJobId, setScheduleModalJobId] = useState<string | null>(null);
+  const [mismatchReviewedRowVersion, setMismatchReviewedRowVersion] =
+    useState<string | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
 
   const { data: jobs = [], isLoading: loading, isFetching: isRefreshing, error: jobsError } = useQuery({
@@ -275,16 +296,24 @@ export function PrintQueueDashboardPage() {
   ]);
 
   const handleCancelJob = useCallback((jobId: string) => {
-    setJobToCancel(jobId);
+    const reviewed = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+    if (!reviewed) {
+      setError("This job has no reviewed revision. Refresh and review it again.");
+      return;
+    }
+    setJobToCancel({ jobId, rowVersion: reviewed });
     setShowCancelConfirmation(true);
-  }, []);
+  }, [jobs]);
 
   const handleConfirmCancel = useCallback(async () => {
     if (!jobToCancel) return;
 
     try {
-      setCancelingJobId(jobToCancel);
-      await apiClient.cancelPrintQueueJob(jobToCancel);
+      setCancelingJobId(jobToCancel.jobId);
+      await apiClient.cancelPrintQueueJob(
+        jobToCancel.jobId,
+        jobToCancel.rowVersion
+      );
       setShowCancelConfirmation(false);
       setJobToCancel(null);
       invalidateQueue();
@@ -301,7 +330,9 @@ export function PrintQueueDashboardPage() {
 
   const handlePauseJob = async (jobId: string) => {
     try {
-      await apiClient.pauseJob(jobId);
+      const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+      if (!rowVersion) throw new Error("Refresh and review this job before pausing it.");
+      await apiClient.pauseJob(jobId, rowVersion);
       invalidateQueue();
     } catch (err) {
       const errorMessage =
@@ -312,28 +343,35 @@ export function PrintQueueDashboardPage() {
 
   const handleResumeJob = useCallback(async (jobId: string) => {
     try {
-      await apiClient.resumeJob(jobId);
+      const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+      if (!rowVersion) throw new Error("Refresh and review this job before resuming it.");
+      await apiClient.resumeJob(jobId, rowVersion);
       invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to resume job";
       setError(errorMessage);
     }
-  }, [invalidateQueue]);
+  }, [invalidateQueue, jobs]);
 
   const handleAbortPrint = useCallback(async (jobId: string) => {
     try {
-      await apiClient.abortPrint(jobId);
+      const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+      if (!rowVersion) throw new Error("Refresh and review this job before aborting it.");
+      await apiClient.abortPrint(jobId, rowVersion);
       invalidateQueue();
     } catch (err) {
       const errorMessage =
         err instanceof Error ? err.message : "Failed to abort print";
       setError(errorMessage);
     }
-  }, [invalidateQueue]);
+  }, [invalidateQueue, jobs]);
 
   /** Actually send the dispatch request for a job (no spool check). */
-  const executeDispatch = useCallback(async (jobId: string) => {
+  const executeDispatch = useCallback(async (
+    jobId: string,
+    reviewedRowVersion: string
+  ) => {
     setDispatchingJobId(jobId);
     setDispatchUploadProgressByJobId((prev) => {
       const copy = { ...prev };
@@ -341,7 +379,38 @@ export function PrintQueueDashboardPage() {
       return copy;
     });
     try {
-      await apiClient.dispatchPrintQueueJob(jobId);
+      const result = await apiClient.dispatchPrintQueueJob(
+        jobId,
+        reviewedRowVersion
+      );
+      if (result.kind === "stale") {
+        setError("This job changed after you reviewed it. Review the refreshed row before confirming again.");
+        await invalidateQueue();
+        return;
+      }
+      if (result.kind === "reconciliation") {
+        setError(
+          result.dispatch.errorDetail ??
+            "The backend outcome is unknown. The attempt remains fenced while reconciliation runs."
+        );
+      } else if (result.kind === "conflict" || result.kind === "unavailable") {
+        setError(
+          `${result.errorCode}: ${result.detail ?? "Dispatch was not accepted."}${
+            result.job?.dispatchResult?.isRetryable ? " Retry after reviewing refreshed state." : ""
+          }`
+        );
+      }
+      if (
+        (result.kind === "accepted" || result.kind === "reconciliation") &&
+        result.dispatch.attemptId &&
+        result.dispatch.attemptNumber != null
+      ) {
+        uploadAttemptFenceByJobId.current[jobId] = fenceDispatchAttempt(
+          uploadAttemptFenceByJobId.current[jobId],
+          result.dispatch.attemptId,
+          result.dispatch.attemptNumber
+        );
+      }
       invalidateQueue();
     } catch (err) {
       const errorMessage =
@@ -360,8 +429,13 @@ export function PrintQueueDashboardPage() {
   /** Validate spool state before dispatching; shows modal if issues found. */
   const handleDispatchJob = useCallback(async (jobId: string) => {
     const jobWrapper = jobs.find(j => j.job.id === jobId);
+    const reviewedRowVersion = jobWrapper?.job.rowVersion;
+    if (!reviewedRowVersion) {
+      setError("This job has no reviewed revision. Refresh and review it again.");
+      return;
+    }
     if (!jobWrapper?.assignedPrinter) {
-      await executeDispatch(jobId);
+      await executeDispatch(jobId, reviewedRowVersion);
       return;
     }
 
@@ -379,16 +453,17 @@ export function PrintQueueDashboardPage() {
       if (ctx) {
         // Spool issue found — show validation modal
         setSpoolValidationCtx(ctx);
+        setMismatchReviewedRowVersion(reviewedRowVersion);
         setDispatchingJobId(null);
       } else {
         // No issues — dispatch directly
         setDispatchingJobId(null);
-        await executeDispatch(jobId);
+        await executeDispatch(jobId, reviewedRowVersion);
       }
     } catch {
       // Validation fetch failed — don't block dispatch
       setDispatchingJobId(null);
-      await executeDispatch(jobId);
+      await executeDispatch(jobId, reviewedRowVersion);
     }
   }, [jobs, executeDispatch]);
 
@@ -396,10 +471,24 @@ export function PrintQueueDashboardPage() {
   useEffect(() => {
     printerSignalRService.connect();
     const unsub = printerSignalRService.onDispatchUploadProgress((progress) => {
-      setDispatchUploadProgressByJobId((prev) => ({
-        ...prev,
-        [progress.jobId]: progress,
-      }));
+      const current = uploadAttemptFenceByJobId.current[progress.jobId];
+      const nextFence = advanceDispatchUploadFence(current, progress);
+      if (!nextFence) {
+        return;
+      }
+
+      uploadAttemptFenceByJobId.current[progress.jobId] = nextFence;
+      setDispatchUploadProgressByJobId((previous) => {
+        if (progress.isCompleted) {
+          const next = { ...previous };
+          delete next[progress.jobId];
+          return next;
+        }
+        return {
+          ...previous,
+          [progress.jobId]: progress,
+        };
+      });
     });
     return () => {
       unsub();
@@ -441,7 +530,11 @@ export function PrintQueueDashboardPage() {
 
   const handleRerunJob = async (jobId: string) => {
     try {
-      await apiClient.rerunPrintQueueJob(jobId);
+      const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+      if (!rowVersion) {
+        throw new Error("This job has no reviewed revision. Refresh and review again.");
+      }
+      await apiClient.rerunPrintQueueJob(jobId, rowVersion);
       setError(null);
       invalidateQueue();
     } catch (err) {
@@ -453,7 +546,11 @@ export function PrintQueueDashboardPage() {
 
   const handlePriorityChange = async (jobId: string, newPriority: number) => {
     try {
-      await apiClient.updateJobPriority(jobId, newPriority);
+      const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;
+      if (!rowVersion) {
+        throw new Error("This job has no reviewed revision. Refresh and review again.");
+      }
+      await apiClient.updateJobPriority(jobId, newPriority, rowVersion);
       invalidateQueue();
     } catch (err) {
       const errorMessage =
@@ -464,7 +561,19 @@ export function PrintQueueDashboardPage() {
 
   const handleReorder = async (moves: { jobId: string; newPosition: number }[]) => {
     try {
-      await apiClient.reorderQueueJobs(moves);
+      await apiClient.reorderQueueJobs(
+        moves.map((move) => {
+          const rowVersion = jobs.find(
+            (entry) => entry.job.id === move.jobId
+          )?.job.rowVersion;
+          if (!rowVersion) {
+            throw new Error(
+              `Job ${move.jobId} changed or has no reviewed revision. Refresh before reordering.`
+            );
+          }
+          return { ...move, rowVersion };
+        })
+      );
       invalidateQueue();
     } catch (err) {
       const errorMessage =
@@ -710,10 +819,18 @@ export function PrintQueueDashboardPage() {
       {/* Spool Validation Modal — shown before dispatch when spool issues detected */}
       <SpoolValidationModal
         isOpen={spoolValidationCtx !== null}
-        onClose={() => setSpoolValidationCtx(null)}
+        onClose={() => {
+          setSpoolValidationCtx(null);
+          setMismatchReviewedRowVersion(null);
+        }}
         onProceed={(jobId) => {
           setSpoolValidationCtx(null);
-          executeDispatch(jobId);
+          if (!mismatchReviewedRowVersion) {
+            setError("The reviewed job revision is unavailable. Review the refreshed row again.");
+            return;
+          }
+          void executeDispatch(jobId, mismatchReviewedRowVersion);
+          setMismatchReviewedRowVersion(null);
         }}
         context={spoolValidationCtx}
       />

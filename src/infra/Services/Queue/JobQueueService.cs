@@ -1554,6 +1554,8 @@ public class JobQueueService : IJobQueueService
             Id = job.Id,
             RowVersion = ToBase64RowVersion(job.RowVersion),
             JobKind = job.JobKind,
+            CalibrationProjectId = job.CalibrationProjectId,
+            PinnedPrinterConfigRevision = job.PinnedPrinterConfigRevision,
             IsIdempotentReplay = isIdempotentReplay,
             GcodeFileId = job.GcodeFileId,
             GcodeFileName = gcodeFileName,

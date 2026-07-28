@@ -93,7 +93,11 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         CommandResult(success: true, message: "Emergency stop executed (demo)")
     }
 
-    func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
+    func setMaintenanceMode(
+        id: UUID,
+        inMaintenance: Bool,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
         guard let printer = printers.first(where: { $0.id == id }) else {
             throw ServiceError.notImplemented("Printer not found")
         }
@@ -113,7 +117,11 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         }
     }
 
-    func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult {
+    func setActiveSpool(
+        printerId: UUID,
+        spoolId: Int?,
+        reviewedRowVersion: String
+    ) async throws -> CommandResult {
         CommandResult(success: true, message: "Spool set (demo)")
     }
 

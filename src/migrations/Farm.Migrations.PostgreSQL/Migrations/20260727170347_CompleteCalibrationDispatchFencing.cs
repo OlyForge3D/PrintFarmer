@@ -133,8 +133,7 @@ public partial class CompleteCalibrationDispatchFencing : Migration
             table: "JobSchedules",
             type: "character varying(256)",
             maxLength: 256,
-            nullable: false,
-            defaultValue: "system:scheduler");
+            nullable: true);
 
         migrationBuilder.AddColumn<long>(
             name: "Revision",

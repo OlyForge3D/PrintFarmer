@@ -45,6 +45,7 @@ vi.mock('@/features/slicer/components/CloneProfilesModal', () => ({
 
 function basePrinterDetails(overrides: Record<string, unknown> = {}) {
   return {
+    rowVersion: 'printer-v1',
     name: 'test-printer',
     serverUrl: 'http://test.local',
     originalServerUrl: 'http://test.local',
@@ -145,6 +146,7 @@ describe('Printer Cost Fields', () => {
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
         id: 'p-1',
+        reviewedRowVersion: 'printer-v1',
         printer: expect.objectContaining({
           wattage: 400,
           machineHourlyRate: 2.5,
@@ -175,6 +177,7 @@ describe('Printer Cost Fields', () => {
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
         id: 'p-1',
+        reviewedRowVersion: 'printer-v1',
         printer: expect.objectContaining({
           wattage: undefined,
           machineHourlyRate: undefined,

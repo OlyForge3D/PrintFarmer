@@ -75,6 +75,7 @@ function QueueGcodeModalInner({ file, printerPromise, isOpen, onClose }: {
  */
 type SuccessState = {
   jobId: string;
+  reviewedRowVersion?: string | null;
   printerName: string;
   isStarting: boolean;
   isStarted: boolean;
@@ -99,6 +100,8 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const [error, setError] = useState<string | null>(null);
   const [successState, setSuccessState] = useState<SuccessState | null>(null);
   const [spoolValidationCtx, setSpoolValidationCtx] = useState<SpoolValidationContext | null>(null);
+  const [pendingDispatchRowVersion, setPendingDispatchRowVersion] =
+    useState<string | null>(null);
 
   // Override state: allows user to bypass model matching and see all printers
   const [overrideModelFilter, setOverrideModelFilter] = useState(false);
@@ -207,6 +210,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
       // Show success state instead of closing
       setSuccessState({
         jobId: result.id,
+        reviewedRowVersion: result.rowVersion,
         printerName: result.assignedPrinterName || 'Unknown Printer',
         isStarting: false,
         isStarted: false
@@ -217,8 +221,44 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
     }
   };
 
+  const executeReviewedDispatch = async (
+    jobId: string,
+    reviewedRowVersion: string
+  ) => {
+    const result = await apiClient.dispatchPrintQueueJob(
+      jobId,
+      reviewedRowVersion
+    );
+    if (result.kind === 'accepted') return;
+    if (result.kind === 'reconciliation') {
+      throw new Error(
+        result.dispatch.errorDetail ??
+          'The printer start requires reconciliation. Review queue status before retrying.'
+      );
+    }
+    if (!('errorCode' in result)) {
+      throw new Error('Dispatch returned an unexpected outcome.');
+    }
+    throw new Error(
+      `${result.errorCode}: ${result.detail ?? 'Dispatch was not accepted.'}${
+        result.job?.dispatchResult?.isRetryable
+          ? ' Refresh, review, and retry.'
+          : ''
+      }`
+    );
+  };
+
   /** Dispatch a job, validating spool state first. */
-  const dispatchWithSpoolCheck = async (jobId: string, printerName: string) => {
+  const dispatchWithSpoolCheck = async (
+    jobId: string,
+    printerName: string,
+    reviewedRowVersion?: string | null
+  ) => {
+    if (!reviewedRowVersion) {
+      throw new Error(
+        'This job has no reviewed revision. Refresh and review it before starting.'
+      );
+    }
     const req = buildRequest();
     const printerId = autoAssign ? undefined : selectedPrinter;
 
@@ -229,12 +269,19 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
       );
       if (ctx) {
         setSpoolValidationCtx(ctx);
+        setPendingDispatchRowVersion(reviewedRowVersion);
         return;
       }
     }
 
-    await apiClient.dispatchPrintQueueJob(jobId);
-    setSuccessState({ jobId, printerName, isStarting: false, isStarted: true });
+    await executeReviewedDispatch(jobId, reviewedRowVersion);
+    setSuccessState({
+      jobId,
+      reviewedRowVersion,
+      printerName,
+      isStarting: false,
+      isStarted: true,
+    });
   };
 
   const handleQueueAndStart = async () => {
@@ -244,8 +291,15 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
       const req = buildRequest();
       const result = await printJobQueueService.enqueue(req);
       const printerName = result.assignedPrinterName || 'Unknown Printer';
+      setSuccessState({
+        jobId: result.id,
+        reviewedRowVersion: result.rowVersion,
+        printerName,
+        isStarting: true,
+        isStarted: false,
+      });
 
-      await dispatchWithSpoolCheck(result.id, printerName);
+      await dispatchWithSpoolCheck(result.id, printerName, result.rowVersion);
       setStartNowLoading(false);
     } catch (err) {
       setStartNowLoading(false);
@@ -258,10 +312,11 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
 
     setSuccessState({ ...successState, isStarting: true, startError: undefined });
     try {
-      await dispatchWithSpoolCheck(successState.jobId, successState.printerName);
-      if (!spoolValidationCtx) {
-        setSuccessState({ ...successState, isStarting: false, isStarted: true });
-      }
+      await dispatchWithSpoolCheck(
+        successState.jobId,
+        successState.printerName,
+        successState.reviewedRowVersion
+      );
     } catch (err) {
       setSuccessState({
         ...successState,
@@ -275,12 +330,24 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
   const handleSpoolValidated = async (jobId: string) => {
     setSpoolValidationCtx(null);
     try {
-      await apiClient.dispatchPrintQueueJob(jobId);
+      if (!pendingDispatchRowVersion) {
+        throw new Error(
+          'This job has no reviewed revision. Refresh and review it before starting.'
+        );
+      }
+      await executeReviewedDispatch(jobId, pendingDispatchRowVersion);
       const printerName = successState?.printerName || 'Printer';
-      setSuccessState({ jobId, printerName, isStarting: false, isStarted: true });
+      setSuccessState({
+        jobId,
+        reviewedRowVersion: pendingDispatchRowVersion,
+        printerName,
+        isStarting: false,
+        isStarted: true,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start print');
     } finally {
+      setPendingDispatchRowVersion(null);
       setStartNowLoading(false);
     }
   };
@@ -296,6 +363,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
         isOpen
         onClose={() => {
           setSpoolValidationCtx(null);
+          setPendingDispatchRowVersion(null);
           setStartNowLoading(false);
         }}
         onProceed={handleSpoolValidated}
@@ -528,6 +596,7 @@ function QueueGcodeModalContent({ file, printers, requiredModel, isOpen, onClose
               <ToolheadSpoolPicker
                 printerId={selectedPrinter}
                 toolheads={selectedPrinterDetails.toolheads}
+                reviewedRowVersion={selectedPrinterDetails.rowVersion}
                 targetFilamentColorHex={file.filamentPerExtruderColorHex}
                 targetFilamentType={file.filamentPerExtruderType}
                 onSpoolChange={() => {

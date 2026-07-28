@@ -289,6 +289,10 @@ public class JobQueuePrintJobDto
     /// <summary>Server-derived job classification (never client-supplied).</summary>
     public JobKind? JobKind { get; set; }
 
+    public Guid? CalibrationProjectId { get; set; }
+
+    public long? PinnedPrinterConfigRevision { get; set; }
+
     public bool IsIdempotentReplay { get; set; }
 
     /// <summary>

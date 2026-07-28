@@ -4,6 +4,7 @@ import { Button } from '@/common/components/ui/Button';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { apiClient } from '@/services/api';
+import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { toast } from 'sonner';
 import type { SpoolmanSpool } from '@/types/api';
 import { AlertCircleIcon, FilamentLoadIcon } from '@/common/components/icons/MdiIcons';
@@ -42,13 +43,17 @@ export function SpoolValidationModal({
 
       setSettingSpool(true);
       try {
-        await apiClient.setActiveSpool(context.printerId, spoolId);
+        await apiClient.setActiveSpool(
+          context.printerId,
+          spoolId,
+          context.reviewedPrinterRowVersion
+        );
         toast.success(`Spool "${spool.filamentName || spool.name || `#${spoolId}`}" set on ${context.printerName}`);
         setShowSpoolPicker(false);
         // Spool is now set — proceed with dispatch
         onProceed(context.jobId);
       } catch (err) {
-        toast.error(`Failed to set spool: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        toast.error(mutationErrorMessage(err, 'Failed to set spool'));
       } finally {
         setSettingSpool(false);
       }

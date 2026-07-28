@@ -641,7 +641,7 @@ public sealed class DispatchClaimService(
     }
 
     /// <inheritdoc />
-    public async Task RecordBackendCallStartedAsync(
+    public async Task<bool> RecordBackendCallStartedAsync(
         Guid attemptId,
         CancellationToken ct = default)
     {
@@ -649,20 +649,28 @@ public sealed class DispatchClaimService(
             .FirstOrDefaultAsync(candidate => candidate.Id == attemptId, ct);
         if (attempt is null)
         {
-            throw new InvalidOperationException($"Dispatch attempt {attemptId} was not found.");
+            _logger.LogWarning(
+                "Ignoring backend-call start for missing attempt {AttemptId}.",
+                attemptId);
+            return false;
         }
 
         if (attempt.BackendCallPhase != DispatchBackendCallPhase.Claimed)
         {
-            throw new QueueSemanticConflictException(
-                "The backend call for this dispatch attempt has already started.");
+            _logger.LogWarning(
+                "Ignoring duplicate backend-call start for attempt {AttemptId} in phase {Phase}.",
+                attemptId,
+                attempt.BackendCallPhase);
+            return false;
         }
 
         PrinterDispatchState? activeState = await LoadActiveAttemptStateAsync(attempt, ct);
         if (activeState is null)
         {
-            throw new QueueSemanticConflictException(
-                "The dispatch attempt is no longer the active physical owner.");
+            _logger.LogWarning(
+                "Ignoring backend-call start for inactive attempt {AttemptId}.",
+                attemptId);
+            return false;
         }
 
         attempt.BackendCallPhase = DispatchBackendCallPhase.InvokingBackend;
@@ -675,10 +683,11 @@ public sealed class DispatchClaimService(
         activeState.PhysicalControlStartedAtUtc = attempt.BackendCallStartedAtUtc;
         activeState.PhysicalControlRequiresReconciliation = false;
         await _db.SaveChangesAsync(ct);
+        return true;
     }
 
     /// <inheritdoc />
-    public async Task ReleaseClaimOnKnownFailureAsync(
+    public async Task<bool> ReleaseClaimOnKnownFailureAsync(
         Guid attemptId,
         string errorCode,
         string errorDetail,
@@ -691,7 +700,7 @@ public sealed class DispatchClaimService(
         if (attempt is null)
         {
             _logger.LogWarning("ReleaseClaimOnKnownFailure: Attempt {AttemptId} not found.", attemptId);
-            return;
+            return false;
         }
 
         PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
@@ -700,7 +709,7 @@ public sealed class DispatchClaimService(
             _logger.LogWarning(
                 "Ignoring late known-failure outcome for inactive attempt {AttemptId}.",
                 attemptId);
-            return;
+            return false;
         }
 
         await using QueueOutboxTransactionScope transaction =
@@ -793,17 +802,18 @@ public sealed class DispatchClaimService(
         _logger.LogInformation(
             "Dispatch claim released (known failure): Attempt={AttemptId} Code={ErrorCode}",
             attemptId, errorCode);
+        return true;
     }
 
     /// <inheritdoc />
-    public Task RecordBackendAcceptedAsync(
+    public Task<bool> RecordBackendAcceptedAsync(
         Guid attemptId,
         string? backendJobId,
         CancellationToken ct = default) =>
         RecordBackendAcceptedAsync(attemptId, backendJobId, null, ct);
 
     /// <inheritdoc />
-    public async Task RecordBackendAcceptedAsync(
+    public async Task<bool> RecordBackendAcceptedAsync(
         Guid attemptId,
         string? backendJobId,
         string? backendFileIdentity,
@@ -816,7 +826,7 @@ public sealed class DispatchClaimService(
         if (attempt is null)
         {
             _logger.LogWarning("RecordBackendAccepted: Attempt {AttemptId} not found.", attemptId);
-            return;
+            return false;
         }
 
         PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
@@ -825,7 +835,7 @@ public sealed class DispatchClaimService(
             _logger.LogWarning(
                 "Ignoring late backend acceptance for inactive attempt {AttemptId}.",
                 attemptId);
-            return;
+            return false;
         }
 
         await using QueueOutboxTransactionScope transaction =
@@ -929,10 +939,11 @@ public sealed class DispatchClaimService(
         _logger.LogInformation(
             "Backend accepted dispatch: Attempt={AttemptId} BackendJobId={BackendJobId}",
             attemptId, attempt.BackendJobId ?? "(none)");
+        return true;
     }
 
     /// <inheritdoc />
-    public async Task RecordUnknownOutcomeAsync(
+    public async Task<bool> RecordUnknownOutcomeAsync(
         Guid attemptId,
         string errorDetail,
         CancellationToken ct = default)
@@ -943,7 +954,7 @@ public sealed class DispatchClaimService(
         if (attempt is null)
         {
             _logger.LogWarning("RecordUnknownOutcome: Attempt {AttemptId} not found.", attemptId);
-            return;
+            return false;
         }
 
         PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
@@ -952,7 +963,7 @@ public sealed class DispatchClaimService(
             _logger.LogWarning(
                 "Ignoring late unknown outcome for inactive attempt {AttemptId}.",
                 attemptId);
-            return;
+            return false;
         }
 
         await using QueueOutboxTransactionScope transaction =
@@ -1024,6 +1035,7 @@ public sealed class DispatchClaimService(
         _logger.LogWarning(
             "Dispatch outcome unknown - reconciliation required: Attempt={AttemptId}",
             attemptId);
+        return true;
     }
 
     // ===== Gate evaluation helpers =====
@@ -1033,6 +1045,11 @@ public sealed class DispatchClaimService(
     {
         PrinterDispatchState? state = await _db.PrinterDispatchStates
             .FirstOrDefaultAsync(candidate => candidate.PrinterId == attempt.PrinterId, ct);
+        if (state is not null)
+        {
+            await _db.Entry(state).ReloadAsync(ct);
+        }
+
         Guid? expectedJobId = attempt.PrintJobId;
         if (state is null ||
             state.ActiveDispatchAttemptId != attempt.Id ||

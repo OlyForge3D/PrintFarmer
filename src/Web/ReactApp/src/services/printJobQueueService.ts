@@ -24,6 +24,7 @@ export interface EnqueuePrintJobRequest {
 
 export interface PrintJobDto {
   id: string;
+  rowVersion?: string | null;
   gcodeFileId: string;
   gcodeFileName: string;
   assignedPrinterId?: string;

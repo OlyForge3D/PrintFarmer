@@ -106,11 +106,19 @@ final class PrinterServiceTests: XCTestCase {
         mockAPIClient.stubResponse(json: TestJSON.printer)
 
         let request = UpdatePrinterRequest(name: "Renamed MK4")
-        _ = try await printerService.update(id: TestData.testUUID, request)
+        _ = try await printerService.update(
+            id: TestData.testUUID,
+            request,
+            reviewedRowVersion: "printer-v1"
+        )
 
         let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)") ?? false)
+        XCTAssertEqual(
+            captured?.value(forHTTPHeaderField: "If-Match"),
+            "\"printer-v1\""
+        )
         // URLSession/URLProtocol may relocate the request body onto an httpBodyStream
         // when the request is passed through the mock protocol. `capturedHTTPBody()`
         // reads whichever the runtime chose so the assertion is stable.
@@ -134,11 +142,19 @@ final class PrinterServiceTests: XCTestCase {
     func testSetMaintenanceModeCallsCorrectEndpoint() async throws {
         mockAPIClient.stubResponse(json: TestJSON.printer)
 
-        _ = try await printerService.setMaintenanceMode(id: TestData.testUUID, inMaintenance: true)
+        _ = try await printerService.setMaintenanceMode(
+            id: TestData.testUUID,
+            inMaintenance: true,
+            reviewedRowVersion: "printer-v1"
+        )
 
         let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers/\(TestData.testUUID)/maintenance") ?? false)
+        XCTAssertEqual(
+            captured?.value(forHTTPHeaderField: "If-Match"),
+            "\"printer-v1\""
+        )
     }
 
     // MARK: - Individual Command Endpoints

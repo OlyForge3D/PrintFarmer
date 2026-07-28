@@ -119,7 +119,7 @@ public interface IDispatchClaimService
     Task<DispatchClaimResult> AcquireAdHocClaimAsync(AdHocDispatchClaimRequest request, CancellationToken ct = default);
 
     /// <summary>Persists that the caller is about to invoke the backend.</summary>
-    Task RecordBackendCallStartedAsync(Guid attemptId, CancellationToken ct = default);
+    Task<bool> RecordBackendCallStartedAsync(Guid attemptId, CancellationToken ct = default);
 
     /// <summary>
     /// Releases an active claim after a known pre-start failure, clearing the
@@ -130,7 +130,7 @@ public interface IDispatchClaimService
     /// <param name="errorCode">Typed error code to record on the attempt.</param>
     /// <param name="errorDetail">Human-readable error detail.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task ReleaseClaimOnKnownFailureAsync(Guid attemptId, string errorCode, string errorDetail, CancellationToken ct = default);
+    Task<bool> ReleaseClaimOnKnownFailureAsync(Guid attemptId, string errorCode, string errorDetail, CancellationToken ct = default);
 
     /// <summary>
     /// Records a confirmed backend acceptance, advancing the job to Printing.
@@ -138,10 +138,10 @@ public interface IDispatchClaimService
     /// <param name="attemptId">ID of the attempt to mark accepted.</param>
     /// <param name="backendJobId">External job identifier assigned by the printer backend.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task RecordBackendAcceptedAsync(Guid attemptId, string? backendJobId, CancellationToken ct = default);
+    Task<bool> RecordBackendAcceptedAsync(Guid attemptId, string? backendJobId, CancellationToken ct = default);
 
     /// <summary>Records acceptance with distinct provider job and file identities.</summary>
-    Task RecordBackendAcceptedAsync(
+    Task<bool> RecordBackendAcceptedAsync(
         Guid attemptId,
         string? backendJobId,
         string? backendFileIdentity,
@@ -154,5 +154,5 @@ public interface IDispatchClaimService
     /// <param name="attemptId">ID of the attempt to mark as unknown.</param>
     /// <param name="errorDetail">Error detail to record.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task RecordUnknownOutcomeAsync(Guid attemptId, string errorDetail, CancellationToken ct = default);
+    Task<bool> RecordUnknownOutcomeAsync(Guid attemptId, string errorDetail, CancellationToken ct = default);
 }

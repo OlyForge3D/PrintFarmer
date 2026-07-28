@@ -27,7 +27,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
   const jobsByDate = useMemo(() => {
     const map = new Map<string, ScheduledJob[]>();
     scheduledJobs.forEach((job) => {
-      const date = new Date(job.scheduledTime);
+      const date = new Date(job.scheduledStartTimeUtc);
       const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
       if (!map.has(dateKey)) {
         map.set(dateKey, []);

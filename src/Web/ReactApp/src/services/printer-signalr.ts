@@ -63,7 +63,10 @@ export class PrinterSignalRService {
       );
     }
     this.connection = new HubConnectionBuilder()
-      .withUrl(printersSignalrUrl)
+      .withUrl(printersSignalrUrl, {
+        accessTokenFactory: () => localStorage.getItem("auth-token") ?? "",
+        withCredentials: true,
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           const delay = Math.min(
@@ -533,10 +536,10 @@ export class PrinterSignalRService {
   }
 
   public async subscribeToPrinter(printerId: string): Promise<void> {
-    this.subscribedPrinters.add(printerId);
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToPrinterAsync", printerId);
     }
+    this.subscribedPrinters.add(printerId);
   }
 
   public async unsubscribeFromPrinter(printerId: string): Promise<void> {
@@ -547,17 +550,63 @@ export class PrinterSignalRService {
   }
 
   public async subscribeToQueueJob(jobId: string): Promise<void> {
-    this.subscribedQueueJobs.add(jobId);
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToQueueJobAsync", jobId);
+    }
+    this.subscribedQueueJobs.add(jobId);
+  }
+
+  public async unsubscribeFromQueueJob(jobId: string): Promise<void> {
+    this.subscribedQueueJobs.delete(jobId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("UnsubscribeFromQueueJobAsync", jobId);
     }
   }
 
   public async subscribeToProject(projectId: string): Promise<void> {
-    this.subscribedProjects.add(projectId);
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToProjectAsync", projectId);
     }
+    this.subscribedProjects.add(projectId);
+  }
+
+  public async unsubscribeFromProject(projectId: string): Promise<void> {
+    this.subscribedProjects.delete(projectId);
+    if (this.connection?.state === HubConnectionState.Connected) {
+      await this.connection.invoke("UnsubscribeFromProjectAsync", projectId);
+    }
+  }
+
+  public async replaceQueueResourceSubscriptions(resources: {
+    printerIds: Iterable<string>;
+    jobIds: Iterable<string>;
+    projectIds: Iterable<string>;
+  }): Promise<void> {
+    const nextPrinters = new Set(resources.printerIds);
+    const nextJobs = new Set(resources.jobIds);
+    const nextProjects = new Set(resources.projectIds);
+    const operations: Promise<void>[] = [];
+
+    for (const id of this.subscribedPrinters) {
+      if (!nextPrinters.has(id)) operations.push(this.unsubscribeFromPrinter(id));
+    }
+    for (const id of this.subscribedQueueJobs) {
+      if (!nextJobs.has(id)) operations.push(this.unsubscribeFromQueueJob(id));
+    }
+    for (const id of this.subscribedProjects) {
+      if (!nextProjects.has(id)) operations.push(this.unsubscribeFromProject(id));
+    }
+    for (const id of nextPrinters) {
+      if (!this.subscribedPrinters.has(id)) operations.push(this.subscribeToPrinter(id));
+    }
+    for (const id of nextJobs) {
+      if (!this.subscribedQueueJobs.has(id)) operations.push(this.subscribeToQueueJob(id));
+    }
+    for (const id of nextProjects) {
+      if (!this.subscribedProjects.has(id)) operations.push(this.subscribeToProject(id));
+    }
+
+    await Promise.all(operations);
   }
 
   public onQueueEvent(callback: QueueEventCallback): () => void {
@@ -643,17 +692,33 @@ export class PrinterSignalRService {
 
   private async restoreResourceSubscriptions(): Promise<void> {
     if (this.connection?.state !== HubConnectionState.Connected) return;
-    await Promise.all([
-      ...Array.from(this.subscribedPrinters, (id) =>
-        this.connection!.invoke("SubscribeToPrinterAsync", id)
-      ),
-      ...Array.from(this.subscribedQueueJobs, (id) =>
-        this.connection!.invoke("SubscribeToQueueJobAsync", id)
-      ),
-      ...Array.from(this.subscribedProjects, (id) =>
-        this.connection!.invoke("SubscribeToProjectAsync", id)
-      ),
-    ]);
+    const subscriptions = [
+      ...Array.from(this.subscribedPrinters, (id) => ({
+        id,
+        method: "SubscribeToPrinterAsync",
+        values: this.subscribedPrinters,
+      })),
+      ...Array.from(this.subscribedQueueJobs, (id) => ({
+        id,
+        method: "SubscribeToQueueJobAsync",
+        values: this.subscribedQueueJobs,
+      })),
+      ...Array.from(this.subscribedProjects, (id) => ({
+        id,
+        method: "SubscribeToProjectAsync",
+        values: this.subscribedProjects,
+      })),
+    ];
+    const outcomes = await Promise.allSettled(
+      subscriptions.map(({ id, method }) =>
+        this.connection!.invoke(method, id)
+      )
+    );
+    outcomes.forEach((outcome, index) => {
+      if (outcome.status === "rejected") {
+        subscriptions[index].values.delete(subscriptions[index].id);
+      }
+    });
   }
 
   private async restoreSubscriptionsAndDrain(): Promise<void> {

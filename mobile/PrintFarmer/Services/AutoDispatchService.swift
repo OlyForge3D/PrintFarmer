@@ -17,15 +17,89 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
         try await apiClient.get("/api/auto-dispatch/\(printerId)/status")
     }
 
-    func markReady(printerId: UUID) async throws -> AutoDispatchReadyResult {
-        try await apiClient.post(
-            "/api/auto-dispatch/\(printerId)/ready",
-            headers: try await preconditionHeaders(printerId: printerId)
+    func markReady(status: AutoDispatchStatus) async throws -> AutoDispatchReadyResult {
+        let dispatchETag = try required(status.dispatchStateETag)
+        if status.nextJobKind != "FilamentCalibration" {
+            return try await apiClient.post(
+                "/api/auto-dispatch/\(status.printerId)/ready",
+                headers: ["If-Match": "\"\(dispatchETag)\""]
+            )
+        }
+
+        guard let jobId = status.nextJobId,
+              let jobETag = status.nextJobETag else {
+            throw NetworkError.invalidResponse
+        }
+        let request = AcknowledgeBedClearRequest(
+            printerId: status.printerId,
+            expectedPrinterConfigRevision:
+                status.nextJobPrinterConfigRevision
+        )
+        let response: HTTPDecodedResponse<AcknowledgeBedClearResponse> =
+            try await apiClient.post(
+            "/api/job-queue/\(jobId)/acknowledge-bed-clear-and-start",
+            body: request,
+            headers: [
+                "If-Match": "\"\(jobETag)\"",
+                "X-Dispatch-State-If-Match": "\"\(dispatchETag)\"",
+                "Idempotency-Key": stableIdempotencyKey(status: status)
+            ],
+            accepting: [200, 202, 409, 412, 422, 428, 503]
+        )
+        let errorCode =
+            response.value.error ?? "bed_clear_acknowledgement_failed"
+        switch response.statusCode {
+        case 409:
+            throw BedClearAcknowledgementError.conflict(
+                code: errorCode,
+                detail: response.value.detail
+            )
+        case 412:
+            throw BedClearAcknowledgementError.stale(
+                code: errorCode,
+                detail: response.value.detail
+            )
+        case 422:
+            throw BedClearAcknowledgementError.incompatible(
+                code: errorCode,
+                detail: response.value.detail
+            )
+        case 428:
+            throw BedClearAcknowledgementError.preconditionRequired(
+                code: errorCode,
+                detail: response.value.detail
+            )
+        case 503:
+            throw BedClearAcknowledgementError.unavailable(
+                code: errorCode,
+                detail: response.value.detail
+            )
+        case 200, 202:
+            break
+        default:
+            throw NetworkError.unexpectedStatus(response.statusCode)
+        }
+
+        return AutoDispatchReadyResult(
+            status: status,
+            nextJob: AutoDispatchNextJob(
+                id: jobId,
+                name: status.nextJobName ?? "Calibration job",
+                estimatedFilamentUsageG: nil,
+                requiredMaterialType: nil,
+                estimatedPrintTime: nil,
+                jobKind: "FilamentCalibration",
+                jobETag: jobETag,
+                expectedPrinterConfigRevision:
+                    status.nextJobPrinterConfigRevision
+            ),
+            filamentCheck: nil,
+            acknowledgementOutcome:
+                response.statusCode == 202 ? .accepted : .replayed
         )
     }
 
-    func skip(printerId: UUID) async throws -> AutoDispatchStatus {
-        let status = try await getStatus(printerId: printerId)
+    func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
         guard let dispatchETag = status.dispatchStateETag,
               !dispatchETag.isEmpty,
               let jobETag = status.nextJobETag,
@@ -33,7 +107,7 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
             throw NetworkError.invalidResponse
         }
         let response: AutoDispatchStatus = try await apiClient.post(
-            "/api/auto-dispatch/\(printerId)/skip",
+            "/api/auto-dispatch/\(status.printerId)/skip",
             headers: [
                 "If-Match": "\"\(dispatchETag)\"",
                 "X-Job-If-Match": "\"\(jobETag)\""
@@ -42,22 +116,25 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
         return response
     }
 
-    func cancel(printerId: UUID) async throws -> AutoDispatchStatus {
+    func cancel(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
         try await apiClient.post(
-            "/api/auto-dispatch/\(printerId)/cancel",
-            headers: try await preconditionHeaders(printerId: printerId)
+            "/api/auto-dispatch/\(status.printerId)/cancel",
+            headers: [
+                "If-Match": "\"\(try required(status.dispatchStateETag))\""
+            ]
         )
     }
 
-    func preClear(printerId: UUID) async throws -> AutoDispatchStatus {
+    func preClear(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
         try await apiClient.post(
-            "/api/auto-dispatch/\(printerId)/pre-clear",
-            headers: try await preconditionHeaders(printerId: printerId)
+            "/api/auto-dispatch/\(status.printerId)/pre-clear",
+            headers: [
+                "If-Match": "\"\(try required(status.dispatchStateETag))\""
+            ]
         )
     }
 
-    func setEnabled(printerId: UUID, request: SetAutoDispatchEnabledRequest) async throws -> AutoDispatchStatus {
-        let status = try await getStatus(printerId: printerId)
+    func setEnabled(status: AutoDispatchStatus, request: SetAutoDispatchEnabledRequest) async throws -> AutoDispatchStatus {
         guard let dispatchETag = status.dispatchStateETag,
               !dispatchETag.isEmpty,
               let printerETag = status.printerETag,
@@ -65,7 +142,7 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
             throw NetworkError.invalidResponse
         }
         let response: AutoDispatchStatus = try await apiClient.put(
-            "/api/auto-dispatch/\(printerId)/enabled",
+            "/api/auto-dispatch/\(status.printerId)/enabled",
             body: request,
             headers: [
                 "If-Match": "\"\(dispatchETag)\"",
@@ -75,12 +152,25 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
         return response
     }
 
-    private func preconditionHeaders(printerId: UUID) async throws -> [String: String] {
-        let status = try await getStatus(printerId: printerId)
-        guard let etag = status.dispatchStateETag, !etag.isEmpty else {
+    private func required(_ etag: String?) throws -> String {
+        guard let etag, !etag.isEmpty else {
             throw NetworkError.invalidResponse
         }
+        return etag
+    }
 
-        return ["If-Match": "\"\(etag)\""]
+    private func stableIdempotencyKey(status: AutoDispatchStatus) -> String {
+        let storageKey = [
+            "bed-clear",
+            status.nextJobId?.uuidString ?? "missing",
+            status.nextJobETag ?? "missing",
+            status.dispatchStateETag ?? "missing"
+        ].joined(separator: ":")
+        if let existing = UserDefaults.standard.string(forKey: storageKey) {
+            return existing
+        }
+        let created = UUID().uuidString
+        UserDefaults.standard.set(created, forKey: storageKey)
+        return created
     }
 }

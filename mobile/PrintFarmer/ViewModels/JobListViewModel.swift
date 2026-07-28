@@ -34,34 +34,46 @@ final class JobListViewModel {
 
     func cancelJob(id: UUID) async {
         guard let jobService, isViewActive else { return }
+        guard let rowVersion = reviewedRowVersion(for: id) else {
+            errorMessage = "Refresh and review this job before cancelling it."
+            return
+        }
         do {
-            try await jobService.cancel(id: id)
+            try await jobService.cancel(id: id, reviewedRowVersion: rowVersion)
             await loadJobs()
         } catch {
             guard isViewActive else { return }
-            errorMessage = error.localizedDescription
+            await handleActionError(error)
         }
     }
 
     func abortJob(id: UUID) async {
         guard let jobService, isViewActive else { return }
+        guard let rowVersion = reviewedRowVersion(for: id) else {
+            errorMessage = "Refresh and review this job before aborting it."
+            return
+        }
         do {
-            try await jobService.abort(id: id)
+            try await jobService.abort(id: id, reviewedRowVersion: rowVersion)
             await loadJobs()
         } catch {
             guard isViewActive else { return }
-            errorMessage = error.localizedDescription
+            await handleActionError(error)
         }
     }
 
     func dispatchJob(id: UUID) async {
         guard let jobService, isViewActive else { return }
+        guard let rowVersion = reviewedRowVersion(for: id) else {
+            errorMessage = "Refresh and review this job before dispatching it."
+            return
+        }
         do {
-            try await jobService.dispatch(id: id)
+            try await jobService.dispatch(id: id, reviewedRowVersion: rowVersion)
             await loadJobs()
         } catch {
             guard isViewActive else { return }
-            errorMessage = error.localizedDescription
+            await handleActionError(error)
         }
     }
 
@@ -96,5 +108,33 @@ final class JobListViewModel {
 
     var hasAnyJobs: Bool {
         !jobs.isEmpty
+    }
+
+    private func reviewedRowVersion(for id: UUID) -> String? {
+        jobs.first(where: { $0.job.jobUUID == id })?.job.rowVersion
+    }
+
+    private func handleActionError(_ error: Error) async {
+        if let networkError = error as? NetworkError,
+           networkError.requiresReview {
+            await loadJobs()
+            errorMessage =
+                "This job changed after you reviewed it. Review the refreshed row and confirm again."
+            return
+        }
+        errorMessage = error.localizedDescription
+    }
+}
+
+private extension NetworkError {
+    var requiresReview: Bool {
+        switch self {
+        case .preconditionFailed, .preconditionRequired:
+            return true
+        case .clientError(let code, _):
+            return code == 412 || code == 428
+        default:
+            return false
+        }
     }
 }

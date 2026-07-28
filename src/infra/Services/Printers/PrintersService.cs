@@ -3032,6 +3032,8 @@ public class PrintersService(
             toolhead.CurrentMaterial = spool?.Material ?? null;
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -3114,6 +3116,8 @@ public class PrintersService(
             toolhead.CurrentMaterial = null;
             toolhead.CurrentFilamentColor = null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 

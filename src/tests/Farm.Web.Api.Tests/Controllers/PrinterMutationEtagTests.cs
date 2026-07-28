@@ -7,6 +7,7 @@ using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -85,6 +86,55 @@ public sealed class PrinterMutationEtagTests : IAsyncLifetime
         (await db.Printers.FindAsync(_printerId))!.InMaintenance.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("active-spool", "POST")]
+    [InlineData("toolheads/0/spool", "PUT")]
+    [InlineData("z-offset", "POST")]
+    public async Task PhysicalMetadataMutation_MissingIfMatch_Returns428(
+        string suffix,
+        string method)
+    {
+        using HttpRequestMessage request = CreatePhysicalMetadataRequest(
+            suffix,
+            method,
+            etag: null);
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionRequired);
+    }
+
+    [Theory]
+    [InlineData("active-spool", "POST")]
+    [InlineData("toolheads/0/spool", "PUT")]
+    [InlineData("z-offset", "POST")]
+    public async Task PhysicalMetadataMutation_StaleIfMatch_Returns412WithZeroEffects(
+        string suffix,
+        string method)
+    {
+        HttpResponseMessage current = await _client.GetAsync(
+            $"/api/printers/{_printerId}");
+        string staleEtag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Printer GET omitted ETag.");
+        (await PutMaintenanceAsync(true, staleEtag)).EnsureSuccessStatusCode();
+        using HttpRequestMessage request = CreatePhysicalMetadataRequest(
+            suffix,
+            method,
+            staleEtag);
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = (await db.Printers.FindAsync(_printerId))!;
+        printer.CurrentSpoolId.Should().BeNull();
+        printer.ZOffsetMm.Should().BeNull();
+        (await db.Toolheads.CountAsync(toolhead =>
+            toolhead.PrinterId == _printerId &&
+            toolhead.CurrentSpoolId == 42)).Should().Be(0);
+    }
+
     private async Task<HttpResponseMessage> PutMaintenanceAsync(
         bool enabled,
         string etag)
@@ -97,5 +147,29 @@ public sealed class PrinterMutationEtagTests : IAsyncLifetime
         };
         request.Headers.TryAddWithoutValidation("If-Match", etag);
         return await _client.SendAsync(request);
+    }
+
+    private HttpRequestMessage CreatePhysicalMetadataRequest(
+        string suffix,
+        string method,
+        string? etag)
+    {
+        object body = suffix switch
+        {
+            "z-offset" => new { offsetMm = 0.1m, saveToFirmware = false },
+            _ => new { spoolId = 42 },
+        };
+        var request = new HttpRequestMessage(
+            new HttpMethod(method),
+            $"/api/printers/{_printerId}/{suffix}")
+        {
+            Content = JsonContent.Create(body),
+        };
+        if (etag is not null)
+        {
+            request.Headers.TryAddWithoutValidation("If-Match", etag);
+        }
+
+        return request;
     }
 }

@@ -232,7 +232,30 @@ public class PrintJobManagementService(
             List<PrintJob> jobs = await _repository.GetFilteredJobsAsync(
                 status, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, effectiveQueuedFrom, effectiveQueuedTo, cancellationToken);
 
-            return jobs.Select(pj => MapToQueuedPrintJobWithFileMeta(pj)).ToList();
+            Dictionary<Guid, string?> dispatchVersions = [];
+            if (_appDbContext is not null)
+            {
+                Guid[] printerIds = jobs
+                    .Where(job => job.AssignedPrinterId.HasValue)
+                    .Select(job => job.AssignedPrinterId!.Value)
+                    .Distinct()
+                    .ToArray();
+                dispatchVersions = await _appDbContext.PrinterDispatchStates
+                    .AsNoTracking()
+                    .Where(state => printerIds.Contains(state.PrinterId))
+                    .ToDictionaryAsync(
+                        state => state.PrinterId,
+                        state => state.RowVersion is { Length: > 0 }
+                            ? Convert.ToBase64String(state.RowVersion)
+                            : null,
+                        cancellationToken);
+            }
+
+            return jobs
+                .Select(job => MapToQueuedPrintJobWithFileMeta(
+                    job,
+                    dispatchVersions))
+                .ToList();
         }
         catch (Exception ex)
         {
@@ -1010,6 +1033,16 @@ public class PrintJobManagementService(
             }
 
             Guid? dispatchAttemptId = claimResult.Attempt.Id;
+            int dispatchAttemptNumber = claimResult.Attempt.AttemptNumber;
+            long uploadProgressSequence = 0;
+            string? dispatchJobRevision = job.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(job.RowVersion)
+                : null;
+            string? dispatchStateRevision =
+                claimResult.Attempt.DispatchStateRowVersionAtClaim is { Length: > 0 }
+                    ? Convert.ToBase64String(
+                        claimResult.Attempt.DispatchStateRowVersionAtClaim)
+                    : null;
 
             // Use original filename for the printer (not the GUID-based storage filename)
             string printerFileName = claimResult.Attempt.BackendFileName
@@ -1029,7 +1062,7 @@ public class PrintJobManagementService(
                 if (!System.IO.File.Exists(localFilePath))
                 {
                     job.FailureReason = DispatchArtifactUnavailable;
-                    await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                    bool applied = await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                         dispatchAttemptId.Value,
                         "backend_rejected",
                         DispatchArtifactUnavailable,
@@ -1038,6 +1071,12 @@ public class PrintJobManagementService(
                     _logger.LogError(
                         "G-code artifact is unavailable for print job {JobId}",
                         jobId);
+                    return applied
+                        ? await BuildDispatchResultAsync(
+                            job,
+                            claimResult.Attempt,
+                            cancellationToken)
+                        : BuildSupersededDispatchResult(job, claimResult.Attempt);
                 }
                 else
                 {
@@ -1053,20 +1092,21 @@ public class PrintJobManagementService(
                                 cancellationToken);
                         if (!uploadIntegrity.Success)
                         {
-                            await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                            job.FailureReason = DispatchArtifactUnavailable;
+                            bool applied =
+                                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                                 dispatchAttemptId.Value,
                                 uploadIntegrity.ErrorCode ?? "gcode_byte_hash_mismatch",
                                 uploadIntegrity.ErrorDetail ?? DispatchArtifactUnavailable,
                                 cancellationToken);
-                            claimResult.Attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
-                            claimResult.Attempt.ErrorCode = uploadIntegrity.ErrorCode;
-                            claimResult.Attempt.ErrorDetail = uploadIntegrity.ErrorDetail;
-                            QueuedPrintJobDto integrityFailure = MapToQueuedPrintJobDto(job);
-                            integrityFailure.DispatchResult = await MapDispatchAttemptResultAsync(
-                                claimResult.Attempt,
-                                job,
-                                cancellationToken);
-                            return integrityFailure;
+                            return applied
+                                ? await BuildDispatchResultAsync(
+                                    job,
+                                    claimResult.Attempt,
+                                    cancellationToken)
+                                : BuildSupersededDispatchResult(
+                                    job,
+                                    claimResult.Attempt);
                         }
                     }
 
@@ -1116,6 +1156,12 @@ public class PrintJobManagementService(
                         var dto = new DispatchUploadProgressDto
                         {
                             JobId = jobId,
+                            AttemptId = dispatchAttemptId.Value,
+                            AttemptNumber = dispatchAttemptNumber,
+                            Sequence = Interlocked.Increment(
+                                ref uploadProgressSequence),
+                            JobRevision = dispatchJobRevision,
+                            DispatchStateRevision = dispatchStateRevision,
                             PrinterId = job.AssignedPrinterId.Value.ToString(),
                             FileName = printerFileName,
                             BytesSent = Math.Min(bytesSent, totalBytes),
@@ -1139,9 +1185,17 @@ public class PrintJobManagementService(
 
                     // All backends implement ISupportsUploadAndPrint, handling protocol-specific
                     // delays, path resolution, and retries internally.
-                    await _dispatchClaimService.RecordBackendCallStartedAsync(
-                        dispatchAttemptId.Value,
-                        cancellationToken);
+                    bool callStarted =
+                        await _dispatchClaimService.RecordBackendCallStartedAsync(
+                            dispatchAttemptId.Value,
+                            cancellationToken);
+                    if (!callStarted)
+                    {
+                        return BuildSupersededDispatchResult(
+                            job,
+                            claimResult.Attempt);
+                    }
+
                     var result = await _printersService.UploadAndStartPrintAsync(
                         job.AssignedPrinterId.Value,
                         printerFileName,
@@ -1157,14 +1211,18 @@ public class PrintJobManagementService(
                             await ReportProgressAsync(totalBytes, force: true);
                         }
 
-                        await _dispatchClaimService.RecordBackendAcceptedAsync(
+                        bool applied =
+                            await _dispatchClaimService.RecordBackendAcceptedAsync(
                             dispatchAttemptId.Value,
                             result.BackendJobId,
                             result.BackendFileIdentity ?? printerFileName,
                             cancellationToken);
-                        claimResult.Attempt.Outcome = DispatchAttemptOutcome.Accepted;
-                        claimResult.Attempt.BackendAcceptedAtUtc = DateTime.UtcNow;
-                        claimResult.Attempt.BackendJobId = result.BackendJobId;
+                        if (!applied)
+                        {
+                            return BuildSupersededDispatchResult(
+                                job,
+                                claimResult.Attempt);
+                        }
 
                         // Snapshot per-extruder slicer estimates into PrintJobToolheadUsage records
                         await SnapshotSlicerEstimatesAsync(job, cancellationToken);
@@ -1173,14 +1231,19 @@ public class PrintJobManagementService(
                     }
                     else if (result.Outcome == UploadAndPrintOutcome.Unknown)
                     {
-                        job.FailureReason = DispatchUnexpectedFailure;
-                        await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                        bool applied =
+                            await _dispatchClaimService.RecordUnknownOutcomeAsync(
                             dispatchAttemptId.Value,
                             result.ErrorMessage ?? DispatchUnexpectedFailure,
                             cancellationToken);
-                        claimResult.Attempt.Outcome = DispatchAttemptOutcome.Unknown;
-                        claimResult.Attempt.ErrorCode = "backend_outcome_unknown";
-                        claimResult.Attempt.RequiresReconciliation = true;
+                        if (!applied)
+                        {
+                            return BuildSupersededDispatchResult(
+                                job,
+                                claimResult.Attempt);
+                        }
+
+                        job.FailureReason = DispatchUnexpectedFailure;
 
                         _logger.LogWarning(
                             "Upload/start outcome is unknown for job {JobId} on printer {PrinterId}; lease retained",
@@ -1191,20 +1254,12 @@ public class PrintJobManagementService(
                     {
                         job.FailureReason = DispatchPrinterFailure;
                         string failureDetail = result.ErrorMessage ?? DispatchPrinterFailure;
-                        await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                        bool applied =
+                            await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                             dispatchAttemptId.Value,
                             "backend_rejected",
                             failureDetail,
                             cancellationToken);
-                        claimResult.Attempt.Outcome =
-                            result.Outcome == UploadAndPrintOutcome.FailedBeforeStart
-                                ? DispatchAttemptOutcome.FailedBeforeStart
-                                : DispatchAttemptOutcome.Rejected;
-                        claimResult.Attempt.ErrorCode =
-                            result.Outcome == UploadAndPrintOutcome.FailedBeforeStart
-                                ? "backend_failed_before_start"
-                                : "backend_rejected";
-                        claimResult.Attempt.IsRetryable = true;
 
                         _logger.LogWarning(
                             "Failed to upload and start print job {JobId} on printer {PrinterId} at stage {Stage}",
@@ -1216,6 +1271,12 @@ public class PrintJobManagementService(
                             var failedProgress = new DispatchUploadProgressDto
                             {
                                 JobId = jobId,
+                                AttemptId = dispatchAttemptId.Value,
+                                AttemptNumber = dispatchAttemptNumber,
+                                Sequence = Interlocked.Increment(
+                                    ref uploadProgressSequence),
+                                JobRevision = dispatchJobRevision,
+                                DispatchStateRevision = dispatchStateRevision,
                                 PrinterId = job.AssignedPrinterId.Value.ToString(),
                                 FileName = printerFileName,
                                 BytesSent = lastReportedBytes,
@@ -1232,20 +1293,33 @@ public class PrintJobManagementService(
                                     failedProgress,
                                     cancellationToken);
                         }
+
+                        return applied
+                            ? await BuildDispatchResultAsync(
+                                job,
+                                claimResult.Attempt,
+                                cancellationToken)
+                            : BuildSupersededDispatchResult(
+                                job,
+                                claimResult.Attempt);
                     }
                 }
             }
             catch (Exception printEx)
             {
                 // Record unknown outcome — job stays in Starting for reconciliation.
-                job.FailureReason = DispatchUnexpectedFailure;
-                await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
                     dispatchAttemptId.Value,
                     printEx.Message,
                     CancellationToken.None);
-                claimResult.Attempt.Outcome = DispatchAttemptOutcome.Unknown;
-                claimResult.Attempt.ErrorCode = "backend_outcome_unknown";
-                claimResult.Attempt.RequiresReconciliation = true;
+                if (!applied)
+                {
+                    return BuildSupersededDispatchResult(
+                        job,
+                        claimResult.Attempt);
+                }
+
+                job.FailureReason = DispatchUnexpectedFailure;
 
                 _logger.LogError(
                     "Error dispatching print job {JobId} to printer {PrinterId}; exception type {ExceptionType}",
@@ -1474,15 +1548,19 @@ public class PrintJobManagementService(
         {
             if (!System.IO.File.Exists(localFilePath))
             {
-                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                bool applied = await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                     attemptId, "backend_rejected", DispatchArtifactUnavailable, cancellationToken);
 
                 _logger.LogError(
                     "DispatchJobWithAckAsync: G-code artifact unavailable for job {JobId}",
                     jobId);
 
-                return BackendStartOutcome.FailedBeforeStart(
-                    "artifact_unavailable", DispatchArtifactUnavailable, attemptId);
+                return applied
+                    ? BackendStartOutcome.FailedBeforeStart(
+                        "artifact_unavailable",
+                        DispatchArtifactUnavailable,
+                        attemptId)
+                    : SupersededBackendStart(attemptId);
             }
 
             await using FileStream fileStream = System.IO.File.OpenRead(localFilePath);
@@ -1496,24 +1574,33 @@ public class PrintJobManagementService(
                         cancellationToken);
                 if (!uploadIntegrity.Success)
                 {
-                    await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                    bool applied =
+                        await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                         attemptId,
                         uploadIntegrity.ErrorCode ?? "gcode_byte_hash_mismatch",
                         uploadIntegrity.ErrorDetail ?? DispatchArtifactUnavailable,
                         cancellationToken);
-                    return BackendStartOutcome.FailedBeforeStart(
-                        uploadIntegrity.ErrorCode ?? "gcode_byte_hash_mismatch",
-                        uploadIntegrity.ErrorDetail ?? DispatchArtifactUnavailable,
-                        attemptId);
+                    return applied
+                        ? BackendStartOutcome.FailedBeforeStart(
+                            uploadIntegrity.ErrorCode ?? "gcode_byte_hash_mismatch",
+                            uploadIntegrity.ErrorDetail ?? DispatchArtifactUnavailable,
+                            attemptId)
+                        : SupersededBackendStart(attemptId);
                 }
             }
 
             var stageProgress = new Progress<UploadAndPrintStage>(stage =>
                 _logger.LogDebug("DispatchJobWithAckAsync: Job {JobId} stage {Stage}", jobId, stage));
 
-            await _dispatchClaimService.RecordBackendCallStartedAsync(
-                attemptId,
-                cancellationToken);
+            bool callStarted =
+                await _dispatchClaimService.RecordBackendCallStartedAsync(
+                    attemptId,
+                    cancellationToken);
+            if (!callStarted)
+            {
+                return SupersededBackendStart(attemptId);
+            }
+
             var uploadResult = await _printersService.UploadAndStartPrintAsync(
                 job.AssignedPrinterId.Value,
                 printerFileName,
@@ -1523,8 +1610,13 @@ public class PrintJobManagementService(
 
             if (uploadResult.Success)
             {
-                await _dispatchClaimService.RecordBackendAcceptedAsync(
+                bool applied =
+                    await _dispatchClaimService.RecordBackendAcceptedAsync(
                     attemptId, uploadResult.BackendJobId, cancellationToken);
+                if (!applied)
+                {
+                    return SupersededBackendStart(attemptId);
+                }
 
                 await SnapshotSlicerEstimatesAsync(job, cancellationToken);
 
@@ -1538,16 +1630,24 @@ public class PrintJobManagementService(
             string failureDetail = uploadResult.ErrorMessage ?? DispatchPrinterFailure;
             if (uploadResult.Outcome == UploadAndPrintOutcome.Unknown)
             {
-                await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                bool applied =
+                    await _dispatchClaimService.RecordUnknownOutcomeAsync(
                     attemptId,
                     failureDetail,
                     cancellationToken);
 
-                return BackendStartOutcome.Unknown(failureDetail, attemptId);
+                return applied
+                    ? BackendStartOutcome.Unknown(failureDetail, attemptId)
+                    : SupersededBackendStart(attemptId);
             }
 
-            await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+            bool released =
+                await _dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
                 attemptId, "backend_rejected", failureDetail, cancellationToken);
+            if (!released)
+            {
+                return SupersededBackendStart(attemptId);
+            }
 
             _logger.LogWarning(
                 "DispatchJobWithAckAsync: Backend rejected job {JobId} — {Failure}",
@@ -1568,13 +1668,13 @@ public class PrintJobManagementService(
         catch (OperationCanceledException)
         {
             // Shutdown mid-flight: the outcome is genuinely unknown. Leave the lease.
-            await _dispatchClaimService.RecordUnknownOutcomeAsync(
+            _ = await _dispatchClaimService.RecordUnknownOutcomeAsync(
                 attemptId, "Cancelled during backend start; outcome unknown.", CancellationToken.None);
             throw;
         }
         catch (Exception ex)
         {
-            await _dispatchClaimService.RecordUnknownOutcomeAsync(
+            bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
                 attemptId, ex.Message, cancellationToken);
 
             _logger.LogError(
@@ -1583,8 +1683,11 @@ public class PrintJobManagementService(
                 jobId,
                 job.AssignedPrinterId.Value);
 
-            return BackendStartOutcome.Unknown(
-                "The backend outcome could not be determined; reconciliation is required.", attemptId);
+            return applied
+                ? BackendStartOutcome.Unknown(
+                    "The backend outcome could not be determined; reconciliation is required.",
+                    attemptId)
+                : SupersededBackendStart(attemptId);
         }
     }
 
@@ -3204,7 +3307,9 @@ public class PrintJobManagementService(
         };
     }
 
-    private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(PrintJob job)
+    private QueuedPrintJobWithFileMetaDto MapToQueuedPrintJobWithFileMeta(
+        PrintJob job,
+        Dictionary<Guid, string?> dispatchVersions)
     {
         DateTime? estimatedStart = EstimateStartTime(job);
         DateTime? estimatedCompletion = EstimateCompletionTime(job, estimatedStart);
@@ -3214,6 +3319,13 @@ public class PrintJobManagementService(
             Job = MapToQueuedPrintJobDto(job),
             GcodeFile = job.GcodeFile != null ? MapToQueueGcodeFileMetaDto(job.GcodeFile) : new QueueGcodeFileMetaDto { FileName = string.IsNullOrWhiteSpace(job.Name) ? "Unknown" : job.Name },
             AssignedPrinter = job.AssignedPrinter != null ? MapToQueuePrinterMetaDto(job.AssignedPrinter) : null,
+            DispatchStateRowVersion =
+                job.AssignedPrinterId.HasValue &&
+                dispatchVersions.TryGetValue(
+                    job.AssignedPrinterId.Value,
+                    out string? dispatchVersion)
+                    ? dispatchVersion
+                    : null,
             EstimatedStartTime = estimatedStart,
             EstimatedCompletionTime = estimatedCompletion
         };
@@ -3902,6 +4014,10 @@ public class PrintJobManagementService(
             // FileName = internal GUID-based path (null for history-seeded jobs without GcodeFile)
             FileName = job.GcodeFile?.FileName,
             AssignedPrinterId = job.AssignedPrinterId?.ToString(),
+            JobKind = (
+                job.JobKind ??
+                Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+            CalibrationProjectId = job.CalibrationProjectId,
             PrinterName = job.AssignedPrinter?.Name, // Denormalized printer name for display
             PrinterModel = job.AssignedPrinter?.Model?.Name, // Denormalized printer model for display
             Status = job.Status.ToString(),
@@ -3975,6 +4091,41 @@ public class PrintJobManagementService(
         return dto;
     }
 
+    private async Task<QueuedPrintJobDto> BuildDispatchResultAsync(
+        PrintJob job,
+        QueueDispatchAttempt attempt,
+        CancellationToken ct)
+    {
+        QueuedPrintJobDto dto = MapToQueuedPrintJobDto(job);
+        dto.DispatchResult = await MapDispatchAttemptResultAsync(attempt, job, ct);
+        return dto;
+    }
+
+    private QueuedPrintJobDto BuildSupersededDispatchResult(
+        PrintJob job,
+        QueueDispatchAttempt attempt)
+    {
+        QueuedPrintJobDto dto = MapToQueuedPrintJobDto(job);
+        dto.DispatchResult = new DispatchAttemptResultDto
+        {
+            AttemptId = attempt.Id,
+            AttemptNumber = attempt.AttemptNumber,
+            Outcome = DispatchAttemptOutcome.Rejected,
+            ErrorCode = "attempt_superseded",
+            ErrorDetail =
+                "This dispatch attempt no longer owns the printer. Refresh before retrying.",
+            IsRetryable = false,
+        };
+        return dto;
+    }
+
+    private static BackendStartOutcome SupersededBackendStart(Guid attemptId) =>
+        BackendStartOutcome.Rejected(
+            "attempt_superseded",
+            "This dispatch attempt no longer owns the printer.",
+            attemptId,
+            isRetryable: false);
+
     private async Task<DispatchAttemptResultDto> MapDispatchAttemptResultAsync(
         QueueDispatchAttempt attempt,
         PrintJob job,
@@ -3993,6 +4144,7 @@ public class PrintJobManagementService(
         return new DispatchAttemptResultDto
         {
             AttemptId = attempt.Id,
+            AttemptNumber = attempt.AttemptNumber,
             Outcome = attempt.Outcome,
             BackendAcceptedAtUtc = attempt.BackendAcceptedAtUtc,
             ErrorCode = attempt.ErrorCode,
@@ -4032,6 +4184,9 @@ public class PrintJobManagementService(
         return new QueuePrinterMetaDto
         {
             Id = printer.Id.ToString(),
+            RowVersion = printer.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(printer.RowVersion)
+                : null,
             Name = printer.Name,
             ModelName = printer.Model?.Name ?? "Unknown",
             Status = cachedStatus?.State ?? "Unknown",
