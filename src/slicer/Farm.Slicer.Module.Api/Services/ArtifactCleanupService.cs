@@ -36,7 +36,8 @@ public class ArtifactCleanupService(
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        List<Artifact> candidatesForDeletion = [];
+        List<Artifact> candidatesForDeletion =
+            (await _artifactsRepo.GetCleanupInProgressAsync(ct)).ToList();
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)
@@ -78,7 +79,9 @@ public class ArtifactCleanupService(
         }
 
         // Deduplicate candidates
-        candidatesForDeletion = candidatesForDeletion.Distinct().ToList();
+        candidatesForDeletion = candidatesForDeletion
+            .DistinctBy(artifact => artifact.Id)
+            .ToList();
 
         if (candidatesForDeletion.Count == 0)
         {
@@ -113,47 +116,74 @@ public class ArtifactCleanupService(
         int deletedCount = 0;
         foreach (Artifact artifact in candidatesForDeletion)
         {
-            DateTime reservedAtUtc = DateTime.UtcNow;
-            DateTime staleBeforeUtc = reservedAtUtc.AddMinutes(
-                -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
-            Guid reservationToken = Guid.NewGuid();
-            bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
-                artifact.Id,
-                artifact.CleanupReservationToken,
-                artifact.CleanupReservedAtUtc,
-                reservationToken,
-                reservedAtUtc,
-                staleBeforeUtc,
-                ct);
-            if (!reserved)
+            Guid reservationToken;
+            if (artifact.CleanupReservationToken is Guid inProgressToken &&
+                artifact.CleanupDeletionStartedAtUtc.HasValue)
             {
-                _logger.LogDebug(
-                    "Skipped artifact {Id} because cleanup or promotion already owns it",
-                    artifact.Id);
-                continue;
+                reservationToken = inProgressToken;
             }
-
-            try
+            else
             {
-                // Remove metadata first while this pass still owns cleanup. A stale owner that
-                // loses its token must never delete bytes that still have live metadata.
-                if (!await _artifactsRepo.DeleteReservedAsync(artifact.Id, reservationToken, ct))
+                DateTime reservedAtUtc = DateTime.UtcNow;
+                DateTime staleBeforeUtc = reservedAtUtc.AddMinutes(
+                    -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
+                reservationToken = Guid.NewGuid();
+                bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
+                    artifact.Id,
+                    artifact.CleanupReservationToken,
+                    artifact.CleanupReservedAtUtc,
+                    reservationToken,
+                    reservedAtUtc,
+                    staleBeforeUtc,
+                    ct);
+                if (!reserved)
                 {
-                    _logger.LogWarning(
-                        "Cleanup reservation for artifact {Id} was lost before row deletion",
+                    _logger.LogDebug(
+                        "Skipped artifact {Id} because cleanup or promotion already owns it",
                         artifact.Id);
                     continue;
                 }
 
+                bool deletionStarted = await _artifactsRepo.TryBeginCleanupDeletionAsync(
+                    artifact.Id,
+                    reservationToken,
+                    DateTime.UtcNow,
+                    ct);
+                if (!deletionStarted)
+                {
+                    await _artifactsRepo.ReleaseCleanupReservationAsync(
+                        artifact.Id,
+                        reservationToken,
+                        CancellationToken.None);
+                    _logger.LogWarning(
+                        "Cleanup reservation for artifact {Id} was lost before byte deletion began",
+                        artifact.Id);
+                    continue;
+                }
+            }
+
+            try
+            {
                 string rootPath = Path.IsPathRooted(_settings.RootPath)
                     ? _settings.RootPath
                     : Path.Combine(_env.ContentRootPath, _settings.RootPath);
                 string fullPath = Path.Combine(rootPath, artifact.RelativePath);
 
-                if (File.Exists(fullPath))
+                if (ArtifactFileExists(fullPath))
                 {
-                    File.Delete(fullPath);
+                    DeleteArtifactFile(fullPath);
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
+                }
+
+                if (!await _artifactsRepo.FinalizeCleanupAsync(
+                        artifact.Id,
+                        reservationToken,
+                        ct))
+                {
+                    _logger.LogDebug(
+                        "Cleanup metadata for artifact {Id} was already finalized by another pass",
+                        artifact.Id);
+                    continue;
                 }
 
                 deletedCount++;
@@ -166,15 +196,18 @@ public class ArtifactCleanupService(
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                await _artifactsRepo.ReleaseCleanupReservationAsync(
-                    artifact.Id,
-                    reservationToken,
-                    CancellationToken.None);
-                _logger.LogError(ex, "Failed to delete artifact {Id}", artifact.Id);
+                _logger.LogError(
+                    ex,
+                    "Failed to delete artifact {Id}; durable cleanup state will be retried",
+                    artifact.Id);
             }
         }
 
         _logger.LogInformation("Successfully deleted {Count} artifacts", deletedCount);
         return deletedCount;
     }
+
+    protected virtual bool ArtifactFileExists(string path) => File.Exists(path);
+
+    protected virtual void DeleteArtifactFile(string path) => File.Delete(path);
 }

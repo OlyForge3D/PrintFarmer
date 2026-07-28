@@ -41,6 +41,9 @@ public interface IArtifactsRepository
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Artifact>> GetOlderThanAsync(DateTime cutoffDate, CancellationToken ct = default);
 
+    /// <summary>Gets cleanup operations whose byte-deletion phase must be resumed.</summary>
+    Task<IReadOnlyList<Artifact>> GetCleanupInProgressAsync(CancellationToken ct = default);
+
     /// <summary>
     /// Atomically reserves an eligible artifact for cleanup, excluding any concurrent promotion pin.
     /// </summary>
@@ -53,13 +56,20 @@ public interface IArtifactsRepository
         DateTime staleBeforeUtc,
         CancellationToken ct = default);
 
-    /// <summary>Deletes an artifact only when the caller still owns its cleanup reservation.</summary>
-    Task<bool> DeleteReservedAsync(
+    /// <summary>Atomically enters the immutable, idempotent byte-deletion phase.</summary>
+    Task<bool> TryBeginCleanupDeletionAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        DateTime startedAtUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Finalizes metadata only after byte deletion began under the exact operation token.</summary>
+    Task<bool> FinalizeCleanupAsync(
         Guid artifactId,
         Guid reservationToken,
         CancellationToken ct = default);
 
-    /// <summary>Releases a cleanup reservation after filesystem cleanup could not complete.</summary>
+    /// <summary>Releases a reservation only before its durable deletion phase begins.</summary>
     Task ReleaseCleanupReservationAsync(
         Guid artifactId,
         Guid reservationToken,

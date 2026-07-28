@@ -26,6 +26,7 @@ public class ArtifactConfiguration : IEntityTypeConfiguration<Artifact>
         _ = builder.Property(a => a.CreatedAt).IsRequired();
         _ = builder.Property(a => a.PromotionOperationId).HasMaxLength(128);
         _ = builder.Property(a => a.PromotionOperationKey).HasMaxLength(64);
+        _ = builder.Property(a => a.CleanupDeletionStartedAtUtc);
 
         // Indexes
         _ = builder.HasIndex(a => a.JobId);

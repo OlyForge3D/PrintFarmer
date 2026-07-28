@@ -93,6 +93,12 @@ public class Artifact
     public DateTime? CleanupReservedAtUtc { get; set; }
 
     /// <summary>
+    /// UTC timestamp when cleanup durably entered its idempotent byte-deletion phase.
+    /// </summary>
+    [JsonIgnore]
+    public DateTime? CleanupDeletionStartedAtUtc { get; set; }
+
+    /// <summary>
     /// Whether cleanup may reclaim this artifact. A promotion in flight has an unknown outcome, so the
     /// artifact stays until the promoter or its reconciler resolves the result.
     /// </summary>

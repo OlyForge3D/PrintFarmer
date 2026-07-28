@@ -32,6 +32,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("ClaimToken")
                         .HasColumnType("uuid");
 
+                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("CleanupReservationToken")
                         .HasColumnType("uuid");
 

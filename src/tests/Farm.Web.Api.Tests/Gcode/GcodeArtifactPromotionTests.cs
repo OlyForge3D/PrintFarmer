@@ -23,6 +23,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -365,6 +366,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         TaskCompletionSource releaseSelection =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<IArtifactsRepository> gated = new(MockBehavior.Strict);
+        _ = gated.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = gated.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -427,6 +432,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         TaskCompletionSource releaseDelete =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<IArtifactsRepository> gated = new(MockBehavior.Strict);
+        _ = gated.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = gated.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -456,7 +465,22 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                     reservedAtUtc,
                     staleBeforeUtc,
                     cancellationToken));
-        _ = gated.Setup(repository => repository.DeleteReservedAsync(
+        _ = gated.Setup(repository => repository.TryBeginCleanupDeletionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                DateTime startedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryBeginCleanupDeletionAsync(
+                    id,
+                    reservationToken,
+                    startedAtUtc,
+                    cancellationToken));
+        _ = gated.Setup(repository => repository.FinalizeCleanupAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
@@ -467,7 +491,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             {
                 deleteReached.TrySetResult();
                 await releaseDelete.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
-                return await inner.DeleteReservedAsync(id, reservationToken, cancellationToken);
+                return await inner.FinalizeCleanupAsync(id, reservationToken, cancellationToken);
             });
 
         Task<int> cleanup = _harness.RunArtifactCleanupAsync(gated.Object);
@@ -497,6 +521,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         Mock<IArtifactsRepository> firstPass = new(MockBehavior.Strict);
+        _ = firstPass.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = firstPass.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -535,7 +563,22 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
                 return reserved;
             });
-        _ = firstPass.Setup(repository => repository.DeleteReservedAsync(
+        _ = firstPass.Setup(repository => repository.TryBeginCleanupDeletionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                DateTime startedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryBeginCleanupDeletionAsync(
+                    id,
+                    reservationToken,
+                    startedAtUtc,
+                    cancellationToken));
+        _ = firstPass.Setup(repository => repository.FinalizeCleanupAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
@@ -543,9 +586,13 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 Guid id,
                 Guid reservationToken,
                 CancellationToken cancellationToken) =>
-                inner.DeleteReservedAsync(id, reservationToken, cancellationToken));
+                inner.FinalizeCleanupAsync(id, reservationToken, cancellationToken));
 
         Mock<IArtifactsRepository> secondPass = new(MockBehavior.Strict);
+        _ = secondPass.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = secondPass.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -575,11 +622,6 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                     reservedAtUtc,
                     staleBeforeUtc,
                     cancellationToken));
-        _ = secondPass.Setup(repository => repository.DeleteReservedAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("deterministic cleanup interruption"));
         _ = secondPass.Setup(repository => repository.ReleaseCleanupReservationAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
@@ -656,7 +698,11 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         _ = results.Count(acquired => acquired).Should().Be(1);
         Guid winnerToken = results[0] ? firstTakeoverToken : secondTakeoverToken;
-        _ = (await firstRepository.DeleteReservedAsync(
+        _ = (await firstRepository.TryBeginCleanupDeletionAsync(
+            fixture.ArtifactId,
+            expiredToken,
+            takeoverAtUtc)).Should().BeFalse();
+        _ = (await firstRepository.FinalizeCleanupAsync(
             fixture.ArtifactId,
             expiredToken)).Should().BeFalse();
         await firstRepository.ReleaseCleanupReservationAsync(fixture.ArtifactId, expiredToken);
@@ -670,10 +716,14 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             new PromotionOperationIdentity("stale-takeover-key", "stale-takeover"),
             takeoverAtUtc)).Should().BeFalse();
 
-        _ = (await firstRepository.DeleteReservedAsync(
+        _ = (await firstRepository.TryBeginCleanupDeletionAsync(
+            fixture.ArtifactId,
+            winnerToken,
+            takeoverAtUtc)).Should().BeTrue();
+        _harness.DeleteArtifactBytes(fixture.ArtifactId);
+        _ = (await firstRepository.FinalizeCleanupAsync(
             fixture.ArtifactId,
             winnerToken)).Should().BeTrue();
-        _harness.DeleteArtifactBytes(fixture.ArtifactId);
         _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
         _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
     }
@@ -691,6 +741,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         Mock<IArtifactsRepository> staleOwner = new(MockBehavior.Strict);
+        _ = staleOwner.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = staleOwner.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -733,7 +787,22 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
                 return reserved;
             });
-        _ = staleOwner.Setup(repository => repository.DeleteReservedAsync(
+        _ = staleOwner.Setup(repository => repository.TryBeginCleanupDeletionAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                DateTime startedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryBeginCleanupDeletionAsync(
+                    id,
+                    reservationToken,
+                    startedAtUtc,
+                    cancellationToken));
+        _ = staleOwner.Setup(repository => repository.ReleaseCleanupReservationAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
@@ -741,9 +810,13 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 Guid id,
                 Guid reservationToken,
                 CancellationToken cancellationToken) =>
-                inner.DeleteReservedAsync(id, reservationToken, cancellationToken));
+                inner.ReleaseCleanupReservationAsync(id, reservationToken, cancellationToken));
 
         Mock<IArtifactsRepository> takeover = new(MockBehavior.Strict);
+        _ = takeover.Setup(repository => repository.GetCleanupInProgressAsync(
+                It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                inner.GetCleanupInProgressAsync(cancellationToken));
         _ = takeover.Setup(repository => repository.GetOlderThanAsync(
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
@@ -773,20 +846,21 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                     reservedAtUtc,
                     staleBeforeUtc,
                     cancellationToken));
-        _ = takeover.Setup(repository => repository.DeleteReservedAsync(
+        _ = takeover.Setup(repository => repository.TryBeginCleanupDeletionAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<Guid>(),
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new IOException("deterministic takeover interruption"));
-        _ = takeover.Setup(repository => repository.ReleaseCleanupReservationAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
                 Guid reservationToken,
+                DateTime startedAtUtc,
                 CancellationToken cancellationToken) =>
-                inner.ReleaseCleanupReservationAsync(id, reservationToken, cancellationToken));
+                inner.TryBeginCleanupDeletionAsync(
+                    id,
+                    reservationToken,
+                    startedAtUtc,
+                    cancellationToken));
 
         Task<int> staleCleanup = _harness.RunArtifactCleanupAsync(staleOwner.Object);
         await firstReserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -794,7 +868,9 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         int takeoverDeleted;
         try
         {
-            takeoverDeleted = await _harness.RunArtifactCleanupAsync(takeover.Object);
+            takeoverDeleted = await _harness.RunArtifactCleanupAsync(
+                takeover.Object,
+                _ => throw new IOException("deterministic takeover interruption"));
         }
         finally
         {
@@ -808,8 +884,73 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
         _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeTrue();
         Artifact preserved = await _harness.GetArtifactAsync(fixture.ArtifactId);
-        _ = preserved.CleanupReservationToken.Should().BeNull();
-        _ = preserved.CleanupReservedAtUtc.Should().BeNull();
+        _ = preserved.CleanupReservationToken.Should().NotBeNull();
+        _ = preserved.CleanupDeletionStartedAtUtc.Should().NotBeNull();
+        _ = (await inner.TryPinForPromotionAsync(
+            fixture.ArtifactId,
+            Guid.NewGuid(),
+            new PromotionOperationIdentity("stale-cleanup-retry-key", "stale-cleanup-retry"),
+            DateTime.UtcNow)).Should().BeFalse();
+
+        int recovered = await _harness.RunArtifactCleanupAsync();
+        _ = recovered.Should().Be(1);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
+    }
+
+    [Theory(DisplayName = "A byte deletion failure leaves recoverable cleanup metadata")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ArtifactCleanup_WhenByteDeletionFails_RetriesWithoutOrphaningBytes(
+        bool accessDenied)
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        Exception failure = accessDenied
+            ? new UnauthorizedAccessException("deterministic access denial")
+            : new IOException("deterministic I/O failure");
+
+        int interrupted = await _harness.RunArtifactCleanupAsync(
+            deleteArtifactFile: _ => throw failure);
+
+        _ = interrupted.Should().Be(0);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeTrue();
+        Artifact pending = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = pending.CleanupReservationToken.Should().NotBeNull();
+        _ = pending.CleanupDeletionStartedAtUtc.Should().NotBeNull();
+        _ = (await _harness.CreateArtifactsRepository().TryPinForPromotionAsync(
+            fixture.ArtifactId,
+            Guid.NewGuid(),
+            new PromotionOperationIdentity("cleanup-retry-key", "cleanup-retry"),
+            DateTime.UtcNow)).Should().BeFalse();
+
+        int recovered = await _harness.RunArtifactCleanupAsync();
+
+        _ = recovered.Should().Be(1);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "A restart finalizes metadata after bytes were already deleted")]
+    public async Task ArtifactCleanup_AfterByteDeleteBeforeFinalization_Converges()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        Guid reservationToken = Guid.NewGuid();
+        DateTime startedAtUtc = DateTime.UtcNow;
+        await _harness.SetArtifactCleanupReservationAsync(
+            fixture.ArtifactId,
+            reservationToken,
+            startedAtUtc,
+            startedAtUtc);
+        _harness.DeleteArtifactBytes(fixture.ArtifactId);
+
+        int recovered = await _harness.RunArtifactCleanupAsync();
+
+        _ = recovered.Should().Be(1);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
     }
 
     [Fact(DisplayName = "A restart reconciles an unknown promotion outcome without duplicating the file")]
@@ -1374,12 +1515,14 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         public async Task SetArtifactCleanupReservationAsync(
             Guid artifactId,
             Guid reservationToken,
-            DateTime reservedAtUtc)
+            DateTime reservedAtUtc,
+            DateTime? deletionStartedAtUtc = null)
         {
             await using SlicerDbContext slicer = CreateSlicerContext();
             Artifact artifact = await slicer.Artifacts.SingleAsync(candidate => candidate.Id == artifactId);
             artifact.CleanupReservationToken = reservationToken;
             artifact.CleanupReservedAtUtc = reservedAtUtc;
+            artifact.CleanupDeletionStartedAtUtc = deletionStartedAtUtc;
             _ = await slicer.SaveChangesAsync();
         }
 
@@ -1390,7 +1533,9 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 .SingleAsync(candidate => candidate.Id == artifactId);
         }
 
-        public async Task<int> RunArtifactCleanupAsync(IArtifactsRepository? repository = null)
+        public async Task<int> RunArtifactCleanupAsync(
+            IArtifactsRepository? repository = null,
+            Action<string>? deleteArtifactFile = null)
         {
             ArtifactStorageSettings settings = new()
             {
@@ -1400,12 +1545,33 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 EnableCleanupDryRun = false,
                 CleanupReservationTimeoutMinutes = 30,
             };
-            ArtifactCleanupService cleanup = new(
-                repository ?? CreateArtifactsRepository(),
-                Options.Create(settings),
-                CreateHostEnvironment(),
-                NullLogger<ArtifactCleanupService>.Instance);
+            IArtifactsRepository resolvedRepository = repository ?? CreateArtifactsRepository();
+            ArtifactCleanupService cleanup = deleteArtifactFile is null
+                ? new ArtifactCleanupService(
+                    resolvedRepository,
+                    Options.Create(settings),
+                    CreateHostEnvironment(),
+                    NullLogger<ArtifactCleanupService>.Instance)
+                : new TestArtifactCleanupService(
+                    resolvedRepository,
+                    Options.Create(settings),
+                    CreateHostEnvironment(),
+                    NullLogger<ArtifactCleanupService>.Instance,
+                    deleteArtifactFile);
             return await cleanup.ScanAndCleanupAsync(CancellationToken.None);
+        }
+
+        private sealed class TestArtifactCleanupService(
+            IArtifactsRepository artifactsRepository,
+            IOptions<ArtifactStorageSettings> options,
+            IWebHostEnvironment environment,
+            ILogger<ArtifactCleanupService> logger,
+            Action<string> deleteArtifactFile)
+            : ArtifactCleanupService(artifactsRepository, options, environment, logger)
+        {
+            private readonly Action<string> _deleteArtifactFile = deleteArtifactFile;
+
+            protected override void DeleteArtifactFile(string path) => _deleteArtifactFile(path);
         }
 
         public async Task<bool> ArtifactExistsAsync(Guid artifactId)

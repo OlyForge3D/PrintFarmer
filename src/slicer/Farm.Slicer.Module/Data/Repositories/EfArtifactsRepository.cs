@@ -92,6 +92,20 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<Artifact>> GetCleanupInProgressAsync(
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.Set<Artifact>()
+            .AsNoTracking()
+            .Where(artifact =>
+                artifact.CleanupReservationToken != null &&
+                artifact.CleanupDeletionStartedAtUtc != null)
+            .OrderBy(artifact => artifact.CleanupDeletionStartedAtUtc)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<bool> TryReserveForCleanupAsync(
         Guid artifactId,
         Guid? expectedReservationToken,
@@ -113,6 +127,7 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
                 artifact.Id == artifactId &&
                 artifact.CleanupReservationToken == expectedReservationToken &&
                 artifact.CleanupReservedAtUtc == expectedReservedAtUtc &&
+                artifact.CleanupDeletionStartedAtUtc == null &&
                 (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null));
         int affected = await candidate.ExecuteUpdateAsync(
             setters => setters
@@ -123,7 +138,28 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     }
 
     /// <inheritdoc/>
-    public async Task<bool> DeleteReservedAsync(
+    public async Task<bool> TryBeginCleanupDeletionAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        DateTime startedAtUtc,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    artifact => artifact.CleanupDeletionStartedAtUtc,
+                    startedAtUtc),
+                ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> FinalizeCleanupAsync(
         Guid artifactId,
         Guid reservationToken,
         CancellationToken ct = default)
@@ -132,7 +168,8 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         int affected = await db.Set<Artifact>()
             .Where(artifact =>
                 artifact.Id == artifactId &&
-                artifact.CleanupReservationToken == reservationToken)
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc != null)
             .ExecuteDeleteAsync(ct);
         return affected == 1;
     }
@@ -147,7 +184,8 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         _ = await db.Set<Artifact>()
             .Where(artifact =>
                 artifact.Id == artifactId &&
-                artifact.CleanupReservationToken == reservationToken)
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc == null)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(artifact => artifact.CleanupReservationToken, (Guid?)null)

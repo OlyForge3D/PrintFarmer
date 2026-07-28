@@ -26,6 +26,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("ClaimToken")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("CleanupReservationToken")
                         .HasColumnType("TEXT");
 
