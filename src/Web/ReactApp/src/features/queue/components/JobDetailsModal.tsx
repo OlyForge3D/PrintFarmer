@@ -116,7 +116,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
         if (window.PrintFarmerDebug?.utilities) console.log('Job updated successfully');
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status;
-        if (status === 412) {
+        if (status === 412 || status === 428) {
           const refreshed = await fetchJobDetails(jobDetails.id);
           setJobDetails(refreshed);
           setEditedDetails(refreshed);

@@ -423,8 +423,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     try {
       const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
       const feedrate = extrudeSpeed * 60; // mm/s to mm/min
-      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
-      const result = await apiClient.sendGcode(printer.id, gcode);
+      const result = await apiClient.extrudeFilament(
+        printer.id,
+        distance,
+        feedrate
+      );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
       }

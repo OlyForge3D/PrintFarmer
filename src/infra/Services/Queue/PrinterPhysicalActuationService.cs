@@ -175,7 +175,7 @@ public sealed class PrinterPhysicalActuationService(
         _ = QueueAuditWriter.Add(
             _db,
             actorSubject,
-            QueueAuditOperations.PhysicalControl,
+            AuditOperation(operation),
             QueueAuditOutcomes.Success,
             nameof(Printer),
             resourceId: printerId,
@@ -270,7 +270,7 @@ public sealed class PrinterPhysicalActuationService(
         _ = QueueAuditWriter.Add(
             _db,
             actorSubject,
-            QueueAuditOperations.PhysicalControl,
+            AuditOperation(operation),
             QueueAuditOutcomes.Success,
             nameof(PrintJob),
             resourceId: state.ActiveJobId,
@@ -534,7 +534,7 @@ public sealed class PrinterPhysicalActuationService(
         _ = QueueAuditWriter.Add(
             _db,
             lease.ActorSubject,
-            QueueAuditOperations.PhysicalControl,
+            AuditOperation(lease.Operation),
             outcome,
             nameof(Printer),
             resourceId: lease.PrinterId,
@@ -585,7 +585,7 @@ public sealed class PrinterPhysicalActuationService(
             BackendFileIdentity = job.Name,
             BackendCommandId = $"legacy-{attemptId:N}",
             BackendCorrelationId = $"legacy-{attemptId:N}",
-            BackendCallPhase = DispatchBackendCallPhase.Reconciled,
+            BackendCallPhase = DispatchBackendCallPhase.PostAccept,
             JobRowVersionAtClaim = job.RowVersion,
             DispatchStateRowVersionAtClaim = state.RowVersion,
             UpdatedAtUtc = DateTime.UtcNow,
@@ -645,7 +645,7 @@ public sealed class PrinterPhysicalActuationService(
         _ = QueueAuditWriter.Add(
             _db,
             actorSubject,
-            QueueAuditOperations.PhysicalControl,
+            AuditOperation(operation),
             QueueAuditOutcomes.Denied,
             nameof(Printer),
             resourceId: printerId,
@@ -679,6 +679,7 @@ public sealed class PrinterPhysicalActuationService(
             "resume" => QueueAuditOperations.JobResume,
             "abort" => QueueAuditOperations.JobAbort,
             "cancel" or "emergencystop" => QueueAuditOperations.JobCancel,
+            "printer_file_delete" => QueueAuditOperations.PrinterFileDelete,
             _ => QueueAuditOperations.PhysicalControl,
         };
 }

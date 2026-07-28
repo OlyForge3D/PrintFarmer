@@ -96,6 +96,13 @@ check before backend I/O. Idle controls acquire a database physical-I/O barrier;
 active lifecycle controls carry the exact job and attempt. No later dispatch may
 claim the printer until a known outcome releases that barrier.
 
+Dispatch attempts persist `PreCall`, `BackendCall`, `AwaitingReconciliation`,
+`Accepted`, `PostAccept`, and `Terminal` phases. Pre-call exceptions re-arm the
+job as `FailedBeforeStart`; backend-call exceptions require reconciliation.
+Acceptance is monotonic: notification, analytics, or other post-accept failures
+cannot turn an accepted physical print into `Unknown`. Persisted and client
+failure details are typed and redacted.
+
 The generic `/api/printers/{id}/gcode` surface is retired and always returns
 `410 Gone`. Macros, multiline scripts, case variants, and firmware-specific
 aliases cannot be proven non-starting. Operators and clients must use typed
@@ -114,6 +121,12 @@ flags. SignalR queue events require explicit authorized printer/project/job
 subscriptions. Clients proactively drain the change feed on initial connection
 and reconnect, detect later sequence gaps, and refetch
 `GET /api/job-queue/changes?afterSequence={n}` as REST authority.
+`GET /api/job-queue/subscription-resources` returns the complete, unpaginated
+authorized current job/printer/project snapshot used to restore groups. Queue
+events invalidate both the production `queue-jobs` list and `queue-stats`.
+Upload progress is fenced by attempt ID, attempt number, sequence, and resource
+revision; authoritative REST hydration prevents a delayed attempt from
+overwriting a newer attempt.
 
 Pause, resume, cancel, and abort are durable, single-flight hardware commands.
 Database state changes only after backend acceptance. A response-lost command is
@@ -145,6 +158,21 @@ invalid or ambiguous initial times are rejected. Legacy schedules are never
 assigned a trusted system actor. Missing or revoked provenance disables the
 schedule for operator reauthorization before dispatch, and list/detail/history
 reads are scoped by job, printer, and calibration-project access.
+
+Only an `Accepted` dispatch consumes a scheduled occurrence. `Rejected` and
+`FailedBeforeStart` remain due and retryable, while `Unknown` stores the exact
+dispatch attempt and blocks duplicate starts until reconciliation. Accepted
+recurring standard schedules create a fresh dispatchable `PrintJob`; recurring
+calibration schedules fail closed because reviewed calibration provenance is
+immutable. The scheduling table and calendar render `scheduledLocalTime` in the
+reviewed schedule zone, and expose occurrence/attempt execution history.
+
+Printer file list/download require queue-read plus printer-view access. Delete
+requires queue-write plus printer-submit access and a durable physical barrier;
+known rejection releases the barrier, while cancellation or an indeterminate
+backend response retains it for reconciliation. Delete audit events use the
+typed `printer.file_delete` operation and never persist or return backend
+exception text.
 
 ---
 

@@ -46,6 +46,12 @@ public interface IQueueResourceAuthorizationService
         string actorSubject,
         Guid projectId,
         CancellationToken ct = default);
+
+    Task<IReadOnlySet<Guid>> FilterActorAccessibleJobIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> jobIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -122,8 +128,7 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         }
 
         return Guid.TryParse(actorSubject, out Guid userId) &&
-            (await IsFarmAdminAsync(userId, ct) ||
-             await CanUserAccessJobAsync(userId, jobId, minimumAccess, ct));
+            await CanUserAccessJobAsync(userId, jobId, minimumAccess, ct);
     }
 
     public async Task<bool> CanActorAccessPrinterAsync(
@@ -163,67 +168,129 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                      ct));
     }
 
+    public async Task<IReadOnlySet<Guid>> FilterActorAccessibleJobIdsAsync(
+        string actorSubject,
+        IReadOnlyCollection<Guid> jobIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        if (jobIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        Guid[] distinctJobIds = jobIds.Distinct().ToArray();
+        if (QueueActorIdentity.IsTrustedSystemActor(actorSubject))
+        {
+            return distinctJobIds.ToHashSet();
+        }
+
+        if (!Guid.TryParse(actorSubject, out Guid userId))
+        {
+            return new HashSet<Guid>();
+        }
+
+        if (await IsFarmAdminAsync(userId, ct))
+        {
+            return distinctJobIds.ToHashSet();
+        }
+
+        List<JobAccessScope> scopes = await _db.PrintJobs
+            .AsNoTracking()
+            .Where(job => distinctJobIds.Contains(job.Id))
+            .Select(job => new JobAccessScope(
+                job.Id,
+                job.CreatorSubject,
+                job.CalibrationProjectId,
+                job.AssignedPrinter == null ? null : job.AssignedPrinter.PrinterGroupId,
+                job.GcodeFile == null ? null : job.GcodeFile.PrinterGroupId))
+            .ToListAsync(ct);
+        Guid[] groupIds = scopes
+            .SelectMany(scope => new[] { scope.PrinterGroupId, scope.GcodeGroupId })
+            .Where(groupId => groupId.HasValue)
+            .Select(groupId => groupId!.Value)
+            .Distinct()
+            .ToArray();
+        List<PrinterGroupAccess> rules = groupIds.Length == 0
+            ? []
+            : await _db.PrinterGroupAccesses
+                .AsNoTracking()
+                .Where(rule => groupIds.Contains(rule.PrinterGroupId))
+                .ToListAsync(ct);
+        HashSet<Guid> userRoles = (await _db.UserRoles
+                .AsNoTracking()
+                .Where(role => role.UserId == userId && role.IsActive)
+                .Select(role => role.RoleId)
+                .ToListAsync(ct))
+            .ToHashSet();
+        Guid[] projectIds = scopes
+            .Where(scope => scope.CalibrationProjectId.HasValue)
+            .Select(scope => scope.CalibrationProjectId!.Value)
+            .Distinct()
+            .ToArray();
+        HashSet<Guid> ownedProjects = (await _db.CalibrationProjects
+                .AsNoTracking()
+                .Where(project =>
+                     project.OwnerUserId == userId &&
+                     projectIds.Contains(project.Id))
+                .Select(project => project.Id)
+                .ToListAsync(ct))
+            .ToHashSet();
+        Dictionary<Guid, List<PrinterGroupAccess>> rulesByGroup = rules
+            .GroupBy(rule => rule.PrinterGroupId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var allowed = new HashSet<Guid>();
+        foreach (JobAccessScope scope in scopes)
+        {
+            if (scope.CalibrationProjectId is Guid projectId &&
+                !ownedProjects.Contains(projectId))
+            {
+                continue;
+            }
+
+            Guid[] scopedGroups = new[] { scope.PrinterGroupId, scope.GcodeGroupId }
+                .Where(groupId => groupId.HasValue)
+                .Select(groupId => groupId!.Value)
+                .Distinct()
+                .ToArray();
+            bool groupsAllowed = scopedGroups.All(groupId =>
+                !rulesByGroup.TryGetValue(groupId, out List<PrinterGroupAccess>? groupRules) ||
+                groupRules.Count == 0 ||
+                groupRules.Any(rule =>
+                     userRoles.Contains(rule.RoleId) &&
+                     rule.AccessLevel >= minimumAccess));
+            if (!groupsAllowed)
+            {
+                continue;
+            }
+
+            bool creatorAllowed =
+                scope.CalibrationProjectId.HasValue ||
+                !Guid.TryParse(scope.CreatorSubject, out Guid creatorId) ||
+                creatorId == userId ||
+                scopedGroups.Length > 0;
+            if (creatorAllowed)
+            {
+                _ = allowed.Add(scope.JobId);
+            }
+        }
+
+        return allowed;
+    }
+
     private async Task<bool> CanUserAccessJobAsync(
         Guid userId,
         Guid jobId,
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct)
     {
-        var job = await _db.PrintJobs
-            .AsNoTracking()
-            .Where(candidate => candidate.Id == jobId)
-            .Select(candidate => new
-            {
-                candidate.CreatorSubject,
-                candidate.CalibrationProjectId,
-                PrinterGroupId = candidate.AssignedPrinter != null
-                    ? candidate.AssignedPrinter.PrinterGroupId
-                    : null,
-                GcodeGroupId = candidate.GcodeFile != null
-                    ? candidate.GcodeFile.PrinterGroupId
-                    : null,
-            })
-            .SingleOrDefaultAsync(ct);
-        if (job is null)
-        {
-            return false;
-        }
-
-        if (job.CalibrationProjectId.HasValue)
-        {
-            bool ownsCalibration = await _db.CalibrationProjects
-                .AsNoTracking()
-                .AnyAsync(
-                    project =>
-                        project.Id == job.CalibrationProjectId.Value &&
-                        project.OwnerUserId == userId,
-                    ct);
-            if (!ownsCalibration)
-            {
-                return false;
-            }
-        }
-
-        Guid[] groupIds = new[] { job.PrinterGroupId, job.GcodeGroupId }
-            .Where(groupId => groupId.HasValue)
-            .Select(groupId => groupId!.Value)
-            .Distinct()
-            .ToArray();
-        foreach (Guid groupId in groupIds)
-        {
-            if (!await CanUserAccessGroupAsync(userId, groupId, minimumAccess, ct))
-            {
-                return false;
-            }
-        }
-
-        // A creator does not bypass either source or destination group boundary. Conversely,
-        // authorized group collaborators may operate standard shared jobs. Calibration
-        // ownership was enforced above through the authoritative project owner.
-        return job.CalibrationProjectId.HasValue ||
-            !Guid.TryParse(job.CreatorSubject, out Guid creatorId) ||
-            creatorId == userId ||
-            groupIds.Length > 0;
+        IReadOnlySet<Guid> allowed = await FilterActorAccessibleJobIdsAsync(
+            userId.ToString(),
+            [jobId],
+            minimumAccess,
+            ct);
+        return allowed.Contains(jobId);
     }
 
     private async Task<bool> CanUserAccessPrinterAsync(
@@ -279,4 +346,11 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
                     userRole.IsActive &&
                     userRole.Role.Name == PrintFarmerPermissions.FarmAdminRole,
                 ct);
+
+    private sealed record JobAccessScope(
+        Guid JobId,
+        string? CreatorSubject,
+        Guid? CalibrationProjectId,
+        Guid? PrinterGroupId,
+        Guid? GcodeGroupId);
 }

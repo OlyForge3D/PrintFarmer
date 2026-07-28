@@ -1957,6 +1957,12 @@ export interface QueueChangeFeed {
   events: QueueEventEnvelope[];
 }
 
+export interface QueueSubscriptionResources {
+  printerIds: string[];
+  jobIds: string[];
+  projectIds: string[];
+}
+
 /**
  * Queue overview DTO - provides printer availability and queue status
  * Used for displaying available printers when queueing a print job
@@ -3865,6 +3871,8 @@ export interface ScheduledJob {
 
 export interface JobExecution {
   id: string;
+  occurrenceJobId?: string | null;
+  dispatchAttemptId?: string | null;
   scheduledExecutionTime: string;
   actualStartTime?: string | null;
   status: string;

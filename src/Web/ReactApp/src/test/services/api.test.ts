@@ -560,6 +560,97 @@ describe("ApiClient", () => {
       }
     );
 
+    it.each([
+      [200, "Accepted", "accepted"],
+      [202, "Unknown", "reconciliation"],
+      [409, "Rejected", "conflict"],
+      [412, null, "stale"],
+      [503, "InProgress", "unavailable"],
+    ] as const)(
+      "normalizes dispatch-to HTTP %i as %s",
+      async (status, outcome, expectedKind) => {
+        const job = outcome
+          ? {
+              id: "job-1",
+              rowVersion: "job-v2",
+              status: outcome === "Accepted" ? "Printing" : "Starting",
+              dispatchResult: {
+                attemptId: "attempt-2",
+                attemptNumber: 2,
+                outcome,
+                errorCode: outcome === "Rejected" ? "printer_busy" : null,
+                errorDetail: outcome === "Rejected" ? "Printer busy." : null,
+                isRetryable: outcome === "Rejected",
+                requiresReconciliation: outcome === "Unknown",
+                jobRevision: "job-v2",
+                dispatchStateRevision: "dispatch-v2",
+              },
+            }
+          : undefined;
+        const data =
+          status === 412
+            ? { error: "revision_conflict", detail: "Refresh required." }
+            : status === 503
+              ? { error: "dispatch_outcome_unavailable", job }
+              : job;
+        const mockPost = vi.fn().mockResolvedValue({ status, data });
+        (
+          apiClient as unknown as { client: { post: typeof mockPost } }
+        ).client.post = mockPost;
+
+        const result = await apiClient.dispatchJobToPrinter(
+          "job-1",
+          "printer-1",
+          "job-v1"
+        );
+
+        expect(result.kind).toBe(expectedKind);
+        expect(result.httpStatus).toBe(status);
+        expect(mockPost).toHaveBeenCalledWith(
+          "/job-queue/job-1/dispatch-to",
+          { printerId: "printer-1" },
+          expect.objectContaining({
+            headers: { "If-Match": '"job-v1"' },
+            validateStatus: expect.any(Function),
+          })
+        );
+      }
+    );
+
+    it("uses only bounded typed maintenance routes", async () => {
+      const mockPost = vi.fn().mockResolvedValue({
+        data: { success: true },
+      });
+      (
+        apiClient as unknown as { client: { post: typeof mockPost } }
+      ).client.post = mockPost;
+
+      await apiClient.extrudeFilament("printer-1", -5, 300);
+      await apiClient.mmuGateAction("printer-1", {
+        protocol: "Qidibox",
+        action: "Eject",
+        gateIndex: 2,
+      });
+
+      expect(mockPost).toHaveBeenNthCalledWith(
+        1,
+        "/printers/printer-1/extrude",
+        { distanceMm: -5, feedrateMmPerMinute: 300 }
+      );
+      expect(mockPost).toHaveBeenNthCalledWith(
+        2,
+        "/printers/printer-1/mmu/gate-action",
+        {
+          protocol: "Qidibox",
+          action: "Eject",
+          gateIndex: 2,
+        }
+      );
+      expect(
+        mockPost.mock.calls.some(([url]) => String(url).endsWith("/gcode"))
+      ).toBe(false);
+    });
+
     describe("printables endpoints", () => {
       it("should fetch user collections from the printables collections endpoint", async () => {
         const mockResponse = {

@@ -175,3 +175,12 @@ public sealed record QueueEventEnvelope(
     private static string? Encode(byte[]? rowVersion) =>
         rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : null;
 }
+
+/// <summary>Complete authorized resource snapshot used to restore SignalR groups.</summary>
+/// <param name="PrinterIds">Assigned printers referenced by current visible jobs.</param>
+/// <param name="JobIds">All current queue jobs visible to the authenticated actor.</param>
+/// <param name="ProjectIds">Projects referenced by current visible jobs.</param>
+public sealed record QueueSubscriptionResourcesDto(
+    IReadOnlyList<Guid> PrinterIds,
+    IReadOnlyList<Guid> JobIds,
+    IReadOnlyList<Guid> ProjectIds);

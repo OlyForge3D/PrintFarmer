@@ -587,6 +587,34 @@ actor APIClient {
         }
     }
 
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String],
+        accepting statusCodes: Set<Int>
+    ) async throws -> HTTPDecodedResponse<T> {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
+        try await checkTokenExpiry()
+        let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if !statusCodes.contains(http.statusCode) {
+            try validateResponse(response, data: data)
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data)
+            )
+        } catch {
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
     func getData(_ path: String) async throws -> Data {
         try await checkTokenExpiry()
         let request = try buildRequest(path: path, method: "GET")

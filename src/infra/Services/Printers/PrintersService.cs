@@ -3331,19 +3331,16 @@ public class PrintersService(
             return false;
         }
 
-        try
-        {
-            var backend = (PrinterBackend)p.Backend;
-
-            return _capabilityFactory.TryGetFileDeleteClientTyped(backend, out ISupportsFileDelete? deleteClient)
-                ? await deleteClient!.DeleteFileAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
+        var backend = (PrinterBackend)p.Backend;
+        return _capabilityFactory.TryGetFileDeleteClientTyped(
+            backend,
+            out ISupportsFileDelete? deleteClient)
+                ? await deleteClient!.DeleteFileAsync(
+                    p.BackendUrl,
+                    filename,
+                    p.Credential,
+                    ct).ConfigureAwait(false)
                 : false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to delete file {Filename} on printer {PrinterId}", filename, id);
-            return false;
-        }
     }
 
     /// <summary>

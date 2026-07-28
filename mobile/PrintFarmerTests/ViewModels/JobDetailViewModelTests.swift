@@ -97,6 +97,43 @@ final class JobDetailViewModelTests: XCTestCase {
         XCTAssertEqual(mockJobService.getJobCalledWith, testJobId)
     }
 
+    func testDispatchUnknownShowsReconciliationNotice() async throws {
+        let job = try TestData.decodePrintJob()
+        mockJobService.jobToReturn = job
+        await viewModel.loadJob()
+        mockJobService.dispatchResultToReturn = .reconciliation(
+            dispatchResponse(
+                outcome: .unknown,
+                detail: "Reconciliation required."
+            )
+        )
+
+        await viewModel.dispatchJob()
+
+        XCTAssertEqual(
+            viewModel.actionNotice,
+            "Reconciliation required."
+        )
+        XCTAssertNil(viewModel.actionError)
+    }
+
+    func testDispatchRejectedShowsTypedConflict() async throws {
+        let job = try TestData.decodePrintJob()
+        mockJobService.jobToReturn = job
+        await viewModel.loadJob()
+        mockJobService.dispatchResultToReturn = .rejected(
+            dispatchResponse(
+                outcome: .rejected,
+                detail: "Printer busy."
+            )
+        )
+
+        await viewModel.dispatchJob()
+
+        XCTAssertEqual(viewModel.actionError, "Printer busy.")
+        XCTAssertNil(viewModel.actionNotice)
+    }
+
     // MARK: - Cancel
 
     func testCancelJobCallsService() async throws {
@@ -244,5 +281,27 @@ final class JobDetailViewModelTests: XCTestCase {
         let unconfigured = JobDetailViewModel(jobId: testJobId)
         await unconfigured.cancelJob()
         XCTAssertFalse(unconfigured.isPerformingAction)
+    }
+
+    private func dispatchResponse(
+        outcome: DispatchAttemptOutcome,
+        detail: String?
+    ) -> DispatchJobResponse {
+        DispatchJobResponse(
+            id: testJobId.uuidString,
+            rowVersion: "job-v2",
+            status: "Starting",
+            dispatchResult: DispatchAttemptResult(
+                attemptId: UUID(),
+                attemptNumber: 2,
+                outcome: outcome,
+                errorCode: outcome == .rejected ? "printer_busy" : nil,
+                errorDetail: detail,
+                isRetryable: false,
+                requiresReconciliation: outcome == .unknown,
+                jobRevision: "job-v2",
+                dispatchStateRevision: "dispatch-v2"
+            )
+        )
     }
 }

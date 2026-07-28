@@ -356,6 +356,67 @@ public class JobQueueController(
     }
 
     /// <summary>
+    /// Returns every current queue resource the authenticated actor may subscribe to.
+    /// This snapshot is not paginated so reconnects cannot omit jobs beyond a UI page.
+    /// </summary>
+    [HttpGet("subscription-resources")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(
+        typeof(QueueSubscriptionResourcesDto),
+        StatusCodes.Status200OK)]
+    public async Task<ActionResult<QueueSubscriptionResourcesDto>>
+        GetSubscriptionResourcesAsync(CancellationToken ct = default)
+    {
+        if (db is null || resourceAuthorization is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "queue_subscription_resources_unavailable" });
+        }
+
+        Guid[] currentJobIds = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job =>
+                job.Status == PrintJobStatus.Queued ||
+                job.Status == PrintJobStatus.Assigned ||
+                job.Status == PrintJobStatus.Starting ||
+                job.Status == PrintJobStatus.Printing ||
+                job.Status == PrintJobStatus.Paused)
+            .Select(job => job.Id)
+            .ToArrayAsync(ct);
+        IReadOnlySet<Guid> authorized =
+            await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                QueueActorIdentity.Resolve(User),
+                currentJobIds,
+                PrinterGroupAccessLevel.View,
+                ct);
+        Guid[] authorizedIds = authorized.ToArray();
+        var resources = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => authorizedIds.Contains(job.Id))
+            .Select(job => new
+            {
+                job.Id,
+                job.AssignedPrinterId,
+                ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            })
+            .ToArrayAsync(ct);
+
+        return Ok(new QueueSubscriptionResourcesDto(
+            resources
+                .Where(resource => resource.AssignedPrinterId.HasValue)
+                .Select(resource => resource.AssignedPrinterId!.Value)
+                .Distinct()
+                .ToArray(),
+            resources.Select(resource => resource.Id).ToArray(),
+            resources
+                .Where(resource => resource.ProjectId.HasValue)
+                .Select(resource => resource.ProjectId!.Value)
+                .Distinct()
+                .ToArray()));
+    }
+
+    /// <summary>
     /// Reads and normalizes the <c>If-Match</c> header value (strips weak/quote syntax).
     /// </summary>
     private string? ReadIfMatch()

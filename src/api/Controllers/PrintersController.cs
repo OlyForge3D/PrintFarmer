@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.Core;
@@ -3032,6 +3033,45 @@ public class PrintersController(
             ct);
     }
 
+    /// <summary>Performs a bounded relative extrusion or retraction for maintenance.</summary>
+    [HttpPost("{id:guid}/extrude")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CommandResult>> ExtrudeFilamentAsync(
+        Guid id,
+        [FromBody] ExtrudeFilamentRequest request,
+        CancellationToken ct)
+    {
+        if (!double.IsFinite(request.DistanceMm) ||
+            request.DistanceMm == 0 ||
+            Math.Abs(request.DistanceMm) > 100)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Extrusion distance must be between -100 and 100 mm and cannot be zero."));
+        }
+
+        if (request.FeedrateMmPerMinute is < 1 or > 6000)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Extrusion feedrate must be between 1 and 6000 mm/min."));
+        }
+
+        string distance = request.DistanceMm.ToString(
+            "0.###",
+            CultureInfo.InvariantCulture);
+        string command =
+            $"M83\nG1 E{distance} F{request.FeedrateMmPerMinute}\nM82";
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "extrude_filament",
+            "extrude_filament",
+            token => _printersService.SendGcodeAsync(id, command, token),
+            ct);
+    }
+
     // ── MMU (Multi-Material Unit) control endpoints ──
 
     /// <summary>
@@ -3172,6 +3212,64 @@ public class PrintersController(
             "mmu_recover",
             "mmu_recover",
             token => _printersService.SendGcodeAsync(id, "MMU_RECOVER", token),
+            ct);
+    }
+
+    /// <summary>
+    /// Executes a bounded Qidibox or AFC gate action. The client selects typed fields; only
+    /// server-generated allowlisted macros can reach the backend.
+    /// </summary>
+    [HttpPost("{id:guid}/mmu/gate-action")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CommandResult>> MmuGateActionAsync(
+        Guid id,
+        [FromBody] MmuGateActionRequest request,
+        CancellationToken ct)
+    {
+        string protocol = request.Protocol.Trim().ToLowerInvariant();
+        string action = request.Action.Trim().ToLowerInvariant();
+        string? command = null;
+        if (protocol == "qidibox" &&
+            request.GateIndex is >= 0 and <= 16)
+        {
+            command = action switch
+            {
+                "load" => $"T{request.GateIndex}",
+                "unload" => $"UNLOAD_T{request.GateIndex}",
+                "eject" => $"EJECT_T{request.GateIndex}",
+                _ => null,
+            };
+        }
+        else if (protocol == "afc" &&
+                 request.LaneName is { Length: > 0 } laneName &&
+                 laneName.Length <= 64 &&
+                 Regex.IsMatch(
+                     laneName,
+                     "^[A-Za-z0-9_-]+$",
+                     RegexOptions.CultureInvariant))
+        {
+            command = action switch
+            {
+                "load" => $"CHANGE_TOOL LANE={laneName}",
+                "unload" => $"TOOL_UNLOAD LANE={laneName}",
+                _ => null,
+            };
+        }
+
+        if (command is null)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Unsupported or invalid MMU gate action."));
+        }
+
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            $"mmu_{protocol}_{action}",
+            "mmu_gate_action",
+            token => _printersService.SendGcodeAsync(id, command, token),
             ct);
     }
 
@@ -3620,11 +3718,20 @@ public class PrintersController(
     }
 
     [HttpGet("{id:guid}/files")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(PrinterFileDto[]), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterFileDto[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterFileDto[] files = await _printersService.GetFileListAsync(id, ct);
@@ -3634,9 +3741,15 @@ public class PrintersController(
         {
             return NotFound();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get file list: {ex.Message}");
+            _logger.LogWarning(
+                exception,
+                "Failed to list printer files for {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_list_unavailable" });
         }
     }
 
@@ -3652,6 +3765,7 @@ public class PrintersController(
     /// <response code="404">The printer with the specified ID was not found, or the file does not exist on the printer.</response>
     /// <response code="500">An error occurred while downloading the file from the printer.</response>
     [HttpGet("{id:guid}/files/download")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -3663,12 +3777,20 @@ public class PrintersController(
             return BadRequest(new { error = "filename query parameter is required" });
         }
 
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             byte[]? fileContent = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
             if (fileContent == null)
             {
-                return NotFound(new { error = $"File not found: {filename}" });
+                return NotFound(new { error = "printer_file_not_found" });
             }
 
             // Return the file with appropriate content type
@@ -3685,10 +3807,15 @@ public class PrintersController(
         {
             return NotFound(new { error = "Printer not found" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to download file {Filename} from printer {Id}", filename, id);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = $"Download failed: {ex.Message}" });
+            _logger.LogError(
+                exception,
+                "Failed to download a file from printer {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_download_unavailable" });
         }
     }
 
@@ -3820,6 +3947,7 @@ public class PrintersController(
     }
 
     [HttpDelete("{id:guid}/files")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 500)]
     public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
@@ -3829,17 +3957,77 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            id,
+            "printer_file_delete",
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
         try
         {
-            bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
-            return !success
-                ? Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"))
-                : Ok(new CommandResult(true, "File deleted successfully"));
+            bool success = await _printersService.DeletePrinterFileAsync(
+                id,
+                request.FileName,
+                ct);
+            await _physicalActuationService!.CompleteDirectAsync(
+                begin.Lease,
+                accepted: success,
+                failureCode: success ? null : "printer_file_delete_rejected",
+                ct: ct);
+            return success
+                ? Ok(new CommandResult(true, "File deleted successfully"))
+                : Conflict(new CommandResult(
+                    false,
+                    "The printer did not accept the file deletion."));
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to delete file: {ex.Message}"));
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "printer_file_delete_cancelled_after_send",
+                CancellationToken.None);
+            throw;
         }
+        catch (Exception exception) when (!ct.IsCancellationRequested)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "printer_file_delete_outcome_unknown",
+                CancellationToken.None);
+            _logger.LogWarning(
+                exception,
+                "Printer file deletion outcome unknown for {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The file deletion outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<bool> CanAccessPrinterFilesAsync(
+        Guid printerId,
+        PrinterGroupAccessLevel accessLevel,
+        CancellationToken ct)
+    {
+        return _queueResourceAuthorization is not null &&
+            await _queueResourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                accessLevel,
+                ct);
     }
 
     /// <summary>

@@ -17,7 +17,7 @@ import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
-import { queryKeys } from '@/common/hooks/useApi';
+import { QueueRealtimeBridge } from '@/common/components/QueueRealtimeBridge';
 
 // Services
 import { assetService } from '@/services/assetService';
@@ -34,7 +34,7 @@ import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendi
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 
 // External packages
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
@@ -232,79 +232,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-function QueueRealtimeBridge() {
-  const realtimeQueryClient = useQueryClient();
-
-  useEffect(() => {
-    let disposed = false;
-
-    const invalidateAuthority = async () => {
-      await Promise.all([
-        realtimeQueryClient.invalidateQueries({ queryKey: queryKeys.jobQueue() }),
-        realtimeQueryClient.invalidateQueries({ queryKey: queryKeys.printers }),
-        realtimeQueryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs }),
-        realtimeQueryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),
-      ]);
-    };
-
-    const reconcileSubscriptions = async () => {
-      const jobs = await apiClient.getJobQueue();
-      if (disposed) return;
-      await printerSignalRService.replaceQueueResourceSubscriptions({
-        printerIds: jobs.flatMap((entry) =>
-          entry.job.assignedPrinterId ? [entry.job.assignedPrinterId] : []
-        ),
-        jobIds: jobs.map((entry) => entry.job.id),
-        projectIds: jobs.flatMap((entry) =>
-          entry.job.calibrationProjectId ?? entry.job.projectId
-            ? [entry.job.calibrationProjectId ?? entry.job.projectId!]
-            : []
-        ),
-      });
-    };
-
-    const refreshAuthority = async () => {
-      await invalidateAuthority();
-      await reconcileSubscriptions();
-    };
-
-    const unsubscribeQueue = printerSignalRService.onQueueEvent((event) => {
-      if (event.printerId) {
-        void realtimeQueryClient.invalidateQueries({
-          queryKey: queryKeys.printer(event.printerId),
-        });
-      }
-      if (event.jobId) {
-        void realtimeQueryClient.invalidateQueries({
-          queryKey: queryKeys.scheduledJob(event.jobId),
-        });
-      }
-      void invalidateAuthority();
-      void reconcileSubscriptions();
-    });
-    const unsubscribeConnection =
-      printerSignalRService.onConnectionStateChange((connected) => {
-        if (connected) void refreshAuthority();
-      });
-
-    void printerSignalRService.connect();
-
-    return () => {
-      disposed = true;
-      unsubscribeQueue();
-      unsubscribeConnection();
-      void printerSignalRService.replaceQueueResourceSubscriptions({
-        printerIds: [],
-        jobIds: [],
-        projectIds: [],
-      });
-      void printerSignalRService.disconnect();
-    };
-  }, [realtimeQueryClient]);
-
-  return null;
-}
 
 function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users

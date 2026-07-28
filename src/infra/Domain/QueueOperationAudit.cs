@@ -122,6 +122,9 @@ public static class QueueAuditOperations
 
     /// <summary>A physical printer control route acquired or used the durable barrier.</summary>
     public const string PhysicalControl = "printer.physical_control";
+
+    /// <summary>A printer-resident file deletion was attempted through the durable barrier.</summary>
+    public const string PrinterFileDelete = "printer.file_delete";
 }
 
 /// <summary>Typed outcomes written to <see cref="QueueOperationAudit.Outcome"/>.</summary>

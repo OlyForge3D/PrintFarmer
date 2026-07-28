@@ -321,7 +321,7 @@ public sealed class QueueReconciliationService(
                 attempt.BackendAcceptedAtUtc ??= DateTime.UtcNow;
                 attempt.RequiresReconciliation = false;
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
-                attempt.BackendCallPhase = DispatchBackendCallPhase.Reconciled;
+                attempt.BackendCallPhase = DispatchBackendCallPhase.PostAccept;
                 ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)

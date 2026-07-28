@@ -174,7 +174,29 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
     }
 
     func delete(id: UUID, reviewedRowVersion: String) async throws {}
-    func dispatch(id: UUID, reviewedRowVersion: String) async throws {}
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult {
+        .accepted(
+            DispatchJobResponse(
+                id: id.uuidString,
+                rowVersion: reviewedRowVersion,
+                status: PrintJobStatus.printing.rawValue,
+                dispatchResult: DispatchAttemptResult(
+                    attemptId: UUID(),
+                    attemptNumber: 1,
+                    outcome: .accepted,
+                    errorCode: nil,
+                    errorDetail: nil,
+                    isRetryable: false,
+                    requiresReconciliation: false,
+                    jobRevision: reviewedRowVersion,
+                    dispatchStateRevision: nil
+                )
+            )
+        )
+    }
     func cancel(id: UUID, reviewedRowVersion: String) async throws {}
     func abort(id: UUID, reviewedRowVersion: String) async throws {}
     func pause(id: UUID, reviewedRowVersion: String) async throws {}

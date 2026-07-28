@@ -2782,12 +2782,18 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("JobScheduleId")
                         .HasColumnType("uuid");
 
                     b.Property<string>("Message")
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
+
+                    b.Property<Guid?>("OccurrencePrintJobId")
+                        .HasColumnType("uuid");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -2806,6 +2812,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OccurrencePrintJobId")
+                        .HasDatabaseName("IX_JobExecutions_OccurrencePrintJobId");
 
                     b.HasIndex("ScheduledExecutionTime");
 
@@ -2915,6 +2924,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("RequiresOperatorReauthorization")
                         .HasColumnType("boolean");
 
+                    b.Property<Guid>("RootPrintJobId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2936,6 +2948,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("PrintJobId")
                         .IsUnique();
+
+                    b.HasIndex("RootPrintJobId")
+                        .HasDatabaseName("IX_JobSchedules_RootPrintJobId");
 
                     b.HasIndex("ScheduledStartTime");
 

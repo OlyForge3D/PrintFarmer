@@ -340,6 +340,9 @@ export class PrinterSignalRService {
       void this.refreshSettings();
     };
     window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
+    if (window.PrintFarmerDebug?.printerSignalR) {
+      window.PrintFarmerDebug.printerSignalRService = this;
+    }
   }
 
   private async loadSettings(): Promise<void> {
@@ -614,6 +617,20 @@ export class PrinterSignalRService {
     return () => {
       const index = this.queueEventCallbacks.indexOf(callback);
       if (index >= 0) this.queueEventCallbacks.splice(index, 1);
+    };
+  }
+
+  public getQueueSubscriptionSnapshot(): {
+    printerIds: string[];
+    jobIds: string[];
+    projectIds: string[];
+    lastSequence: number;
+  } {
+    return {
+      printerIds: [...this.subscribedPrinters].sort(),
+      jobIds: [...this.subscribedQueueJobs].sort(),
+      projectIds: [...this.subscribedProjects].sort(),
+      lastSequence: this.lastQueueSequence,
     };
   }
 

@@ -155,4 +155,17 @@ public interface IDispatchClaimService
     /// <param name="errorDetail">Error detail to record.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<bool> RecordUnknownOutcomeAsync(Guid attemptId, string errorDetail, CancellationToken ct = default);
+
+    /// <summary>
+    /// Classifies an exception from the durable call phase without accepting raw exception text.
+    /// Pre-call failures release the claim, backend-call failures require reconciliation, and an
+    /// already accepted attempt remains accepted.
+    /// </summary>
+    Task<DispatchExceptionDisposition> RecordDispatchExceptionAsync(
+        Guid attemptId,
+        string failureCode,
+        CancellationToken ct = default);
+
+    /// <summary>Marks non-physical post-accept processing complete without changing acceptance.</summary>
+    Task<bool> RecordPostAcceptCompletedAsync(Guid attemptId, CancellationToken ct = default);
 }

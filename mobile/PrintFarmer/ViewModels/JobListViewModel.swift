@@ -69,8 +69,24 @@ final class JobListViewModel {
             return
         }
         do {
-            try await jobService.dispatch(id: id, reviewedRowVersion: rowVersion)
-            await loadJobs()
+            let result = try await jobService.dispatch(
+                id: id,
+                reviewedRowVersion: rowVersion
+            )
+            switch result {
+            case .accepted:
+                await loadJobs()
+            case .reconciliation(let response):
+                await loadJobs()
+                errorMessage =
+                    response.dispatchResult?.errorDetail
+                    ?? "The dispatch outcome is being reconciled. Do not dispatch again."
+            case .rejected(let response):
+                await loadJobs()
+                errorMessage =
+                    response.dispatchResult?.errorDetail
+                    ?? "The printer rejected the dispatch."
+            }
         } catch {
             guard isViewActive else { return }
             await handleActionError(error)

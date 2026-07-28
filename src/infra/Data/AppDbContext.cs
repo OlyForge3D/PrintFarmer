@@ -465,6 +465,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .IsUnique()
             .HasDatabaseName("IX_PrintJobs_Idempotency_Calibration");
 
+        _ = modelBuilder.Entity<JobSchedule>()
+            .HasIndex(schedule => schedule.RootPrintJobId)
+            .HasDatabaseName("IX_JobSchedules_RootPrintJobId");
+
+        _ = modelBuilder.Entity<JobExecution>()
+            .HasIndex(execution => execution.OccurrencePrintJobId)
+            .HasDatabaseName("IX_JobExecutions_OccurrencePrintJobId");
+
         // Dispatch-attempt indexes.
         _ = modelBuilder.Entity<QueueDispatchAttempt>()
             .HasIndex(a => new { a.PrintJobId, a.AttemptNumber })

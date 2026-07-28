@@ -24,6 +24,12 @@ public class JobSchedule
     public PrintJob PrintJob { get; set; } = null!;
 
     /// <summary>
+    /// Stable identity of the job the operator originally scheduled. Recurring schedules keep
+    /// this value while <see cref="PrintJobId"/> advances to a fresh occurrence job.
+    /// </summary>
+    public Guid RootPrintJobId { get; set; }
+
+    /// <summary>
     /// Scheduled start time in UTC
     /// </summary>
     public DateTime ScheduledStartTime { get; set; }

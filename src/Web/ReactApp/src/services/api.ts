@@ -55,6 +55,7 @@ import {
   DispatchClientResult,
   BedClearAcknowledgementResult,
   QueueChangeFeed,
+  QueueSubscriptionResources,
   QueueHistoryPageDto,
   QueueOverviewDto,
   QueueStatsDto,
@@ -1063,6 +1064,18 @@ export class ApiClient {
     return response.data;
   }
 
+  async extrudeFilament(
+    printerId: string,
+    distanceMm: number,
+    feedrateMmPerMinute: number
+  ): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/extrude`,
+      { distanceMm, feedrateMmPerMinute }
+    );
+    return response.data;
+  }
+
   // ── MMU (Multi-Material Unit) commands ──
 
   /** Change to a specific MMU tool/gate (loads filament). */
@@ -1113,15 +1126,18 @@ export class ApiClient {
     return response.data;
   }
 
-  /**
-   * Sends an arbitrary G-code command to the printer.
-   * @param printerId The printer's GUID
-   * @param command The G-code command string
-   */
-  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
+  async mmuGateAction(
+    printerId: string,
+    request: {
+      protocol: 'Qidibox' | 'Afc';
+      action: 'Load' | 'Unload' | 'Eject';
+      gateIndex?: number;
+      laneName?: string;
+    }
+  ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/gcode`,
-      { command }
+      `/printers/${printerId}/mmu/gate-action`,
+      request
     );
     return response.data;
   }
@@ -2612,6 +2628,13 @@ export class ApiClient {
     return response.data;
   }
 
+  async getQueueSubscriptionResources(): Promise<QueueSubscriptionResources> {
+    const response = await this.client.get<QueueSubscriptionResources>(
+      "/job-queue/subscription-resources"
+    );
+    return response.data;
+  }
+
   /**
    * Get queue overview for available printers with compatibility filtering.
    * All filtering is done server-side for consistency with auto-assign.
@@ -2755,14 +2778,66 @@ export class ApiClient {
     jobId: string,
     printerId: string,
     reviewedRowVersion: string
-  ): Promise<QueuedPrintJobWithFileMetaDto> {
+  ): Promise<DispatchClientResult> {
     const etag = this.queueJobIfMatch(reviewedRowVersion);
-    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+    const response = await this.client.post<
+      QueuedPrintJobDto | {
+        error?: string;
+        detail?: string;
+        job?: QueuedPrintJobDto;
+      }
+    >(
       `/job-queue/${jobId}/dispatch-to`,
       { printerId },
-      { timeout: 0, headers: { "If-Match": etag } }
+      {
+        timeout: 0,
+        headers: { "If-Match": etag },
+        validateStatus: (status) => [200, 202, 409, 412, 503].includes(status),
+      }
     );
-    return response.data;
+    if (response.status === 200 || response.status === 202) {
+      const job = response.data as QueuedPrintJobDto;
+      if (!job.dispatchResult) {
+        return {
+          kind: 'unavailable',
+          httpStatus: 503,
+          errorCode: 'dispatch_outcome_unavailable',
+        };
+      }
+      return {
+        kind: response.status === 200 ? 'accepted' : 'reconciliation',
+        httpStatus: response.status,
+        job,
+        dispatch: job.dispatchResult,
+      };
+    }
+
+    const body = response.data as {
+      error?: string;
+      detail?: string;
+      job?: QueuedPrintJobDto;
+    };
+    const rejectedJob =
+      body.job ??
+      ('id' in body ? (body as unknown as QueuedPrintJobDto) : undefined);
+    return {
+      kind:
+        response.status === 409
+          ? 'conflict'
+          : response.status === 412
+            ? 'stale'
+            : 'unavailable',
+      httpStatus: response.status as 409 | 412 | 503,
+      errorCode:
+        body.error ??
+        rejectedJob?.dispatchResult?.errorCode ??
+        'dispatch_request_failed',
+      detail:
+        body.detail ??
+        rejectedJob?.dispatchResult?.errorDetail ??
+        undefined,
+      job: rejectedJob,
+    };
   }
 
   // ============ Dispatch history ============

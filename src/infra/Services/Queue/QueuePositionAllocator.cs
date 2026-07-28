@@ -32,7 +32,14 @@ public sealed class QueuePositionAllocator(AppDbContext db) : IQueuePositionAllo
             QueuePositionState? state = await _db.QueuePositionStates.FindAsync([scopeId], ct);
             if (state is null)
             {
-                state = new QueuePositionState { ScopeId = scopeId, NextPosition = 1 };
+                int nextPosition = (await _db.PrintJobs
+                    .Where(job => job.AssignedPrinterId == printerId)
+                    .MaxAsync(job => (int?)job.QueuePosition, ct) ?? 0) + 1;
+                state = new QueuePositionState
+                {
+                    ScopeId = scopeId,
+                    NextPosition = nextPosition,
+                };
                 _db.QueuePositionStates.Add(state);
             }
             else
@@ -57,17 +64,31 @@ public sealed class QueuePositionAllocator(AppDbContext db) : IQueuePositionAllo
             {
                 "Microsoft.EntityFrameworkCore.SqlServer" =>
                     "MERGE [QueuePositionStates] WITH (HOLDLOCK) AS target " +
-                    "USING (SELECT @scopeId AS [ScopeId]) AS source " +
+                    "USING (SELECT @scopeId AS [ScopeId], COALESCE((" +
+                    "SELECT MAX([QueuePosition]) + 1 FROM [PrintJobs] " +
+                    "WHERE [AssignedPrinterId] = @scopeId OR " +
+                    "([AssignedPrinterId] IS NULL AND " +
+                    "@scopeId = '00000000-0000-0000-0000-000000000000')), 1) " +
+                    "AS [InitialPosition]) AS source " +
                     "ON target.[ScopeId] = source.[ScopeId] " +
                     "WHEN MATCHED THEN UPDATE SET [NextPosition] = target.[NextPosition] + 1 " +
-                    "WHEN NOT MATCHED THEN INSERT ([ScopeId], [NextPosition]) VALUES (source.[ScopeId], 1) " +
+                    "WHEN NOT MATCHED THEN INSERT ([ScopeId], [NextPosition]) " +
+                    "VALUES (source.[ScopeId], source.[InitialPosition]) " +
                     "OUTPUT INSERTED.[NextPosition];",
                 "Npgsql.EntityFrameworkCore.PostgreSQL" =>
-                    "INSERT INTO \"QueuePositionStates\" (\"ScopeId\", \"NextPosition\") VALUES (@scopeId, 1) " +
+                    "INSERT INTO \"QueuePositionStates\" (\"ScopeId\", \"NextPosition\") " +
+                    "SELECT @scopeId, COALESCE(MAX(\"QueuePosition\"), 0) + 1 FROM \"PrintJobs\" " +
+                    "WHERE \"AssignedPrinterId\" = @scopeId OR " +
+                    "(\"AssignedPrinterId\" IS NULL AND " +
+                    "@scopeId = '00000000-0000-0000-0000-000000000000') " +
                     "ON CONFLICT (\"ScopeId\") DO UPDATE SET \"NextPosition\" = " +
                     "\"QueuePositionStates\".\"NextPosition\" + 1 RETURNING \"NextPosition\";",
                 "Microsoft.EntityFrameworkCore.Sqlite" =>
-                    "INSERT INTO \"QueuePositionStates\" (\"ScopeId\", \"NextPosition\") VALUES (@scopeId, 1) " +
+                    "INSERT INTO \"QueuePositionStates\" (\"ScopeId\", \"NextPosition\") " +
+                    "SELECT @scopeId, COALESCE(MAX(\"QueuePosition\"), 0) + 1 FROM \"PrintJobs\" " +
+                    "WHERE \"AssignedPrinterId\" = @scopeId OR " +
+                    "(\"AssignedPrinterId\" IS NULL AND " +
+                    "@scopeId = '00000000-0000-0000-0000-000000000000') " +
                     "ON CONFLICT (\"ScopeId\") DO UPDATE SET \"NextPosition\" = \"NextPosition\" + 1 " +
                     "RETURNING \"NextPosition\";",
                 _ => throw new NotSupportedException(

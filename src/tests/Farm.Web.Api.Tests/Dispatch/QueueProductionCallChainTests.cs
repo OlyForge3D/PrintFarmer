@@ -304,7 +304,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 NullLogger<PrintJobManagementService>.Instance,
                 printers.Object,
                 storage.Object,
-                Mock.Of<IHubContext<PrinterHub>>(),
+                CreateHubContext(),
                 Mock.Of<IStoredFileOperationsService>(),
                 Mock.Of<IPrinterStatusCacheReader>(),
                 dispatchClaimService: claimService,
@@ -656,8 +656,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await scheduler.TriggerScheduledJobsAsync();
 
         JobExecution execution = await context.JobExecutions.SingleAsync();
-        execution.Status.Should().Be("Failed");
-        execution.Message.Should().Contain("already owned");
+        execution.Status.Should().Be("Rejected");
+        execution.Message.Should().Be("The scheduled start was not accepted.");
         management.Verify(service => service.DispatchJobAsync(
             fixture.JobId.ToString(),
             CalibrationOwnerId.ToString(),
@@ -1846,7 +1846,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             BackendAcceptedAtUtc = DateTime.UtcNow,
             Outcome = DispatchAttemptOutcome.Accepted,
             BackendFileName = "newer.gcode",
-            BackendCallPhase = DispatchBackendCallPhase.Reconciled,
+            BackendCallPhase = DispatchBackendCallPhase.PostAccept,
             UpdatedAtUtc = DateTime.UtcNow,
         });
         PrinterDispatchState state = await context.PrinterDispatchStates.SingleAsync(
@@ -2463,7 +2463,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             NullLogger<PrintJobManagementService>.Instance,
             printers ?? Mock.Of<IPrintersService>(),
             storage ?? Mock.Of<IStoragePathService>(),
-            Mock.Of<IHubContext<PrinterHub>>(),
+            CreateHubContext(),
             Mock.Of<IStoredFileOperationsService>(),
             Mock.Of<IPrinterStatusCacheReader>(),
             dispatchClaimService: CreateClaim(
@@ -2472,6 +2472,23 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             appDbContext: db,
             outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
             queuePositionAllocator: new QueuePositionAllocator(db));
+
+    private static IHubContext<PrinterHub> CreateHubContext()
+    {
+        var client = new Mock<IClientProxy>();
+        client.Setup(proxy => proxy.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(It.IsAny<string>()))
+            .Returns(client.Object);
+        clients.SetupGet(value => value.All).Returns(client.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+        return hub.Object;
+    }
 
     private AppDbContext CreateContext()
     {

@@ -2784,12 +2784,18 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("JobScheduleId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Message")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("OccurrencePrintJobId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -2808,6 +2814,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("datetime2");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OccurrencePrintJobId")
+                        .HasDatabaseName("IX_JobExecutions_OccurrencePrintJobId");
 
                     b.HasIndex("ScheduledExecutionTime");
 
@@ -2917,6 +2926,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("RequiresOperatorReauthorization")
                         .HasColumnType("bit");
 
+                    b.Property<Guid>("RootPrintJobId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("datetime2");
 
@@ -2938,6 +2950,9 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("PrintJobId")
                         .IsUnique();
+
+                    b.HasIndex("RootPrintJobId")
+                        .HasDatabaseName("IX_JobSchedules_RootPrintJobId");
 
                     b.HasIndex("ScheduledStartTime");
 

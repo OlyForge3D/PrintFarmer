@@ -29,6 +29,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -586,9 +587,24 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                     Outcome = DispatchAttemptOutcome.Accepted,
                 },
             });
+        Exception? schedulerException = null;
+        var schedulerLogger = new Mock<ILogger<JobSchedulingService>>();
+        schedulerLogger.Setup(logger => logger.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                if (invocation.Arguments[3] is Exception exception)
+                {
+                    schedulerException = exception;
+                }
+            }));
         var service = new JobSchedulingService(
             db,
-            NullLogger<JobSchedulingService>.Instance,
+            schedulerLogger.Object,
             management.Object,
             AllowAllSchedulingAuthorization());
 
@@ -607,9 +623,13 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             new DateTime(2026, 3, 7, 9, 30, 0, DateTimeKind.Unspecified));
 
         await service.TriggerScheduledJobsAsync();
+        schedulerException.Should().BeNull(schedulerException?.ToString());
         db.ChangeTracker.Clear();
         JobSchedule advanced = await db.JobSchedules.SingleAsync(
-            schedule => schedule.PrintJobId == job.Id);
+            schedule => schedule.RootPrintJobId == job.Id);
+        advanced.PrintJobId.Should().NotBe(
+            job.Id,
+            "a recurring occurrence must use a fresh dispatchable job");
         advanced.ScheduledStartTime.Should().Be(
             new DateTime(2026, 3, 8, 13, 30, 0, DateTimeKind.Utc));
         service.ConvertFromUtc(
@@ -905,7 +925,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             Outcome = DispatchAttemptOutcome.InProgress,
             BackendFileName = "b.gcode",
             BackendFileIdentity = "b.gcode",
-            BackendCallPhase = DispatchBackendCallPhase.Claimed,
+            BackendCallPhase = DispatchBackendCallPhase.PreCall,
             UpdatedAtUtc = DateTime.UtcNow,
         };
         db.GcodeFiles.Add(gcode);

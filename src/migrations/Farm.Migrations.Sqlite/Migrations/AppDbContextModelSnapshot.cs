@@ -2771,11 +2771,17 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("DispatchAttemptId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("JobScheduleId")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
                         .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("OccurrencePrintJobId")
                         .HasColumnType("TEXT");
 
                     b.Property<byte[]>("RowVersion")
@@ -2795,6 +2801,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OccurrencePrintJobId")
+                        .HasDatabaseName("IX_JobExecutions_OccurrencePrintJobId");
 
                     b.HasIndex("ScheduledExecutionTime");
 
@@ -2904,6 +2913,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool>("RequiresOperatorReauthorization")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid>("RootPrintJobId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("ScheduledAt")
                         .HasColumnType("TEXT");
 
@@ -2925,6 +2937,9 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasIndex("PrintJobId")
                         .IsUnique();
+
+                    b.HasIndex("RootPrintJobId")
+                        .HasDatabaseName("IX_JobSchedules_RootPrintJobId");
 
                     b.HasIndex("ScheduledStartTime");
 

@@ -1,10 +1,15 @@
 import { useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { apiClient } from '@/services/api';
-import { mutationErrorMessage } from '@/common/utils/mutationError';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
+import { queryKeys } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 import type { SpoolmanSpool } from '@/types/api';
 import { AlertCircleIcon, FilamentLoadIcon } from '@/common/components/icons/MdiIcons';
@@ -32,6 +37,7 @@ export function SpoolValidationModal({
   onProceed,
   context,
 }: SpoolValidationModalProps) {
+  const queryClient = useQueryClient();
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [settingSpool, setSettingSpool] = useState(false);
 
@@ -53,12 +59,23 @@ export function SpoolValidationModal({
         // Spool is now set — proceed with dispatch
         onProceed(context.jobId);
       } catch (err) {
+        const status = mutationErrorStatus(err);
+        if (status === 412 || status === 428) {
+          setShowSpoolPicker(false);
+          onClose();
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.printer(context.printerId),
+            }),
+          ]);
+        }
         toast.error(mutationErrorMessage(err, 'Failed to set spool'));
       } finally {
         setSettingSpool(false);
       }
     },
-    [context, onProceed],
+    [context, onClose, onProceed, queryClient],
   );
 
   const handleProceedAnyway = useCallback(() => {

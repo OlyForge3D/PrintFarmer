@@ -118,10 +118,20 @@ public enum BedClearCommandStatus
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum DispatchBackendCallPhase
 {
-    Claimed = 0,
-    InvokingBackend = 1,
+    PreCall = 0,
+    BackendCall = 1,
     AwaitingReconciliation = 2,
-    ResponseReceived = 3,
-    Reconciled = 4,
+    Accepted = 3,
+    PostAccept = 4,
     Terminal = 5,
+}
+
+/// <summary>How a dispatch exception was persisted based on the durable call phase.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DispatchExceptionDisposition
+{
+    ReleasedBeforeStart = 0,
+    AwaitingReconciliation = 1,
+    Accepted = 2,
+    Superseded = 3,
 }

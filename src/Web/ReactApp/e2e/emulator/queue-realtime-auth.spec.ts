@@ -6,7 +6,7 @@ test.describe('Queue realtime authentication — Emulator', () => {
   }) => {
     const printerSocketUrls: string[] = [];
     const printerHubUnauthorizedStatuses: number[] = [];
-    const queueResponseStatuses: number[] = [];
+    const resourceResponseStatuses: number[] = [];
 
     page.on('websocket', (socket) => {
       if (new URL(socket.url()).pathname === '/hubs/printers') {
@@ -18,8 +18,8 @@ test.describe('Queue realtime authentication — Emulator', () => {
       if (url.pathname.startsWith('/hubs/printers') && response.status() === 401) {
         printerHubUnauthorizedStatuses.push(response.status());
       }
-      if (url.pathname === '/api/job-queue-analytics') {
-        queueResponseStatuses.push(response.status());
+      if (url.pathname === '/api/job-queue/subscription-resources') {
+        resourceResponseStatuses.push(response.status());
       }
     });
 
@@ -35,9 +35,168 @@ test.describe('Queue realtime authentication — Emulator', () => {
       { timeout: 15_000 },
     ).toBe(true);
     await expect.poll(
-      () => queueResponseStatuses.some((status) => status === 200),
+      () => resourceResponseStatuses.some((status) => status === 200),
       { timeout: 15_000 },
     ).toBe(true);
     expect(printerHubUnauthorizedStatuses).toEqual([]);
+  });
+
+  test('restores subscriptions, rejects unauthorized groups, drains gaps, and refetches queue data', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.PrintFarmerDebug = { printerSignalR: true };
+    });
+    const changeFeedRequests: string[] = [];
+    let queueListResponses = 0;
+    let queueStatsResponses = 0;
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/job-queue/changes') {
+        changeFeedRequests.push(url.toString());
+      }
+    });
+    page.on('response', (response) => {
+      const path = new URL(response.url()).pathname;
+      if (path === '/api/job-queue-analytics' && response.status() === 200) {
+        queueListResponses++;
+      }
+      if (path === '/api/job-queue-analytics/stats' && response.status() === 200) {
+        queueStatsResponses++;
+      }
+    });
+
+    await page.goto('/printQueue');
+    await page.waitForLoadState('networkidle');
+    await expect.poll(
+      () => page.evaluate(() => {
+        const service = window.PrintFarmerDebug?.printerSignalRService as
+          | { isConnected?: boolean }
+          | undefined;
+        return service?.isConnected === true;
+      }),
+      { timeout: 15_000 }
+    ).toBe(true);
+
+    const beforeReconnect = await page.evaluate(() => {
+      const service = window.PrintFarmerDebug!.printerSignalRService as {
+        getQueueSubscriptionSnapshot: () => {
+          printerIds: string[];
+          jobIds: string[];
+          projectIds: string[];
+          lastSequence: number;
+        };
+      };
+      return service.getQueueSubscriptionSnapshot();
+    });
+    const unauthorizedId = 'not-a-valid-job-id';
+    const unauthorizedAccepted = await page.evaluate(async (jobId) => {
+      const service = window.PrintFarmerDebug!.printerSignalRService as {
+        subscribeToQueueJob: (id: string) => Promise<void>;
+        getQueueSubscriptionSnapshot: () => { jobIds: string[] };
+      };
+      try {
+        await service.subscribeToQueueJob(jobId);
+        return true;
+      } catch {
+        return service.getQueueSubscriptionSnapshot().jobIds.includes(jobId);
+      }
+    }, unauthorizedId);
+    expect(unauthorizedAccepted).toBe(false);
+
+    await page.evaluate(async () => {
+      const service = window.PrintFarmerDebug!.printerSignalRService as {
+        disconnect: () => Promise<void>;
+        connect: () => Promise<void>;
+      };
+      await service.disconnect();
+      await service.connect();
+    });
+    await expect.poll(
+      () => page.evaluate(() => {
+        const service = window.PrintFarmerDebug!.printerSignalRService as {
+          isConnected: boolean;
+        };
+        return service.isConnected;
+      }),
+      { timeout: 15_000 }
+    ).toBe(true);
+    const afterReconnect = await page.evaluate(() => {
+      const service = window.PrintFarmerDebug!.printerSignalRService as {
+        getQueueSubscriptionSnapshot: () => {
+          printerIds: string[];
+          jobIds: string[];
+          projectIds: string[];
+          lastSequence: number;
+        };
+      };
+      return service.getQueueSubscriptionSnapshot();
+    });
+    expect(afterReconnect.printerIds).toEqual(beforeReconnect.printerIds);
+    expect(afterReconnect.jobIds).toEqual(beforeReconnect.jobIds);
+    expect(afterReconnect.projectIds).toEqual(beforeReconnect.projectIds);
+
+    const listBaseline = queueListResponses;
+    const statsBaseline = queueStatsResponses;
+    const changeBaseline = changeFeedRequests.length;
+    await page.evaluate(async () => {
+      const service = window.PrintFarmerDebug!.printerSignalRService as {
+        getQueueSubscriptionSnapshot: () => { lastSequence: number };
+        handleQueueEvent: (event: Record<string, unknown>) => Promise<void>;
+      };
+      const sequence =
+        service.getQueueSubscriptionSnapshot().lastSequence + 2;
+      await service.handleQueueEvent({
+        schemaVersion: '2',
+        eventId: crypto.randomUUID(),
+        sequence,
+        eventType: 'PrintFarmer.Queue.BrowserGapProbe.v1',
+        occurredAtUtc: new Date().toISOString(),
+      });
+    });
+
+    await expect.poll(() => changeFeedRequests.length).toBeGreaterThan(
+      changeBaseline
+    );
+    await expect.poll(() => queueListResponses).toBeGreaterThan(listBaseline);
+    await expect.poll(() => queueStatsResponses).toBeGreaterThan(statsBaseline);
+  });
+
+  test('maintenance client traffic never uses the retired raw G-code route', async ({
+    page,
+  }) => {
+    const physicalRequests: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST') {
+        physicalRequests.push(new URL(request.url()).pathname);
+      }
+    });
+
+    const status = await page.evaluate(async () => {
+      const token = localStorage.getItem('auth-token');
+      const response = await fetch(
+        '/api/printers/00000000-0000-0000-0000-000000000099/extrude',
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token ?? ''}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            distanceMm: -1,
+            feedrateMmPerMinute: 300,
+          }),
+        }
+      );
+      return response.status;
+    });
+
+    expect([404, 409]).toContain(status);
+    expect(
+      physicalRequests.some((path) => path.endsWith('/extrude'))
+    ).toBe(true);
+    expect(
+      physicalRequests.some((path) => path.endsWith('/gcode'))
+    ).toBe(false);
   });
 });

@@ -13,7 +13,10 @@ protocol JobServiceProtocol: Sendable {
         reviewedRowVersion: String
     ) async throws -> PrintJob
     func delete(id: UUID, reviewedRowVersion: String) async throws
-    func dispatch(id: UUID, reviewedRowVersion: String) async throws
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult
     func cancel(id: UUID, reviewedRowVersion: String) async throws
     func abort(id: UUID, reviewedRowVersion: String) async throws
     func pause(id: UUID, reviewedRowVersion: String) async throws

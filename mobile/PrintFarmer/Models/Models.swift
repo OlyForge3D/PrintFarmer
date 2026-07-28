@@ -607,6 +607,39 @@ struct PrintJob: Codable, Identifiable, Sendable {
     }
 }
 
+enum DispatchAttemptOutcome: String, Codable, Sendable {
+    case accepted = "Accepted"
+    case rejected = "Rejected"
+    case failedBeforeStart = "FailedBeforeStart"
+    case unknown = "Unknown"
+    case inProgress = "InProgress"
+}
+
+struct DispatchAttemptResult: Codable, Sendable {
+    let attemptId: UUID?
+    let attemptNumber: Int?
+    let outcome: DispatchAttemptOutcome
+    let errorCode: String?
+    let errorDetail: String?
+    let isRetryable: Bool
+    let requiresReconciliation: Bool
+    let jobRevision: String?
+    let dispatchStateRevision: String?
+}
+
+struct DispatchJobResponse: Codable, Sendable {
+    let id: String
+    let rowVersion: String?
+    let status: String
+    let dispatchResult: DispatchAttemptResult?
+}
+
+enum JobDispatchResult: Sendable {
+    case accepted(DispatchJobResponse)
+    case reconciliation(DispatchJobResponse)
+    case rejected(DispatchJobResponse)
+}
+
 // MARK: - Queue Overview (matches QueueOverviewDto)
 
 struct QueueOverview: Codable, Identifiable, Sendable {

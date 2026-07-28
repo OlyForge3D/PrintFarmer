@@ -3,13 +3,16 @@ import type { AutoDispatchStatus } from '@/types/api';
 
 const signalRTestState = vi.hoisted(() => {
   const connectionHandlers = new Map<string, (...args: unknown[]) => void>();
+  let reconnectedHandler: (() => void) | undefined;
   const connection = {
     on: vi.fn((eventName: string, callback: (...args: unknown[]) => void) => {
       connectionHandlers.set(eventName, callback);
     }),
     onclose: vi.fn(),
     onreconnecting: vi.fn(),
-    onreconnected: vi.fn(),
+    onreconnected: vi.fn((callback: () => void) => {
+      reconnectedHandler = callback;
+    }),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     invoke: vi.fn().mockResolvedValue(undefined),
@@ -34,6 +37,8 @@ const signalRTestState = vi.hoisted(() => {
     connection,
     builder,
     getSettings: vi.fn(),
+    getQueueChanges: vi.fn(),
+    triggerReconnected: () => reconnectedHandler?.(),
   };
 });
 
@@ -55,6 +60,7 @@ vi.mock('@microsoft/signalr', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSettings: signalRTestState.getSettings,
+    getQueueChanges: signalRTestState.getQueueChanges,
   },
 }));
 
@@ -68,11 +74,175 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     vi.clearAllMocks();
     signalRTestState.connectionHandlers.clear();
     signalRTestState.connection.state = 'Disconnected';
+    signalRTestState.connection.start.mockImplementation(async () => {
+      signalRTestState.connection.state = 'Connected';
+    });
+    signalRTestState.connection.invoke.mockResolvedValue(undefined);
     signalRTestState.getSettings.mockResolvedValue({
       logLevel: 'Information',
       consoleLoggingEnabled: false,
     });
     window.PrintFarmerDebug = undefined;
+    localStorage.clear();
+    signalRTestState.getQueueChanges.mockResolvedValue({
+      afterSequence: 0,
+      nextSequence: 0,
+      hasMore: false,
+      events: [],
+    });
+  });
+
+  describe('PrinterSignalRService queue reconciliation', () => {
+    const flushMicrotasks = async () => {
+      for (let index = 0; index < 12; index++) {
+        await Promise.resolve();
+      }
+    };
+
+    beforeEach(() => {
+      vi.resetModules();
+      vi.clearAllMocks();
+      signalRTestState.connectionHandlers.clear();
+      signalRTestState.connection.state = 'Disconnected';
+      signalRTestState.connection.start.mockImplementation(async () => {
+        signalRTestState.connection.state = 'Connected';
+      });
+      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.getSettings.mockResolvedValue({
+        logLevel: 'Information',
+        consoleLoggingEnabled: false,
+      });
+      signalRTestState.getQueueChanges.mockResolvedValue({
+        afterSequence: 0,
+        nextSequence: 0,
+        hasMore: false,
+        events: [],
+      });
+      localStorage.clear();
+      window.PrintFarmerDebug = undefined;
+    });
+
+    it('authenticates the WebSocket from the current local bearer token', async () => {
+      localStorage.setItem('auth-token', 'jwt-for-websocket');
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      const options = signalRTestState.builder.withUrl.mock.calls.at(-1)?.[1] as {
+        accessTokenFactory: () => string;
+      };
+      expect(options.accessTokenFactory()).toBe('jwt-for-websocket');
+
+      printerSignalRService.dispose();
+    });
+
+    it('proactively drains the durable cursor on the initial connection', async () => {
+      signalRTestState.getQueueChanges.mockResolvedValueOnce({
+        afterSequence: 0,
+        nextSequence: 1,
+        hasMore: false,
+        events: [
+          {
+            schemaVersion: '2',
+            eventId: 'event-1',
+            sequence: 1,
+            eventType: 'queue.updated',
+            occurredAtUtc: '2026-07-28T00:00:00Z',
+          },
+        ],
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const callback = vi.fn();
+      printerSignalRService.onQueueEvent(callback);
+
+      await printerSignalRService.connect();
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ sequence: 1 })
+      );
+      expect(printerSignalRService.getQueueSubscriptionSnapshot().lastSequence)
+        .toBe(1);
+      printerSignalRService.dispose();
+    });
+
+    it('replays missed events before delivering a sequence-gap hint', async () => {
+      signalRTestState.getQueueChanges.mockResolvedValueOnce({
+        afterSequence: 0,
+        nextSequence: 2,
+        hasMore: false,
+        events: [
+          {
+            schemaVersion: '2',
+            eventId: 'event-1',
+            sequence: 1,
+            eventType: 'queue.updated',
+            occurredAtUtc: '2026-07-28T00:00:00Z',
+          },
+          {
+            schemaVersion: '2',
+            eventId: 'event-2',
+            sequence: 2,
+            eventType: 'queue.updated',
+            occurredAtUtc: '2026-07-28T00:00:01Z',
+          },
+        ],
+      });
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const sequences: number[] = [];
+      printerSignalRService.onQueueEvent((event) => sequences.push(event.sequence));
+
+      signalRTestState.connectionHandlers.get('queueevent')?.({
+        schemaVersion: '2',
+        eventId: 'event-3',
+        sequence: 3,
+        eventType: 'queue.updated',
+        occurredAtUtc: '2026-07-28T00:00:02Z',
+      });
+      await flushMicrotasks();
+
+      expect(sequences).toEqual([1, 2, 3]);
+      printerSignalRService.dispose();
+    });
+
+    it('restores authorized groups and removes a rejected group on reconnect', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: ['printer-1'],
+        jobIds: ['job-1'],
+        projectIds: ['project-1'],
+      });
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (method === 'SubscribeToQueueJobAsync' && id === 'job-1') {
+            throw new Error('Forbidden');
+          }
+        }
+      );
+
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'SubscribeToPrinterAsync',
+        'printer-1'
+      );
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'SubscribeToProjectAsync',
+        'project-1'
+      );
+      expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
+        expect.objectContaining({
+          printerIds: ['printer-1'],
+          jobIds: [],
+          projectIds: ['project-1'],
+        })
+      );
+      printerSignalRService.dispose();
+    });
   });
 
   it('registers the auto-dispatch event name for status updates', async () => {

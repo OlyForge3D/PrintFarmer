@@ -10,6 +10,7 @@ import { SpoolValidationModal } from '@/features/queue/components/SpoolValidatio
 import { apiClient } from '@/services/api';
 import type { SpoolValidationContext } from '@/features/queue/utils/spoolValidation';
 import type { AutoDispatchStatus, AutoDispatchReadyResult, Printer } from '@/types/api';
+import { mutationErrorStatus } from '@/common/utils/mutationError';
 
 interface BedClearBannerProps {
   printerId: string;
@@ -29,13 +30,31 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       if (!autoDispatchStatus.nextJobETag) {
         throw new Error('The reviewed job revision is unavailable.');
       }
-      await apiClient.dispatchJobToPrinter(
+      const dispatch = await apiClient.dispatchJobToPrinter(
         jobId,
         printerId,
         autoDispatchStatus.nextJobETag
       );
+      if (dispatch.kind === 'stale') {
+        throw Object.assign(
+          new Error(
+            'The reviewed job changed. Refresh and confirm the override again.'
+          ),
+          { statusCode: 412 }
+        );
+      }
+      if (dispatch.kind === 'conflict' || dispatch.kind === 'unavailable') {
+        throw new Error(
+          dispatch.detail ??
+            `${dispatch.errorCode}: Dispatch was not accepted.`
+        );
+      }
       const jobName = mismatchContext?.jobName ?? 'Job';
-      toast.success(`Dispatching "${jobName}" to ${printerName} (material override)`);
+      toast.success(
+        dispatch.kind === 'reconciliation'
+          ? `Dispatching "${jobName}" to ${printerName}; reconciliation is in progress`
+          : `Dispatching "${jobName}" to ${printerName} (material override)`
+      );
       setMismatchContext(null);
 
       // Optimistic UI update
@@ -49,6 +68,15 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
         old ? optimisticUpdate(old) : undefined,
       );
     } catch (err) {
+      const status = mutationErrorStatus(err);
+      if (status === 412 || status === 428) {
+        setMismatchContext(null);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+          queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
+          queryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),
+        ]);
+      }
       toast.error(`Failed to dispatch: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   }, [printerId, printerName, mismatchContext, queryClient, autoDispatchStatus.nextJobETag]);

@@ -79,6 +79,22 @@ describe('dispatch upload attempt fence', () => {
     });
   });
 
+  it('does not let a stale REST snapshot regress a newer event attempt', () => {
+    const attemptB: DispatchUploadFence = {
+      attemptId: 'attempt-b',
+      attemptNumber: 2,
+      sequence: 7,
+    };
+
+    expect(fenceDispatchAttempt(attemptB, 'attempt-a', 1)).toEqual(attemptB);
+    expect(
+      advanceDispatchUploadFence(
+        fenceDispatchAttempt(undefined, 'attempt-b', 2),
+        progress('attempt-a', 1, 100, true)
+      )
+    ).toBeNull();
+  });
+
   it('retains the exact-attempt cursor across reconnect ordering', () => {
     const beforeReconnect: DispatchUploadFence = {
       attemptId: 'attempt-b',

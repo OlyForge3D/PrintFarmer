@@ -118,15 +118,36 @@ function reviewedMutationError(
   );
 }
 
-function handleMutationError(
+async function handleMutationError(
   queryClient: QueryClient,
   error: unknown,
-  fallback: string
+  fallback: string,
+  printerId?: string
 ) {
   const status = mutationErrorStatus(error);
   if (status === 412 || status === 428) {
-    void queryClient.invalidateQueries({ queryKey: KEYS.all });
-    void queryClient.invalidateQueries({ queryKey: ['job-queue'] });
+    const exactRefetch = printerId
+      ? queryClient.refetchQueries({
+          queryKey: KEYS.status(printerId),
+          exact: true,
+          type: 'active',
+        })
+      : Promise.resolve();
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: KEYS.all }),
+      queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+      queryClient.refetchQueries({
+        queryKey: KEYS.allStatuses,
+        exact: true,
+        type: 'active',
+      }),
+      queryClient.refetchQueries({
+        queryKey: KEYS.globalStatus,
+        exact: true,
+        type: 'active',
+      }),
+      exactRefetch,
+    ]);
   }
   toast.error(mutationErrorMessage(error, fallback));
 }
@@ -219,8 +240,13 @@ export function useSetAutoDispatchEnabled() {
       qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
-    onError: (error) =>
-      handleMutationError(qc, error, 'Failed to update auto-dispatch'),
+    onError: (error, variables) =>
+      handleMutationError(
+        qc,
+        error,
+        'Failed to update auto-dispatch',
+        variables.printerId
+      ),
   });
 }
 

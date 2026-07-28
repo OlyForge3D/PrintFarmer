@@ -167,6 +167,159 @@ public class PrintersControllerControlGuardsTests
         telemetry.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData(0, 300)]
+    [InlineData(101, 300)]
+    [InlineData(-101, 300)]
+    [InlineData(5, 0)]
+    [InlineData(5, 6001)]
+    public async Task ExtrudeFilamentAsync_InvalidBounds_ProduceZeroBackendIo(
+        double distance,
+        int feedrate)
+    {
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.ExtrudeFilamentAsync(
+            Guid.NewGuid(),
+            new ExtrudeFilamentRequest
+            {
+                DistanceMm = distance,
+                FeedrateMmPerMinute = feedrate,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ExtrudeFilamentAsync_ValidRequest_UsesBoundedServerCommand()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(service => service.SendGcodeAsync(
+                id,
+                "M83\nG1 E-5 F300\nM82",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.ExtrudeFilamentAsync(
+            id,
+            new ExtrudeFilamentRequest
+            {
+                DistanceMm = -5,
+                FeedrateMmPerMinute = 300,
+            },
+            CancellationToken.None);
+
+        Assert.True(result.Value?.Success);
+        printersService.Verify(service => service.SendGcodeAsync(
+            id,
+            "M83\nG1 E-5 F300\nM82",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Qidibox", "Load", 2, null, "T2")]
+    [InlineData("Qidibox", "Unload", 2, null, "UNLOAD_T2")]
+    [InlineData("Qidibox", "Eject", 2, null, "EJECT_T2")]
+    [InlineData("Afc", "Load", null, "lane_2", "CHANGE_TOOL LANE=lane_2")]
+    [InlineData("Afc", "Unload", null, "lane-2", "TOOL_UNLOAD LANE=lane-2")]
+    public async Task MmuGateActionAsync_ValidTypedAction_UsesAllowlistedCommand(
+        string protocol,
+        string action,
+        int? gateIndex,
+        string? laneName,
+        string expectedCommand)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(service => service.SendGcodeAsync(
+                id,
+                expectedCommand,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.MmuGateActionAsync(
+            id,
+            new MmuGateActionRequest
+            {
+                Protocol = protocol,
+                Action = action,
+                GateIndex = gateIndex,
+                LaneName = laneName,
+            },
+            CancellationToken.None);
+
+        Assert.True(result.Value?.Success);
+        printersService.Verify(service => service.SendGcodeAsync(
+            id,
+            expectedCommand,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Qidibox", "Load", 99, null)]
+    [InlineData("Qidibox", "Start", 1, null)]
+    [InlineData("Afc", "Load", null, "lane 1; START_PRINT")]
+    [InlineData("Afc", "Eject", null, "lane1")]
+    public async Task MmuGateActionAsync_InvalidTypedAction_ProducesZeroBackendIo(
+        string protocol,
+        string action,
+        int? gateIndex,
+        string? laneName)
+    {
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.MmuGateActionAsync(
+            Guid.NewGuid(),
+            new MmuGateActionRequest
+            {
+                Protocol = protocol,
+                Action = action,
+                GateIndex = gateIndex,
+                LaneName = laneName,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task SetTempsAsync_ReturnsConflict_WhenPrinterIsPrinting()
     {

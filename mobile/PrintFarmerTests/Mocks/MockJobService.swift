@@ -7,6 +7,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var jobToReturn: PrintJob?
     var errorToThrow: Error?
     var actionErrorToThrow: Error?
+    var dispatchResultToReturn: JobDispatchResult?
 
     // Call tracking
     var listJobsCalled = false
@@ -68,9 +69,33 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
-    func dispatch(id: UUID, reviewedRowVersion: String) async throws {
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult {
         dispatchCalledWith = id
         if let error = actionErrorToThrow ?? errorToThrow { throw error }
+        if let dispatchResultToReturn {
+            return dispatchResultToReturn
+        }
+        return .accepted(
+            DispatchJobResponse(
+                id: id.uuidString,
+                rowVersion: reviewedRowVersion,
+                status: PrintJobStatus.printing.rawValue,
+                dispatchResult: DispatchAttemptResult(
+                    attemptId: UUID(),
+                    attemptNumber: 1,
+                    outcome: .accepted,
+                    errorCode: nil,
+                    errorDetail: nil,
+                    isRetryable: false,
+                    requiresReconciliation: false,
+                    jobRevision: reviewedRowVersion,
+                    dispatchStateRevision: nil
+                )
+            )
+        )
     }
 
     func abort(id: UUID, reviewedRowVersion: String) async throws {
@@ -110,6 +135,7 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         jobToReturn = nil
         errorToThrow = nil
         actionErrorToThrow = nil
+        dispatchResultToReturn = nil
         listJobsCalled = false
         listAllJobsCalled = false
         getJobCalledWith = nil

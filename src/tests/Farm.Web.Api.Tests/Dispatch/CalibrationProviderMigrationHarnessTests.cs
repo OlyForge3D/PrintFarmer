@@ -5,6 +5,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Interfaces;
@@ -436,6 +437,11 @@ public class CalibrationProviderMigrationHarnessTests
         await SeedLegacyPrintJobAsync(ctx, legacyJobId);
         await SeedLegacyScheduleAsync(ctx, legacyScheduleId, legacyJobId);
         await migrator.MigrateAsync(frozenParent);
+        Guid legacyExecutionId = Guid.NewGuid();
+        await SeedLegacyExecutionAsync(
+            ctx,
+            legacyExecutionId,
+            legacyScheduleId);
         if (!string.Equals(providerName, "SQLite", StringComparison.Ordinal))
         {
             await SetLegacyScheduleActorAsync(
@@ -453,6 +459,9 @@ public class CalibrationProviderMigrationHarnessTests
         applied.Should().Contain(
             m => m.EndsWith("AddQueueAuditAndBackendIdentity", StringComparison.Ordinal),
             $"[{providerName}] the queue audit / backend identity migration must be applied");
+        applied.Should().Contain(
+            m => m.EndsWith("AddScheduledOccurrenceIdentity", StringComparison.Ordinal),
+            $"[{providerName}] the scheduled occurrence identity migration must be applied");
 
         // OutboxSequenceState seed row must exist.
         bool seedExists = await ctx.OutboxSequenceStates.AnyAsync(s => s.Id == 1);
@@ -514,6 +523,14 @@ public class CalibrationProviderMigrationHarnessTests
         legacySchedule.IsPaused.Should().BeTrue();
         legacySchedule.RequiresOperatorReauthorization.Should().BeTrue();
         legacySchedule.RecurrenceInterval.Should().Be(1);
+        legacySchedule.RootPrintJobId.Should().Be(
+            legacyJobId,
+            $"[{providerName}] legacy schedules must retain their original stable job identity");
+        JobExecution legacyExecution = await ctx.JobExecutions
+            .SingleAsync(execution => execution.Id == legacyExecutionId);
+        legacyExecution.OccurrencePrintJobId.Should().Be(
+            legacyJobId,
+            $"[{providerName}] legacy history must identify its original occurrence");
         (await ctx.JobExecutions.CountAsync(execution =>
             execution.JobScheduleId == legacyScheduleId &&
             execution.Status == "ReauthorizationRequired")).Should().Be(
@@ -530,6 +547,8 @@ public class CalibrationProviderMigrationHarnessTests
 
         await AssertProviderNativeConcurrencyAsync(opts, providerName);
         await AssertProviderBusinessRacesAsync(opts, providerName);
+        await AssertProviderSchedulerOccurrencesAsync(opts, providerName);
+        await AssertProviderDispatchPhasesAsync(opts, providerName);
 
         // No pending migrations must remain.
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();
@@ -631,6 +650,38 @@ public class CalibrationProviderMigrationHarnessTests
                 UPDATE "JobSchedules"
                 SET "InitiatingActorSubject" = {actor}
                 WHERE "Id" = {scheduleId}
+                """);
+        }
+    }
+
+    private static async Task SeedLegacyExecutionAsync(
+        AppDbContext context,
+        Guid executionId,
+        Guid scheduleId)
+    {
+        DateTime created = DateTime.UtcNow.AddMinutes(-30);
+        if (context.Database.IsSqlServer())
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO [JobExecutions]
+                    ([Id], [JobScheduleId], [ScheduledExecutionTime], [ActualStartTime],
+                     [Status], [Message], [CreatedAt], [UpdatedAt])
+                VALUES
+                    ({executionId}, {scheduleId}, {created}, {created},
+                     {"Completed"}, {"Legacy occurrence"}, {created}, {created})
+                """);
+        }
+        else
+        {
+            await context.Database.ExecuteSqlInterpolatedAsync(
+                $"""
+                INSERT INTO "JobExecutions"
+                    ("Id", "JobScheduleId", "ScheduledExecutionTime", "ActualStartTime",
+                     "Status", "Message", "CreatedAt", "UpdatedAt")
+                VALUES
+                    ({executionId}, {scheduleId}, {created}, {created},
+                     {"Completed"}, {"Legacy occurrence"}, {created}, {created})
                 """);
         }
     }
@@ -871,6 +922,243 @@ public class CalibrationProviderMigrationHarnessTests
         }
     }
 
+    private static async Task AssertProviderSchedulerOccurrencesAsync(
+        DbContextOptions<AppDbContext> options,
+        string providerName)
+    {
+        (bool Recurring, DispatchAttemptOutcome Outcome)[] scenarios =
+        [
+            (false, DispatchAttemptOutcome.Accepted),
+            (false, DispatchAttemptOutcome.Rejected),
+            (false, DispatchAttemptOutcome.FailedBeforeStart),
+            (false, DispatchAttemptOutcome.Unknown),
+            (true, DispatchAttemptOutcome.Accepted),
+            (true, DispatchAttemptOutcome.Rejected),
+            (true, DispatchAttemptOutcome.FailedBeforeStart),
+            (true, DispatchAttemptOutcome.Unknown),
+        ];
+        foreach ((bool recurring, DispatchAttemptOutcome outcome) in scenarios)
+        {
+            ProviderFixture fixture = await SeedProviderFixtureAsync(
+                options,
+                $"schedule-{recurring}-{outcome}",
+                PrintJobStatus.Assigned,
+                DispatchAttemptOutcome.InProgress,
+                createAttempt: false);
+            Guid actorId = Guid.NewGuid();
+            DateTime due = DateTime.UtcNow.AddMinutes(-1);
+            await using var db = new AppDbContext(options);
+            var schedule = new JobSchedule
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = fixture.JobId,
+                RootPrintJobId = fixture.JobId,
+                ScheduledStartTime = due,
+                TimeZone = "UTC",
+                RecurrencePattern = recurring ? "Daily" : null,
+                RecurrenceInterval = 1,
+                IsActive = true,
+                IsPaused = false,
+                InitiatingActorSubject = actorId.ToString(),
+                RequiresOperatorReauthorization = false,
+                ScheduledAt = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            db.JobSchedules.Add(schedule);
+            await db.QueuePositionStates
+                .Where(state => state.ScopeId == fixture.PrinterId)
+                .ExecuteDeleteAsync();
+            await db.SaveChangesAsync();
+
+            var management = new Mock<IPrintJobManagementService>();
+            management.Setup(service => service.DispatchJobAsync(
+                    fixture.JobId.ToString(),
+                    actorId.ToString(),
+                    null,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new QueuedPrintJobDto
+                {
+                    Id = fixture.JobId.ToString(),
+                    DispatchResult = new DispatchAttemptResultDto
+                    {
+                        AttemptId = Guid.NewGuid(),
+                        AttemptNumber = 1,
+                        Outcome = outcome,
+                        RequiresReconciliation =
+                            outcome == DispatchAttemptOutcome.Unknown,
+                    },
+                });
+            var authorization = new Mock<IQueueResourceAuthorizationService>();
+            authorization.Setup(service => service.CanActorAccessJobAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<PrinterGroupAccessLevel>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            authorization.Setup(service => service.CanActorAccessPrinterAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<PrinterGroupAccessLevel>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            var scheduler = new JobSchedulingService(
+                db,
+                NullLogger<JobSchedulingService>.Instance,
+                management.Object,
+                authorization.Object);
+
+            await scheduler.TriggerScheduledJobsAsync();
+            if (outcome == DispatchAttemptOutcome.Unknown)
+            {
+                await scheduler.TriggerScheduledJobsAsync();
+            }
+
+            db.ChangeTracker.Clear();
+            JobSchedule persisted = await db.JobSchedules
+                .Include(candidate => candidate.PrintJob)
+                .SingleAsync(candidate => candidate.Id == schedule.Id);
+            int executionCount = await db.JobExecutions.CountAsync(
+                execution => execution.JobScheduleId == schedule.Id);
+            executionCount.Should().Be(
+                1,
+                $"[{providerName}] {outcome} must create one occurrence record");
+            if (outcome == DispatchAttemptOutcome.Accepted && recurring)
+            {
+                persisted.ScheduledStartTime.Should().BeAfter(due);
+                persisted.PrintJobId.Should().NotBe(fixture.JobId);
+                persisted.PrintJob.Status.Should().Be(PrintJobStatus.Assigned);
+            }
+            else if (outcome == DispatchAttemptOutcome.Accepted)
+            {
+                persisted.IsActive.Should().BeFalse();
+            }
+            else
+            {
+                persisted.IsActive.Should().BeTrue();
+                persisted.ScheduledStartTime.Should().BeCloseTo(
+                    due,
+                    TimeSpan.FromMilliseconds(1));
+                persisted.PrintJobId.Should().Be(fixture.JobId);
+            }
+
+            management.Verify(service => service.DispatchJobAsync(
+                    fixture.JobId.ToString(),
+                    actorId.ToString(),
+                    null,
+                    It.IsAny<CancellationToken>()),
+                Times.Once,
+                $"[{providerName}] unresolved occurrences must not duplicate backend calls");
+            persisted.IsActive = false;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    private static async Task AssertProviderDispatchPhasesAsync(
+        DbContextOptions<AppDbContext> options,
+        string providerName)
+    {
+        ProviderFixture preCall = await SeedProviderFixtureAsync(
+            options,
+            "phase-pre",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        ProviderFixture backendCall = await SeedProviderFixtureAsync(
+            options,
+            "phase-backend",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        ProviderFixture accepted = await SeedProviderFixtureAsync(
+            options,
+            "phase-accepted",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        var snapshots = new Mock<IPrinterStatusSnapshotReader>();
+        snapshots.Setup(reader => reader.GetStatusSnapshot(It.IsAny<Guid>()))
+            .Returns((Guid printerId) => new PrinterStatusSnapshot(
+                new PrinterStatusDto(
+                    printerId,
+                    IsOnline: true,
+                    State: "idle"),
+                DateTime.UtcNow.AddSeconds(-1),
+                DateTime.UtcNow.AddSeconds(-1),
+                "provider-test"));
+        await using var db = new AppDbContext(options);
+        var service = new DispatchClaimService(
+            db,
+            snapshots.Object,
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance);
+
+        DispatchClaimResult preClaim = await service.AcquireClaimAsync(
+            ClaimRequest(preCall, "provider-phase"));
+        DispatchExceptionDisposition preDisposition =
+            await service.RecordDispatchExceptionAsync(
+                preClaim.Attempt!.Id,
+                "secret=/private/path?token=abc");
+
+        DispatchClaimResult backendClaim = await service.AcquireClaimAsync(
+            ClaimRequest(backendCall, "provider-phase"));
+        (await service.RecordBackendCallStartedAsync(
+            backendClaim.Attempt!.Id)).Should().BeTrue();
+        DispatchExceptionDisposition backendDisposition =
+            await service.RecordDispatchExceptionAsync(
+                backendClaim.Attempt.Id,
+                "secret=/private/path?token=abc");
+
+        DispatchClaimResult acceptedClaim = await service.AcquireClaimAsync(
+            ClaimRequest(accepted, "provider-phase"));
+        (await service.RecordBackendCallStartedAsync(
+            acceptedClaim.Attempt!.Id)).Should().BeTrue();
+        (await service.RecordBackendAcceptedAsync(
+            acceptedClaim.Attempt.Id,
+            "provider-job")).Should().BeTrue();
+        DispatchExceptionDisposition acceptedDisposition =
+            await service.RecordDispatchExceptionAsync(
+                acceptedClaim.Attempt.Id,
+                "secret=/private/path?token=abc");
+        (await service.RecordPostAcceptCompletedAsync(
+            acceptedClaim.Attempt.Id)).Should().BeTrue();
+
+        db.ChangeTracker.Clear();
+        QueueDispatchAttempt[] attempts = await db.QueueDispatchAttempts
+            .Where(attempt =>
+                attempt.Id == preClaim.Attempt.Id ||
+                attempt.Id == backendClaim.Attempt.Id ||
+                attempt.Id == acceptedClaim.Attempt.Id)
+            .ToArrayAsync();
+        QueueDispatchAttempt persistedPre = attempts.Single(
+            attempt => attempt.Id == preClaim.Attempt.Id);
+        QueueDispatchAttempt persistedBackend = attempts.Single(
+            attempt => attempt.Id == backendClaim.Attempt.Id);
+        QueueDispatchAttempt persistedAccepted = attempts.Single(
+            attempt => attempt.Id == acceptedClaim.Attempt.Id);
+        preDisposition.Should().Be(
+            DispatchExceptionDisposition.ReleasedBeforeStart);
+        persistedPre.Outcome.Should().Be(
+            DispatchAttemptOutcome.FailedBeforeStart);
+        backendDisposition.Should().Be(
+            DispatchExceptionDisposition.AwaitingReconciliation);
+        persistedBackend.Outcome.Should().Be(DispatchAttemptOutcome.Unknown);
+        acceptedDisposition.Should().Be(
+            DispatchExceptionDisposition.Accepted);
+        persistedAccepted.Outcome.Should().Be(DispatchAttemptOutcome.Accepted);
+        persistedAccepted.BackendCallPhase.Should().Be(
+            DispatchBackendCallPhase.PostAccept);
+        attempts.Should().NotContain(attempt =>
+            attempt.ErrorDetail != null &&
+            (attempt.ErrorDetail.Contains(
+                "private",
+                StringComparison.OrdinalIgnoreCase) ||
+             attempt.ErrorDetail.Contains(
+                 "token",
+                 StringComparison.OrdinalIgnoreCase)),
+            $"[{providerName}] persisted exception details must be redacted");
+    }
+
     private static DispatchClaimService CreateProviderClaim(
         AppDbContext db,
         Guid printerId) =>
@@ -996,7 +1284,7 @@ public class CalibrationProviderMigrationHarnessTests
                 BackendFileIdentity = backendFileIdentity,
                 BackendCallPhase = attemptOutcome == DispatchAttemptOutcome.Unknown
                     ? DispatchBackendCallPhase.AwaitingReconciliation
-                    : DispatchBackendCallPhase.Reconciled,
+                    : DispatchBackendCallPhase.PostAccept,
                 UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-30),
             };
             db.QueueDispatchAttempts.Add(attempt);

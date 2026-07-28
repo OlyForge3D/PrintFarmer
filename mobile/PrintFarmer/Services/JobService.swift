@@ -51,11 +51,27 @@ actor JobService: JobServiceProtocol {
         )
     }
 
-    func dispatch(id: UUID, reviewedRowVersion: String) async throws {
-        try await apiClient.postVoid(
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult {
+        let response: HTTPDecodedResponse<DispatchJobResponse> =
+            try await apiClient.post(
             "/api/job-queue/\(id)/dispatch",
-            headers: preconditionHeaders(reviewedRowVersion)
+            headers: preconditionHeaders(reviewedRowVersion),
+            accepting: [200, 202, 409]
         )
+        guard response.value.dispatchResult != nil else {
+            throw NetworkError.invalidResponse
+        }
+        switch response.statusCode {
+        case 200:
+            return .accepted(response.value)
+        case 202:
+            return .reconciliation(response.value)
+        default:
+            return .rejected(response.value)
+        }
     }
 
     func abort(id: UUID, reviewedRowVersion: String) async throws {

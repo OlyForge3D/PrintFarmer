@@ -252,10 +252,6 @@ export const printerService = {
 
   // ── G-code & Spoolman ─────────────────────────────────────────────────
 
-  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
-    return apiClient.sendGcode(printerId, command);
-  },
-
   async setActiveSpool(
     printerId: string,
     spoolId: number,

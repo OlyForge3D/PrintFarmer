@@ -142,6 +142,7 @@
 		CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */; };
 		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
 		F900A0010000000000000001 /* AutoDispatchServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F900A0020000000000000002 /* AutoDispatchServiceTests.swift */; };
+		F900A0030000000000000003 /* JobServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F900A0040000000000000004 /* JobServiceTests.swift */; };
 		F1F1F1F100000000000000B1 /* SignalRServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1F1F1F100000000000000A1 /* SignalRServiceTests.swift */; };
 		D0C9B8A7F6E5D4C3B2A1F2E1 /* NFCTagParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D4E5F6A7B8C9D0E1F2A3B4 /* NFCTagParser.swift */; };
 		D1E2F3A4B5C6D7E8F9A0B1C2 /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1D2E3F4A5B6C7D8E9F0A1B2 /* PushNotificationManager.swift */; };
@@ -294,6 +295,7 @@
 		2D136C4B21A734AB1D5FDBFD /* ServiceError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceError.swift; sourceTree = "<group>"; };
 		319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClientTests.swift; sourceTree = "<group>"; };
 		F900A0020000000000000002 /* AutoDispatchServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoDispatchServiceTests.swift; sourceTree = "<group>"; };
+		F900A0040000000000000004 /* JobServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JobServiceTests.swift; sourceTree = "<group>"; };
 		F1F1F1F100000000000000A1 /* SignalRServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignalRServiceTests.swift; sourceTree = "<group>"; };
 		34D860B7B852D3B6814A7CAF /* AddSpoolViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddSpoolViewModel.swift; sourceTree = "<group>"; };
 		3C12D0C96BEDCD759DF8A6F1 /* MockSignalRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockSignalRService.swift; sourceTree = "<group>"; };
@@ -891,6 +893,7 @@
 			children = (
 				319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */,
 				F900A0020000000000000002 /* AutoDispatchServiceTests.swift */,
+				F900A0040000000000000004 /* JobServiceTests.swift */,
 				F1F1F1F100000000000000A1 /* SignalRServiceTests.swift */,
 				BC200000000000000000000A /* BarcodeIntakeServiceTests.swift */,
 				BC20000000000000000000FA /* SpoolServiceTests.swift */,
@@ -1143,6 +1146,7 @@
 				BC10000000000000000000FA /* SpoolServiceTests.swift in Sources */,
 				CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */,
 				F900A0010000000000000001 /* AutoDispatchServiceTests.swift in Sources */,
+				F900A0030000000000000003 /* JobServiceTests.swift in Sources */,
 				F1F1F1F100000000000000B1 /* SignalRServiceTests.swift in Sources */,
 				B58C5ED9DA35CFF23A191D1D /* AuthServiceTests.swift in Sources */,
 				CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */,

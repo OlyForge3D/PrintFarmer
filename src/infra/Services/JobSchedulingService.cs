@@ -21,12 +21,15 @@ public class JobSchedulingService(
     AppDbContext context,
     ILogger<JobSchedulingService> logger,
     IPrintJobManagementService? printJobManagement = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null)
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    IQueuePositionAllocator? positionAllocator = null)
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
     private readonly ILogger<JobSchedulingService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintJobManagementService? _printJobManagement = printJobManagement;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization = resourceAuthorization;
+    private readonly IQueuePositionAllocator _positionAllocator =
+        positionAllocator ?? new QueuePositionAllocator(context);
 
     /// <summary>
     /// Schedule a print job for a specific date and time in a given timezone
@@ -61,6 +64,7 @@ public class JobSchedulingService(
             timeZoneInfo,
             nameof(scheduledLocalTime));
         string? normalizedRecurrence = NormalizeRecurrence(recurrencePattern);
+        EnsureRecurrenceSupported(job, normalizedRecurrence);
         int normalizedInterval = ValidateRecurrenceInterval(
             normalizedRecurrence,
             recurrenceInterval);
@@ -77,19 +81,27 @@ public class JobSchedulingService(
                 nameof(recurrenceEndLocalTime));
         }
 
+        JobSchedule? existingSchedule = job.Schedule ??
+            await _context.JobSchedules
+                .Include(schedule => schedule.PrintJob)
+                .FirstOrDefaultAsync(
+                    schedule => schedule.RootPrintJobId == jobId,
+                    cancellationToken);
+
         // If job already has a schedule, update it
-        if (job.Schedule != null)
+        if (existingSchedule is not null)
         {
-            job.Schedule.ScheduledStartTime = utcTime;
-            job.Schedule.TimeZone = timeZone;
-            job.Schedule.RecurrencePattern = normalizedRecurrence;
-            job.Schedule.RecurrenceInterval = normalizedInterval;
-            job.Schedule.RecurrenceEndDate = recurrenceEndUtc;
-            job.Schedule.IsActive = true;
-            job.Schedule.IsPaused = false;
-            job.Schedule.UpdatedAt = DateTime.UtcNow;
-            job.Schedule.InitiatingActorSubject = actorSubject;
-            job.Schedule.RequiresOperatorReauthorization = false;
+            existingSchedule.RootPrintJobId = StableJobId(existingSchedule);
+            existingSchedule.ScheduledStartTime = utcTime;
+            existingSchedule.TimeZone = timeZone;
+            existingSchedule.RecurrencePattern = normalizedRecurrence;
+            existingSchedule.RecurrenceInterval = normalizedInterval;
+            existingSchedule.RecurrenceEndDate = recurrenceEndUtc;
+            existingSchedule.IsActive = true;
+            existingSchedule.IsPaused = false;
+            existingSchedule.UpdatedAt = DateTime.UtcNow;
+            existingSchedule.InitiatingActorSubject = actorSubject;
+            existingSchedule.RequiresOperatorReauthorization = false;
         }
         else
         {
@@ -97,6 +109,7 @@ public class JobSchedulingService(
             var schedule = new JobSchedule
             {
                 PrintJobId = jobId,
+                RootPrintJobId = jobId,
                 ScheduledStartTime = utcTime,
                 TimeZone = timeZone,
                 RecurrencePattern = normalizedRecurrence,
@@ -143,7 +156,11 @@ public class JobSchedulingService(
     {
         JobSchedule schedule = await _context.JobSchedules
             .Include(candidate => candidate.PrintJob)
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+            .FirstOrDefaultAsync(
+                candidate =>
+                    candidate.PrintJobId == jobId ||
+                    candidate.RootPrintJobId == jobId,
+                cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
         await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         TimeZoneInfo timeZoneInfo = GetTimeZoneInfo(timeZone);
@@ -152,6 +169,7 @@ public class JobSchedulingService(
             timeZoneInfo,
             nameof(scheduledLocalTime));
         string? normalizedRecurrence = NormalizeRecurrence(recurrencePattern);
+        EnsureRecurrenceSupported(schedule.PrintJob, normalizedRecurrence);
         int normalizedInterval = ValidateRecurrenceInterval(
             normalizedRecurrence,
             recurrenceInterval);
@@ -200,7 +218,11 @@ public class JobSchedulingService(
     {
         JobSchedule schedule = await _context.JobSchedules
             .Include(candidate => candidate.PrintJob)
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+            .FirstOrDefaultAsync(
+                candidate =>
+                    candidate.PrintJobId == jobId ||
+                    candidate.RootPrintJobId == jobId,
+                cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
         await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsActive = false;
@@ -224,7 +246,11 @@ public class JobSchedulingService(
     {
         JobSchedule schedule = await _context.JobSchedules
             .Include(candidate => candidate.PrintJob)
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+            .FirstOrDefaultAsync(
+                candidate =>
+                    candidate.PrintJobId == jobId ||
+                    candidate.RootPrintJobId == jobId,
+                cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
         await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsPaused = true;
@@ -248,7 +274,11 @@ public class JobSchedulingService(
     {
         JobSchedule schedule = await _context.JobSchedules
             .Include(candidate => candidate.PrintJob)
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
+            .FirstOrDefaultAsync(
+                candidate =>
+                    candidate.PrintJobId == jobId ||
+                    candidate.RootPrintJobId == jobId,
+                cancellationToken) ?? throw new InvalidOperationException($"Job '{jobId}' is not scheduled");
         await EnsureActorMayScheduleAsync(schedule.PrintJob, actorSubject, cancellationToken);
 
         schedule.IsPaused = false;
@@ -294,20 +324,21 @@ public class JobSchedulingService(
             .OrderBy(js => js.ScheduledStartTime)
             .ToListAsync(cancellationToken);
 
-        var authorized = new List<ScheduledJobDto>();
-        foreach (JobSchedule schedule in schedules)
+        if (_resourceAuthorization is null)
         {
-            if (await ActorMayAccessJobAsync(
-                schedule.PrintJob,
-                actorSubject,
-                PrinterGroupAccessLevel.View,
-                cancellationToken))
-            {
-                authorized.Add(ToDto(schedule));
-            }
+            return [];
         }
 
-        return authorized;
+        IReadOnlySet<Guid> authorizedJobIds =
+            await _resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                actorSubject,
+                schedules.Select(schedule => schedule.PrintJobId).ToArray(),
+                PrinterGroupAccessLevel.View,
+                cancellationToken);
+        return schedules
+            .Where(schedule => authorizedJobIds.Contains(schedule.PrintJobId))
+            .Select(ToDto)
+            .ToList();
     }
 
     /// <summary>
@@ -324,7 +355,11 @@ public class JobSchedulingService(
         JobSchedule? schedule = await _context.JobSchedules
             .Include(js => js.PrintJob)
             .ThenInclude(j => j.AssignedPrinter)
-            .FirstOrDefaultAsync(js => js.PrintJobId == jobId, cancellationToken);
+            .FirstOrDefaultAsync(
+                schedule =>
+                    schedule.PrintJobId == jobId ||
+                    schedule.RootPrintJobId == jobId,
+                cancellationToken);
 
         return schedule is not null &&
             await ActorMayAccessJobAsync(
@@ -351,7 +386,9 @@ public class JobSchedulingService(
             .AsNoTracking()
             .Include(candidate => candidate.PrintJob)
             .FirstOrDefaultAsync(
-                candidate => candidate.PrintJobId == jobId,
+                candidate =>
+                    candidate.PrintJobId == jobId ||
+                    candidate.RootPrintJobId == jobId,
                 cancellationToken);
         if (schedule is null ||
             !await ActorMayAccessJobAsync(
@@ -364,7 +401,7 @@ public class JobSchedulingService(
         }
 
         List<JobExecution> executions = await _context.JobExecutions
-            .Where(je => je.JobSchedule.PrintJobId == jobId)
+            .Where(execution => execution.JobScheduleId == schedule.Id)
             .OrderByDescending(je => je.ScheduledExecutionTime)
             .ToListAsync(cancellationToken);
 
@@ -375,6 +412,8 @@ public class JobSchedulingService(
             ActualStartTime = je.ActualStartTime,
             Status = je.Status,
             Message = je.Message,
+            OccurrenceJobId = je.OccurrencePrintJobId,
+            DispatchAttemptId = je.DispatchAttemptId,
             DurationSeconds = je.ActualStartTime.HasValue
                 ? (int)(DateTime.UtcNow - je.ActualStartTime.Value).TotalSeconds
                 : null
@@ -394,6 +433,7 @@ public class JobSchedulingService(
         List<JobSchedule> dueSchedules = await _context.JobSchedules
             .Where(js => js.IsActive && !js.IsPaused && js.ScheduledStartTime <= now)
             .Include(js => js.PrintJob)
+            .ThenInclude(job => job.ToolheadUsages)
             .OrderByDescending(js => js.PrintJob.Priority)
             .ThenBy(js => js.ScheduledStartTime)
             .ThenBy(js => js.PrintJob.QueuePosition)
@@ -421,10 +461,16 @@ public class JobSchedulingService(
                     continue;
                 }
 
+                if (await ResolveUnknownOccurrenceAsync(schedule, cancellationToken))
+                {
+                    continue;
+                }
+
                 // Create execution record
                 var execution = new JobExecution
                 {
                     JobScheduleId = schedule.Id,
+                    OccurrencePrintJobId = schedule.PrintJobId,
                     ScheduledExecutionTime = schedule.ScheduledStartTime,
                     Status = "Running",
                     ActualStartTime = now
@@ -440,17 +486,33 @@ public class JobSchedulingService(
                 // acknowledgement, telemetry freshness, filament, capability and
                 // compatibility gates. The scheduler simply invokes that path.
                 // =============================================================
-                await TriggerScheduledDispatchAsync(schedule, execution, cancellationToken);
+                ScheduledOccurrenceDisposition disposition =
+                    await TriggerScheduledDispatchAsync(
+                        schedule,
+                        execution,
+                        cancellationToken);
 
                 _logger.LogInformation(
-                    "[JobScheduling] Triggered scheduled job '{JobId}' at {ExecutionTime}", schedule.PrintJobId, now);
+                    "[JobScheduling] Scheduled occurrence for job '{JobId}' completed with {Disposition}",
+                    schedule.PrintJobId,
+                    disposition);
 
-                AdvanceSchedule(schedule);
+                if (disposition == ScheduledOccurrenceDisposition.Accepted)
+                {
+                    await ConsumeAcceptedOccurrenceAsync(
+                        schedule,
+                        execution,
+                        cancellationToken);
+                }
+
                 await _context.SaveChangesAsync(cancellationToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError("[JobScheduling] Failed to trigger job '{JobId}': {ExceptionMessage}", schedule.PrintJobId, ex.Message);
+                _logger.LogError(
+                    ex,
+                    "[JobScheduling] Failed to trigger scheduled occurrence for job '{JobId}'",
+                    schedule.PrintJobId);
             }
         }
     }
@@ -460,7 +522,7 @@ public class JobSchedulingService(
     /// The execution record is updated with the typed outcome so an operator can see why a
     /// scheduled start was refused instead of finding a job silently stuck in Printing.
     /// </summary>
-    private async Task TriggerScheduledDispatchAsync(
+    private async Task<ScheduledOccurrenceDisposition> TriggerScheduledDispatchAsync(
         JobSchedule schedule,
         JobExecution execution,
         CancellationToken cancellationToken)
@@ -470,7 +532,7 @@ public class JobSchedulingService(
             execution.Status = "Failed";
             execution.Message = "Scheduled job no longer exists.";
             await _context.SaveChangesAsync(cancellationToken);
-            return;
+            return ScheduledOccurrenceDisposition.RetryableFailure;
         }
 
         if (_printJobManagement is null)
@@ -484,7 +546,7 @@ public class JobSchedulingService(
             _logger.LogWarning(
                 "[JobScheduling] Dispatch orchestration unavailable; job {JobId} left queued for auto-dispatch",
                 schedule.PrintJobId);
-            return;
+            return ScheduledOccurrenceDisposition.RetryableFailure;
         }
 
         try
@@ -496,35 +558,75 @@ public class JobSchedulingService(
                 cancellationToken);
 
             DispatchAttemptResultDto? dispatch = result.DispatchResult;
+            execution.DispatchAttemptId = dispatch?.AttemptId;
             if (dispatch?.Outcome == DispatchAttemptOutcome.Accepted)
             {
                 execution.Status = "Completed";
                 execution.Message = "The backend confirmed the scheduled start.";
+                await _context.SaveChangesAsync(cancellationToken);
+                return ScheduledOccurrenceDisposition.Accepted;
             }
             else if (dispatch?.Outcome == DispatchAttemptOutcome.Unknown)
             {
                 execution.Status = "Unknown";
-                execution.Message =
-                    dispatch.ErrorDetail ?? "The backend start requires reconciliation.";
+                execution.Message = "The backend start requires reconciliation.";
+                await _context.SaveChangesAsync(cancellationToken);
+                return ScheduledOccurrenceDisposition.AwaitingReconciliation;
             }
             else
             {
-                execution.Status = "Failed";
-                execution.Message =
-                    dispatch?.ErrorDetail ?? "The scheduled start was not accepted.";
+                execution.Status = dispatch?.Outcome switch
+                {
+                    DispatchAttemptOutcome.Rejected => "Rejected",
+                    DispatchAttemptOutcome.FailedBeforeStart => "FailedBeforeStart",
+                    _ => "FailedBeforeStart",
+                };
+                execution.Message = "The scheduled start was not accepted.";
+                await _context.SaveChangesAsync(cancellationToken);
+                return ScheduledOccurrenceDisposition.RetryableFailure;
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            execution.Status = "Failed";
-            execution.Message = ex.Message[..Math.Min(ex.Message.Length, 500)];
-
             _logger.LogWarning(
-                "[JobScheduling] Scheduled dispatch refused for job {JobId}: {Reason}",
-                schedule.PrintJobId, ex.Message);
-        }
+                exception,
+                "[JobScheduling] Scheduled dispatch client failed for job {JobId}; resolving durable outcome",
+                schedule.PrintJobId);
+            QueueDispatchAttempt? durableAttempt = await _context.QueueDispatchAttempts
+                .AsNoTracking()
+                .Where(attempt => attempt.PrintJobId == schedule.PrintJobId)
+                .OrderByDescending(attempt => attempt.ClaimedAtUtc)
+                .FirstOrDefaultAsync(CancellationToken.None);
+            execution.DispatchAttemptId = durableAttempt?.Id;
+            if (durableAttempt?.Outcome == DispatchAttemptOutcome.Accepted ||
+                durableAttempt?.BackendCallPhase is DispatchBackendCallPhase.Accepted or
+                    DispatchBackendCallPhase.PostAccept)
+            {
+                execution.Status = "Completed";
+                execution.Message =
+                    "The durable dispatch attempt confirms backend acceptance.";
+                await _context.SaveChangesAsync(CancellationToken.None);
+                return ScheduledOccurrenceDisposition.Accepted;
+            }
 
-        await _context.SaveChangesAsync(cancellationToken);
+            if ((durableAttempt?.Outcome is DispatchAttemptOutcome.Unknown or
+                    DispatchAttemptOutcome.InProgress) &&
+                durableAttempt.BackendCallPhase is
+                    DispatchBackendCallPhase.BackendCall or
+                    DispatchBackendCallPhase.AwaitingReconciliation)
+            {
+                execution.Status = "Unknown";
+                execution.Message =
+                    "The durable dispatch attempt requires reconciliation.";
+                await _context.SaveChangesAsync(CancellationToken.None);
+                return ScheduledOccurrenceDisposition.AwaitingReconciliation;
+            }
+
+            execution.Status = "FailedBeforeStart";
+            execution.Message = "The scheduled start failed before backend acceptance.";
+            await _context.SaveChangesAsync(cancellationToken);
+            return ScheduledOccurrenceDisposition.RetryableFailure;
+        }
     }
 
     private async Task EnsureActorMayScheduleAsync(
@@ -598,13 +700,93 @@ public class JobSchedulingService(
             schedule.PrintJobId);
     }
 
-    private void AdvanceSchedule(JobSchedule schedule)
+    private async Task<bool> ResolveUnknownOccurrenceAsync(
+        JobSchedule schedule,
+        CancellationToken ct)
+    {
+        JobExecution? unresolved = await _context.JobExecutions
+            .Where(execution =>
+                execution.JobScheduleId == schedule.Id &&
+                execution.ScheduledExecutionTime == schedule.ScheduledStartTime &&
+                execution.Status == "Unknown")
+            .OrderByDescending(execution => execution.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (unresolved is null)
+        {
+            return false;
+        }
+
+        if (unresolved.DispatchAttemptId is not Guid attemptId)
+        {
+            return true;
+        }
+
+        QueueDispatchAttempt? attempt = await _context.QueueDispatchAttempts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == attemptId, ct);
+        if (attempt is null ||
+            attempt.Outcome is DispatchAttemptOutcome.Unknown or
+                DispatchAttemptOutcome.InProgress)
+        {
+            return true;
+        }
+
+        unresolved.UpdatedAt = DateTime.UtcNow;
+        if (attempt.Outcome == DispatchAttemptOutcome.Accepted)
+        {
+            unresolved.Status = "Completed";
+            unresolved.Message = "Reconciliation confirmed backend acceptance.";
+            await ConsumeAcceptedOccurrenceAsync(schedule, unresolved, ct);
+            await _context.SaveChangesAsync(ct);
+            return true;
+        }
+
+        unresolved.Status = attempt.Outcome == DispatchAttemptOutcome.Rejected
+            ? "Rejected"
+            : "FailedBeforeStart";
+        unresolved.Message = "Reconciliation confirmed the occurrence was not accepted.";
+        await _context.SaveChangesAsync(ct);
+        return false;
+    }
+
+    private async Task ConsumeAcceptedOccurrenceAsync(
+        JobSchedule schedule,
+        JobExecution execution,
+        CancellationToken ct)
+    {
+        schedule.RootPrintJobId = StableJobId(schedule);
+        if (!AdvanceSchedule(schedule))
+        {
+            return;
+        }
+
+        if (schedule.PrintJob.JobKind == JobKind.FilamentCalibration)
+        {
+            schedule.IsActive = false;
+            schedule.IsPaused = true;
+            execution.Message =
+                "Backend acceptance was confirmed; recurring calibration requires a new reviewed job.";
+            return;
+        }
+
+        PrintJob previousOccurrence = schedule.PrintJob;
+        PrintJob nextOccurrence = await CloneRecurringOccurrenceAsync(
+            previousOccurrence,
+            ct);
+        previousOccurrence.Schedule = null;
+        schedule.PrintJobId = nextOccurrence.Id;
+        schedule.PrintJob = nextOccurrence;
+        nextOccurrence.Schedule = schedule;
+        _context.PrintJobs.Add(nextOccurrence);
+    }
+
+    private bool AdvanceSchedule(JobSchedule schedule)
     {
         if (string.IsNullOrWhiteSpace(schedule.RecurrencePattern))
         {
             schedule.IsActive = false;
             schedule.UpdatedAt = DateTime.UtcNow;
-            return;
+            return false;
         }
 
         TimeZoneInfo timeZone = GetTimeZoneInfo(schedule.TimeZone);
@@ -628,11 +810,75 @@ public class JobSchedulingService(
         {
             schedule.IsActive = false;
             schedule.UpdatedAt = DateTime.UtcNow;
-            return;
+            return false;
         }
 
         schedule.ScheduledStartTime = nextUtc;
         schedule.UpdatedAt = DateTime.UtcNow;
+        return true;
+    }
+
+    private async Task<PrintJob> CloneRecurringOccurrenceAsync(
+        PrintJob source,
+        CancellationToken ct)
+    {
+        DateTime now = DateTime.UtcNow;
+        var occurrence = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = source.Name,
+            GcodeFileId = source.GcodeFileId,
+            AssignedPrinterId = source.AssignedPrinterId,
+            Status = source.AssignedPrinterId.HasValue
+                ? PrintJobStatus.Assigned
+                : PrintJobStatus.Queued,
+            Priority = source.Priority,
+            QueuePosition = await _positionAllocator.AllocateAsync(
+                source.AssignedPrinterId,
+                ct),
+            RequiredNozzleDiameter = source.RequiredNozzleDiameter,
+            RequiredMaterialType = source.RequiredMaterialType,
+            RequiredCapabilities = source.RequiredCapabilities?.ToArray(),
+            EstimatedPrintTime = source.EstimatedPrintTime,
+            EstimatedFilamentUsage = source.EstimatedFilamentUsage,
+            PreferredPrinterIds = source.PreferredPrinterIds?.ToArray(),
+            ExcludedPrinterIds = source.ExcludedPrinterIds?.ToArray(),
+            Notes = source.Notes,
+            DeadlineAtUtc = source.DeadlineAtUtc.HasValue
+                ? now + (source.DeadlineAtUtc.Value - source.QueuedAt)
+                : null,
+            Copies = source.Copies,
+            ProjectFileId = source.ProjectFileId,
+            ProjectId = source.ProjectId,
+            ProjectName = source.ProjectName,
+            SpoolmanFilamentId = source.SpoolmanFilamentId,
+            SpoolmanSpoolId = source.SpoolmanSpoolId,
+            FilamentName = source.FilamentName,
+            FilamentVendor = source.FilamentVendor,
+            FilamentColor = source.FilamentColor,
+            PlateIndex = source.PlateIndex,
+            PlateName = source.PlateName,
+            JobKind = JobKind.Standard,
+            CreatorSubject = source.CreatorSubject,
+            CreatedAt = now,
+            UpdatedAt = now,
+            QueuedAt = now,
+        };
+        foreach (PrintJobToolheadUsage usage in source.ToolheadUsages)
+        {
+            occurrence.ToolheadUsages.Add(new PrintJobToolheadUsage
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = occurrence.Id,
+                ToolheadIndex = usage.ToolheadIndex,
+                SpoolmanSpoolId = usage.SpoolmanSpoolId,
+                SlicerEstimateGrams = usage.SlicerEstimateGrams,
+                FilamentName = usage.FilamentName,
+                FilamentColor = usage.FilamentColor,
+            });
+        }
+
+        return occurrence;
     }
 
     private ScheduledJobDto ToDto(JobSchedule schedule)
@@ -643,7 +889,7 @@ public class JobSchedulingService(
         return new ScheduledJobDto
         {
             Id = schedule.Id,
-            JobId = schedule.PrintJobId,
+            JobId = StableJobId(schedule),
             PrinterId = schedule.PrintJob.AssignedPrinterId,
             PrinterName = schedule.PrintJob.AssignedPrinter?.Name ?? "Unassigned",
             JobName = schedule.PrintJob.Name ?? "Unknown",
@@ -840,6 +1086,31 @@ public class JobSchedulingService(
                 nameof(recurrenceInterval),
                 "Recurrence interval must be between 1 and 365.");
     }
+
+    private static Guid StableJobId(JobSchedule schedule) =>
+        schedule.RootPrintJobId == Guid.Empty
+            ? schedule.PrintJobId
+            : schedule.RootPrintJobId;
+
+    private static void EnsureRecurrenceSupported(
+        PrintJob job,
+        string? recurrencePattern)
+    {
+        if (recurrencePattern is not null &&
+            job.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new ArgumentException(
+                "Calibration jobs are immutable one-shot jobs and cannot recur.",
+                nameof(recurrencePattern));
+        }
+    }
+
+    private enum ScheduledOccurrenceDisposition
+    {
+        Accepted,
+        RetryableFailure,
+        AwaitingReconciliation,
+    }
 }
 
 /// <summary>
@@ -890,6 +1161,10 @@ public class ScheduledJobDto
 public class JobExecutionDto
 {
     public Guid Id { get; set; }
+
+    public Guid? OccurrenceJobId { get; set; }
+
+    public Guid? DispatchAttemptId { get; set; }
 
     public DateTime ScheduledExecutionTime { get; set; }
 

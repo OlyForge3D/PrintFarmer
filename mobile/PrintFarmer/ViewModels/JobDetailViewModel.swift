@@ -8,6 +8,7 @@ final class JobDetailViewModel {
     var errorMessage: String?
     var isPerformingAction = false
     var actionError: String?
+    var actionNotice: String?
     var showCancelConfirmation = false
     var isViewActive = true
 
@@ -43,12 +44,47 @@ final class JobDetailViewModel {
     // MARK: - Actions
 
     func dispatchJob() async {
-        await performAction {
-            try await $0.dispatch(
-                id: self.jobId,
-                reviewedRowVersion: $1
-            )
+        guard isViewActive else { return }
+        guard let jobService,
+              let reviewedRowVersion = job?.rowVersion,
+              !reviewedRowVersion.isEmpty else {
+            actionError = "Refresh and review this job before confirming the action."
+            return
         }
+        isPerformingAction = true
+        actionError = nil
+        actionNotice = nil
+
+        do {
+            let result = try await jobService.dispatch(
+                id: jobId,
+                reviewedRowVersion: reviewedRowVersion
+            )
+            switch result {
+            case .accepted:
+                await loadJob()
+            case .reconciliation(let response):
+                await loadJob()
+                actionNotice =
+                    response.dispatchResult?.errorDetail
+                    ?? "The dispatch outcome is being reconciled. Do not dispatch again."
+            case .rejected(let response):
+                await loadJob()
+                actionError =
+                    response.dispatchResult?.errorDetail
+                    ?? "The printer rejected the dispatch."
+            }
+        } catch {
+            if isStaleRevision(error) {
+                await loadJob()
+                actionError =
+                    "This job changed after you reviewed it. Review the refreshed details and confirm again."
+            } else {
+                actionError = error.localizedDescription
+            }
+        }
+
+        isPerformingAction = false
     }
 
     func cancelJob() async {

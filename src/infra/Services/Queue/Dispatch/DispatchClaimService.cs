@@ -313,7 +313,7 @@ public sealed class DispatchClaimService(
             BackendFileName = BuildBackendFileName(attemptId, job.GcodeFile?.Name),
             BackendFileIdentity = BuildBackendFileName(attemptId, job.GcodeFile?.Name),
             BackendCorrelationId = $"pf-{attemptId:N}",
-            BackendCallPhase = DispatchBackendCallPhase.Claimed,
+            BackendCallPhase = DispatchBackendCallPhase.PreCall,
         };
 
         bool consumesAcknowledgement =
@@ -593,7 +593,7 @@ public sealed class DispatchClaimService(
                 ? BuildBackendFileName(attemptId, request.BackendFileName)
                 : request.BackendFileName,
             BackendCorrelationId = $"pf-{attemptId:N}",
-            BackendCallPhase = DispatchBackendCallPhase.Claimed,
+            BackendCallPhase = DispatchBackendCallPhase.PreCall,
             DispatchStateRowVersionAtClaim = dispatchState.RowVersion,
         };
 
@@ -655,7 +655,7 @@ public sealed class DispatchClaimService(
             return false;
         }
 
-        if (attempt.BackendCallPhase != DispatchBackendCallPhase.Claimed)
+        if (attempt.BackendCallPhase != DispatchBackendCallPhase.PreCall)
         {
             _logger.LogWarning(
                 "Ignoring duplicate backend-call start for attempt {AttemptId} in phase {Phase}.",
@@ -673,7 +673,7 @@ public sealed class DispatchClaimService(
             return false;
         }
 
-        attempt.BackendCallPhase = DispatchBackendCallPhase.InvokingBackend;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.BackendCall;
         attempt.BackendCallStartedAtUtc = DateTime.UtcNow;
         attempt.UpdatedAtUtc = DateTime.UtcNow;
         activeState.PhysicalControlCommandId = attempt.Id;
@@ -703,6 +703,16 @@ public sealed class DispatchClaimService(
             return false;
         }
 
+        if (attempt.Outcome == DispatchAttemptOutcome.Accepted ||
+            attempt.BackendCallPhase is DispatchBackendCallPhase.Accepted or
+                DispatchBackendCallPhase.PostAccept)
+        {
+            _logger.LogWarning(
+                "Ignoring known failure after acceptance for attempt {AttemptId}.",
+                attemptId);
+            return false;
+        }
+
         PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
         if (dispatchState is null)
         {
@@ -718,7 +728,7 @@ public sealed class DispatchClaimService(
 
         attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
         attempt.ErrorCode = errorCode;
-        attempt.ErrorDetail = errorDetail;
+        attempt.ErrorDetail = RedactedFailureDetail(errorCode);
         attempt.IsRetryable = true;
         attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
         attempt.TerminalAtUtc = nowUtc;
@@ -844,7 +854,7 @@ public sealed class DispatchClaimService(
 
         attempt.Outcome = DispatchAttemptOutcome.Accepted;
         attempt.BackendAcceptedAtUtc = nowUtc;
-        attempt.BackendCallPhase = DispatchBackendCallPhase.ResponseReceived;
+        attempt.BackendCallPhase = DispatchBackendCallPhase.Accepted;
         attempt.BackendResponseAtUtc = nowUtc;
 
         // Never overwrite a persisted backend identity with null: the identity written
@@ -860,7 +870,6 @@ public sealed class DispatchClaimService(
         }
 
         attempt.UpdatedAtUtc = nowUtc;
-        attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
         attempt.TerminalAtUtc = nowUtc;
         BedClearCommandRecord? acceptedCommand = await _db.BedClearCommandRecords
             .FirstOrDefaultAsync(record => record.DispatchAttemptId == attemptId, ct);
@@ -957,6 +966,16 @@ public sealed class DispatchClaimService(
             return false;
         }
 
+        if (attempt.Outcome == DispatchAttemptOutcome.Accepted ||
+            attempt.BackendCallPhase is DispatchBackendCallPhase.Accepted or
+                DispatchBackendCallPhase.PostAccept)
+        {
+            _logger.LogWarning(
+                "Ignoring unknown outcome after acceptance for attempt {AttemptId}.",
+                attemptId);
+            return false;
+        }
+
         PrinterDispatchState? dispatchState = await LoadActiveAttemptStateAsync(attempt, ct);
         if (dispatchState is null)
         {
@@ -969,7 +988,7 @@ public sealed class DispatchClaimService(
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         attempt.Outcome = DispatchAttemptOutcome.Unknown;
-        attempt.ErrorDetail = errorDetail;
+        attempt.ErrorDetail = RedactedFailureDetail("backend_outcome_unknown");
         attempt.IsRetryable = false;
         attempt.RequiresReconciliation = true;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
@@ -1037,6 +1056,99 @@ public sealed class DispatchClaimService(
             attemptId);
         return true;
     }
+
+    /// <inheritdoc />
+    public async Task<DispatchExceptionDisposition> RecordDispatchExceptionAsync(
+        Guid attemptId,
+        string failureCode,
+        CancellationToken ct = default)
+    {
+        QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.Id == attemptId, ct);
+        if (attempt is null)
+        {
+            return DispatchExceptionDisposition.Superseded;
+        }
+
+        if (attempt.Outcome == DispatchAttemptOutcome.Accepted ||
+            attempt.BackendCallPhase is DispatchBackendCallPhase.Accepted or
+                DispatchBackendCallPhase.PostAccept)
+        {
+            return DispatchExceptionDisposition.Accepted;
+        }
+
+        if (attempt.BackendCallPhase == DispatchBackendCallPhase.PreCall)
+        {
+            bool released = await ReleaseClaimOnKnownFailureAsync(
+                attemptId,
+                failureCode,
+                RedactedFailureDetail(failureCode),
+                ct);
+            return released
+                ? DispatchExceptionDisposition.ReleasedBeforeStart
+                : DispatchExceptionDisposition.Superseded;
+        }
+
+        if (attempt.BackendCallPhase is DispatchBackendCallPhase.BackendCall or
+            DispatchBackendCallPhase.AwaitingReconciliation)
+        {
+            bool recorded = await RecordUnknownOutcomeAsync(
+                attemptId,
+                RedactedFailureDetail("backend_outcome_unknown"),
+                ct);
+            return recorded
+                ? DispatchExceptionDisposition.AwaitingReconciliation
+                : DispatchExceptionDisposition.Superseded;
+        }
+
+        return DispatchExceptionDisposition.Superseded;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RecordPostAcceptCompletedAsync(
+        Guid attemptId,
+        CancellationToken ct = default)
+    {
+        QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+            .FirstOrDefaultAsync(candidate => candidate.Id == attemptId, ct);
+        if (attempt is null ||
+            attempt.Outcome != DispatchAttemptOutcome.Accepted)
+        {
+            return false;
+        }
+
+        if (attempt.BackendCallPhase == DispatchBackendCallPhase.PostAccept)
+        {
+            return true;
+        }
+
+        if (attempt.BackendCallPhase != DispatchBackendCallPhase.Accepted)
+        {
+            return false;
+        }
+
+        attempt.BackendCallPhase = DispatchBackendCallPhase.PostAccept;
+        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    private static string RedactedFailureDetail(string errorCode) =>
+        errorCode switch
+        {
+            "artifact_unavailable" or
+            "gcode_byte_hash_mismatch" or
+            "gcode_byte_size_mismatch" =>
+                "The stored G-code artifact is unavailable or failed integrity validation.",
+            "backend_rejected" or
+            "backend_failed_before_start" =>
+                "The printer rejected the request before accepting the print.",
+            "backend_outcome_unknown" =>
+                "The backend outcome could not be determined; reconciliation is required.",
+            _ =>
+                "The dispatch failed before backend acceptance.",
+        };
 
     // ===== Gate evaluation helpers =====
     private async Task<PrinterDispatchState?> LoadActiveAttemptStateAsync(

@@ -11,6 +11,10 @@ export function fenceDispatchAttempt(
   attemptId: string,
   attemptNumber: number
 ): DispatchUploadFence {
+  if (current && attemptNumber < current.attemptNumber) {
+    return current;
+  }
+
   const sameAttempt =
     current?.attemptId === attemptId &&
     current.attemptNumber === attemptNumber;
