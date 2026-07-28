@@ -1067,8 +1067,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 null,
                 null));
         claim.Success.Should().BeTrue(claim.ErrorDetail);
+        claim.Attempt!.BackendJobId = "provider-history-id";
+        await seed.SaveChangesAsync();
         await claimService.RecordUnknownOutcomeAsync(
-            claim.Attempt!.Id,
+            claim.Attempt.Id,
             "response lost");
 
         var printers = new Mock<IPrintersService>();
@@ -1084,7 +1086,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("exact history identity absent"));
-        printers.Setup(service => service.GetHistoryListAsync(
+        printers.Setup(service => service.ProbeHistoryListAsync(
                 fixture.PrinterId,
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
@@ -1092,7 +1094,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 It.IsAny<DateTime?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new HistoryListResponse());
+            .ReturnsAsync(HistoryListProbeResult.Authoritative(
+                new HistoryListResponse()));
 
         await RunReconciliationAsync(printers.Object);
 
@@ -1109,9 +1112,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         state.ActiveDispatchAttemptId.Should().BeNull();
         printers.Verify(service => service.GetHistoryJobAsync(
             fixture.PrinterId,
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Never);
-        printers.Verify(service => service.GetHistoryListAsync(
+            "provider-history-id",
+            It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.ProbeHistoryListAsync(
             fixture.PrinterId,
             It.IsAny<int?>(),
             It.IsAny<int?>(),
@@ -1140,8 +1143,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 null,
                 null));
         claim.Success.Should().BeTrue(claim.ErrorDetail);
+        claim.Attempt!.BackendJobId = "provider-history-id";
+        await seed.SaveChangesAsync();
         await claimService.RecordUnknownOutcomeAsync(
-            claim.Attempt!.Id,
+            claim.Attempt.Id,
             "response lost");
 
         var printers = new Mock<IPrintersService>();
@@ -1154,14 +1159,19 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 State: "idle"));
         printers.Setup(service => service.GetHistoryJobAsync(
                 fixture.PrinterId,
-                claim.Attempt.BackendCommandId!,
-                It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new KeyNotFoundException("identity absent"));
-        printers.Setup(service => service.GetHistoryJobAsync(
-                fixture.PrinterId,
-                claim.Attempt.BackendFileName!,
+                "provider-history-id",
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("history transport unavailable"));
+        printers.Setup(service => service.ProbeHistoryListAsync(
+                fixture.PrinterId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryListProbeResult.Authoritative(
+                new HistoryListResponse()));
 
         await RunReconciliationAsync(printers.Object);
 
@@ -1173,6 +1183,157 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         attempt.Outcome.Should().Be(DispatchAttemptOutcome.Unknown);
         attempt.RequiresReconciliation.Should().BeTrue();
         state.ActiveDispatchAttemptId.Should().Be(claim.Attempt.Id);
+        printers.Verify(service => service.ProbeHistoryListAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int?>(),
+            It.IsAny<int?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_FlashForgeUnsupportedHistory_RetainsEveryFence()
+    {
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                "flashforge-history-id",
+                PrinterBackend.FlashForge);
+        await using (AppDbContext ageContext = CreateContext())
+        {
+            QueueDispatchOutbox command =
+                await ageContext.QueueDispatchOutbox.SingleAsync(
+                    candidate =>
+                        candidate.EventType ==
+                            BedClearAcknowledgementService.BackendStartCommandEventType &&
+                        candidate.AttemptId == attemptId);
+            command.CreatedAtUtc = DateTime.UtcNow.AddDays(-2);
+            await ageContext.SaveChangesAsync();
+        }
+
+        Mock<IPrintersService> printers = CreateQuiescentHistoryProbe(
+            fixture.PrinterId,
+            "flashforge-history-id",
+            HistoryListProbeResult.Unsupported());
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_NullHistoryProbe_RetainsEveryFence()
+    {
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync("null-history-id");
+        Mock<IPrintersService> printers = CreateQuiescentHistoryProbe(
+            fixture.PrinterId,
+            "null-history-id",
+            historyProbe: null);
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Theory]
+    [InlineData(HistoryProbeStatus.Unavailable)]
+    [InlineData(HistoryProbeStatus.Error)]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_NonAuthoritativeHistoryProbe_RetainsEveryFence(
+        HistoryProbeStatus status)
+    {
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                $"history-{status.ToString().ToLowerInvariant()}");
+        HistoryListProbeResult probe = status == HistoryProbeStatus.Unavailable
+            ? HistoryListProbeResult.Unavailable()
+            : HistoryListProbeResult.Error();
+        Mock<IPrintersService> printers = CreateQuiescentHistoryProbe(
+            fixture.PrinterId,
+            $"history-{status.ToString().ToLowerInvariant()}",
+            probe);
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_NoBackendJobId_AuthoritativeEmptyRetainsEveryFence()
+    {
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId: null);
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryListAsync(
+                fixture.PrinterId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryListProbeResult.Authoritative(
+                new HistoryListResponse()));
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        printers.Verify(service => service.GetHistoryJobAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.ProbeHistoryListAsync(
+            fixture.PrinterId,
+            It.IsAny<int?>(),
+            It.IsAny<int?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_UnknownOnlineState_RetainsEveryFenceWithoutHistoryProbe()
+    {
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync("unknown-state-id");
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "busy-but-unmapped"));
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        printers.Verify(service => service.GetHistoryJobAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.ProbeHistoryListAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int?>(),
+            It.IsAny<int?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -2577,6 +2738,112 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             hub.Object,
             NullLogger<PrintJobCompletionService>.Instance,
             sequenceAllocator: new DbOutboxSequenceAllocator());
+    }
+
+    private async Task<(Fixture Fixture, Guid AttemptId)>
+        SeedUnknownReconciliationAttemptAsync(
+            string? backendJobId,
+            PrinterBackend? backend = null)
+    {
+        await using AppDbContext db = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(db, withAck: true);
+        DispatchClaimService claimService = CreateClaim(
+            db,
+            DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+        DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator-1",
+                "Manual",
+                fixture.AckKey,
+                null,
+                null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+        claim.Attempt!.BackendJobId = backendJobId;
+        if (backend.HasValue)
+        {
+            Printer printer = await db.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.Backend = (int)backend.Value;
+        }
+
+        await db.SaveChangesAsync();
+        (await claimService.RecordUnknownOutcomeAsync(
+            claim.Attempt.Id,
+            "response lost")).Should().BeTrue();
+        return (fixture, claim.Attempt.Id);
+    }
+
+    private static Mock<IPrintersService> CreateQuiescentHistoryProbe(
+        Guid printerId,
+        string backendJobId,
+        HistoryListProbeResult? historyProbe)
+    {
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                printerId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.GetHistoryJobAsync(
+                printerId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("identity absent"));
+        printers.Setup(service => service.ProbeHistoryListAsync(
+                printerId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyProbe!);
+        return printers;
+    }
+
+    private async Task AssertIndeterminateFencesAsync(
+        Fixture fixture,
+        Guid attemptId)
+    {
+        await using AppDbContext db = CreateContext();
+        QueueDispatchAttempt attempt = await db.QueueDispatchAttempts.SingleAsync(
+            candidate => candidate.Id == attemptId);
+        PrintJob job = await db.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        BedClearCommandRecord acknowledgement =
+            await db.BedClearCommandRecords.SingleAsync(
+                candidate => candidate.DispatchAttemptId == attemptId);
+        QueueDispatchOutbox startCommand =
+            await db.QueueDispatchOutbox.SingleAsync(
+                candidate =>
+                    candidate.EventType ==
+                        BedClearAcknowledgementService.BackendStartCommandEventType &&
+                    candidate.AttemptId == attemptId);
+
+        attempt.Outcome.Should().Be(DispatchAttemptOutcome.Unknown);
+        attempt.RequiresReconciliation.Should().BeTrue();
+        attempt.BackendCallPhase.Should().Be(
+            DispatchBackendCallPhase.AwaitingReconciliation);
+        attempt.AcknowledgementIdempotencyKey.Should().Be(fixture.AckKey);
+        job.Status.Should().Be(PrintJobStatus.Starting);
+        state.ActiveJobId.Should().Be(fixture.JobId);
+        state.ActiveDispatchAttemptId.Should().Be(attemptId);
+        acknowledgement.Status.Should().Be(BedClearCommandStatus.Unknown);
+        startCommand.Status.Should().BeOneOf(
+            QueueOutboxEventStatus.Pending,
+            QueueOutboxEventStatus.Processing);
+        startCommand.CompletedAtUtc.Should().BeNull();
+        startCommand.FailureCode.Should().NotBe("reconciliation_absent");
+        (await db.QueueDispatchOutbox.AnyAsync(candidate =>
+            candidate.EventType ==
+                DispatchClaimService.EventTypeReconciliationAbsent &&
+            candidate.AttemptId == attemptId)).Should().BeFalse();
     }
 
     private async Task RunReconciliationAsync(IPrintersService printers)

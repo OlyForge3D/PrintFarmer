@@ -10,6 +10,7 @@ export function QueueRealtimeBridge() {
   useEffect(() => {
     let disposed = false;
     let refreshInFlight: Promise<void> | null = null;
+    let refreshDirty = false;
 
     const invalidateAuthority = async () => {
       await Promise.all([
@@ -38,14 +39,26 @@ export function QueueRealtimeBridge() {
       });
     };
 
-    const refreshAuthority = () => {
-      if (!refreshInFlight) {
-        refreshInFlight = (async () => {
+    const startRefreshLoop = () => {
+      if (refreshInFlight || disposed) return;
+      refreshInFlight = (async () => {
+        do {
+          refreshDirty = false;
           await invalidateAuthority();
           await reconcileSubscriptions();
-        })().finally(() => {
-          refreshInFlight = null;
-        });
+        } while (refreshDirty && !disposed);
+      })().finally(() => {
+        refreshInFlight = null;
+        if (refreshDirty && !disposed) {
+          startRefreshLoop();
+        }
+      });
+    };
+
+    const refreshAuthority = () => {
+      if (!disposed) {
+        refreshDirty = true;
+        startRefreshLoop();
       }
       return refreshInFlight;
     };

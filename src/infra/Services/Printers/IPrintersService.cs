@@ -254,6 +254,27 @@ public interface IPrintersService
     Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
 
     /// <summary>
+    /// Probes backend history without collapsing unsupported, unavailable, and
+    /// failed queries into an authoritative empty history.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="start">Starting pagination index.</param>
+    /// <param name="since">Inclusive lower timestamp bound.</param>
+    /// <param name="before">Exclusive upper timestamp bound.</param>
+    /// <param name="order">Sort order.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed result whose authoritative value may validly contain zero jobs.</returns>
+    Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct);
+
+    /// <summary>
     /// Retrieves details for a specific print job from printer history.
     /// </summary>
     /// <param name="printerId">The printer ID</param>

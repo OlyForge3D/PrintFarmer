@@ -605,8 +605,6 @@ public sealed class QueueReconciliationService(
                         ct);
                 }
 
-                await ExpireIndeterminateBackendStartCommandAsync(db, attempt, ct);
-
                 break;
         }
 
@@ -712,37 +710,6 @@ public sealed class QueueReconciliationService(
         }
     }
 
-    private static async Task ExpireIndeterminateBackendStartCommandAsync(
-        AppDbContext db,
-        QueueDispatchAttempt attempt,
-        CancellationToken ct)
-    {
-        if (attempt.PrintJobId is null)
-        {
-            return;
-        }
-
-        DateTime manualReviewCutoff = DateTime.UtcNow - TimeSpan.FromHours(24);
-        List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
-            .Where(command =>
-                command.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
-                command.Status == QueueOutboxEventStatus.Processing &&
-                command.CreatedAtUtc <= manualReviewCutoff &&
-                (command.AttemptId == attempt.Id ||
-                 (command.AttemptId == null && command.AggregateId == attempt.PrintJobId.Value)))
-            .ToListAsync(ct);
-
-        foreach (QueueDispatchOutbox command in commands)
-        {
-            command.AttemptId = attempt.Id;
-            command.Status = QueueOutboxEventStatus.DeadLettered;
-            command.FailureCode = "manual_reconciliation_required";
-            command.LastError =
-                "Backend outcome remained indeterminate for 24 hours. The dispatch lease remains fenced for manual review.";
-            command.CompletedAtUtc = DateTime.UtcNow;
-        }
-    }
-
     private async Task<BackendReconciliationOutcome> QueryBackendOutcomeAsync(
         IPrintersService printersSvc,
         QueueDispatchAttempt attempt,
@@ -789,37 +756,56 @@ public sealed class QueueReconciliationService(
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
-            // Backend is idle. Confirm via the backend job/command history APIs before
-            // declaring absence.
+            if (!IsExplicitlyIdleOrTerminalState(status.State))
+            {
+                logger.LogWarning(
+                    "[Reconciliation] Printer {PrinterId} reported unknown online state '{State}' for attempt {AttemptId}; " +
+                    "absence cannot be proven and every dispatch fence is retained",
+                    attempt.PrinterId,
+                    status.State ?? "(null)",
+                    attempt.Id);
+                return BackendReconciliationOutcome.BackendIndeterminate;
+            }
+
+            // The backend is explicitly idle/terminal. Both the exact provider-id probe and
+            // the list probe must complete authoritatively before absence is destructive.
             logger.LogDebug(
-                "[Reconciliation] Printer {PrinterId} is idle (state='{State}') — probing history for attempt {AttemptId}",
+                "[Reconciliation] Printer {PrinterId} is quiescent (state='{State}') — probing history for attempt {AttemptId}",
                 attempt.PrinterId, status.State, attempt.Id);
 
-            bool historyProbeFailed = false;
-            if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+            string? backendJobId = attempt.BackendJobId;
+            bool hasBackendJobId = !string.IsNullOrWhiteSpace(backendJobId);
+            if (hasBackendJobId)
             {
+                string authoritativeBackendJobId = backendJobId!;
                 try
                 {
-                    HistoryJob historyJob = await printersSvc.GetHistoryJobAsync(
+                    HistoryJob? historyJob = await printersSvc.GetHistoryJobAsync(
                         attempt.PrinterId,
-                        attempt.BackendJobId,
+                        authoritativeBackendJobId,
                         ct);
-
-                    if (historyJob is not null)
+                    if (historyJob is null)
                     {
-                        attempt.BackendFileIdentity = historyJob.Filename;
-                        logger.LogInformation(
-                            "[Reconciliation] Attempt {AttemptId} found by provider history id '{Identity}'",
-                            attempt.Id,
-                            attempt.BackendJobId);
-                        return BackendReconciliationOutcome.CompletedOnBackend;
+                        logger.LogWarning(
+                            "[Reconciliation] Provider-id probe returned null for '{Identity}' on printer {PrinterId}; " +
+                            "the result is unavailable, not authoritative absence",
+                            authoritativeBackendJobId,
+                            attempt.PrinterId);
+                        return BackendReconciliationOutcome.BackendIndeterminate;
                     }
+
+                    attempt.BackendFileIdentity = historyJob.Filename;
+                    logger.LogInformation(
+                        "[Reconciliation] Attempt {AttemptId} found by provider history id '{Identity}'",
+                        attempt.Id,
+                        authoritativeBackendJobId);
+                    return BackendReconciliationOutcome.CompletedOnBackend;
                 }
                 catch (KeyNotFoundException)
                 {
                     logger.LogDebug(
-                        "[Reconciliation] Provider history id '{Identity}' is absent on printer {PrinterId}",
-                        attempt.BackendJobId,
+                        "[Reconciliation] Provider history id '{Identity}' is authoritatively absent on printer {PrinterId}",
+                        authoritativeBackendJobId,
                         attempt.PrinterId);
                 }
                 catch (Exception histEx) when (histEx is not OperationCanceledException)
@@ -827,15 +813,14 @@ public sealed class QueueReconciliationService(
                     logger.LogDebug(
                         histEx,
                         "[Reconciliation] Provider-id probe failed for '{Identity}' on printer {PrinterId}",
-                        attempt.BackendJobId,
+                        authoritativeBackendJobId,
                         attempt.PrinterId);
-                    historyProbeFailed = true;
+                    return BackendReconciliationOutcome.BackendIndeterminate;
                 }
             }
 
-            try
-            {
-                HistoryListResponse history = await printersSvc.GetHistoryListAsync(
+            HistoryListProbeResult? historyProbe =
+                await printersSvc.ProbeHistoryListAsync(
                     attempt.PrinterId,
                     limit: 100,
                     start: null,
@@ -843,36 +828,41 @@ public sealed class QueueReconciliationService(
                     before: null,
                     order: "desc",
                     ct);
-                HistoryJob? exactFileMatch = history.Jobs.FirstOrDefault(candidate =>
-                    MatchesHistoryIdentity(attempt, candidate));
-                if (exactFileMatch is not null)
-                {
-                    if (!string.IsNullOrWhiteSpace(exactFileMatch.JobId))
-                    {
-                        attempt.BackendJobId = exactFileMatch.JobId;
-                    }
-
-                    attempt.BackendFileIdentity = exactFileMatch.Filename;
-                    logger.LogInformation(
-                        "[Reconciliation] Attempt {AttemptId} matched provider history file '{FileName}' as id '{HistoryId}'",
-                        attempt.Id,
-                        exactFileMatch.Filename,
-                        exactFileMatch.JobId);
-                    return BackendReconciliationOutcome.CompletedOnBackend;
-                }
-            }
-            catch (Exception histEx) when (histEx is not OperationCanceledException)
+            if (historyProbe?.Status != HistoryProbeStatus.Authoritative ||
+                historyProbe.History is null)
             {
-                logger.LogDebug(
-                    histEx,
-                    "[Reconciliation] History-list probe failed for attempt {AttemptId} on printer {PrinterId}",
+                logger.LogWarning(
+                    "[Reconciliation] History-list probe for attempt {AttemptId} was {Status}; " +
+                    "absence cannot be proven and every dispatch fence is retained",
                     attempt.Id,
-                    attempt.PrinterId);
-                historyProbeFailed = true;
+                    historyProbe?.Status.ToString() ?? "null");
+                return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
-            if (historyProbeFailed)
+            HistoryJob? exactFileMatch = historyProbe.History.Jobs.FirstOrDefault(
+                candidate => MatchesHistoryIdentity(attempt, candidate));
+            if (exactFileMatch is not null)
             {
+                if (!string.IsNullOrWhiteSpace(exactFileMatch.JobId))
+                {
+                    attempt.BackendJobId = exactFileMatch.JobId;
+                }
+
+                attempt.BackendFileIdentity = exactFileMatch.Filename;
+                logger.LogInformation(
+                    "[Reconciliation] Attempt {AttemptId} matched provider history file '{FileName}' as id '{HistoryId}'",
+                    attempt.Id,
+                    exactFileMatch.Filename,
+                    exactFileMatch.JobId);
+                return BackendReconciliationOutcome.CompletedOnBackend;
+            }
+
+            if (!hasBackendJobId)
+            {
+                logger.LogWarning(
+                    "[Reconciliation] Attempt {AttemptId} has no authoritative backend job id and no exact history match; " +
+                    "absence cannot be proven and every dispatch fence is retained",
+                    attempt.Id);
                 return BackendReconciliationOutcome.BackendIndeterminate;
             }
 
@@ -929,6 +919,20 @@ public sealed class QueueReconciliationService(
          normalized.Equals("heating", StringComparison.OrdinalIgnoreCase) ||
          normalized.Equals("pausing", StringComparison.OrdinalIgnoreCase) ||
          normalized.Equals("resuming", StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsExplicitlyIdleOrTerminalState(string? state) =>
+        !string.IsNullOrWhiteSpace(state) &&
+        state.Trim() is var normalized &&
+        (normalized.Equals("idle", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("ready", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("standby", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("operational", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("complete", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("completed", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("finished", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("cancelled", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("canceled", StringComparison.OrdinalIgnoreCase) ||
+         normalized.Equals("failed", StringComparison.OrdinalIgnoreCase));
 
     private static string NormalizeBackendIdentity(string value) =>
         value.Trim().Replace('\\', '/').TrimStart('/');

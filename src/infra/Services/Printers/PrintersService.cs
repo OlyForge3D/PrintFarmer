@@ -207,42 +207,134 @@ public class PrintersService(
     /// </remarks>
     public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
     {
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryListProbeResult probe = await ProbeHistoryListAsync(
+            printerId,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            ct);
+        if (probe.Status == HistoryProbeStatus.Authoritative &&
+            probe.History is not null)
+        {
+            return probe.History;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ => new InvalidOperationException("Printer history could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryListProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            _logger.LogWarning(
+                "[History] Printer {PrinterId} backend {PrinterBackend} does not support history",
+                printerId,
+                backend);
+            return HistoryListProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            // Use factory to get strongly-typed history client
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryListResponse? response = await historyClient!.GetHistoryListAsync(
+                printer.BackendUrl,
+                limit,
+                start,
+                since,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (response is null)
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
-                if (response == null)
-                {
-                    _logger.LogWarning("[History] No response from history API for printer {PrinterId}", printerId);
-                    return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
-                }
-
-                _logger.LogInformation("[History] Got {Count} jobs from {Backend}", response.Count, backend);
-
-                // Set ThumbnailUrl for each job
-                foreach (HistoryJob job in response.Jobs)
-                {
-                    job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-                }
-
-                return response;
+                _logger.LogWarning(
+                    "[History] Backend {Backend} returned no history response for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Unavailable();
             }
-            else
+
+            _logger.LogInformation(
+                "[History] Got {Count} authoritative jobs from {Backend}",
+                response.Count,
+                backend);
+            foreach (HistoryJob job in response.Jobs)
             {
-                _logger.LogWarning("[History] Printer {PrinterId} backend {PrinterBackend} does not support history", printerId, printer.Backend);
-                return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+                job.ThumbnailUrl = ExtractThumbnailUrl(
+                    job.Metadata ?? new Dictionary<string, object>(),
+                    printer.ServerUrl);
             }
+
+            return HistoryListProbeResult.Authoritative(response);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history transport unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable();
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history socket unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable();
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve history for printer {PrinterId}: {Message}", printerId, ex.Message);
-            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history failed for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Error();
         }
     }
 

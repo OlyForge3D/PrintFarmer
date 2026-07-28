@@ -3,6 +3,14 @@ import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueueRealtimeBridge } from '../QueueRealtimeBridge';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 const mocks = vi.hoisted(() => {
   let queueCallback:
     | ((event: { jobId?: string; printerId?: string }) => void)
@@ -106,5 +114,53 @@ describe('QueueRealtimeBridge', () => {
     );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
+  });
+
+  it('runs a trailing snapshot when B commits after in-flight snapshot A reads resources', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const firstSubscriptionApply = deferred<void>();
+    mocks.getQueueSubscriptionResources
+      .mockResolvedValueOnce({
+        printerIds: ['printer-a'],
+        jobIds: ['job-a'],
+        projectIds: ['project-a'],
+      })
+      .mockResolvedValueOnce({
+        printerIds: ['printer-b'],
+        jobIds: ['job-b'],
+        projectIds: ['project-b'],
+      });
+    mocks.replaceQueueResourceSubscriptions
+      .mockImplementationOnce(() => firstSubscriptionApply.promise)
+      .mockResolvedValue(undefined);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+
+    mocks.emitConnection(true);
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: ['visible-printer', 'printer-a'],
+        jobIds: ['job-a'],
+        projectIds: ['project-a'],
+      })
+    );
+
+    mocks.emitResourcesChanged();
+    expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(1);
+    firstSubscriptionApply.resolve();
+
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenLastCalledWith({
+        printerIds: ['visible-printer', 'printer-b'],
+        jobIds: ['job-b'],
+        projectIds: ['project-b'],
+      })
+    );
+    expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(2);
   });
 });

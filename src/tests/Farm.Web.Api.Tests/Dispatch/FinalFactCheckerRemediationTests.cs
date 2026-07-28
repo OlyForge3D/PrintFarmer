@@ -320,7 +320,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                 printerId,
                 IsOnline: true,
                 State: "idle"));
-        printers.Setup(service => service.GetHistoryListAsync(
+        printers.Setup(service => service.ProbeHistoryListAsync(
                 printerId,
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
@@ -328,19 +328,20 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                 It.IsAny<DateTime?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new HistoryListResponse
-            {
-                Count = 1,
-                Jobs =
-                [
-                    new HistoryJob
-                    {
-                        JobId = "provider-uid-123",
-                        Filename = seededAttempt.BackendFileIdentity!,
-                        Status = "completed",
-                    },
-                ],
-            });
+            .ReturnsAsync(HistoryListProbeResult.Authoritative(
+                new HistoryListResponse
+                {
+                    Count = 1,
+                    Jobs =
+                    [
+                        new HistoryJob
+                        {
+                            JobId = "provider-uid-123",
+                            Filename = seededAttempt.BackendFileIdentity!,
+                            Status = "completed",
+                        },
+                    ],
+                }));
         using ServiceProvider provider = CreateQueueProvider(printers.Object);
         var reconciler = new QueueReconciliationService(
             provider.GetRequiredService<IServiceScopeFactory>(),
