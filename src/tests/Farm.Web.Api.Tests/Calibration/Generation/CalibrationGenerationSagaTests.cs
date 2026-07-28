@@ -1,12 +1,16 @@
-﻿using System.Text;
+﻿using System.Security.Cryptography;
+using System.Text;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
+using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Contracts;
 using Farm.Web.Api.Services.Calibration;
 using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Calibration.Generation;
 
@@ -537,6 +541,55 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = stored.UploadedByUserId.Should().Be(owner);
     }
 
+    [Fact(DisplayName = "Concurrent owners persist identical generated geometry without orphaning bytes")]
+    public async Task ResumeAsync_WithConcurrentOwners_ConvergesOnModelHashRace()
+    {
+        Guid firstOwner = Guid.NewGuid();
+        Guid secondOwner = Guid.NewGuid();
+        CalibrationGenerationFixture first = await _harness.SeedAttemptAsync(ownerId: firstOwner);
+        CalibrationGenerationFixture second = await _harness.SeedAttemptAsync(ownerId: secondOwner);
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(first, "generate-concurrent-owner-first");
+        await AcceptAsync(second, "generate-concurrent-owner-second");
+
+        ModelStorageRaceGate gate = new();
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            ModelRepositoryDecorator = gate.Decorate,
+        };
+        ICalibrationGenerationSaga firstSaga = _harness.CreateSaga(options);
+        ICalibrationGenerationSaga secondSaga = _harness.CreateSaga(options);
+
+        _ = await Task.WhenAll(
+            firstSaga.ResumeAsync(first.OrchestrationId, CancellationToken.None),
+            secondSaga.ResumeAsync(second.OrchestrationId, CancellationToken.None));
+
+        SliceJob firstJob = (await _harness.FindSliceJobAsync(first.OrchestrationId))!;
+        SliceJob secondJob = (await _harness.FindSliceJobAsync(second.OrchestrationId))!;
+        _ = firstJob.Model3DId.Should().NotBeNull();
+        _ = secondJob.Model3DId.Should().NotBeNull();
+        _ = secondJob.Model3DId.Value.Should().NotBe(firstJob.Model3DId.Value);
+        _ = firstJob.ModelSha256.Should().MatchRegex("^[A-F0-9]{64}$");
+        _ = secondJob.ModelSha256.Should().Be(firstJob.ModelSha256);
+
+        await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
+        List<Model3D> stored = await slicer.Models3D.AsNoTracking().ToListAsync();
+        _ = stored.Should().HaveCount(2);
+        _ = stored.Select(model => model.UploadedByUserId).Should()
+            .BeEquivalentTo([firstOwner, secondOwner]);
+        _ = stored.Count(model => model.FileHash == firstJob.ModelSha256).Should().Be(1);
+
+        string[] modelFiles = Directory.GetFiles(_harness.ModelRoot, "*.stl");
+        _ = modelFiles.Should().HaveCount(stored.Count, "every staged file must have durable metadata");
+        foreach (Model3D model in stored)
+        {
+            string path = Path.Combine(_harness.ModelRoot, model.FileName);
+            _ = File.Exists(path).Should().BeTrue();
+            byte[] bytes = await File.ReadAllBytesAsync(path);
+            _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(firstJob.ModelSha256);
+        }
+    }
+
     [Fact(DisplayName = "A run reaches completion and promotes a verified, annotated artifact")]
     public async Task ResumeAsync_CompletesAndPromotesVerifiedArtifact()
     {
@@ -1003,6 +1056,89 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         CalibrationOrchestration failed = await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
         _ = failed.Status.Should().Be(CalibrationOrchestrationStatus.Failed);
         _ = failed.LastErrorCode.Should().Be(CalibrationGenerationProblemCodes.GcodeMalformed);
+    }
+
+    private sealed class ModelStorageRaceGate
+    {
+        private readonly TaskCompletionSource _bothHashesRead =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _bothSavesReached =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _winnerSaved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _participantCount;
+        private int _hashReadCount;
+        private int _saveCount;
+
+        public IModel3DFileRepository Decorate(IModel3DFileRepository inner)
+        {
+            int participant = Interlocked.Increment(ref _participantCount);
+            if (participant > 2)
+            {
+                throw new InvalidOperationException("The model race gate supports exactly two repositories.");
+            }
+
+            Mock<IModel3DFileRepository> gated = new(MockBehavior.Strict);
+            _ = gated.Setup(repository => repository.GetByHashAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(async (string hash, CancellationToken cancellationToken) =>
+                {
+                    Model3D? existing = await inner.GetByHashAsync(hash, cancellationToken);
+                    if (Interlocked.Increment(ref _hashReadCount) == 2)
+                    {
+                        _bothHashesRead.TrySetResult();
+                    }
+
+                    await _bothHashesRead.Task.WaitAsync(
+                        TimeSpan.FromSeconds(10),
+                        cancellationToken);
+                    return existing;
+                });
+            _ = gated.Setup(repository => repository.GetByIdAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.AddAsync(
+                    It.IsAny<Model3D>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Model3D model, CancellationToken cancellationToken) =>
+                    inner.AddAsync(model, cancellationToken));
+            _ = gated.Setup(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                .Returns(async (CancellationToken cancellationToken) =>
+                {
+                    if (Interlocked.Increment(ref _saveCount) == 2)
+                    {
+                        _bothSavesReached.TrySetResult();
+                    }
+
+                    await _bothSavesReached.Task.WaitAsync(
+                        TimeSpan.FromSeconds(10),
+                        cancellationToken);
+                    if (participant == 1)
+                    {
+                        try
+                        {
+                            await inner.SaveChangesAsync(cancellationToken);
+                            _winnerSaved.TrySetResult();
+                        }
+                        catch (Exception ex)
+                        {
+                            _winnerSaved.TrySetException(ex);
+                            throw;
+                        }
+
+                        return;
+                    }
+
+                    await _winnerSaved.Task.WaitAsync(
+                        TimeSpan.FromSeconds(10),
+                        cancellationToken);
+                    await inner.SaveChangesAsync(cancellationToken);
+                });
+            return gated.Object;
+        }
     }
 
     private async Task AcceptAsync(CalibrationGenerationFixture fixture, string operationId)

@@ -123,6 +123,11 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         IArtifactsService artifacts = CreateArtifactsService(artifactsRepository);
         ISliceJobRepository sliceJobs = new EfSliceJobRepository(CreateSlicerContext());
         IModel3DFileRepository models = new EfModel3DFileRepository(CreateSlicerContext());
+        if (resolved.ModelRepositoryDecorator is not null)
+        {
+            models = resolved.ModelRepositoryDecorator(models);
+        }
+
         IStoragePathService storagePaths = CreateStoragePaths();
         IModelStorageResolver modelStorage = new Model3DStorageResolver(
             models,
@@ -703,6 +708,9 @@ internal sealed record CalibrationGenerationHarnessOptions
     /// a real pass compiled without changing what the saga does with it.
     /// </remarks>
     public IOrcaCalibrationPlanCompiler? PlanCompiler { get; init; }
+
+    /// <summary>Optional test-only decorator around the production model repository.</summary>
+    public Func<IModel3DFileRepository, IModel3DFileRepository>? ModelRepositoryDecorator { get; init; }
 }
 
 // CalibrationGenerationFixture lives in CalibrationGenerationFixture.cs so the pinned-worker smoke

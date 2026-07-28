@@ -13,7 +13,10 @@ using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Contracts;
 using Farm.Web.Api.Services.Gcode;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Farm.Web.Api.Services.Calibration.Generation;
 
@@ -956,37 +959,105 @@ public sealed class CalibrationGenerationSaga(
         _ = Directory.CreateDirectory(root);
         Guid modelId = Guid.NewGuid();
         string storedFileName = $"{modelId:N}.stl";
-        await File.WriteAllBytesAsync(
-            Path.Combine(root, storedFileName),
-            geometry.Content.ToArray(),
-            cancellationToken);
-
-        DateTime nowUtc = UtcNow();
-        Model3D model = new()
+        string storedPath = Path.Combine(root, storedFileName);
+        bool persisted = false;
+        try
         {
-            Id = modelId,
-            Name = CalibrationBodyGeometryFactory.BuildStoredModelName(orchestration.AttemptId),
-            FileName = storedFileName,
-            FilePath = string.Empty,
-            FileSizeBytes = geometry.Content.Length,
+            await File.WriteAllBytesAsync(
+                storedPath,
+                geometry.Content.ToArray(),
+                cancellationToken);
 
-            // FileHash carries a global unique index, so a hash already recorded against a
-            // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
-            // this new row even though the bytes match: doing so would violate the unique
-            // constraint. A per-model synthetic value keeps the insert unique. Worker delivery
-            // still verifies the bytes against SliceJob.ModelSha256, which records the real
-            // content digest and takes precedence over this legacy database key.
-            FileHash = byHash is null ? upperDigest : modelId.ToString("N"),
-            FileFormat = ModelFileFormat.STL,
-            UploadedByUserId = project.OwnerUserId,
-            UploadedAt = nowUtc,
-            CreatedAt = nowUtc,
-            UpdatedAt = nowUtc,
-            IsValid = true,
+            DateTime nowUtc = UtcNow();
+            Model3D model = new()
+            {
+                Id = modelId,
+                Name = CalibrationBodyGeometryFactory.BuildStoredModelName(orchestration.AttemptId),
+                FileName = storedFileName,
+                FilePath = string.Empty,
+                FileSizeBytes = geometry.Content.Length,
+
+                // FileHash carries a global unique index, so a hash already recorded against a
+                // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
+                // this new row even though the bytes match: doing so would violate the unique
+                // constraint. A per-model synthetic value keeps the insert unique. Worker delivery
+                // still verifies the bytes against SliceJob.ModelSha256, which records the real
+                // content digest and takes precedence over this legacy database key.
+                FileHash = byHash is null ? upperDigest : modelId.ToString("N"),
+                FileFormat = ModelFileFormat.STL,
+                UploadedByUserId = project.OwnerUserId,
+                UploadedAt = nowUtc,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+                IsValid = true,
+            };
+            await _models.AddAsync(model, cancellationToken);
+            try
+            {
+                await _models.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateException ex) when (
+                byHash is null &&
+                IsModelFileHashUniqueConflict(ex))
+            {
+                // A competing generator inserted the same real digest after our lookup. Keep this
+                // owner's staged bytes, but move the legacy unique key to the same synthetic
+                // per-model form used when the competing row was visible before the write.
+                model.FileHash = modelId.ToString("N");
+                await _models.SaveChangesAsync(cancellationToken);
+            }
+
+            persisted = true;
+            return modelId;
+        }
+        finally
+        {
+            if (!persisted)
+            {
+                DeleteUnpersistedGeneratedModel(storedPath, modelId);
+            }
+        }
+    }
+
+    private static bool IsModelFileHashUniqueConflict(DbUpdateException exception)
+    {
+        const string indexName = "IX_Models3D_FileHash";
+        return exception.InnerException switch
+        {
+            SqliteException sqlite =>
+                sqlite.SqliteErrorCode == 19
+                && sqlite.SqliteExtendedErrorCode == 2067
+                && sqlite.Message.Contains(
+                    "UNIQUE constraint failed: Models3D.FileHash",
+                    StringComparison.OrdinalIgnoreCase),
+            PostgresException postgres =>
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation
+                && string.Equals(postgres.ConstraintName, indexName, StringComparison.Ordinal),
+            SqlException sqlServer =>
+                sqlServer.Number is 2601 or 2627
+                && NamesDelimitedIndex(sqlServer.Message, indexName),
+            _ => false,
         };
-        await _models.AddAsync(model, cancellationToken);
-        await _models.SaveChangesAsync(cancellationToken);
-        return modelId;
+    }
+
+    private static bool NamesDelimitedIndex(string message, string indexName) =>
+        message.Contains($"'{indexName}'", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
+
+    private void DeleteUnpersistedGeneratedModel(string storedPath, Guid modelId)
+    {
+        try
+        {
+            File.Delete(storedPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to remove unpersisted generated model bytes for {ModelId}",
+                modelId);
+        }
     }
 
     private async Task SubmitSliceJobAsync(
