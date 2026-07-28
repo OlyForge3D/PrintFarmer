@@ -46,8 +46,11 @@ public interface IArtifactsRepository
     /// </summary>
     Task<bool> TryReserveForCleanupAsync(
         Guid artifactId,
+        Guid? expectedReservationToken,
+        DateTime? expectedReservedAtUtc,
         Guid reservationToken,
         DateTime reservedAtUtc,
+        DateTime staleBeforeUtc,
         CancellationToken ct = default);
 
     /// <summary>Deletes an artifact only when the caller still owns its cleanup reservation.</summary>

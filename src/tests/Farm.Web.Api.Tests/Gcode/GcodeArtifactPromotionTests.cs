@@ -378,18 +378,27 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             });
         _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
                 CancellationToken cancellationToken) =>
                 inner.TryReserveForCleanupAsync(
                     id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
                     reservationToken,
                     reservedAtUtc,
+                    staleBeforeUtc,
                     cancellationToken));
 
         Task<int> cleanup = _harness.RunArtifactCleanupAsync(gated.Object);
@@ -425,18 +434,27 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 inner.GetOlderThanAsync(cutoff, cancellationToken));
         _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
                 CancellationToken cancellationToken) =>
                 inner.TryReserveForCleanupAsync(
                     id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
                     reservationToken,
                     reservedAtUtc,
+                    staleBeforeUtc,
                     cancellationToken));
         _ = gated.Setup(repository => repository.DeleteReservedAsync(
                 It.IsAny<Guid>(),
@@ -486,19 +504,28 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 inner.GetOlderThanAsync(cutoff, cancellationToken));
         _ = firstPass.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns(async (
                 Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
                 CancellationToken cancellationToken) =>
             {
                 bool reserved = await inner.TryReserveForCleanupAsync(
                     id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
                     reservationToken,
                     reservedAtUtc,
+                    staleBeforeUtc,
                     cancellationToken);
                 if (reserved)
                 {
@@ -526,18 +553,27 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 inner.GetOlderThanAsync(cutoff, cancellationToken));
         _ = secondPass.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
                 It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
                 CancellationToken cancellationToken) =>
                 inner.TryReserveForCleanupAsync(
                     id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
                     reservationToken,
                     reservedAtUtc,
+                    staleBeforeUtc,
                     cancellationToken));
         _ = secondPass.Setup(repository => repository.DeleteReservedAsync(
                 It.IsAny<Guid>(),
@@ -579,6 +615,201 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = firstDeleted.Should().Be(1);
         _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
         _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "Exactly one cleanup pass can take over an observed expired reservation")]
+    public async Task CleanupReservation_WhenObservedReservationExpired_AllowsExactlyOneTakeover()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        Guid expiredToken = Guid.NewGuid();
+        Guid firstTakeoverToken = Guid.NewGuid();
+        Guid secondTakeoverToken = Guid.NewGuid();
+        DateTime expiredAtUtc = new(2020, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        DateTime takeoverAtUtc = expiredAtUtc.AddHours(1);
+        await _harness.SetArtifactCleanupReservationAsync(
+            fixture.ArtifactId,
+            expiredToken,
+            expiredAtUtc);
+        IArtifactsRepository firstRepository = _harness.CreateArtifactsRepository();
+        IArtifactsRepository secondRepository = _harness.CreateArtifactsRepository();
+        TaskCompletionSource releaseAttempts =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        async Task<bool> AttemptTakeoverAsync(
+            IArtifactsRepository repository,
+            Guid reservationToken)
+        {
+            await releaseAttempts.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            return await repository.TryReserveForCleanupAsync(
+                fixture.ArtifactId,
+                expiredToken,
+                expiredAtUtc,
+                reservationToken,
+                takeoverAtUtc,
+                takeoverAtUtc.AddMinutes(-30));
+        }
+
+        Task<bool> firstAttempt = AttemptTakeoverAsync(firstRepository, firstTakeoverToken);
+        Task<bool> secondAttempt = AttemptTakeoverAsync(secondRepository, secondTakeoverToken);
+        releaseAttempts.TrySetResult();
+        bool[] results = await Task.WhenAll(firstAttempt, secondAttempt);
+
+        _ = results.Count(acquired => acquired).Should().Be(1);
+        Guid winnerToken = results[0] ? firstTakeoverToken : secondTakeoverToken;
+        _ = (await firstRepository.DeleteReservedAsync(
+            fixture.ArtifactId,
+            expiredToken)).Should().BeFalse();
+        await firstRepository.ReleaseCleanupReservationAsync(fixture.ArtifactId, expiredToken);
+        Artifact reserved = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = reserved.CleanupReservationToken.Should().Be(winnerToken);
+        _ = reserved.CleanupReservedAtUtc.Should().Be(takeoverAtUtc);
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeTrue();
+        _ = (await firstRepository.TryPinForPromotionAsync(
+            fixture.ArtifactId,
+            Guid.NewGuid(),
+            new PromotionOperationIdentity("stale-takeover-key", "stale-takeover"),
+            takeoverAtUtc)).Should().BeFalse();
+
+        _ = (await firstRepository.DeleteReservedAsync(
+            fixture.ArtifactId,
+            winnerToken)).Should().BeTrue();
+        _harness.DeleteArtifactBytes(fixture.ArtifactId);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "A stale cleanup owner cannot delete bytes after takeover")]
+    public async Task ArtifactCleanup_WhenStaleReservationIsTakenOver_FencesOldByteDeletion()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        DateTime expiredAtUtc = new(2020, 1, 1, 12, 0, 0, DateTimeKind.Utc);
+        TaskCompletionSource firstReserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseFirst =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Mock<IArtifactsRepository> staleOwner = new(MockBehavior.Strict);
+        _ = staleOwner.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DateTime cutoff, CancellationToken cancellationToken) =>
+                inner.GetOlderThanAsync(cutoff, cancellationToken));
+        _ = staleOwner.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (
+                Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
+                CancellationToken cancellationToken) =>
+            {
+                bool reserved = await inner.TryReserveForCleanupAsync(
+                    id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
+                    reservationToken,
+                    reservedAtUtc,
+                    staleBeforeUtc,
+                    cancellationToken);
+                if (reserved)
+                {
+                    await _harness.SetArtifactCleanupReservationAsync(
+                        id,
+                        reservationToken,
+                        expiredAtUtc);
+                    firstReserved.TrySetResult();
+                    await releaseFirst.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                }
+
+                return reserved;
+            });
+        _ = staleOwner.Setup(repository => repository.DeleteReservedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                CancellationToken cancellationToken) =>
+                inner.DeleteReservedAsync(id, reservationToken, cancellationToken));
+
+        Mock<IArtifactsRepository> takeover = new(MockBehavior.Strict);
+        _ = takeover.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DateTime cutoff, CancellationToken cancellationToken) =>
+                inner.GetOlderThanAsync(cutoff, cancellationToken));
+        _ = takeover.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid? expectedReservationToken,
+                DateTime? expectedReservedAtUtc,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                DateTime staleBeforeUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryReserveForCleanupAsync(
+                    id,
+                    expectedReservationToken,
+                    expectedReservedAtUtc,
+                    reservationToken,
+                    reservedAtUtc,
+                    staleBeforeUtc,
+                    cancellationToken));
+        _ = takeover.Setup(repository => repository.DeleteReservedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("deterministic takeover interruption"));
+        _ = takeover.Setup(repository => repository.ReleaseCleanupReservationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                CancellationToken cancellationToken) =>
+                inner.ReleaseCleanupReservationAsync(id, reservationToken, cancellationToken));
+
+        Task<int> staleCleanup = _harness.RunArtifactCleanupAsync(staleOwner.Object);
+        await firstReserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        int takeoverDeleted;
+        try
+        {
+            takeoverDeleted = await _harness.RunArtifactCleanupAsync(takeover.Object);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+        }
+
+        int staleDeleted = await staleCleanup;
+
+        _ = takeoverDeleted.Should().Be(0);
+        _ = staleDeleted.Should().Be(0);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeTrue();
+        Artifact preserved = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = preserved.CleanupReservationToken.Should().BeNull();
+        _ = preserved.CleanupReservedAtUtc.Should().BeNull();
     }
 
     [Fact(DisplayName = "A restart reconciles an unknown promotion outcome without duplicating the file")]
@@ -1140,6 +1371,25 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             _ = await slicer.SaveChangesAsync();
         }
 
+        public async Task SetArtifactCleanupReservationAsync(
+            Guid artifactId,
+            Guid reservationToken,
+            DateTime reservedAtUtc)
+        {
+            await using SlicerDbContext slicer = CreateSlicerContext();
+            Artifact artifact = await slicer.Artifacts.SingleAsync(candidate => candidate.Id == artifactId);
+            artifact.CleanupReservationToken = reservationToken;
+            artifact.CleanupReservedAtUtc = reservedAtUtc;
+            _ = await slicer.SaveChangesAsync();
+        }
+
+        public async Task<Artifact> GetArtifactAsync(Guid artifactId)
+        {
+            await using SlicerDbContext slicer = CreateSlicerContext();
+            return await slicer.Artifacts.AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == artifactId);
+        }
+
         public async Task<int> RunArtifactCleanupAsync(IArtifactsRepository? repository = null)
         {
             ArtifactStorageSettings settings = new()
@@ -1148,6 +1398,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 MaxAgeDays = 1,
                 MaxTotalBytes = null,
                 EnableCleanupDryRun = false,
+                CleanupReservationTimeoutMinutes = 30,
             };
             ArtifactCleanupService cleanup = new(
                 repository ?? CreateArtifactsRepository(),

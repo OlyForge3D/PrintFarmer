@@ -113,11 +113,17 @@ public class ArtifactCleanupService(
         int deletedCount = 0;
         foreach (Artifact artifact in candidatesForDeletion)
         {
+            DateTime reservedAtUtc = DateTime.UtcNow;
+            DateTime staleBeforeUtc = reservedAtUtc.AddMinutes(
+                -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
             Guid reservationToken = Guid.NewGuid();
             bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
                 artifact.Id,
+                artifact.CleanupReservationToken,
+                artifact.CleanupReservedAtUtc,
                 reservationToken,
-                DateTime.UtcNow,
+                reservedAtUtc,
+                staleBeforeUtc,
                 ct);
             if (!reserved)
             {
@@ -129,7 +135,16 @@ public class ArtifactCleanupService(
 
             try
             {
-                // Delete file from filesystem
+                // Remove metadata first while this pass still owns cleanup. A stale owner that
+                // loses its token must never delete bytes that still have live metadata.
+                if (!await _artifactsRepo.DeleteReservedAsync(artifact.Id, reservationToken, ct))
+                {
+                    _logger.LogWarning(
+                        "Cleanup reservation for artifact {Id} was lost before row deletion",
+                        artifact.Id);
+                    continue;
+                }
+
                 string rootPath = Path.IsPathRooted(_settings.RootPath)
                     ? _settings.RootPath
                     : Path.Combine(_env.ContentRootPath, _settings.RootPath);
@@ -141,23 +156,13 @@ public class ArtifactCleanupService(
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
                 }
 
-                // Remove from the database only while this pass still owns cleanup.
-                if (await _artifactsRepo.DeleteReservedAsync(artifact.Id, reservationToken, ct))
-                {
-                    deletedCount++;
-                    _logger.LogInformation(
-                        "Deleted artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
-                        artifact.Id,
-                        artifact.Kind,
-                        artifact.SizeBytes,
-                        artifact.CreatedAt);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Cleanup reservation for artifact {Id} was lost before row deletion",
-                        artifact.Id);
-                }
+                deletedCount++;
+                _logger.LogInformation(
+                    "Deleted artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
+                    artifact.Id,
+                    artifact.Kind,
+                    artifact.SizeBytes,
+                    artifact.CreatedAt);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

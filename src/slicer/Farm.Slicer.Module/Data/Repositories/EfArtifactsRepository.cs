@@ -94,21 +94,31 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     /// <inheritdoc/>
     public async Task<bool> TryReserveForCleanupAsync(
         Guid artifactId,
+        Guid? expectedReservationToken,
+        DateTime? expectedReservedAtUtc,
         Guid reservationToken,
         DateTime reservedAtUtc,
+        DateTime staleBeforeUtc,
         CancellationToken ct = default)
     {
+        if (expectedReservationToken.HasValue &&
+            (!expectedReservedAtUtc.HasValue || expectedReservedAtUtc.Value > staleBeforeUtc))
+        {
+            return false;
+        }
+
         await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
-        int affected = await db.Set<Artifact>()
+        IQueryable<Artifact> candidate = db.Set<Artifact>()
             .Where(artifact =>
                 artifact.Id == artifactId &&
-                artifact.CleanupReservationToken == null &&
-                (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null))
-            .ExecuteUpdateAsync(
-                setters => setters
-                    .SetProperty(artifact => artifact.CleanupReservationToken, reservationToken)
-                    .SetProperty(artifact => artifact.CleanupReservedAtUtc, reservedAtUtc),
-                ct);
+                artifact.CleanupReservationToken == expectedReservationToken &&
+                artifact.CleanupReservedAtUtc == expectedReservedAtUtc &&
+                (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null));
+        int affected = await candidate.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(artifact => artifact.CleanupReservationToken, reservationToken)
+                .SetProperty(artifact => artifact.CleanupReservedAtUtc, reservedAtUtc),
+            ct);
         return affected == 1;
     }
 
