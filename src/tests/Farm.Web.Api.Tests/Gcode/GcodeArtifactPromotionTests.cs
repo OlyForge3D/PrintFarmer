@@ -932,6 +932,35 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "A false existence probe cannot finalize metadata over retained bytes")]
+    public async Task ArtifactCleanup_WhenExistenceProbeFails_StillRequiresConfirmedDeletion()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        bool deletionAttempted = false;
+
+        int interrupted = await _harness.RunArtifactCleanupAsync(
+            deleteArtifactFile: _ =>
+            {
+                deletionAttempted = true;
+                throw new UnauthorizedAccessException("deterministic delete access denial");
+            },
+            artifactFileExists: _ => false);
+
+        _ = interrupted.Should().Be(0);
+        _ = deletionAttempted.Should().BeTrue();
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeTrue();
+        Artifact pending = await _harness.GetArtifactAsync(fixture.ArtifactId);
+        _ = pending.CleanupReservationToken.Should().NotBeNull();
+        _ = pending.CleanupDeletionStartedAtUtc.Should().NotBeNull();
+
+        int recovered = await _harness.RunArtifactCleanupAsync();
+        _ = recovered.Should().Be(1);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
+    }
+
     [Fact(DisplayName = "A restart finalizes metadata after bytes were already deleted")]
     public async Task ArtifactCleanup_AfterByteDeleteBeforeFinalization_Converges()
     {
@@ -1535,7 +1564,8 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         public async Task<int> RunArtifactCleanupAsync(
             IArtifactsRepository? repository = null,
-            Action<string>? deleteArtifactFile = null)
+            Action<string>? deleteArtifactFile = null,
+            Func<string, bool>? artifactFileExists = null)
         {
             ArtifactStorageSettings settings = new()
             {
@@ -1546,7 +1576,8 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 CleanupReservationTimeoutMinutes = 30,
             };
             IArtifactsRepository resolvedRepository = repository ?? CreateArtifactsRepository();
-            ArtifactCleanupService cleanup = deleteArtifactFile is null
+            ArtifactCleanupService cleanup =
+                deleteArtifactFile is null && artifactFileExists is null
                 ? new ArtifactCleanupService(
                     resolvedRepository,
                     Options.Create(settings),
@@ -1557,7 +1588,8 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                     Options.Create(settings),
                     CreateHostEnvironment(),
                     NullLogger<ArtifactCleanupService>.Instance,
-                    deleteArtifactFile);
+                    deleteArtifactFile,
+                    artifactFileExists);
             return await cleanup.ScanAndCleanupAsync(CancellationToken.None);
         }
 
@@ -1566,12 +1598,26 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             IOptions<ArtifactStorageSettings> options,
             IWebHostEnvironment environment,
             ILogger<ArtifactCleanupService> logger,
-            Action<string> deleteArtifactFile)
+            Action<string>? deleteArtifactFile,
+            Func<string, bool>? artifactFileExists)
             : ArtifactCleanupService(artifactsRepository, options, environment, logger)
         {
-            private readonly Action<string> _deleteArtifactFile = deleteArtifactFile;
+            private readonly Action<string>? _deleteArtifactFile = deleteArtifactFile;
+            private readonly Func<string, bool>? _artifactFileExists = artifactFileExists;
 
-            protected override void DeleteArtifactFile(string path) => _deleteArtifactFile(path);
+            protected override bool ArtifactFileExists(string path) =>
+                _artifactFileExists?.Invoke(path) ?? base.ArtifactFileExists(path);
+
+            protected override void DeleteArtifactFile(string path)
+            {
+                if (_deleteArtifactFile is null)
+                {
+                    base.DeleteArtifactFile(path);
+                    return;
+                }
+
+                _deleteArtifactFile(path);
+            }
         }
 
         public async Task<bool> ArtifactExistsAsync(Guid artifactId)

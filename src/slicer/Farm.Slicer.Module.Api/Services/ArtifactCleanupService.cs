@@ -169,10 +169,19 @@ public class ArtifactCleanupService(
                     : Path.Combine(_env.ContentRootPath, _settings.RootPath);
                 string fullPath = Path.Combine(rootPath, artifact.RelativePath);
 
-                if (ArtifactFileExists(fullPath))
+                // File.Delete is idempotent for a missing path and throws for access or filesystem
+                // failures. File.Exists cannot distinguish those failures from absence.
+                try
                 {
                     DeleteArtifactFile(fullPath);
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
+                }
+                catch (Exception ex) when (
+                    ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    _logger.LogDebug(
+                        "Artifact file {Path} was already absent during cleanup",
+                        fullPath);
                 }
 
                 if (!await _artifactsRepo.FinalizeCleanupAsync(
