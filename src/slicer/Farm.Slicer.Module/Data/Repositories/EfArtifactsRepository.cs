@@ -94,7 +94,6 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     /// <inheritdoc/>
     public async Task<bool> TryReserveForCleanupAsync(
         Guid artifactId,
-        Guid? expectedReservationToken,
         Guid reservationToken,
         DateTime reservedAtUtc,
         CancellationToken ct = default)
@@ -103,7 +102,7 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         int affected = await db.Set<Artifact>()
             .Where(artifact =>
                 artifact.Id == artifactId &&
-                artifact.CleanupReservationToken == expectedReservationToken &&
+                artifact.CleanupReservationToken == null &&
                 (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null))
             .ExecuteUpdateAsync(
                 setters => setters

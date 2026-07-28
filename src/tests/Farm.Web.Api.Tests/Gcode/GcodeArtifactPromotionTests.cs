@@ -378,19 +378,16 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             });
         _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
-                It.IsAny<Guid?>(),
                 It.IsAny<Guid>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
-                Guid? expectedReservationToken,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
                 CancellationToken cancellationToken) =>
                 inner.TryReserveForCleanupAsync(
                     id,
-                    expectedReservationToken,
                     reservationToken,
                     reservedAtUtc,
                     cancellationToken));
@@ -428,19 +425,16 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 inner.GetOlderThanAsync(cutoff, cancellationToken));
         _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
                 It.IsAny<Guid>(),
-                It.IsAny<Guid?>(),
                 It.IsAny<Guid>(),
                 It.IsAny<DateTime>(),
                 It.IsAny<CancellationToken>()))
             .Returns((
                 Guid id,
-                Guid? expectedReservationToken,
                 Guid reservationToken,
                 DateTime reservedAtUtc,
                 CancellationToken cancellationToken) =>
                 inner.TryReserveForCleanupAsync(
                     id,
-                    expectedReservationToken,
                     reservationToken,
                     reservedAtUtc,
                     cancellationToken));
@@ -471,6 +465,120 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = deleted.Should().Be(1);
         _ = pinned.Should().BeFalse();
         _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "A live cleanup reservation cannot be stolen by another cleanup pass")]
+    public async Task ArtifactCleanup_WhenCleanupPassesOverlap_PreservesExclusiveOwnership()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        TaskCompletionSource firstReserved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseFirst =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        Mock<IArtifactsRepository> firstPass = new(MockBehavior.Strict);
+        _ = firstPass.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DateTime cutoff, CancellationToken cancellationToken) =>
+                inner.GetOlderThanAsync(cutoff, cancellationToken));
+        _ = firstPass.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (
+                Guid id,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                CancellationToken cancellationToken) =>
+            {
+                bool reserved = await inner.TryReserveForCleanupAsync(
+                    id,
+                    reservationToken,
+                    reservedAtUtc,
+                    cancellationToken);
+                if (reserved)
+                {
+                    firstReserved.TrySetResult();
+                    await releaseFirst.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                }
+
+                return reserved;
+            });
+        _ = firstPass.Setup(repository => repository.DeleteReservedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                CancellationToken cancellationToken) =>
+                inner.DeleteReservedAsync(id, reservationToken, cancellationToken));
+
+        Mock<IArtifactsRepository> secondPass = new(MockBehavior.Strict);
+        _ = secondPass.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DateTime cutoff, CancellationToken cancellationToken) =>
+                inner.GetOlderThanAsync(cutoff, cancellationToken));
+        _ = secondPass.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryReserveForCleanupAsync(
+                    id,
+                    reservationToken,
+                    reservedAtUtc,
+                    cancellationToken));
+        _ = secondPass.Setup(repository => repository.DeleteReservedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new IOException("deterministic cleanup interruption"));
+        _ = secondPass.Setup(repository => repository.ReleaseCleanupReservationAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid reservationToken,
+                CancellationToken cancellationToken) =>
+                inner.ReleaseCleanupReservationAsync(id, reservationToken, cancellationToken));
+
+        Task<int> firstCleanup = _harness.RunArtifactCleanupAsync(firstPass.Object);
+        await firstReserved.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        int secondDeleted;
+        bool rowSurvivedSecondPass;
+        bool bytesSurvivedSecondPass;
+        try
+        {
+            secondDeleted = await _harness.RunArtifactCleanupAsync(secondPass.Object);
+            rowSurvivedSecondPass = await _harness.ArtifactExistsAsync(fixture.ArtifactId);
+            bytesSurvivedSecondPass = _harness.ArtifactBytesExist(fixture.ArtifactId);
+        }
+        finally
+        {
+            releaseFirst.TrySetResult();
+        }
+
+        int firstDeleted = await firstCleanup;
+
+        _ = secondDeleted.Should().Be(0);
+        _ = rowSurvivedSecondPass.Should().BeTrue();
+        _ = bytesSurvivedSecondPass.Should().BeTrue();
+        _ = firstDeleted.Should().Be(1);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+        _ = _harness.ArtifactBytesExist(fixture.ArtifactId).Should().BeFalse();
     }
 
     [Fact(DisplayName = "A restart reconciles an unknown promotion outcome without duplicating the file")]
@@ -1020,6 +1128,9 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         public void DeleteArtifactBytes(Guid artifactId) =>
             File.Delete(Path.Combine(ArtifactRoot, $"{artifactId}.gcode"));
+
+        public bool ArtifactBytesExist(Guid artifactId) =>
+            File.Exists(Path.Combine(ArtifactRoot, $"{artifactId}.gcode"));
 
         public async Task AgeArtifactAsync(Guid artifactId, TimeSpan age)
         {

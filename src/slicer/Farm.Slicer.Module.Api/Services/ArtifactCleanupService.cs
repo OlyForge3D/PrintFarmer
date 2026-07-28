@@ -116,7 +116,6 @@ public class ArtifactCleanupService(
             Guid reservationToken = Guid.NewGuid();
             bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
                 artifact.Id,
-                artifact.CleanupReservationToken,
                 reservationToken,
                 DateTime.UtcNow,
                 ct);

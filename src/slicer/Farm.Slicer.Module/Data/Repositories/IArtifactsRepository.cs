@@ -46,7 +46,6 @@ public interface IArtifactsRepository
     /// </summary>
     Task<bool> TryReserveForCleanupAsync(
         Guid artifactId,
-        Guid? expectedReservationToken,
         Guid reservationToken,
         DateTime reservedAtUtc,
         CancellationToken ct = default);
