@@ -1,0 +1,312 @@
+name: TEMP Epic 705 macOS/iOS Qualification (DO NOT MERGE)
+
+on:
+  pull_request:
+    branches:
+      - feature/705-operator-redesign
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/ios-epic-705-qualification.yml'
+
+concurrency:
+  group: temp-epic-705-ios-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  IOS_SIMULATOR_DEVICE_PREFERENCE: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+  IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.4,iOS 26.5
+
+jobs:
+  debug-build:
+    name: Candidate iOS Debug simulator build
+    runs-on: macos-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout exact candidate 76499bef
+        uses: actions/checkout@v7
+        with:
+          ref: 76499bef9595bb18ab6834359b5009d19df54635
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        run: |
+          set -euo pipefail
+          mkdir -p qualification-artifacts
+          actual_sha="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
+            | tee qualification-artifacts/checkout-identity.txt
+          test "$actual_sha" = "76499bef9595bb18ab6834359b5009d19df54635"
+          test "$actual_tree" = "65482f2d1b961d936413611be0432eab3234003b"
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version | tee qualification-artifacts/xcode-version.log
+
+      - name: Resolve package dependencies
+        run: |
+          set -o pipefail
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            2>&1 | tee qualification-artifacts/resolve-packages.log
+
+      - name: Resolve pinned iPhone simulator
+        run: |
+          set -o pipefail
+          ../scripts/ci/resolve-ios-simulator.sh \
+            2>&1 | tee qualification-artifacts/simulator.log
+
+      - name: Build Debug for iOS Simulator
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            build \
+            2>&1 | tee qualification-artifacts/debug-build.log
+
+      - name: Upload Debug build evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: epic-705-ios-debug-build
+          path: mobile/qualification-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  unit-tests:
+    name: Candidate PrintFarmerTests
+    runs-on: macos-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout exact candidate 76499bef
+        uses: actions/checkout@v7
+        with:
+          ref: 76499bef9595bb18ab6834359b5009d19df54635
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        run: |
+          set -euo pipefail
+          mkdir -p qualification-artifacts
+          actual_sha="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
+            | tee qualification-artifacts/checkout-identity.txt
+          test "$actual_sha" = "76499bef9595bb18ab6834359b5009d19df54635"
+          test "$actual_tree" = "65482f2d1b961d936413611be0432eab3234003b"
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version | tee qualification-artifacts/xcode-version.log
+
+      - name: Resolve pinned iPhone simulator
+        run: |
+          set -o pipefail
+          ../scripts/ci/resolve-ios-simulator.sh \
+            2>&1 | tee qualification-artifacts/simulator.log
+
+      - name: Reset and boot iPhone simulator
+        run: |
+          set -o pipefail
+          xcrun simctl shutdown "$SIMULATOR_UDID" || true
+          xcrun simctl erase "$SIMULATOR_UDID"
+          ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID" \
+            2>&1 | tee qualification-artifacts/simulator-boot.log
+
+      - name: Build PrintFarmerTests for testing
+        timeout-minutes: 20
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            build-for-testing \
+            2>&1 | tee qualification-artifacts/build-for-testing.log
+
+      - name: Run PrintFarmerTests without building
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath build \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            test-without-building \
+            -only-testing:PrintFarmerTests \
+            -resultBundlePath qualification-artifacts/PrintFarmerTests.xcresult \
+            2>&1 | tee qualification-artifacts/unit-tests.log
+
+      - name: Upload unit test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: epic-705-ios-unit-tests
+          path: mobile/qualification-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
+
+  attention-actions:
+    name: Candidate AttentionActionsUITests (${{ matrix.family }}, accessibility XXXL)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - key: iphone
+            family: iPhone
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+          - key: ipad
+            family: iPad
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout exact candidate 76499bef
+        uses: actions/checkout@v7
+        with:
+          ref: 76499bef9595bb18ab6834359b5009d19df54635
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify candidate identity
+        run: |
+          set -euo pipefail
+          mkdir -p qualification-artifacts
+          actual_sha="$(git rev-parse HEAD)"
+          actual_tree="$(git rev-parse 'HEAD^{tree}')"
+          printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
+            | tee qualification-artifacts/checkout-identity.txt
+          test "$actual_sha" = "76499bef9595bb18ab6834359b5009d19df54635"
+          test "$actual_tree" = "65482f2d1b961d936413611be0432eab3234003b"
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          echo "Using: $XCODE_PATH"
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version | tee qualification-artifacts/xcode-version.log
+
+      - name: Resolve package dependencies
+        run: |
+          set -o pipefail
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            2>&1 | tee qualification-artifacts/resolve-packages.log
+
+      - name: Resolve ${{ matrix.family }} simulator
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
+          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+        run: |
+          set -o pipefail
+          ../scripts/ci/resolve-ios-simulator.sh \
+            2>&1 | tee qualification-artifacts/simulator.log
+
+      - name: Boot ${{ matrix.family }} simulator
+        run: |
+          set -o pipefail
+          ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID" \
+            2>&1 | tee qualification-artifacts/simulator-boot.log
+
+      - name: Record issue 948 context without waiver
+        if: matrix.key == 'ipad'
+        run: |
+          printf '%s\n' \
+            'Known context: issue #948 documents unrelated iPad tests that assume an iPhone tab bar instead of the adaptive sidebar.' \
+            'This qualification runs AttentionActionsUITests with normal failure semantics; no failure is waived.' \
+            | tee qualification-artifacts/issue-948-context.log
+          cat qualification-artifacts/issue-948-context.log >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run AttentionActionsUITests at accessibility XXXL
+        timeout-minutes: 25
+        run: |
+          set -o pipefail
+          grep -Fq 'UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge' \
+            PrintFarmerUITests/AttentionActionsUITests.swift
+          xcodebuild test \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:PrintFarmerUITests/AttentionActionsUITests \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath qualification-artifacts/AttentionActions.xcresult \
+            2>&1 | tee qualification-artifacts/attention-actions.log
+
+      - name: Upload AttentionActions evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: epic-705-attention-actions-${{ matrix.key }}
+          path: mobile/qualification-artifacts/
+          if-no-files-found: warn
+          retention-days: 7
