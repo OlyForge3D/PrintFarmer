@@ -2,6 +2,8 @@
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
+using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Services;
 
@@ -9,9 +11,14 @@ namespace Farm.Slicer.Module.Services;
 /// Database-backed implementation of ISlicerJobQueue which delegates to ISliceJobRepository/EfSliceJobRepository
 /// This provides equivalent semantics for the HTTP-based worker claim/renew/complete flow used by HttpJobPollerService.
 /// </summary>
-public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
+public class DbSlicerJobQueue(
+    ISliceJobRepository repo,
+    IOptions<JobDispatchRetrySettings>? retryOptions = null) : ISlicerJobQueue
 {
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+    private readonly int _maxClaimRetries = Math.Max(
+        0,
+        retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
 
     public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
@@ -28,7 +35,13 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             throw new ArgumentException("Worker ID must be a valid GUID.", nameof(workerId));
         }
 
-        SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
+        SliceJob? job = await _repo.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(
+                wid,
+                preferredEngine == null ? null : [preferredEngine.Value.ToString()]),
+            leaseDurationSeconds: 300,
+            maxRetries: _maxClaimRetries,
+            ct: cancellationToken);
         return job == null ? null : ToDistributedJob(job);
     }
 

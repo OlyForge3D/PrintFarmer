@@ -354,6 +354,125 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "A promotion pin that wins after cleanup selection keeps the artifact")]
+    public async Task ArtifactCleanup_WhenPromotionPinsAfterSelection_KeepsSourceArtifact()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        TaskCompletionSource selected =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseSelection =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IArtifactsRepository> gated = new(MockBehavior.Strict);
+        _ = gated.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (DateTime cutoff, CancellationToken cancellationToken) =>
+            {
+                IReadOnlyList<Artifact> candidates =
+                    await inner.GetOlderThanAsync(cutoff, cancellationToken);
+                selected.TrySetResult();
+                await releaseSelection.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                return candidates;
+            });
+        _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid? expectedReservationToken,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryReserveForCleanupAsync(
+                    id,
+                    expectedReservationToken,
+                    reservationToken,
+                    reservedAtUtc,
+                    cancellationToken));
+
+        Task<int> cleanup = _harness.RunArtifactCleanupAsync(gated.Object);
+        await selected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        bool pinned = await inner.TryPinForPromotionAsync(
+            fixture.ArtifactId,
+            Guid.NewGuid(),
+            new PromotionOperationIdentity("pin-first-key", "pin-first"),
+            DateTime.UtcNow);
+        releaseSelection.TrySetResult();
+        int deleted = await cleanup;
+
+        _ = pinned.Should().BeTrue();
+        _ = deleted.Should().Be(0);
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "A cleanup reservation that wins before promotion excludes the pin")]
+    public async Task ArtifactCleanup_WhenCleanupWinsReservation_RejectsPromotionPin()
+    {
+        PromotionFixture fixture = await _harness.SeedCompletedGcodeArtifactAsync();
+        await _harness.AgeArtifactAsync(fixture.ArtifactId, TimeSpan.FromDays(30));
+        IArtifactsRepository inner = _harness.CreateArtifactsRepository();
+        TaskCompletionSource deleteReached =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource releaseDelete =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<IArtifactsRepository> gated = new(MockBehavior.Strict);
+        _ = gated.Setup(repository => repository.GetOlderThanAsync(
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DateTime cutoff, CancellationToken cancellationToken) =>
+                inner.GetOlderThanAsync(cutoff, cancellationToken));
+        _ = gated.Setup(repository => repository.TryReserveForCleanupAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<Guid>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((
+                Guid id,
+                Guid? expectedReservationToken,
+                Guid reservationToken,
+                DateTime reservedAtUtc,
+                CancellationToken cancellationToken) =>
+                inner.TryReserveForCleanupAsync(
+                    id,
+                    expectedReservationToken,
+                    reservationToken,
+                    reservedAtUtc,
+                    cancellationToken));
+        _ = gated.Setup(repository => repository.DeleteReservedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (
+                Guid id,
+                Guid reservationToken,
+                CancellationToken cancellationToken) =>
+            {
+                deleteReached.TrySetResult();
+                await releaseDelete.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+                return await inner.DeleteReservedAsync(id, reservationToken, cancellationToken);
+            });
+
+        Task<int> cleanup = _harness.RunArtifactCleanupAsync(gated.Object);
+        await deleteReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        bool pinned = await inner.TryPinForPromotionAsync(
+            fixture.ArtifactId,
+            Guid.NewGuid(),
+            new PromotionOperationIdentity("cleanup-first-key", "cleanup-first"),
+            DateTime.UtcNow);
+        releaseDelete.TrySetResult();
+        int deleted = await cleanup;
+
+        _ = deleted.Should().Be(1);
+        _ = pinned.Should().BeFalse();
+        _ = (await _harness.ArtifactExistsAsync(fixture.ArtifactId)).Should().BeFalse();
+    }
+
     [Fact(DisplayName = "A restart reconciles an unknown promotion outcome without duplicating the file")]
     public async Task ReconcilePendingAsync_AfterUnknownOutcome_CompletesWithoutDuplicate()
     {
@@ -718,6 +837,9 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 withArtifactRouting ? sliceJobs : null);
         }
 
+        public IArtifactsRepository CreateArtifactsRepository() =>
+            new EfArtifactsRepository(new SlicerContextFactory(_slicerConnectionString));
+
         public async Task<PromotionFixture> SeedCompletedGcodeArtifactAsync(
             string kind = SlicerArtifactKinds.Gcode,
             string contentType = "text/x.gcode",
@@ -907,7 +1029,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             _ = await slicer.SaveChangesAsync();
         }
 
-        public async Task<int> RunArtifactCleanupAsync()
+        public async Task<int> RunArtifactCleanupAsync(IArtifactsRepository? repository = null)
         {
             ArtifactStorageSettings settings = new()
             {
@@ -917,7 +1039,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 EnableCleanupDryRun = false,
             };
             ArtifactCleanupService cleanup = new(
-                new EfArtifactsRepository(new SlicerContextFactory(_slicerConnectionString)),
+                repository ?? CreateArtifactsRepository(),
                 Options.Create(settings),
                 CreateHostEnvironment(),
                 NullLogger<ArtifactCleanupService>.Instance);

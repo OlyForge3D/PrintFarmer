@@ -107,11 +107,41 @@ public class StubSliceJobRepository : ISliceJobRepository
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
-    public Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default)
+    public Task<SliceJob?> ClaimNextJobAsync(
+        WorkerClaimIdentity worker,
+        int leaseDurationSeconds,
+        int maxRetries,
+        CancellationToken ct = default)
     {
-        SliceJob? job = Jobs.Find(j => j.Status == SliceJobStatus.Queued);
+        DateTime now = DateTime.UtcNow;
+        SliceJob? job = Jobs.Find(j =>
+            j.Status == SliceJobStatus.Queued ||
+            (j.Status == SliceJobStatus.Processing && j.LeaseExpiresAt < now));
         if (job != null)
-        { job.Status = SliceJobStatus.Processing; job.WorkerId = workerId; job.ClaimedAt = DateTime.UtcNow; job.ClaimToken = Guid.NewGuid(); job.LeaseExpiresAt = DateTime.UtcNow.AddSeconds(leaseDurationSeconds); }
+        {
+            if (job.Status == SliceJobStatus.Processing)
+            {
+                if (job.RetryCount >= maxRetries)
+                {
+                    job.RetryCount = maxRetries;
+                    job.Status = SliceJobStatus.Failed;
+                    job.WorkerId = null;
+                    job.ClaimToken = null;
+                    job.LeaseExpiresAt = null;
+                    return Task.FromResult<SliceJob?>(null);
+                }
+
+                job.RetryCount++;
+            }
+
+            job.Status = SliceJobStatus.Processing;
+            job.WorkerId = worker.WorkerId;
+            job.ClaimedAt = now;
+            job.ClaimToken = Guid.NewGuid();
+            job.LeaseToken = job.ClaimToken;
+            job.LeaseFence++;
+            job.LeaseExpiresAt = now.AddSeconds(leaseDurationSeconds);
+        }
         return Task.FromResult(job);
     }
     public Task<IReadOnlyList<SliceJob>> GetExpiredLeaseJobsAsync(int? limit = null, CancellationToken ct = default)
@@ -165,12 +195,20 @@ public class StubSliceJobRepository : ISliceJobRepository
             return Task.FromResult(false);
         }
 
-        job.RetryCount++;
         job.WorkerId = null;
         job.ClaimedAt = null;
         job.ClaimToken = null;
         job.LeaseExpiresAt = null;
-        job.Status = job.RetryCount > maxRetries ? SliceJobStatus.Failed : SliceJobStatus.Queued;
+        if (job.RetryCount >= maxRetries)
+        {
+            job.RetryCount = maxRetries;
+            job.Status = SliceJobStatus.Failed;
+        }
+        else
+        {
+            job.RetryCount++;
+            job.Status = SliceJobStatus.Queued;
+        }
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }
@@ -201,14 +239,13 @@ public class StubSliceJobRepository : ISliceJobRepository
             return Task.CompletedTask;
         }
 
-        j.RetryCount += 1;
         j.WorkerId = null;
         j.ClaimedAt = null;
         j.LeaseExpiresAt = null;
-        if (j.RetryCount > maxRetries)
-        { j.Status = SliceJobStatus.Failed; }
+        if (j.RetryCount >= maxRetries)
+        { j.RetryCount = maxRetries; j.Status = SliceJobStatus.Failed; }
         else
-        { j.Status = SliceJobStatus.Queued; j.QueuedAt = DateTime.UtcNow; }
+        { j.RetryCount += 1; j.Status = SliceJobStatus.Queued; j.QueuedAt = DateTime.UtcNow; }
         return Task.CompletedTask;
     }
     public Task<bool> TryRequeueForActiveLeaseAsync(
@@ -224,12 +261,20 @@ public class StubSliceJobRepository : ISliceJobRepository
             return Task.FromResult(false);
         }
 
-        job.RetryCount++;
         job.WorkerId = null;
         job.ClaimedAt = null;
         job.ClaimToken = null;
         job.LeaseExpiresAt = null;
-        job.Status = job.RetryCount > maxRetries ? SliceJobStatus.Failed : SliceJobStatus.Queued;
+        if (job.RetryCount >= maxRetries)
+        {
+            job.RetryCount = maxRetries;
+            job.Status = SliceJobStatus.Failed;
+        }
+        else
+        {
+            job.RetryCount++;
+            job.Status = SliceJobStatus.Queued;
+        }
         job.UpdatedAt = DateTime.UtcNow;
         return Task.FromResult(true);
     }

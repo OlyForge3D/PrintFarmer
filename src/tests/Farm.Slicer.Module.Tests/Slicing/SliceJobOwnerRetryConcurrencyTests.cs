@@ -38,9 +38,9 @@ public sealed class SliceJobOwnerRetryConcurrencyTests
                 observed.UpdatedAt);
             retried.Should().NotBeNull();
             SliceJob? claimed = await concurrentRepository.ClaimNextJobAsync(
-                newWorkerId,
-                capabilities: null,
-                leaseDurationSeconds: 300);
+                WorkerClaimIdentity.CreateUnattested(newWorkerId, capabilities: null),
+                leaseDurationSeconds: 300,
+                maxRetries: 3);
             claimed.Should().NotBeNull();
         }
 

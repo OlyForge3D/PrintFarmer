@@ -80,17 +80,6 @@ public class ArtifactCleanupService(
         // Deduplicate candidates
         candidatesForDeletion = candidatesForDeletion.Distinct().ToList();
 
-        // A promotion that has not produced a durable result yet owns its source bytes: deleting them
-        // would strand an unknown outcome that nothing could reconcile.
-        int pinnedCount = candidatesForDeletion.Count(artifact => !artifact.IsCleanupEligible());
-        if (pinnedCount > 0)
-        {
-            candidatesForDeletion = candidatesForDeletion.Where(artifact => artifact.IsCleanupEligible()).ToList();
-            _logger.LogInformation(
-                "Skipped {Count} artifacts pinned by an unresolved promotion",
-                pinnedCount);
-        }
-
         if (candidatesForDeletion.Count == 0)
         {
             _logger.LogInformation("No artifacts eligible for cleanup");
@@ -104,7 +93,10 @@ public class ArtifactCleanupService(
         if (_settings.EnableCleanupDryRun)
         {
             // Dry-run mode: log what would be deleted
-            foreach (Artifact artifact in candidatesForDeletion)
+            List<Artifact> eligibleCandidates = candidatesForDeletion
+                .Where(artifact => artifact.IsCleanupEligible())
+                .ToList();
+            foreach (Artifact artifact in eligibleCandidates)
             {
                 _logger.LogInformation(
                     "[DRY RUN] Would delete artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
@@ -114,13 +106,28 @@ public class ArtifactCleanupService(
                     artifact.CreatedAt);
             }
 
-            return candidatesForDeletion.Count;
+            return eligibleCandidates.Count;
         }
 
         // Actual deletion
         int deletedCount = 0;
         foreach (Artifact artifact in candidatesForDeletion)
         {
+            Guid reservationToken = Guid.NewGuid();
+            bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
+                artifact.Id,
+                artifact.CleanupReservationToken,
+                reservationToken,
+                DateTime.UtcNow,
+                ct);
+            if (!reserved)
+            {
+                _logger.LogDebug(
+                    "Skipped artifact {Id} because cleanup or promotion already owns it",
+                    artifact.Id);
+                continue;
+            }
+
             try
             {
                 // Delete file from filesystem
@@ -135,19 +142,30 @@ public class ArtifactCleanupService(
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
                 }
 
-                // Remove from database
-                _ = await _artifactsRepo.DeleteByIdAsync(artifact.Id, ct);
-                deletedCount++;
-
-                _logger.LogInformation(
-                    "Deleted artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
-                    artifact.Id,
-                    artifact.Kind,
-                    artifact.SizeBytes,
-                    artifact.CreatedAt);
+                // Remove from the database only while this pass still owns cleanup.
+                if (await _artifactsRepo.DeleteReservedAsync(artifact.Id, reservationToken, ct))
+                {
+                    deletedCount++;
+                    _logger.LogInformation(
+                        "Deleted artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
+                        artifact.Id,
+                        artifact.Kind,
+                        artifact.SizeBytes,
+                        artifact.CreatedAt);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Cleanup reservation for artifact {Id} was lost before row deletion",
+                        artifact.Id);
+                }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
+                await _artifactsRepo.ReleaseCleanupReservationAsync(
+                    artifact.Id,
+                    reservationToken,
+                    CancellationToken.None);
                 _logger.LogError(ex, "Failed to delete artifact {Id}", artifact.Id);
             }
         }

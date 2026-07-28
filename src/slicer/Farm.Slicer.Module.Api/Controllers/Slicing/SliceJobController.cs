@@ -14,6 +14,7 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -49,7 +50,8 @@ public partial class SliceJobController(
     ISlicerResourceAccessAuthorizer? resourceAccess = null,
     IPrinterAccessValidator? printerAccess = null,
     IModelStorageResolver? modelStorage = null,
-    ICalibrationProfileResolver? profileResolver = null) : ControllerBase
+    ICalibrationProfileResolver? profileResolver = null,
+    IOptions<JobDispatchRetrySettings>? retryOptions = null) : ControllerBase
 {
     private readonly ISliceJobRepository _jobRepository = jobRepository;
     private readonly ISliceJobEventService _eventService = eventService;
@@ -66,6 +68,9 @@ public partial class SliceJobController(
     private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
     private readonly IModelStorageResolver? _modelStorage = modelStorage;
     private readonly ICalibrationProfileResolver? _profileResolver = profileResolver;
+    private readonly int _maxClaimRetries = Math.Max(
+        0,
+        retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
 
     /// <summary>
     /// Submits a new slice job.
@@ -419,10 +424,16 @@ public partial class SliceJobController(
             }
         }
 
+        WorkerClaimIdentity claimIdentity = WorkerClaimIdentity.FromRegisteredWorker(worker);
+        if (claimIdentity.Capabilities.Length == 0)
+        {
+            return NoContent();
+        }
+
         SliceJob? job = await _jobRepository.ClaimNextJobAsync(
-            worker.Id,
-            request.Capabilities,
+            claimIdentity,
             request.LeaseDurationSeconds,
+            _maxClaimRetries,
             ct);
         if (job is null)
         {

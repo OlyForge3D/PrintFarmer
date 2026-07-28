@@ -42,6 +42,28 @@ public interface IArtifactsRepository
     Task<IReadOnlyList<Artifact>> GetOlderThanAsync(DateTime cutoffDate, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomically reserves an eligible artifact for cleanup, excluding any concurrent promotion pin.
+    /// </summary>
+    Task<bool> TryReserveForCleanupAsync(
+        Guid artifactId,
+        Guid? expectedReservationToken,
+        Guid reservationToken,
+        DateTime reservedAtUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Deletes an artifact only when the caller still owns its cleanup reservation.</summary>
+    Task<bool> DeleteReservedAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default);
+
+    /// <summary>Releases a cleanup reservation after filesystem cleanup could not complete.</summary>
+    Task ReleaseCleanupReservationAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Pins an artifact against cleanup while a promotion runs, or confirms an existing pin held by the
     /// same operation.
     /// </summary>

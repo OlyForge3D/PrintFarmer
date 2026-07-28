@@ -92,6 +92,61 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     }
 
     /// <inheritdoc/>
+    public async Task<bool> TryReserveForCleanupAsync(
+        Guid artifactId,
+        Guid? expectedReservationToken,
+        Guid reservationToken,
+        DateTime reservedAtUtc,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == expectedReservationToken &&
+                (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(artifact => artifact.CleanupReservationToken, reservationToken)
+                    .SetProperty(artifact => artifact.CleanupReservedAtUtc, reservedAtUtc),
+                ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteReservedAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken)
+            .ExecuteDeleteAsync(ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task ReleaseCleanupReservationAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        _ = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(artifact => artifact.CleanupReservationToken, (Guid?)null)
+                    .SetProperty(artifact => artifact.CleanupReservedAtUtc, (DateTime?)null),
+                ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<long> GetTotalSizeAsync(CancellationToken ct = default)
     {
         using SlicerDbContext db = _dbFactory.CreateDbContext();
@@ -109,26 +164,25 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         ArgumentException.ThrowIfNullOrWhiteSpace(operation.Key);
         ArgumentException.ThrowIfNullOrWhiteSpace(operation.OperationId);
 
-        using SlicerDbContext db = _dbFactory.CreateDbContext();
-        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
-        if (artifact is null)
-        {
-            return false;
-        }
-
-        if (artifact.PromotionOperationKey is not null &&
-            !string.Equals(artifact.PromotionOperationKey, operation.Key, StringComparison.Ordinal))
-        {
-            // Another operation already owns this artifact; promotion stays single-writer.
-            return false;
-        }
-
-        artifact.PromotionOperationKey = operation.Key;
-        artifact.PromotionOperationId = operation.OperationId;
-        artifact.PromotionCheckpointId = checkpointId ?? artifact.PromotionCheckpointId;
-        artifact.PromotionStartedAtUtc ??= startedAtUtc;
-        _ = await db.SaveChangesAsync(ct);
-        return true;
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == null &&
+                (artifact.PromotionOperationKey == null ||
+                    artifact.PromotionOperationKey == operation.Key))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(artifact => artifact.PromotionOperationKey, operation.Key)
+                    .SetProperty(artifact => artifact.PromotionOperationId, operation.OperationId)
+                    .SetProperty(
+                        artifact => artifact.PromotionCheckpointId,
+                        artifact => checkpointId ?? artifact.PromotionCheckpointId)
+                    .SetProperty(
+                        artifact => artifact.PromotionStartedAtUtc,
+                        artifact => artifact.PromotionStartedAtUtc ?? startedAtUtc),
+                ct);
+        return affected == 1;
     }
 
     /// <inheritdoc/>

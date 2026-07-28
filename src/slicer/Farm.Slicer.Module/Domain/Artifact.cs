@@ -84,6 +84,14 @@ public class Artifact
     /// <summary>Promoted G-code file identity, recorded so lineage survives artifact cleanup.</summary>
     public Guid? PromotedGcodeFileId { get; set; }
 
+    /// <summary>Exclusive cleanup reservation that prevents a concurrent promotion pin.</summary>
+    [JsonIgnore]
+    public Guid? CleanupReservationToken { get; set; }
+
+    /// <summary>UTC timestamp when cleanup reserved this artifact.</summary>
+    [JsonIgnore]
+    public DateTime? CleanupReservedAtUtc { get; set; }
+
     /// <summary>
     /// Whether cleanup may reclaim this artifact. A promotion in flight has an unknown outcome, so the
     /// artifact stays until the promoter or its reconciler resolves the result.
@@ -92,7 +100,8 @@ public class Artifact
     /// <see langword="false"/> only while a promotion is pinned without a durable result.
     /// </returns>
     public bool IsCleanupEligible() =>
-        PromotionStartedAtUtc is null || PromotedAtUtc is not null;
+        CleanupReservationToken is null &&
+        (PromotionStartedAtUtc is null || PromotedAtUtc is not null);
 }
 
 /// <summary>

@@ -281,7 +281,8 @@ public sealed class DatabaseMigrationTests
             "20260725173232_AlignDevelopmentSlicerSchema",
             "20260725185010_AddOwnerScopedPromotionOperationKey",
             "20260726084205_AddSliceJobSlicerEngineVersion",
-            "20260726170804_AddSliceJobClaimIncarnation");
+            "20260726170804_AddSliceJobClaimIncarnation",
+            "20260728212624_AddWorkerAttestationAndCleanupReservation");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
