@@ -225,6 +225,12 @@ public class PrintersService(
         {
             HistoryProbeStatus.Unsupported =>
                 new NotSupportedException("The printer backend does not support history."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history request timed out."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history transport is unavailable."),
             HistoryProbeStatus.Unavailable =>
                 new InvalidOperationException("Printer history is currently unavailable."),
             _ when probe.FailureCode == "printer_not_found" =>
@@ -302,7 +308,8 @@ public class PrintersService(
                 ex,
                 "[History] Backend history timed out for printer {PrinterId}",
                 printerId);
-            return HistoryListProbeResult.Unavailable();
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (HttpRequestException ex)
         {
@@ -310,7 +317,8 @@ public class PrintersService(
                 ex,
                 "[History] Backend history transport unavailable for printer {PrinterId}",
                 printerId);
-            return HistoryListProbeResult.Unavailable();
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
         }
         catch (SocketException ex)
         {
@@ -318,7 +326,8 @@ public class PrintersService(
                 ex,
                 "[History] Backend history socket unavailable for printer {PrinterId}",
                 printerId);
-            return HistoryListProbeResult.Unavailable();
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
         }
         catch (TimeoutException ex)
         {
@@ -326,7 +335,8 @@ public class PrintersService(
                 ex,
                 "[History] Backend history timed out for printer {PrinterId}",
                 printerId);
-            return HistoryListProbeResult.Unavailable();
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {
@@ -370,6 +380,12 @@ public class PrintersService(
                 new KeyNotFoundException($"History job {jobId} was not found."),
             HistoryDetailProbeStatus.Unsupported =>
                 new NotSupportedException("The printer backend does not support history."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history detail request timed out."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history detail transport is unavailable."),
             HistoryDetailProbeStatus.Unavailable =>
                 new InvalidOperationException("Printer history detail is currently unavailable."),
             _ when probe.FailureCode == "printer_not_found" =>
@@ -443,22 +459,26 @@ public class PrintersService(
         catch (OperationCanceledException ex)
         {
             _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
-            return HistoryJobProbeResult.Unavailable();
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogWarning(ex, "[History] Detail transport unavailable for printer {PrinterId}", printerId);
-            return HistoryJobProbeResult.Unavailable();
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
         }
         catch (SocketException ex)
         {
             _logger.LogWarning(ex, "[History] Detail socket unavailable for printer {PrinterId}", printerId);
-            return HistoryJobProbeResult.Unavailable();
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
         }
         catch (TimeoutException ex)
         {
             _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
-            return HistoryJobProbeResult.Unavailable();
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {

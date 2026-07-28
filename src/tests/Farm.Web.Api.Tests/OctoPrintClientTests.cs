@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.OctoPrint;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Domain;
 using Farm.Web.Api.Services;
@@ -151,5 +152,53 @@ public class OctoPrintClientTests
             new PrinterCredential { ApiKey = "key" });
 
         await action.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Theory]
+    [InlineData("""{"success":true,"count":0}""")]
+    [InlineData("""{"success":true,"count":1,"results":[{}]}""")]
+    [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","timestamp":1700000000}]}""")]
+    [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","success":true}]}""")]
+    [InlineData("""{"success":true,"count":"one","results":[]}""")]
+    public async Task GetHistoryListAsync_IncompleteOrMalformedEntry_IsUnavailable(
+        string payload)
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    payload,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        history.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_CompleteEntries_AreAuthoritative()
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"success":true,"count":1,"results":[{"name":"a.gcode","success":true,"timestamp":1700000000}]}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle();
+        history.Jobs[0].JobId.Should().Be("a.gcode");
     }
 }

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -4065,7 +4066,10 @@ public class PrintersController(
     // ===== HISTORY ENDPOINTS =====
     [HttpGet("{id}/history")]
     [ProducesResponseType(typeof(HistoryListResponse), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
@@ -4077,6 +4081,26 @@ public class PrintersController(
         catch (KeyNotFoundException)
         {
             return NotFound();
+        }
+        catch (NotSupportedException ex)
+        {
+            _logger.LogWarning(ex, "History requested for unsupported printer {Id}", id);
+            return BadRequest("History is not available for this printer backend");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Network error retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogError(ex, "Socket error retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (Exception ex)
         {
@@ -4109,6 +4133,11 @@ public class PrintersController(
             _logger.LogInformation("History job {JobId} not found for printer {Id}", jobId, id);
             return NotFound($"History job {jobId} not found");
         }
+        catch (NotSupportedException ex)
+        {
+            _logger.LogWarning(ex, "History requested for unsupported printer {Id}", id);
+            return BadRequest("History is not available for this printer backend");
+        }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning(ex, "History requested for non-Moonraker printer {Id}", id);
@@ -4118,6 +4147,16 @@ public class PrintersController(
         {
             _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogError(ex, "Socket error retrieving history job {JobId} for printer {Id}", jobId, id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {Id}", jobId, id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {

@@ -2306,7 +2306,15 @@ public class MoonrakerClient(
 
             string content = await resp.Content.ReadAsStringAsync(cts.Token);
             _logger.LogDebug("[Moonraker] History response: {Value0}...", content.Substring(0, Math.Min(200, content.Length)));
-            MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
+            if (!IsAuthoritativeHistoryListPayload(content))
+            {
+                _logger.LogWarning(
+                    "[Moonraker] History response was structurally incomplete");
+                return null;
+            }
+
+            MoonrakerResponse<HistoryListResponse>? response =
+                JsonSerializer.Deserialize<MoonrakerResponse<HistoryListResponse>>(content);
             if (response?.Result == null)
             {
                 _logger.LogWarning($"[Moonraker] History response deserialization returned null");
@@ -2321,10 +2329,15 @@ public class MoonrakerClient(
             _logger.LogDebug("History request cancelled by user");
             throw;
         }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        catch (OperationCanceledException ex)
         {
             _logger.LogWarning(ex, "[Moonraker] History request timed out for {BaseUrl}", baseUrl);
-            return null;
+            throw new TimeoutException("Moonraker history request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[Moonraker] History transport failed for {BaseUrl}", baseUrl);
+            throw;
         }
         catch (Exception ex)
         {
@@ -2332,6 +2345,36 @@ public class MoonrakerClient(
             return null;
         }
     }
+
+    private static bool IsAuthoritativeHistoryListPayload(string content)
+    {
+        using JsonDocument document = JsonDocument.Parse(content);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("result", out JsonElement result) ||
+            result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("count", out JsonElement countElement) ||
+            !countElement.TryGetInt32(out int count) ||
+            count < 0 ||
+            !result.TryGetProperty("jobs", out JsonElement jobsElement) ||
+            jobsElement.ValueKind != JsonValueKind.Array ||
+            count != jobsElement.GetArrayLength())
+        {
+            return false;
+        }
+
+        return jobsElement.EnumerateArray().All(job =>
+            job.ValueKind == JsonValueKind.Object &&
+            HasRequiredHistoryString(job, "job_id") &&
+            HasRequiredHistoryString(job, "filename") &&
+            HasRequiredHistoryString(job, "status"));
+    }
+
+    private static bool HasRequiredHistoryString(
+        JsonElement job,
+        string propertyName) =>
+        job.TryGetProperty(propertyName, out JsonElement value) &&
+        value.ValueKind == JsonValueKind.String &&
+        !string.IsNullOrWhiteSpace(value.GetString());
 
     /// <summary>
     /// Get a specific history job by job ID

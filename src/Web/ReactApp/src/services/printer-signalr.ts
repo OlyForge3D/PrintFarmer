@@ -52,6 +52,7 @@ export class PrinterSignalRService {
   }
 
   private buildConnection(): void {
+    if (this.disposed) return;
     const printersSignalrUrl = getHubUrl("/hubs/printers");
     // Only emit noisy connection debug when the developer debug flag is enabled
     if (
@@ -63,7 +64,7 @@ export class PrinterSignalRService {
         printersSignalrUrl
       );
     }
-    this.connection = new HubConnectionBuilder()
+    const connection = new HubConnectionBuilder()
       .withUrl(printersSignalrUrl, {
         accessTokenFactory: () => localStorage.getItem("auth-token") ?? "",
         withCredentials: true,
@@ -105,12 +106,11 @@ export class PrinterSignalRService {
       })
       .build();
 
-    this.setupEventHandlers();
+    this.connection = connection;
+    this.setupEventHandlers(connection);
   }
 
-  private setupEventHandlers(): void {
-    if (!this.connection) return;
-
+  private setupEventHandlers(connection: HubConnection): void {
     // Handler for printerupdated event
     const handlePrinterUpdated = (status: PrinterStatusUpdate) => {
       try {
@@ -165,9 +165,9 @@ export class PrinterSignalRService {
     };
 
     // Register single lowercase event name
-    this.connection.on("printerupdated", handlePrinterUpdated);
+    connection.on("printerupdated", handlePrinterUpdated);
 
-    this.connection.on("jobqueueupdate", (update: JobQueueUpdateDto) => {
+    connection.on("jobqueueupdate", (update: JobQueueUpdateDto) => {
       this.jobQueueUpdateCallbacks.forEach((cb) => {
         try {
           cb(update);
@@ -176,10 +176,10 @@ export class PrinterSignalRService {
         }
       });
     });
-    this.connection.on("queueevent", (event: QueueEventEnvelope) => {
+    connection.on("queueevent", (event: QueueEventEnvelope) => {
       void this.handleQueueEvent(event);
     });
-    this.connection.on("queueresourceschanged", () => {
+    connection.on("queueresourceschanged", () => {
       this.queueResourcesChangedCallbacks.forEach((callback) => {
         try {
           callback();
@@ -227,12 +227,12 @@ export class PrinterSignalRService {
     };
 
     // Register only lowercase event names
-    this.connection.on("discoveryprogress", handleDiscoveryProgress);
-    this.connection.on("discoveryprinterfound", handleDiscoveryPrinterFound);
-    this.connection.on("discoverycompleted", handleDiscoveryCompleted);
+    connection.on("discoveryprogress", handleDiscoveryProgress);
+    connection.on("discoveryprinterfound", handleDiscoveryPrinterFound);
+    connection.on("discoverycompleted", handleDiscoveryCompleted);
 
     // Handler for printer import progress event
-    this.connection.on("printerimportprogress", (progress: unknown) => {
+    connection.on("printerimportprogress", (progress: unknown) => {
       this.printerImportProgressCallbacks.forEach((cb) => {
         try {
           cb(progress);
@@ -243,7 +243,7 @@ export class PrinterSignalRService {
     });
 
     // Dispatch upload progress event
-    this.connection.on(
+    connection.on(
       "dispatchuploadprogress",
       (progress: DispatchUploadProgressDto) => {
         this.dispatchUploadProgressCallbacks.forEach((cb) => {
@@ -257,7 +257,7 @@ export class PrinterSignalRService {
     );
 
     // Failure detection event
-    this.connection.on(
+    connection.on(
       "failuredetected",
       (event: FailureDetectionEvent) => {
         if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
@@ -273,7 +273,7 @@ export class PrinterSignalRService {
       }
     );
 
-    this.connection.on(
+    connection.on(
       AUTO_DISPATCH_STATE_CHANGED_EVENT,
       (status: AutoDispatchStatus) => {
         this.autoDispatchStatusCallbacks.forEach((cb) => {
@@ -286,25 +286,46 @@ export class PrinterSignalRService {
       }
     );
 
-    this.connection.onclose(() => this.notifyConnectionState(false));
-    this.connection.onreconnecting(() => this.notifyConnectionState(false));
-    this.connection.onreconnected(() => {
+    connection.onclose(() => {
+      if (connection !== this.connection) return;
+      this.invalidateConnectionEpoch();
+      this.notifyConnectionState(false);
+    });
+    connection.onreconnecting(() => {
+      if (connection !== this.connection) return;
+      this.invalidateConnectionEpoch();
+      this.notifyConnectionState(false);
+      if (this.disposed || !this.connectionRequested) {
+        void connection.stop();
+      }
+    });
+    connection.onreconnected(() => {
+      if (
+        connection !== this.connection ||
+        this.disposed ||
+        !this.connectionRequested
+      ) {
+        void connection.stop();
+        return;
+      }
       this.reconnectAttempts = 0;
+      this.clearManualReconnectTimer();
+      const connectionEpoch = this.beginConnectionEpoch();
       this.notifyConnectionState(true);
-      void this.restoreSubscriptionsAndDrain();
+      void this.restoreSubscriptionsAndDrain(connection, connectionEpoch);
     });
     // Add debug hooks for connection lifecycle (gated behind debug flag)
     if (
       (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
         .PrintFarmerDebug?.printerSignalR
     ) {
-      this.connection.onclose((err) =>
+      connection.onclose((err) =>
         console.info("[printerSignalR] connection closed", err)
       );
-      this.connection.onreconnecting((err) =>
+      connection.onreconnecting((err) =>
         console.info("[printerSignalR] reconnecting", err)
       );
-      this.connection.onreconnected((id) =>
+      connection.onreconnected((id) =>
         console.info("[printerSignalR] reconnected, connectionId=", id)
       );
     }
@@ -342,12 +363,16 @@ export class PrinterSignalRService {
   private queueSubscriptionGeneration = 0;
   private queueSubscriptionTail: Promise<void> = Promise.resolve();
   private disposed = false;
+  private connectionRequested = false;
+  private connectionIntentGeneration = 0;
+  private connectionEpoch = 0;
+  private manualReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lastQueueSequence = 0;
   private queueDrain: Promise<void> | null = null;
 
   constructor() {
     this.loadSettings().then(() => {
-      this.buildConnection();
+      if (!this.disposed) this.buildConnection();
     });
     // The initial load above runs at module-import time, before the user has
     // authenticated, so the anonymous GET /api/settings/SignalR fails closed
@@ -399,13 +424,25 @@ export class PrinterSignalRService {
       }
       const wasActive =
         this.connection?.state === HubConnectionState.Connected ||
-        this.connection?.state === HubConnectionState.Connecting;
-      if (this.connection) {
-        await this.connection.stop();
+        this.connection?.state === HubConnectionState.Connecting ||
+        this.connection?.state === HubConnectionState.Reconnecting;
+      const shouldReconnect = this.connectionRequested || wasActive;
+      const previousConnection = this.connection;
+      this.connectionIntentGeneration++;
+      this.clearManualReconnectTimer();
+      this.invalidateConnectionEpoch();
+      if (
+        previousConnection &&
+        previousConnection.state !== HubConnectionState.Disconnected
+      ) {
+        await previousConnection.stop();
+      }
+      if (previousConnection === this.connection) {
         this.connection = null;
       }
+      if (this.disposed) return;
       this.buildConnection();
-      if (wasActive) {
+      if (shouldReconnect) {
         await this.connect();
       }
     } finally {
@@ -490,10 +527,16 @@ export class PrinterSignalRService {
   }
 
   public async connect(): Promise<void> {
+    if (this.disposed) return;
+    this.connectionRequested = true;
+    this.clearManualReconnectTimer();
     if (!this.connection) this.buildConnection();
     if (this.connection!.state === HubConnectionState.Connected) return;
     if (this.connection!.state === HubConnectionState.Connecting) return;
+    if (this.connection!.state === HubConnectionState.Reconnecting) return;
     if (this.connection!.state !== HubConnectionState.Disconnected) return;
+    const connection = this.connection!;
+    const intentGeneration = ++this.connectionIntentGeneration;
     try {
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
@@ -501,9 +544,22 @@ export class PrinterSignalRService {
       ) {
         console.info("[printerSignalR] starting connection");
       }
-      await this.connection!.start();
-      await this.restoreResourceSubscriptions();
+      await connection.start();
+      if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
+        await this.stopConnection(connection);
+        return;
+      }
+      const connectionEpoch = this.beginConnectionEpoch();
+      await this.restoreResourceSubscriptions(connection, connectionEpoch);
+      if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
+        await this.stopConnection(connection);
+        return;
+      }
       await this.drainQueueChanges();
+      if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
+        await this.stopConnection(connection);
+        return;
+      }
       if (
         (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
           .PrintFarmerDebug?.printerSignalR
@@ -513,17 +569,63 @@ export class PrinterSignalRService {
       this.reconnectAttempts = 0;
       this.notifyConnectionState(true);
     } catch {
+      if (!this.isCurrentConnectionIntent(connection, intentGeneration)) {
+        return;
+      }
       console.error("[printerSignalR] connect failed");
       this.notifyConnectionState(false);
-      if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      if (
+        this.connectionRequested &&
+        this.reconnectAttempts < this.maxReconnectAttempts
+      ) {
         const delay = Math.min(
           this.reconnectDelay * Math.pow(2, this.reconnectAttempts),
           this.maxReconnectDelay
         );
         this.reconnectAttempts++;
-        setTimeout(() => this.connect(), delay);
+        this.manualReconnectTimer = setTimeout(() => {
+          this.manualReconnectTimer = null;
+          if (this.isCurrentConnectionIntent(connection, intentGeneration)) {
+            void this.connect();
+          }
+        }, delay);
       }
     }
+  }
+
+  private isCurrentConnectionIntent(
+    connection: HubConnection,
+    intentGeneration: number): boolean {
+    return (
+      !this.disposed &&
+      this.connectionRequested &&
+      connection === this.connection &&
+      intentGeneration === this.connectionIntentGeneration
+    );
+  }
+
+  private clearManualReconnectTimer(): void {
+    if (this.manualReconnectTimer) {
+      clearTimeout(this.manualReconnectTimer);
+      this.manualReconnectTimer = null;
+    }
+  }
+
+  private async stopConnection(connection: HubConnection): Promise<void> {
+    if (connection.state !== HubConnectionState.Disconnected) {
+      await connection.stop();
+    }
+  }
+
+  private beginConnectionEpoch(): number {
+    this.connectionEpoch++;
+    this.clearAppliedQueueSubscriptionState();
+    return this.connectionEpoch;
+  }
+
+  private invalidateConnectionEpoch(): void {
+    this.connectionEpoch++;
+    this.clearAppliedQueueSubscriptionState();
   }
 
   // Request the current status for a specific printer from the server
@@ -561,10 +663,14 @@ export class PrinterSignalRService {
   }
 
   private async applySubscribeToPrinter(printerId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("SubscribeToPrinterAsync", printerId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("SubscribeToPrinterAsync", printerId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedPrinters.add(printerId);
+      }
     }
-    this.subscribedPrinters.add(printerId);
   }
 
   public async unsubscribeFromPrinter(printerId: string): Promise<void> {
@@ -573,10 +679,16 @@ export class PrinterSignalRService {
   }
 
   private async applyUnsubscribeFromPrinter(printerId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("UnsubscribeFromPrinterAsync", printerId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("UnsubscribeFromPrinterAsync", printerId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedPrinters.delete(printerId);
+      }
+    } else {
+      this.subscribedPrinters.delete(printerId);
     }
-    this.subscribedPrinters.delete(printerId);
   }
 
   public async subscribeToQueueJob(jobId: string): Promise<void> {
@@ -585,10 +697,14 @@ export class PrinterSignalRService {
   }
 
   private async applySubscribeToQueueJob(jobId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("SubscribeToQueueJobAsync", jobId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("SubscribeToQueueJobAsync", jobId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedQueueJobs.add(jobId);
+      }
     }
-    this.subscribedQueueJobs.add(jobId);
   }
 
   public async unsubscribeFromQueueJob(jobId: string): Promise<void> {
@@ -597,10 +713,16 @@ export class PrinterSignalRService {
   }
 
   private async applyUnsubscribeFromQueueJob(jobId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("UnsubscribeFromQueueJobAsync", jobId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("UnsubscribeFromQueueJobAsync", jobId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedQueueJobs.delete(jobId);
+      }
+    } else {
+      this.subscribedQueueJobs.delete(jobId);
     }
-    this.subscribedQueueJobs.delete(jobId);
   }
 
   public async subscribeToProject(projectId: string): Promise<void> {
@@ -609,10 +731,14 @@ export class PrinterSignalRService {
   }
 
   private async applySubscribeToProject(projectId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("SubscribeToProjectAsync", projectId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("SubscribeToProjectAsync", projectId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedProjects.add(projectId);
+      }
     }
-    this.subscribedProjects.add(projectId);
   }
 
   public async unsubscribeFromProject(projectId: string): Promise<void> {
@@ -621,10 +747,26 @@ export class PrinterSignalRService {
   }
 
   private async applyUnsubscribeFromProject(projectId: string): Promise<void> {
-    if (this.connection?.state === HubConnectionState.Connected) {
-      await this.connection.invoke("UnsubscribeFromProjectAsync", projectId);
+    const connection = this.connection;
+    const connectionEpoch = this.connectionEpoch;
+    if (connection?.state === HubConnectionState.Connected) {
+      await connection.invoke("UnsubscribeFromProjectAsync", projectId);
+      if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+        this.subscribedProjects.delete(projectId);
+      }
+    } else {
+      this.subscribedProjects.delete(projectId);
     }
-    this.subscribedProjects.delete(projectId);
+  }
+
+  private isCurrentConnectionEpoch(
+    connection: HubConnection,
+    connectionEpoch: number): boolean {
+    return (
+      !this.disposed &&
+      connection === this.connection &&
+      connectionEpoch === this.connectionEpoch
+    );
   }
 
   public async replaceQueueResourceSubscriptions(resources: {
@@ -685,6 +827,17 @@ export class PrinterSignalRService {
       }
     });
     return generation;
+  }
+
+  public async releaseQueueResourceSubscriptionsAndDisconnect(): Promise<void> {
+    const replacement = this.replaceQueueResourceSubscriptions({
+      printerIds: [],
+      jobIds: [],
+      projectIds: [],
+    });
+    const releaseGeneration = this.queueSubscriptionGeneration;
+    const disconnection = this.disconnect(releaseGeneration);
+    await Promise.all([replacement, disconnection]);
   }
 
   private enqueueQueueSubscriptionOperation(
@@ -808,10 +961,18 @@ export class PrinterSignalRService {
     });
   }
 
-  private async restoreResourceSubscriptions(): Promise<void> {
+  private async restoreResourceSubscriptions(
+    connection: HubConnection,
+    connectionEpoch: number
+  ): Promise<void> {
     const generation = this.queueSubscriptionGeneration;
     await this.enqueueQueueSubscriptionOperation(generation, async () => {
-      if (this.connection?.state !== HubConnectionState.Connected) return;
+      if (
+        !this.isCurrentConnectionEpoch(connection, connectionEpoch) ||
+        connection.state !== HubConnectionState.Connected
+      ) {
+        return;
+      }
       const subscriptions = [
         ...Array.from(this.desiredQueuePrinters, (id) => ({
           id,
@@ -834,28 +995,32 @@ export class PrinterSignalRService {
       ];
       const outcomes = await Promise.allSettled(
         subscriptions.map(({ id, method }) =>
-          this.connection!.invoke(method, id)
+          connection.invoke(method, id)
         )
       );
-      if (
-        this.disposed ||
-        generation !== this.queueSubscriptionGeneration
-      ) {
-        return;
-      }
       outcomes.forEach((outcome, index) => {
-        if (outcome.status === "rejected") {
-          subscriptions[index].desiredValues.delete(subscriptions[index].id);
-          subscriptions[index].appliedValues.delete(subscriptions[index].id);
-        } else {
-          subscriptions[index].appliedValues.add(subscriptions[index].id);
+        const subscription = subscriptions[index];
+        if (outcome.status === "fulfilled") {
+          if (this.isCurrentConnectionEpoch(connection, connectionEpoch)) {
+            subscription.appliedValues.add(subscription.id);
+          }
+        } else if (
+          this.isCurrentConnectionEpoch(connection, connectionEpoch) &&
+          generation === this.queueSubscriptionGeneration
+        ) {
+          subscription.desiredValues.delete(subscription.id);
+          subscription.appliedValues.delete(subscription.id);
         }
       });
     });
   }
 
-  private async restoreSubscriptionsAndDrain(): Promise<void> {
-    await this.restoreResourceSubscriptions();
+  private async restoreSubscriptionsAndDrain(
+    connection: HubConnection,
+    connectionEpoch: number
+  ): Promise<void> {
+    await this.restoreResourceSubscriptions(connection, connectionEpoch);
+    if (!this.isCurrentConnectionEpoch(connection, connectionEpoch)) return;
     await this.drainQueueChanges();
   }
 
@@ -931,20 +1096,22 @@ export class PrinterSignalRService {
   }
 
   public async disconnect(expectedQueueGeneration?: number): Promise<void> {
-    if (expectedQueueGeneration !== undefined) {
-      await this.queueSubscriptionTail.catch(() => undefined);
-      if (
-        expectedQueueGeneration !== this.queueSubscriptionGeneration ||
-        this.hasDesiredQueueSubscriptions()
-      ) {
-        return;
-      }
-    }
     if (
-      this.connection &&
-      this.connection.state === HubConnectionState.Connected
+      expectedQueueGeneration !== undefined &&
+      (expectedQueueGeneration !== this.queueSubscriptionGeneration ||
+        this.hasDesiredQueueSubscriptions())
     ) {
-      await this.connection.stop();
+      return;
+    }
+
+    this.connectionRequested = false;
+    this.connectionIntentGeneration++;
+    this.reconnectAttempts = 0;
+    this.clearManualReconnectTimer();
+    this.invalidateConnectionEpoch();
+    const connection = this.connection;
+    if (connection) {
+      await this.stopConnection(connection);
       if (
         expectedQueueGeneration !== undefined &&
         expectedQueueGeneration !== this.queueSubscriptionGeneration &&
@@ -1022,6 +1189,11 @@ export class PrinterSignalRService {
   }
   dispose(): void {
     this.disposed = true;
+    this.connectionRequested = false;
+    this.connectionIntentGeneration++;
+    this.reconnectAttempts = 0;
+    this.clearManualReconnectTimer();
+    this.invalidateConnectionEpoch();
     this.queueSubscriptionGeneration += 1;
     if (this.authListener) {
       window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
@@ -1040,8 +1212,9 @@ export class PrinterSignalRService {
     this.queueEventCallbacks = [];
     this.queueResourcesChangedCallbacks = [];
     this.clearQueueSubscriptionState();
-    if (this.connection) {
-      this.connection.stop();
+    const connection = this.connection;
+    if (connection) {
+      void this.stopConnection(connection);
       this.connection = null;
     }
   }
@@ -1050,6 +1223,10 @@ export class PrinterSignalRService {
     this.desiredQueuePrinters.clear();
     this.desiredQueueJobs.clear();
     this.desiredQueueProjects.clear();
+    this.clearAppliedQueueSubscriptionState();
+  }
+
+  private clearAppliedQueueSubscriptionState(): void {
     this.subscribedPrinters.clear();
     this.subscribedQueueJobs.clear();
     this.subscribedProjects.clear();

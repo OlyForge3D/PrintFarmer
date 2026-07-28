@@ -2,10 +2,13 @@
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
+using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Api.Services.PrintQueue;
+using Farm.Backend.Plugin.Moonraker;
+using Farm.Backend.Plugin.OctoPrint;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -22,6 +25,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -1261,7 +1265,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrintersService service = CreateConcreteHistoryPrintersService(
             serviceDb,
             printer,
-            history);
+            history.Object);
 
         await RunReconciliationAsync(service);
 
@@ -1303,11 +1307,79 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrintersService service = CreateConcreteHistoryPrintersService(
             serviceDb,
             printer,
+            history.Object);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_MoonrakerIncompleteList_RetainsEveryFence()
+    {
+        const string backendJobId = "moonraker-malformed-list";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.Moonraker);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath == "/server/history/job"
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse("""{"result":{"count":1,"jobs":[]}}"""));
+        using var http = new HttpClient(handler);
+        var history = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
             history);
 
         await RunReconciliationAsync(service);
 
         await AssertIndeterminateFencesAsync(fixture, attemptId);
+        handler.RequestPaths.Should().Contain("/server/history/list");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_OctoPrintPartialListEntry_RetainsEveryFence()
+    {
+        const string backendJobId = "octoprint-malformed-list";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.OctoPrint);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        printer.Credential = new PrinterCredential { ApiKey = "test-api-key" };
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains(
+                backendJobId,
+                StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(
+                    """{"success":true,"count":1,"results":[{"name":"a.gcode","success":true}]}"""));
+        using var http = new HttpClient(handler);
+        var history = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new BackendTimeoutSettings());
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        handler.RequestPaths.Should().Contain("/api/history");
     }
 
     [Fact]
@@ -2925,7 +2997,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     private static PrintersService CreateConcreteHistoryPrintersService(
         AppDbContext db,
         Printer printer,
-        Mock<ISupportsHistory>? historyClient)
+        ISupportsHistory? historyClient)
     {
         var printersRepository = new Mock<IPrintersRepository>();
         printersRepository.Setup(repository => repository.FindByIdAsync(
@@ -2946,7 +3018,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
         else
         {
-            ISupportsHistory? supported = historyClient.Object;
+            ISupportsHistory? supported = historyClient;
             capabilityFactory.Setup(factory => factory.TryGetHistoryClientTyped(
                     (PrinterBackend)printer.Backend,
                     out supported))
@@ -2982,6 +3054,30 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<IStoragePathService>());
+    }
+
+    private static HttpResponseMessage JsonResponse(string payload) =>
+        new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(
+                payload,
+                Encoding.UTF8,
+                "application/json"),
+        };
+
+    private sealed class HistoryAuthorityHandler(
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        : HttpMessageHandler
+    {
+        public List<string> RequestPaths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestPaths.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(responseFactory(request));
+        }
     }
 
     private async Task AssertIndeterminateFencesAsync(

@@ -613,9 +613,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            HttpResponseMessage response = await SendWithRetryAsync(
+                request,
+                cancellationToken: ct);
             response.EnsureSuccessStatusCode();
-            string content = await response.Content.ReadAsStringAsync();
+            string content = await response.Content.ReadAsStringAsync(ct);
             HistoryListResponse? parsed = ParseOctoPrintHistoryList(content);
             if (parsed is null)
             {
@@ -624,6 +626,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             }
 
             return parsed;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogError("Get history list timed out", ex);
+            throw new TimeoutException("OctoPrint history request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            LogError("Get history list transport failed", ex);
+            throw;
         }
         catch (Exception ex)
         {
@@ -1545,25 +1561,33 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 return null;
             }
 
-            List<HistoryJob> jobs = new();
-
-            // Parse the results array
-            if (root.TryGetProperty("results", out JsonElement resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
+            if (!root.TryGetProperty("results", out JsonElement resultsProp) ||
+                resultsProp.ValueKind != JsonValueKind.Array)
             {
-                foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+                return null;
+            }
+
+            List<HistoryJob> jobs = new();
+            foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+            {
+                HistoryJob? job = ParseOctoPrintJobElement(
+                    jobElement,
+                    requireCompleteListEntry: true);
+                if (job is null)
                 {
-                    HistoryJob? job = ParseOctoPrintJobElement(jobElement);
-                    if (job != null)
-                    {
-                        jobs.Add(job);
-                    }
+                    return null;
                 }
+
+                jobs.Add(job);
             }
 
             int count = jobs.Count;
             if (root.TryGetProperty("count", out JsonElement countProp))
             {
-                count = countProp.GetInt32();
+                if (!countProp.TryGetInt32(out count) || count < 0)
+                {
+                    return null;
+                }
             }
 
             return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
@@ -1578,26 +1602,62 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Parses a single OctoPrint job element into a HistoryJob object.
     /// </summary>
     /// <param name="jobElement">JSON element representing a job from OctoPrint</param>
-    private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
+    /// <param name="requireCompleteListEntry">Whether list-authority fields are mandatory.</param>
+    private static HistoryJob? ParseOctoPrintJobElement(
+        JsonElement jobElement,
+        bool requireCompleteListEntry = false)
     {
         try
         {
-            var job = new HistoryJob();
-
-            // Extract basic job information
-            if (jobElement.TryGetProperty("name", out JsonElement nameProp))
+            if (jobElement.ValueKind != JsonValueKind.Object ||
+                !jobElement.TryGetProperty("name", out JsonElement nameProp) ||
+                nameProp.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(nameProp.GetString()))
             {
-                job.Filename = nameProp.GetString() ?? string.Empty;
-                job.JobId = job.Filename;
+                return null;
             }
 
-            if (jobElement.TryGetProperty("success", out JsonElement successProp))
+            var job = new HistoryJob
+            {
+                Filename = nameProp.GetString()!,
+                JobId = nameProp.GetString()!,
+            };
+
+            bool successPresent =
+                jobElement.TryGetProperty("success", out JsonElement successProp);
+            bool timestampPresent =
+                jobElement.TryGetProperty("timestamp", out JsonElement timestampProp);
+            if ((successPresent &&
+                 successProp.ValueKind is not JsonValueKind.True and not JsonValueKind.False) ||
+                (timestampPresent && timestampProp.ValueKind != JsonValueKind.Number))
+            {
+                return null;
+            }
+
+            bool hasSuccess = successPresent;
+            bool hasTimestamp = timestampPresent;
+            if (requireCompleteListEntry && (!hasSuccess || !hasTimestamp))
+            {
+                return null;
+            }
+
+            if (hasSuccess)
             {
                 job.Status = successProp.GetBoolean() ? "Completed" : "Failed";
             }
 
+            if (hasTimestamp)
+            {
+                job.StartTime = timestampProp.GetDouble();
+            }
+
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
             {
+                if (printTimeProp.ValueKind != JsonValueKind.Number)
+                {
+                    return null;
+                }
+
                 job.PrintDuration = printTimeProp.GetDouble();
             }
 
@@ -1605,18 +1665,22 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 if (filamentProp.TryGetProperty("length", out JsonElement lengthProp))
                 {
+                    if (lengthProp.ValueKind != JsonValueKind.Number)
+                    {
+                        return null;
+                    }
+
                     job.FilamentUsed = lengthProp.GetDouble() / 1000.0; // Convert from mm to m
                 }
             }
 
-            // Extract timestamp information
-            if (jobElement.TryGetProperty("timestamp", out JsonElement timestampProp))
-            {
-                job.StartTime = timestampProp.GetDouble();
-            }
-
             if (jobElement.TryGetProperty("completionTime", out JsonElement completionProp) && completionProp.ValueKind != JsonValueKind.Null)
             {
+                if (completionProp.ValueKind != JsonValueKind.Number)
+                {
+                    return null;
+                }
+
                 job.EndTime = completionProp.GetDouble();
             }
 

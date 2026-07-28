@@ -134,6 +134,64 @@ public sealed class MoonrakerUploadOutcomeTests
         await action.Should().ThrowAsync<InvalidDataException>();
     }
 
+    [Theory]
+    [InlineData("""{"result":{}}""")]
+    [InlineData("""{"result":{"count":0}}""")]
+    [InlineData("""{"result":{"count":1,"jobs":[]}}""")]
+    [InlineData("""{"result":{"count":1,"jobs":[{"filename":"a.gcode","status":"completed"}]}}""")]
+    [InlineData("""{"result":{"count":1,"jobs":[{"job_id":"uid-1","status":"completed"}]}}""")]
+    [InlineData("""{"result":{"count":1,"jobs":[{"job_id":"uid-1","filename":"a.gcode"}]}}""")]
+    public async Task GetHistoryListAsync_IncompleteSourcePayload_IsUnavailable(
+        string payload)
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    payload,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://moonraker/");
+
+        history.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_CompleteSourcePayload_IsAuthoritative()
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"result":{"count":1,"jobs":[{"job_id":"uid-1","filename":"a.gcode","status":"completed"}]}}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://moonraker/");
+
+        history.Should().NotBeNull();
+        history!.Count.Should().Be(1);
+        history.Jobs.Should().ContainSingle();
+        history.Jobs[0].JobId.Should().Be("uid-1");
+    }
+
     private sealed class ResponseLostAfterContentHandler : HttpMessageHandler
     {
         public bool ContentWasRead { get; private set; }

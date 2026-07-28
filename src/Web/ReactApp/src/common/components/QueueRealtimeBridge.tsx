@@ -155,17 +155,23 @@ export function QueueRealtimeBridge() {
       retryTimer = undefined;
       resolveRetryDelay?.();
       resolveRetryDelay = undefined;
-      void (async () => {
-        const releaseGeneration =
-          await printerSignalRService.replaceQueueResourceSubscriptions({
-            printerIds: [],
-            jobIds: [],
-            projectIds: [],
-          });
-        await printerSignalRService.disconnect(releaseGeneration);
-      })().catch((error) => {
-        console.error('[QueueRealtimeBridge] cleanup failed', error);
-      });
+      const lifecycle = printerSignalRService as typeof printerSignalRService & {
+        releaseQueueResourceSubscriptionsAndDisconnect?: () => Promise<void>;
+      };
+      const cleanup = lifecycle.releaseQueueResourceSubscriptionsAndDisconnect
+        ? lifecycle.releaseQueueResourceSubscriptionsAndDisconnect()
+        : (async () => {
+            const releaseGeneration =
+              await printerSignalRService.replaceQueueResourceSubscriptions({
+                printerIds: [],
+                jobIds: [],
+                projectIds: [],
+              });
+            await printerSignalRService.disconnect(releaseGeneration);
+          })();
+      void cleanup.catch((error) => {
+          console.error('[QueueRealtimeBridge] cleanup failed', error);
+        });
     };
   }, [queryClient]);
 

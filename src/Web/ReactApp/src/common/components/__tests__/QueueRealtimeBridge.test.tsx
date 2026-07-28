@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
     getQueueSubscriptionResources: vi.fn(),
     getPrinters: vi.fn(),
     replaceQueueResourceSubscriptions: vi.fn().mockResolvedValue(undefined),
+    releaseQueueResourceSubscriptionsAndDisconnect:
+      vi.fn().mockResolvedValue(undefined),
     connect: vi.fn().mockResolvedValue(undefined),
     disconnect: vi.fn().mockResolvedValue(undefined),
     onQueueEvent: vi.fn(
@@ -58,6 +60,8 @@ vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
     replaceQueueResourceSubscriptions:
       mocks.replaceQueueResourceSubscriptions,
+    releaseQueueResourceSubscriptionsAndDisconnect:
+      mocks.releaseQueueResourceSubscriptionsAndDisconnect,
     connect: mocks.connect,
     disconnect: mocks.disconnect,
     onQueueEvent: mocks.onQueueEvent,
@@ -238,16 +242,14 @@ describe('QueueRealtimeBridge', () => {
     error.mockRestore();
   });
 
-  it('queues empty ownership before disconnect when unmounted during an apply', async () => {
+  it('releases ownership and disconnects when unmounted during an apply', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
     const inFlightApply = deferred<void>();
-    mocks.replaceQueueResourceSubscriptions
-      .mockImplementationOnce(() => inFlightApply.promise)
-      .mockImplementationOnce(async () => {
-        await inFlightApply.promise;
-      });
+    mocks.replaceQueueResourceSubscriptions.mockImplementationOnce(
+      () => inFlightApply.promise
+    );
     const rendered = render(
       <QueryClientProvider client={queryClient}>
         <QueueRealtimeBridge />
@@ -264,16 +266,11 @@ describe('QueueRealtimeBridge', () => {
 
     rendered.unmount();
     await waitFor(() =>
-      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
-        printerIds: [],
-        jobIds: [],
-        projectIds: [],
-      })
+      expect(
+        mocks.releaseQueueResourceSubscriptionsAndDisconnect
+      ).toHaveBeenCalledOnce()
     );
-    expect(mocks.disconnect).not.toHaveBeenCalled();
-
     inFlightApply.resolve();
-    await waitFor(() => expect(mocks.disconnect).toHaveBeenCalledOnce());
   });
 
   it('keeps the latest mounted owner in React StrictMode', async () => {

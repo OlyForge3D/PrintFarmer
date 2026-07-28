@@ -1,5 +1,18 @@
 ﻿namespace Farm.Infrastructure.Services.Printers;
 
+/// <summary>Stable failure reasons shared by list and detail history probes.</summary>
+public static class HistoryProbeFailureCodes
+{
+    /// <summary>The provider returned no usable response without a classified transport failure.</summary>
+    public const string Unavailable = "history_unavailable";
+
+    /// <summary>The provider could not be reached over its transport.</summary>
+    public const string TransportUnavailable = "history_transport_unavailable";
+
+    /// <summary>The provider operation exceeded its configured timeout.</summary>
+    public const string Timeout = "history_timeout";
+}
+
 /// <summary>
 /// Describes whether a backend history-list response is authoritative enough for
 /// physical dispatch reconciliation.
@@ -42,8 +55,9 @@ public sealed record HistoryListProbeResult(
         new(HistoryProbeStatus.Unsupported, null, "history_unsupported");
 
     /// <summary>Creates a result for a supported backend that returned no usable response.</summary>
-    public static HistoryListProbeResult Unavailable() =>
-        new(HistoryProbeStatus.Unavailable, null, "history_unavailable");
+    public static HistoryListProbeResult Unavailable(
+        string failureCode = HistoryProbeFailureCodes.Unavailable) =>
+        new(HistoryProbeStatus.Unavailable, null, failureCode);
 
     /// <summary>Creates a result for an unexpected history-query failure.</summary>
     public static HistoryListProbeResult Error(string failureCode = "history_error") =>
@@ -123,8 +137,9 @@ public sealed record HistoryJobProbeResult(
         new(HistoryDetailProbeStatus.Unsupported, null, "history_unsupported");
 
     /// <summary>Creates a result for transport, timeout, or blank-response failure.</summary>
-    public static HistoryJobProbeResult Unavailable() =>
-        new(HistoryDetailProbeStatus.Unavailable, null, "history_unavailable");
+    public static HistoryJobProbeResult Unavailable(
+        string failureCode = HistoryProbeFailureCodes.Unavailable) =>
+        new(HistoryDetailProbeStatus.Unavailable, null, failureCode);
 
     /// <summary>Creates a result for malformed or invalid detail data.</summary>
     public static HistoryJobProbeResult Error(string failureCode = "history_error") =>

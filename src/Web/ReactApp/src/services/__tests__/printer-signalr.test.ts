@@ -11,13 +11,19 @@ function deferred<T>() {
 
 const signalRTestState = vi.hoisted(() => {
   const connectionHandlers = new Map<string, (...args: unknown[]) => void>();
+  let closeHandler: (() => void) | undefined;
+  let reconnectingHandler: (() => void) | undefined;
   let reconnectedHandler: (() => void) | undefined;
   const connection = {
     on: vi.fn((eventName: string, callback: (...args: unknown[]) => void) => {
       connectionHandlers.set(eventName, callback);
     }),
-    onclose: vi.fn(),
-    onreconnecting: vi.fn(),
+    onclose: vi.fn((callback: () => void) => {
+      closeHandler = callback;
+    }),
+    onreconnecting: vi.fn((callback: () => void) => {
+      reconnectingHandler = callback;
+    }),
     onreconnected: vi.fn((callback: () => void) => {
       reconnectedHandler = callback;
     }),
@@ -46,6 +52,8 @@ const signalRTestState = vi.hoisted(() => {
     builder,
     getSettings: vi.fn(),
     getQueueChanges: vi.fn(),
+    triggerClose: () => closeHandler?.(),
+    triggerReconnecting: () => reconnectingHandler?.(),
     triggerReconnected: () => reconnectedHandler?.(),
   };
 });
@@ -57,6 +65,8 @@ vi.mock('@microsoft/signalr', () => ({
   HubConnectionState: {
     Connected: 'Connected',
     Connecting: 'Connecting',
+    Reconnecting: 'Reconnecting',
+    Disconnecting: 'Disconnecting',
     Disconnected: 'Disconnected',
   },
   LogLevel: {
@@ -84,6 +94,9 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     signalRTestState.connection.state = 'Disconnected';
     signalRTestState.connection.start.mockImplementation(async () => {
       signalRTestState.connection.state = 'Connected';
+    });
+    signalRTestState.connection.stop.mockImplementation(async () => {
+      signalRTestState.connection.state = 'Disconnected';
     });
     signalRTestState.connection.invoke.mockResolvedValue(undefined);
     signalRTestState.getSettings.mockResolvedValue({
@@ -114,6 +127,9 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       signalRTestState.connection.state = 'Disconnected';
       signalRTestState.connection.start.mockImplementation(async () => {
         signalRTestState.connection.state = 'Connected';
+      });
+      signalRTestState.connection.stop.mockImplementation(async () => {
+        signalRTestState.connection.state = 'Disconnected';
       });
       signalRTestState.connection.invoke.mockResolvedValue(undefined);
       signalRTestState.getSettings.mockResolvedValue({
@@ -233,7 +249,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('restores authorized groups and removes a rejected group on reconnect', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       await printerSignalRService.replaceQueueResourceSubscriptions({
         printerIds: ['printer-1'],
         jobIds: ['job-1'],
@@ -272,7 +288,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('serializes an in-flight subscription behind the latest empty generation', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       const subscribeStarted = deferred<void>();
       const releaseSubscribe = deferred<void>();
       signalRTestState.connection.invoke.mockImplementation(
@@ -316,7 +332,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('logout clears desired ownership so reconnect restores no stale groups', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       await printerSignalRService.replaceQueueResourceSubscriptions({
         printerIds: ['printer-logout'],
         jobIds: ['job-logout'],
@@ -353,7 +369,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('reconnect waits for an in-flight generation and observes newer cleanup', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       const subscribeStarted = deferred<void>();
       const releaseSubscribe = deferred<void>();
       signalRTestState.connection.invoke.mockImplementation(
@@ -399,7 +415,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('retains a failed unsubscribe in applied state and retries it', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       await printerSignalRService.replaceQueueResourceSubscriptions({
         printerIds: ['printer-retry'],
         jobIds: [],
@@ -447,7 +463,7 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     it('hydrates applied state when reconnect restores a transiently failed group', async () => {
       const { printerSignalRService } = await import('../printer-signalr');
       await flushMicrotasks();
-      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.connect();
       signalRTestState.connection.invoke.mockRejectedValueOnce(
         new Error('transient subscribe failure')
       );
@@ -470,6 +486,176 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       expect(
         printerSignalRService.getQueueSubscriptionSnapshot().jobIds
       ).toEqual(['job-recover']);
+      printerSignalRService.dispose();
+    });
+
+    it('aborts Connecting and fences a late authenticated start completion', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const startEntered = deferred<void>();
+      const releaseStart = deferred<void>();
+      signalRTestState.connection.start.mockImplementation(async () => {
+        signalRTestState.connection.state = 'Connecting';
+        startEntered.resolve();
+        await releaseStart.promise;
+        signalRTestState.connection.state = 'Connected';
+      });
+      const connected = vi.fn();
+      printerSignalRService.onConnectionStateChange(connected);
+
+      const connect = printerSignalRService.connect();
+      await startEntered.promise;
+      const teardown =
+        printerSignalRService.releaseQueueResourceSubscriptionsAndDisconnect();
+      releaseStart.resolve();
+      await Promise.all([connect, teardown]);
+
+      expect(signalRTestState.connection.stop).toHaveBeenCalled();
+      expect(signalRTestState.connection.state).toBe('Disconnected');
+      expect(signalRTestState.getQueueChanges).not.toHaveBeenCalled();
+      expect(connected).not.toHaveBeenCalledWith(true);
+      printerSignalRService.dispose();
+    });
+
+    it('stops Reconnecting and rejects a late automatic reconnect callback', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: ['job-reconnecting'],
+        projectIds: [],
+      });
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.state = 'Reconnecting';
+      signalRTestState.triggerReconnecting();
+
+      await printerSignalRService.releaseQueueResourceSubscriptionsAndDisconnect();
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(signalRTestState.connection.stop).toHaveBeenCalled();
+      expect(signalRTestState.connection.invoke).not.toHaveBeenCalledWith(
+        'SubscribeToQueueJobAsync',
+        'job-reconnecting'
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('cancels a tracked manual reconnect retry during teardown', async () => {
+      vi.useFakeTimers();
+      try {
+        const { printerSignalRService } = await import('../printer-signalr');
+        await flushMicrotasks();
+        signalRTestState.connection.start.mockImplementation(async () => {
+          signalRTestState.connection.state = 'Disconnected';
+          throw new Error('initial start failed');
+        });
+
+        await printerSignalRService.connect();
+        expect(signalRTestState.connection.start).toHaveBeenCalledOnce();
+        await printerSignalRService.disconnect();
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        expect(signalRTestState.connection.start).toHaveBeenCalledOnce();
+        printerSignalRService.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('journals a deferred restore join so newer cleanup unsubscribes it', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: ['job-deferred'],
+        projectIds: [],
+      });
+      signalRTestState.connection.state = 'Reconnecting';
+      signalRTestState.triggerReconnecting();
+      const restoreStarted = deferred<void>();
+      const releaseRestore = deferred<void>();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (
+            method === 'SubscribeToQueueJobAsync' &&
+            id === 'job-deferred'
+          ) {
+            restoreStarted.resolve();
+            await releaseRestore.promise;
+          }
+        }
+      );
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.triggerReconnected();
+      await restoreStarted.promise;
+
+      const cleanup = printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: [],
+        projectIds: [],
+      });
+      releaseRestore.resolve();
+      await cleanup;
+
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'UnsubscribeFromQueueJobAsync',
+        'job-deferred'
+      );
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().jobIds
+      ).toEqual([]);
+      printerSignalRService.dispose();
+    });
+
+    it('does not journal a deferred restore from an obsolete connection epoch', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      await printerSignalRService.connect();
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: ['job-epoch'],
+        projectIds: [],
+      });
+      signalRTestState.connection.state = 'Reconnecting';
+      signalRTestState.triggerReconnecting();
+      const firstRestoreStarted = deferred<void>();
+      const releaseFirstRestore = deferred<void>();
+      let subscribeCalls = 0;
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (method === 'SubscribeToQueueJobAsync' && id === 'job-epoch') {
+            subscribeCalls++;
+            if (subscribeCalls === 1) {
+              firstRestoreStarted.resolve();
+              await releaseFirstRestore.promise;
+            }
+          }
+        }
+      );
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.triggerReconnected();
+      await firstRestoreStarted.promise;
+
+      signalRTestState.connection.state = 'Reconnecting';
+      signalRTestState.triggerReconnecting();
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.triggerReconnected();
+      releaseFirstRestore.resolve();
+      await flushMicrotasks();
+
+      expect(subscribeCalls).toBe(2);
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().jobIds
+      ).toEqual(['job-epoch']);
+      await printerSignalRService.releaseQueueResourceSubscriptionsAndDisconnect();
+      expect(signalRTestState.connection.stop).toHaveBeenCalled();
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().jobIds
+      ).toEqual([]);
       printerSignalRService.dispose();
     });
   });

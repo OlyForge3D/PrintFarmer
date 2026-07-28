@@ -1,4 +1,5 @@
-﻿using Farm.Backend.Plugin.Core;
+﻿using System.Net.Sockets;
+using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.FlashForge;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
@@ -29,6 +30,9 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(HistoryProbeStatus.Unsupported);
         result.History.Should().BeNull();
+        Func<Task> legacyRead = async () => await service.GetHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+        await legacyRead.Should().ThrowAsync<NotSupportedException>();
     }
 
     [Fact]
@@ -80,6 +84,44 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(HistoryProbeStatus.Unavailable);
         result.History.Should().BeNull();
+        result.FailureCode.Should().Be(
+            HistoryProbeFailureCodes.TransportUnavailable);
+        Func<Task> legacyRead = async () => await service.GetHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+        await legacyRead.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Theory]
+    [InlineData(typeof(SocketException), typeof(HttpRequestException), HistoryProbeFailureCodes.TransportUnavailable)]
+    [InlineData(typeof(TimeoutException), typeof(TimeoutException), HistoryProbeFailureCodes.Timeout)]
+    public async Task ProbeHistoryListAsync_ClassifiedFailure_PreservesLegacyReason(
+        Type adapterExceptionType,
+        Type legacyExceptionType,
+        string expectedFailureCode)
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(adapterExceptionType)!);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Unavailable);
+        result.FailureCode.Should().Be(expectedFailureCode);
+        Func<Task> legacyRead = async () => await service.GetHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+        (await legacyRead.Should().ThrowAsync<Exception>())
+            .Which.Should().BeOfType(legacyExceptionType);
     }
 
     [Fact]
@@ -199,6 +241,11 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(HistoryDetailProbeStatus.Unsupported);
         result.Job.Should().BeNull();
+        Func<Task> legacyRead = async () => await service.GetHistoryJobAsync(
+            printer.Id,
+            "provider-job",
+            CancellationToken.None);
+        await legacyRead.Should().ThrowAsync<NotSupportedException>();
     }
 
     [Fact]
@@ -301,6 +348,40 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(expectedStatus);
         result.Job.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(typeof(HttpRequestException), typeof(HttpRequestException), HistoryProbeFailureCodes.TransportUnavailable)]
+    [InlineData(typeof(SocketException), typeof(HttpRequestException), HistoryProbeFailureCodes.TransportUnavailable)]
+    [InlineData(typeof(TimeoutException), typeof(TimeoutException), HistoryProbeFailureCodes.Timeout)]
+    public async Task ProbeHistoryJobAsync_ClassifiedFailure_PreservesLegacyReason(
+        Type adapterExceptionType,
+        Type legacyExceptionType,
+        string expectedFailureCode)
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(adapterExceptionType)!);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Unavailable);
+        result.FailureCode.Should().Be(expectedFailureCode);
+        Func<Task> legacyRead = async () => await service.GetHistoryJobAsync(
+            printer.Id,
+            "provider-job",
+            CancellationToken.None);
+        (await legacyRead.Should().ThrowAsync<Exception>())
+            .Which.Should().BeOfType(legacyExceptionType);
     }
 
     private static AppDbContext CreateDbContext()
