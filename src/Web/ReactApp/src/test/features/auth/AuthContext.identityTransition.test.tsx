@@ -195,6 +195,23 @@ describe('Identity transition cache isolation (#762)', () => {
     vi.mocked(apiClient.put).mockResolvedValue({ data: settingsFor('unset') } as never);
   });
 
+  it.each([
+    ['a network failure', new Error('Network Error')],
+    ['a server error', Object.assign(new Error('Request failed with status code 500'), { statusCode: 500 })],
+  ])('preserves the stored token without rendering an identity when initialization encounters %s', async (
+    _scenario,
+    validationError,
+  ) => {
+    localStorage.setItem('auth-token', 'token-a');
+    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(validationError);
+
+    renderHarness();
+
+    await waitFor(() => expect(screen.queryByTestId('auth-loading')).toBeNull());
+    expect(localStorage.getItem('auth-token')).toBe('token-a');
+    expect(screen.queryByTestId('current-user')).toBeNull();
+  });
+
   it('never exposes identity A cached preferences to identity B after logout/login', async () => {
     vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
 
@@ -466,7 +483,13 @@ describe('Identity transition cache isolation (#762)', () => {
     expect(screen.queryByTestId('auth-loading')).toBeNull();
   });
 
-  it('finishes loading and clears the rejected token when cross-tab identity validation fails', async () => {
+  it.each([
+    ['a network failure', new Error('Network Error')],
+    ['a server error', Object.assign(new Error('Request failed with status code 500'), { statusCode: 500 })],
+  ])('preserves the current token without rendering an identity when cross-tab validation encounters %s', async (
+    _scenario,
+    validationError,
+  ) => {
     vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
     renderHarness();
 
@@ -475,7 +498,37 @@ describe('Identity transition cache isolation (#762)', () => {
     });
     await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
 
-    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(new Error('temporary network failure'));
+    vi.mocked(apiClient.getCurrentUser).mockRejectedValueOnce(validationError);
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: 'token-a',
+        newValue: 'token-b',
+      }));
+    });
+
+    await waitFor(() => expect(screen.queryByTestId('auth-loading')).toBeNull());
+    expect(localStorage.getItem('auth-token')).toBe('token-b');
+    expect(screen.queryByTestId('current-user')).toBeNull();
+  });
+
+  it('accepts interceptor-owned expiration when cross-tab validation rejects the current token', async () => {
+    vi.mocked(apiClient.getNotificationPreferences).mockResolvedValue(prefsFor('user-a'));
+    renderHarness();
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'login-a' }).click();
+    });
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-a'));
+
+    vi.mocked(apiClient.getCurrentUser).mockImplementationOnce(async () => {
+      if (localStorage.getItem('auth-token') === 'token-b') {
+        localStorage.removeItem('auth-token');
+        notifyAuthenticationExpired();
+      }
+      throw Object.assign(new Error('Request failed with status code 401'), { statusCode: 401 });
+    });
     await act(async () => {
       localStorage.setItem('auth-token', 'token-b');
       window.dispatchEvent(new StorageEvent('storage', {
