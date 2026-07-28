@@ -968,8 +968,13 @@ public sealed class CalibrationGenerationSaga(
 
         string root = _storagePaths.GetModelUploadDirectory();
         _ = Directory.CreateDirectory(root);
-        Guid modelId = Guid.NewGuid();
-        string storedFileName = $"{modelId:N}.stl";
+        (Guid modelId, string storageIdentity) =
+            await ResolveGeneratedModelStorageIdentityAsync(
+                project.OwnerUserId,
+                upperDigest,
+                ownerScopedHash,
+                cancellationToken);
+        string storedFileName = $"{storageIdentity}.stl";
         string storedPath = Path.Combine(root, storedFileName);
         bool persisted = false;
         bool preserveStagedBytes = false;
@@ -1109,6 +1114,38 @@ public sealed class CalibrationGenerationSaga(
             ownerUserId,
             contentSha256,
         }).ToUpperInvariant();
+
+    private async Task<(Guid ModelId, string StorageIdentity)>
+        ResolveGeneratedModelStorageIdentityAsync(
+            Guid ownerUserId,
+            string contentSha256,
+            string ownerScopedHash,
+            CancellationToken cancellationToken)
+    {
+        string storageIdentity = ownerScopedHash;
+        for (int collision = 0; collision < 16; collision++)
+        {
+            Guid modelId = DeterministicGuid(
+                $"calibration-generated-model:{storageIdentity}");
+            Model3D? occupied = await _models!.GetByIdAsync(modelId, cancellationToken);
+            if (occupied is null)
+            {
+                return (modelId, storageIdentity);
+            }
+
+            storageIdentity = CalibrationCanonicalJson.ComputeSha256(new
+            {
+                purpose = "calibration-generated-model-storage-collision",
+                ownerUserId,
+                contentSha256,
+                occupiedModelId = occupied.Id,
+                priorStorageIdentity = storageIdentity,
+            }).ToUpperInvariant();
+        }
+
+        throw new InvalidOperationException(
+            "Could not allocate a deterministic generated-model storage identity.");
+    }
 
     private async Task<GeneratedModelSaveOutcome> ReconcileGeneratedModelSaveAsync(Model3D expected)
     {
