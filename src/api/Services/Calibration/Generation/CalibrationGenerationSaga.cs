@@ -955,6 +955,17 @@ public sealed class CalibrationGenerationSaga(
             return byHash.Id;
         }
 
+        string ownerScopedHash = ComputeOwnerScopedGeneratedModelHash(
+            project.OwnerUserId,
+            upperDigest);
+        Model3D? byOwnerHash = await _models.GetByHashAsync(
+            ownerScopedHash,
+            cancellationToken);
+        if (byOwnerHash is not null && byOwnerHash.UploadedByUserId == project.OwnerUserId)
+        {
+            return byOwnerHash.Id;
+        }
+
         string root = _storagePaths.GetModelUploadDirectory();
         _ = Directory.CreateDirectory(root);
         Guid modelId = Guid.NewGuid();
@@ -981,10 +992,11 @@ public sealed class CalibrationGenerationSaga(
                 // FileHash carries a global unique index, so a hash already recorded against a
                 // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
                 // this new row even though the bytes match: doing so would violate the unique
-                // constraint. A per-model synthetic value keeps the insert unique. Worker delivery
-                // still verifies the bytes against SliceJob.ModelSha256, which records the real
-                // content digest and takes precedence over this legacy database key.
-                FileHash = byHash is null ? upperDigest : modelId.ToString("N"),
+                // constraint. A deterministic owner-and-content key keeps the insert unique and
+                // makes a committed row discoverable after a restart before the saga checkpoint.
+                // Worker delivery still verifies the bytes against SliceJob.ModelSha256, which
+                // records the real content digest and takes precedence over this storage key.
+                FileHash = byHash is null ? upperDigest : ownerScopedHash,
                 FileFormat = ModelFileFormat.STL,
                 UploadedByUserId = project.OwnerUserId,
                 UploadedAt = nowUtc,
@@ -1005,8 +1017,8 @@ public sealed class CalibrationGenerationSaga(
                 {
                     // A competing generator inserted the same real digest after our lookup. Keep this
                     // owner's staged bytes, but move the legacy unique key to the same synthetic
-                    // per-model form used when the competing row was visible before the write.
-                    model.FileHash = modelId.ToString("N");
+                    // owner-and-content form used when the competing row was visible before the write.
+                    model.FileHash = ownerScopedHash;
                     await _models.SaveChangesAsync(cancellationToken);
                 }
             }
@@ -1087,6 +1099,16 @@ public sealed class CalibrationGenerationSaga(
         message.Contains($"'{indexName}'", StringComparison.OrdinalIgnoreCase)
         || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
         || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
+
+    private static string ComputeOwnerScopedGeneratedModelHash(
+        Guid ownerUserId,
+        string contentSha256) =>
+        CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-storage",
+            ownerUserId,
+            contentSha256,
+        }).ToUpperInvariant();
 
     private async Task<GeneratedModelSaveOutcome> ReconcileGeneratedModelSaveAsync(Model3D expected)
     {

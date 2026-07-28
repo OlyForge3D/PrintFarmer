@@ -590,6 +590,60 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "A restart after a cross-owner model commit reuses the durable owner model")]
+    public async Task ResumeAsync_AfterModelCommitBeforeCheckpoint_ReusesOwnerModel()
+    {
+        Guid canonicalOwner = Guid.NewGuid();
+        Guid restartingOwner = Guid.NewGuid();
+        CalibrationGenerationFixture canonical = await _harness.SeedAttemptAsync(ownerId: canonicalOwner);
+        CalibrationGenerationFixture restarting = await _harness.SeedAttemptAsync(ownerId: restartingOwner);
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(canonical, "generate-restart-canonical-owner");
+        await AcceptAsync(restarting, "generate-restart-owner");
+
+        _ = await _harness.CreateSaga().ResumeAsync(canonical.OrchestrationId, CancellationToken.None);
+        _ = await _harness.CreateSaga().ResumeAsync(restarting.OrchestrationId, CancellationToken.None);
+        SliceJob committedJob = (await _harness.FindSliceJobAsync(restarting.OrchestrationId))!;
+        Guid committedModelId = committedJob.Model3DId!.Value;
+        string committedDigest = committedJob.ModelSha256!;
+
+        await using (Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext())
+        {
+            SliceJob downstreamJob = await slicer.SliceJobs
+                .SingleAsync(candidate => candidate.CalibrationOrchestrationId == restarting.OrchestrationId);
+            _ = slicer.SliceJobs.Remove(downstreamJob);
+            _ = await slicer.SaveChangesAsync();
+        }
+
+        await _harness.MutateOrchestrationAsync(restarting.OrchestrationId, orchestration =>
+        {
+            orchestration.Model3DId = null;
+            orchestration.SliceJobId = null;
+            orchestration.PlanManifestSha256 = null;
+            orchestration.CurrentStep = CalibrationGenerationSteps.ResolvingModel;
+            orchestration.Status = CalibrationOrchestrationStatus.Running;
+            orchestration.RetryCount = 0;
+            orchestration.NextRetryAtUtc = null;
+            orchestration.LastErrorCode = null;
+            orchestration.LastErrorJson = null;
+            orchestration.LeaseOwner = null;
+            orchestration.LeaseExpiresAtUtc = null;
+        });
+
+        _ = await _harness.CreateSaga().ResumeAsync(restarting.OrchestrationId, CancellationToken.None);
+
+        SliceJob resumedJob = (await _harness.FindSliceJobAsync(restarting.OrchestrationId))!;
+        _ = resumedJob.Model3DId.Should().Be(committedModelId);
+        _ = resumedJob.ModelSha256.Should().Be(committedDigest);
+        _ = (await _harness.CountStoredModelsAsync(restartingOwner)).Should().Be(1);
+        _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().HaveCount(2);
+        await using Farm.Slicer.Module.Data.SlicerDbContext verify = _harness.CreateSlicerContext();
+        Model3D committed = await verify.Models3D.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == committedModelId);
+        byte[] bytes = await File.ReadAllBytesAsync(Path.Combine(_harness.ModelRoot, committed.FileName));
+        _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(committedDigest);
+    }
+
     [Fact(DisplayName = "A model save that throws after commit retains its durable bytes")]
     public async Task ResumeAsync_WhenModelSaveThrowsAfterCommit_ReconcilesDurableModel()
     {
