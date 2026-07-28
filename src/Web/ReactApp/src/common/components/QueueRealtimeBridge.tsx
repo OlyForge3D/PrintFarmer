@@ -67,6 +67,10 @@ export function QueueRealtimeBridge() {
       printerSignalRService.onConnectionStateChange((connected) => {
         if (connected) void refreshAuthority();
       });
+    const unsubscribeResources =
+      printerSignalRService.onQueueResourcesChanged?.(() => {
+        void refreshAuthority();
+      }) ?? (() => {});
 
     void printerSignalRService.connect();
 
@@ -74,6 +78,7 @@ export function QueueRealtimeBridge() {
       disposed = true;
       unsubscribeQueue();
       unsubscribeConnection();
+      unsubscribeResources();
       void printerSignalRService.replaceQueueResourceSubscriptions({
         printerIds: [],
         jobIds: [],

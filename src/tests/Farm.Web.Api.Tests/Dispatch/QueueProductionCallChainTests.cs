@@ -230,6 +230,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             new DbOutboxSequenceAllocator(),
             DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId),
             NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
 
         AcknowledgeBedClearResult result = await acknowledgement.AcknowledgeAsync(
@@ -1358,10 +1359,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         QueueDispatchOutbox row = await verify.QueueDispatchOutbox.SingleAsync(e =>
             e.AggregateId == fixture.JobId &&
             e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
+        Guid? calibrationAttemptId = await verify.PrintJobs
+            .Where(job => job.Id == fixture.JobId)
+            .Select(job => job.CalibrationAttemptId)
+            .SingleAsync();
 
         QueueEventEnvelope first = QueueEventEnvelope.FromOutbox(
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
+            calibrationAttemptId: row.CalibrationAttemptId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
             attemptId: row.AttemptId, attemptNumber: row.AttemptNumber,
             attemptOutcome: row.AttemptOutcome, bedClearState: row.BedClearState,
@@ -1371,11 +1377,13 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             failureRequiresReconciliation: row.FailureRequiresReconciliation,
             payloadJson: row.PayloadJson,
             jobLogicalRevision: row.JobRevision,
-            dispatchStateLogicalRevision: row.DispatchStateRevision);
+            dispatchStateLogicalRevision: row.DispatchStateRevision,
+            schemaVersion: row.SchemaVersion);
 
         QueueEventEnvelope redelivery = QueueEventEnvelope.FromOutbox(
             row.Id, row.Sequence, row.CreatedAtUtc, row.EventType,
             jobId: row.AggregateId, printerId: row.PrinterId,
+            calibrationAttemptId: row.CalibrationAttemptId,
             jobRevision: row.AggregateRowVersion, dispatchStateRevision: row.DispatchStateRowVersion,
             attemptId: row.AttemptId, attemptNumber: row.AttemptNumber,
             attemptOutcome: row.AttemptOutcome, bedClearState: row.BedClearState,
@@ -1385,7 +1393,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             failureRequiresReconciliation: row.FailureRequiresReconciliation,
             payloadJson: row.PayloadJson,
             jobLogicalRevision: row.JobRevision,
-            dispatchStateLogicalRevision: row.DispatchStateRevision);
+            dispatchStateLogicalRevision: row.DispatchStateRevision,
+            schemaVersion: row.SchemaVersion);
 
         redelivery.Should().Be(first, "a redelivery must be byte-identical so consumers can de-duplicate");
         first.EventId.Should().Be(row.Id, "the envelope id is the durable outbox row id");
@@ -1394,6 +1403,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         first.AttemptId.Should().Be(row.AttemptId);
         first.AttemptNumber.Should().Be(row.AttemptNumber);
         first.AttemptOutcome.Should().Be(row.AttemptOutcome);
+        row.SchemaVersion.Should().Be(QueueEventSchemaVersions.Current);
+        first.SchemaVersion.Should().Be(row.SchemaVersion);
+        first.CalibrationAttemptId.Should().Be(calibrationAttemptId);
         first.BedClearState.Should().Be("Consumed");
         first.BedClearCommandId.Should().NotBeNull();
         first.JobLogicalRevision.Should().BeGreaterThan(0);
@@ -1404,6 +1416,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         printerHint.PrinterId.Should().Be(first.PrinterId);
         printerHint.JobId.Should().BeNull();
         printerHint.ProjectId.Should().BeNull();
+        printerHint.CalibrationAttemptId.Should().BeNull();
         printerHint.AttemptId.Should().BeNull();
         printerHint.AttemptNumber.Should().BeNull();
         printerHint.AttemptOutcome.Should().BeNull();
@@ -1411,6 +1424,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         printerHint.JobRevision.Should().BeNull();
         printerHint.DispatchStateRevision.Should().BeNull();
         printerHint.PayloadJson.Should().BeNull();
+
+        QueueEventEnvelope legacy = QueueEventEnvelope.FromOutbox(
+            Guid.NewGuid(),
+            row.Sequence + 1,
+            row.CreatedAtUtc,
+            "PrintFarmer.Queue.Legacy.v1",
+            schemaVersion: "1");
+        legacy.SchemaVersion.Should().Be("1");
     }
 
     [Fact]
@@ -1637,6 +1658,82 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         recovered.RetryAfterUtc.Should().BeOnOrBefore(DateTime.UtcNow);
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OutboxPublisher_SendsPayloadFreeDiscoveryAndPersistedEnvelope()
+    {
+        Guid calibrationAttemptId = Guid.NewGuid();
+        QueueDispatchOutbox row;
+        await using (AppDbContext seed = CreateContext())
+        {
+            await seed.Database.MigrateAsync();
+            await using var transaction = await seed.Database.BeginTransactionAsync();
+            row = new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                AggregateType = nameof(PrintJob),
+                AggregateId = Guid.NewGuid(),
+                CalibrationAttemptId = calibrationAttemptId,
+                EventType = "PrintFarmer.Queue.ResourceDiscoveryProbe.v1",
+                SchemaVersion = QueueEventSchemaVersions.Current,
+                PayloadJson = "{}",
+                Status = QueueOutboxEventStatus.Processing,
+                CreatedAtUtc = DateTime.UtcNow,
+            };
+            seed.QueueDispatchOutbox.Add(row);
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        var proxy = new Mock<IClientProxy>();
+        proxy
+            .Setup(client => client.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var clients = new Mock<IHubClients>();
+        clients
+            .Setup(client => client.Group(It.IsAny<string>()))
+            .Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.Setup(context => context.Clients).Returns(clients.Object);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var publisher = new QueueOutboxPublisherService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                hub.Object,
+                NullLogger<QueueOutboxPublisherService>.Instance);
+
+            await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
+        }
+
+        proxy.Verify(client => client.SendCoreAsync(
+            "queueresourceschanged",
+            It.Is<object?[]>(arguments => arguments.Length == 0),
+            It.IsAny<CancellationToken>()), Times.Once);
+        proxy.Verify(client => client.SendCoreAsync(
+            "queueevent",
+            It.Is<object?[]>(arguments =>
+                IsExpectedQueueEnvelope(arguments, calibrationAttemptId)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static bool IsExpectedQueueEnvelope(
+        object?[] arguments,
+        Guid calibrationAttemptId)
+    {
+        return arguments is [QueueEventEnvelope envelope] &&
+               envelope.SchemaVersion == QueueEventSchemaVersions.Current &&
+               envelope.CalibrationAttemptId == calibrationAttemptId;
+    }
+
     // =========================================================================
     // Durable command consumer outcome semantics
     // =========================================================================
@@ -1788,6 +1885,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(s => s.PrinterId == fixture.PrinterId);
         state.ActiveJobId.Should().BeNull("failing a job must release the ActiveJobId lease");
         state.ActiveDispatchAttemptId.Should().BeNull("failing a job must release the ActiveDispatchAttemptId");
+        PrintJob failedJob = await verify.PrintJobs.SingleAsync(
+            job => job.Id == fixture.JobId);
+        failedJob.Status.Should().Be(PrintJobStatus.Failed);
+        QueueDispatchAttempt acceptedAttempt = await verify.QueueDispatchAttempts
+            .SingleAsync(attempt => attempt.Id == claim.Attempt!.Id);
+        acceptedAttempt.Outcome.Should().Be(
+            DispatchAttemptOutcome.Accepted,
+            "a later print failure does not change the fact that the start was accepted");
     }
 
     [Fact]
@@ -1965,6 +2070,66 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         result.Success.Should().BeFalse("ad-hoc dispatch must fail closed when telemetry is stale");
         result.ErrorCode.Should().Be("telemetry_stale");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task AdvertisedTelemetrySla_IsIdenticalForClaimAndBedClearAcknowledgement()
+    {
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        IPrinterStatusSnapshotReader twentySecondOld =
+            DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId, ageSeconds: 20);
+        IPrinterTelemetryFreshnessPolicy tenSecondSla =
+            DispatchTestDoubles.TelemetryFreshnessPolicy(
+                TimeSpan.FromSeconds(10));
+
+        await using AppDbContext claimContext = CreateContext();
+        DispatchClaimResult claim = await CreateClaim(
+                claimContext,
+                twentySecondOld,
+                tenSecondSla)
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator",
+                "Manual",
+                fixture.AckKey,
+                null,
+                null));
+
+        claim.Success.Should().BeFalse();
+        claim.ErrorCode.Should().Be("telemetry_stale");
+
+        await using AppDbContext acknowledgementContext = CreateContext();
+        PrintJob job = await acknowledgementContext.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        Printer printer = await acknowledgementContext.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        PrinterDispatchState state =
+            await acknowledgementContext.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+        var acknowledgement = new BedClearAcknowledgementService(
+            acknowledgementContext,
+            new DbOutboxSequenceAllocator(),
+            twentySecondOld,
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            tenSecondSla,
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
+        AcknowledgeBedClearResult acknowledged =
+            await acknowledgement.AcknowledgeAsync(
+                new AcknowledgeBedClearRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator",
+                    "sla-boundary",
+                    state.RowVersion,
+                    printer.ConfigurationRevision,
+                    job.RowVersion));
+
+        acknowledged.Outcome.Should().Be(
+            BedClearAckOutcome.PrinterOfflineOrStale);
+        acknowledged.ErrorDetail.Should().Contain("10 seconds");
     }
 
     // =========================================================================
@@ -2189,6 +2354,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             "the completion event must have a higher sequence than the backend-accepted event");
         completionEvent.Status.Should().Be(QueueOutboxEventStatus.Pending,
             "lifecycle events are Pending so the publisher can broadcast them via SignalR");
+        completionEvent.SchemaVersion.Should().Be(QueueEventSchemaVersions.Current);
+        completionEvent.CalibrationAttemptId.Should().Be(
+            await verify.PrintJobs
+                .Where(job => job.Id == fixture.JobId)
+                .Select(job => job.CalibrationAttemptId)
+                .SingleAsync());
     }
 
     [Fact]
@@ -2226,6 +2397,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .SingleAsync();
 
         failEvent.FailureCode.Should().Be("backend_failure");
+        failEvent.AttemptOutcome.Should().Be(
+            DispatchAttemptOutcome.Accepted.ToString());
+        (await verify.QueueDispatchAttempts.SingleAsync(
+            attempt => attempt.Id == claim.Attempt!.Id)).Outcome.Should().Be(
+                DispatchAttemptOutcome.Accepted);
+        (await verify.PrintJobs.SingleAsync(
+            job => job.Id == fixture.JobId)).Status.Should().Be(
+                PrintJobStatus.Failed);
         failEvent.Status.Should().Be(QueueOutboxEventStatus.Pending);
     }
 
@@ -2500,12 +2679,17 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         return ctx;
     }
 
-    private static DispatchClaimService CreateClaim(AppDbContext db, IPrinterStatusSnapshotReader reader) =>
+    private static DispatchClaimService CreateClaim(
+        AppDbContext db,
+        IPrinterStatusSnapshotReader reader,
+        IPrinterTelemetryFreshnessPolicy? telemetryFreshnessPolicy = null) =>
         new(
             db,
             reader,
             new DbOutboxSequenceAllocator(),
             NullLogger<DispatchClaimService>.Instance,
+            telemetryFreshnessPolicy ??
+                DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
 
     private static JobQueueService CreateQueueService(AppDbContext db) =>

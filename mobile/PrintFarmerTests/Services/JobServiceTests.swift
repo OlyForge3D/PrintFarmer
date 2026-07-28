@@ -74,6 +74,46 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testGetHydratesLatestAttemptFromAuthoritativeRecoveryBody() async throws {
+        let attemptB = UUID()
+        mockAPIClient.stubResponse(
+            json: """
+            {
+              "id": "\(jobId)",
+              "rowVersion": "job-v2",
+              "status": "Starting",
+              "priority": 5,
+              "queuePosition": 1,
+              "gcodeFileName": "calibration.gcode",
+              "copies": 1,
+              "completedCopies": 0,
+              "remainingCopies": 1,
+              "dispatchResult": {
+                "attemptId": "\(attemptB)",
+                "attemptNumber": 2,
+                "outcome": "Unknown",
+                "errorCode": null,
+                "errorDetail": null,
+                "isRetryable": false,
+                "requiresReconciliation": true,
+                "jobRevision": "job-v2",
+                "dispatchStateRevision": "dispatch-v2"
+              }
+            }
+            """
+        )
+
+        let recovered = try await service.get(id: jobId)
+
+        XCTAssertEqual(recovered.dispatchResult?.attemptId, attemptB)
+        XCTAssertEqual(recovered.dispatchResult?.attemptNumber, 2)
+        XCTAssertEqual(recovered.dispatchResult?.outcome, .unknown)
+        XCTAssertEqual(
+            mockAPIClient.capturedRequests.last?.url?.path,
+            "/api/job-queue/\(jobId)"
+        )
+    }
+
     private func stubDispatch(statusCode: Int, outcome: String) {
         let requiresReconciliation = outcome == "Unknown"
         mockAPIClient.stubResponse(

@@ -54,6 +54,11 @@ internal static class DispatchTestDoubles
     public static IStoredGcodeIntegrityVerifier ValidByteIntegrityVerifier() =>
         new ValidIntegrityVerifier();
 
+    public static IPrinterTelemetryFreshnessPolicy TelemetryFreshnessPolicy(
+        TimeSpan? maximumObservationAge = null) =>
+        new FixedTelemetryFreshnessPolicy(
+            maximumObservationAge ?? TimeSpan.FromMinutes(1));
+
     private sealed class StubSnapshotReader(Guid printerId, PrinterStatusSnapshot? snapshot)
         : IPrinterStatusSnapshotReader
     {
@@ -69,5 +74,17 @@ internal static class DispatchTestDoubles
             long? expectedSizeBytes,
             CancellationToken ct = default) =>
             Task.FromResult(StoredGcodeIntegrityResult.Valid());
+    }
+
+    private sealed class FixedTelemetryFreshnessPolicy(TimeSpan maximumObservationAge)
+        : IPrinterTelemetryFreshnessPolicy
+    {
+        public bool TryGetMaximumObservationAge(
+            int backendId,
+            out TimeSpan maximumAge)
+        {
+            maximumAge = maximumObservationAge;
+            return true;
+        }
     }
 }

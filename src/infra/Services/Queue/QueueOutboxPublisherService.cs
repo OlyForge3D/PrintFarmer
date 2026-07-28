@@ -142,7 +142,9 @@ public sealed class QueueOutboxPublisherService(
         _ = await db.SaveChangesAsync(ct);
     }
 
-    private async Task ProcessSingleEventAsync(QueueDispatchOutbox evt, CancellationToken ct)
+    internal async Task ProcessSingleEventAsync(
+        QueueDispatchOutbox evt,
+        CancellationToken ct)
     {
         try
         {
@@ -158,6 +160,7 @@ public sealed class QueueOutboxPublisherService(
                 jobId: evt.AggregateId,
                 printerId: evt.PrinterId,
                 projectId: evt.ProjectId,
+                calibrationAttemptId: evt.CalibrationAttemptId,
                 jobStatus: evt.JobStatus,
                 jobKind: evt.JobKind,
                 jobRevision: evt.AggregateRowVersion,
@@ -173,9 +176,16 @@ public sealed class QueueOutboxPublisherService(
                 bedClearCommandId: evt.BedClearCommandId,
                 bedClearExpiresAtUtc: evt.BedClearExpiresAtUtc,
                 failureRetryable: evt.FailureRetryable,
-                failureRequiresReconciliation: evt.FailureRequiresReconciliation);
+                failureRequiresReconciliation: evt.FailureRequiresReconciliation,
+                schemaVersion: evt.SchemaVersion);
 
             List<Task> sends = new();
+
+            // Payload-free discovery hint. Queue readers learn only that their authorized
+            // resource snapshot may have changed; REST performs the actual ACL-filtered read.
+            sends.Add(
+                hub.Clients.Group(AuthorizedHubGroups.QueueReaders)
+                    .SendAsync("queueresourceschanged", ct));
 
             // Job-scoped group: narrower delivery for clients watching this specific job.
             if (string.Equals(evt.AggregateType, nameof(PrintJob), StringComparison.Ordinal))

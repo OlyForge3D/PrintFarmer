@@ -6158,6 +6158,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("CalibrationAttemptId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("TEXT");
 

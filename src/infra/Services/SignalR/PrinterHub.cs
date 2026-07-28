@@ -44,6 +44,15 @@ public class PrinterHub(
             await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Administrators);
         }
 
+        if (PrintFarmerPermissions.HasPermission(
+                Context.User!,
+                PrintFarmerPermissions.Queue.Read))
+        {
+            await Groups.AddToGroupAsync(
+                Context.ConnectionId,
+                AuthorizedHubGroups.QueueReaders);
+        }
+
         await base.OnConnectedAsync();
     }
 

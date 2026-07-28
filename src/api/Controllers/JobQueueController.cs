@@ -316,6 +316,7 @@ public class JobQueueController(
                 jobId: eventJobId,
                 printerId: evt.PrinterId,
                 projectId: evt.ProjectId,
+                calibrationAttemptId: evt.CalibrationAttemptId,
                 jobStatus: evt.JobStatus,
                 jobKind: evt.JobKind,
                 jobRevision: evt.AggregateRowVersion,
@@ -331,7 +332,8 @@ public class JobQueueController(
                 failureRequiresReconciliation: evt.FailureRequiresReconciliation,
                 payloadJson: evt.PayloadJson,
                 jobLogicalRevision: evt.JobRevision,
-                dispatchStateLogicalRevision: evt.DispatchStateRevision));
+                dispatchStateLogicalRevision: evt.DispatchStateRevision,
+                schemaVersion: evt.SchemaVersion));
             if (events.Count == limit)
             {
                 break;

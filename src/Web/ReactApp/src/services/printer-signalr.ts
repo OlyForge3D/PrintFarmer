@@ -30,6 +30,7 @@ type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => v
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
 type QueueEventCallback = (event: QueueEventEnvelope) => void;
+type QueueResourcesChangedCallback = () => void;
 
 const AUTO_DISPATCH_STATE_CHANGED_EVENT = "autodispatchstatechanged";
 
@@ -178,6 +179,15 @@ export class PrinterSignalRService {
     this.connection.on("queueevent", (event: QueueEventEnvelope) => {
       void this.handleQueueEvent(event);
     });
+    this.connection.on("queueresourceschanged", () => {
+      this.queueResourcesChangedCallbacks.forEach((callback) => {
+        try {
+          callback();
+        } catch (error) {
+          console.error("Queue resource callback error:", error);
+        }
+      });
+    });
     // Discovery events - register only lowercase names for consistency
     const handleDiscoveryProgress = (progress: DiscoveryProgressDto) => {
       if (typeof window !== 'undefined' && window.PrintFarmerDebug?.printerSignalR) {
@@ -322,6 +332,7 @@ export class PrinterSignalRService {
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
   private queueEventCallbacks: QueueEventCallback[] = [];
+  private queueResourcesChangedCallbacks: QueueResourcesChangedCallback[] = [];
   private subscribedPrinters = new Set<string>();
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
@@ -620,6 +631,16 @@ export class PrinterSignalRService {
     };
   }
 
+  public onQueueResourcesChanged(
+    callback: QueueResourcesChangedCallback
+  ): () => void {
+    this.queueResourcesChangedCallbacks.push(callback);
+    return () => {
+      const index = this.queueResourcesChangedCallbacks.indexOf(callback);
+      if (index >= 0) this.queueResourcesChangedCallbacks.splice(index, 1);
+    };
+  }
+
   public getQueueSubscriptionSnapshot(): {
     printerIds: string[];
     jobIds: string[];
@@ -904,6 +925,7 @@ export class PrinterSignalRService {
     this.failureDetectionCallbacks = [];
     this.autoDispatchStatusCallbacks = [];
     this.queueEventCallbacks = [];
+    this.queueResourcesChangedCallbacks = [];
     this.subscribedPrinters.clear();
     this.subscribedQueueJobs.clear();
     this.subscribedProjects.clear();

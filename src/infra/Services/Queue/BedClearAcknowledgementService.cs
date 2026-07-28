@@ -29,6 +29,7 @@ public sealed class BedClearAcknowledgementService(
     IDbOutboxSequenceAllocator sequenceAllocator,
     IPrinterStatusSnapshotReader statusReader,
     ILogger<BedClearAcknowledgementService> logger,
+    IPrinterTelemetryFreshnessPolicy telemetryFreshnessPolicy,
     IStoredGcodeIntegrityVerifier? integrityVerifier = null,
     IQueueResourceAuthorizationService? resourceAuthorization = null) : IBedClearAcknowledgementService
 {
@@ -38,9 +39,6 @@ public sealed class BedClearAcknowledgementService(
     /// </summary>
     private static readonly TimeSpan DefaultAcknowledgementTtl = TimeSpan.FromMinutes(15);
 
-    /// <summary>Maximum age of a telemetry snapshot accepted when issuing an acknowledgement.</summary>
-    private static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
-
     /// <summary>Event type string for the durable backend-start command written to the outbox.</summary>
     public const string BackendStartCommandEventType = "PrintFarmer.Queue.BackendStartCommand.v1";
 
@@ -49,6 +47,10 @@ public sealed class BedClearAcknowledgementService(
     private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
     private readonly ILogger<BedClearAcknowledgementService> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private readonly IPrinterTelemetryFreshnessPolicy _telemetryFreshnessPolicy =
+        telemetryFreshnessPolicy ??
+        throw new ArgumentNullException(nameof(telemetryFreshnessPolicy));
 
     private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
@@ -354,6 +356,17 @@ public sealed class BedClearAcknowledgementService(
         // Fresh telemetry — an acknowledgement must reflect a bed the operator can
         // actually see right now, on a printer that is online and not printing.
         // =========================================================================
+        if (!_telemetryFreshnessPolicy.TryGetMaximumObservationAge(
+                printer.Backend,
+                out TimeSpan telemetryFreshnessLimit))
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.PrinterOfflineOrStale,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "The printer backend does not advertise a telemetry freshness SLA; bed-clear cannot be acknowledged.");
+        }
+
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
         if (snapshot is null)
         {
@@ -364,12 +377,13 @@ public sealed class BedClearAcknowledgementService(
         }
 
         DateTime? observedAtUtc = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
-        if (!observedAtUtc.HasValue || (DateTime.UtcNow - observedAtUtc.Value) > TelemetryFreshnessLimit)
+        if (!observedAtUtc.HasValue ||
+            (DateTime.UtcNow - observedAtUtc.Value) > telemetryFreshnessLimit)
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.PrinterOfflineOrStale,
                 job.RowVersion, dispatchState.RowVersion,
-                $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes; bed-clear cannot be acknowledged.");
+                $"Printer telemetry exceeds the backend SLA of {telemetryFreshnessLimit.TotalSeconds:F0} seconds; bed-clear cannot be acknowledged.");
         }
 
         if (!snapshot.Status.IsOnline)
@@ -611,11 +625,12 @@ public sealed class BedClearAcknowledgementService(
             BedClearState = "Acknowledged",
             PrinterId = request.PrinterId,
             ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            CalibrationAttemptId = job.CalibrationAttemptId,
             JobStatus = job.Status.ToString(),
             JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             PrinterConfigRevision = job.PinnedPrinterConfigRevision,
             EventType = BackendStartCommandEventType,
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 jobId = request.JobId,

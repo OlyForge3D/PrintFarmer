@@ -851,7 +851,8 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             db,
             DispatchTestDoubles.OnlineIdleReader(printerId),
             new DbOutboxSequenceAllocator(),
-            NullLogger<DispatchClaimService>.Instance);
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy());
 
     private async Task<ControlFixture> SeedControlFixtureAsync(
         AppDbContext db,

@@ -1912,6 +1912,7 @@ export interface JobQueuePrintJob {
   toolheadUsages?: PrintJobToolheadUsage[];
   dispatchResult?: {
     attemptId?: string | null;
+    attemptNumber?: number | null;
     outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown";
     backendAcceptedAtUtc?: string | null;
     errorCode?: string | null;
@@ -1931,6 +1932,7 @@ export interface QueueEventEnvelope {
   jobId?: string | null;
   printerId?: string | null;
   projectId?: string | null;
+  calibrationAttemptId?: string | null;
   jobStatus?: string | null;
   jobKind?: string | null;
   jobRevision?: string | null;

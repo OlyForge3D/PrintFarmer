@@ -2,6 +2,11 @@
 
 namespace Farm.Infrastructure.Domain;
 
+public static class QueueEventSchemaVersions
+{
+    public const string Current = "3";
+}
+
 /// <summary>
 /// Single-row sequence counter table for the durable outbox.
 /// Atomically incremented (within the same <c>AppDbContext</c> transaction as each
@@ -76,6 +81,9 @@ public sealed class QueueDispatchOutbox
     /// <summary>Calibration or print project scope, when present.</summary>
     public Guid? ProjectId { get; set; }
 
+    /// <summary>Calibration attempt scope, when present.</summary>
+    public Guid? CalibrationAttemptId { get; set; }
+
     /// <summary>Print-job status captured when the event was written.</summary>
     [MaxLength(32)]
     public string? JobStatus { get; set; }
@@ -135,9 +143,9 @@ public sealed class QueueDispatchOutbox
     [MaxLength(256)]
     public string EventType { get; set; } = string.Empty;
 
-    /// <summary>Schema version of the payload (e.g., <c>1</c>).</summary>
+    /// <summary>Persisted envelope schema version.</summary>
     [MaxLength(16)]
-    public string SchemaVersion { get; set; } = "1";
+    public string SchemaVersion { get; set; } = QueueEventSchemaVersions.Current;
 
     /// <summary>
     /// Serialized payload; contains only public identifiers and no credentials,

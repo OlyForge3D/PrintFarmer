@@ -98,6 +98,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             new DbOutboxSequenceAllocator(),
             statusReader ?? DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
             NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
 
     private static DispatchClaimService CreateClaimService(AppDbContext db, IPrinterStatusSnapshotReader? reader = null)
@@ -109,6 +110,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             reader,
             new DbOutboxSequenceAllocator(),
             NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
@@ -1289,14 +1291,17 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
                 candidate.EventType ==
                 BedClearAcknowledgementService.BackendStartCommandEventType);
 
-        // Verify required metadata fields (schemaVersion=1, eventType, non-zero sequence).
-        evt.SchemaVersion.Should().Be("1", "outbox events must use schemaVersion 1");
+        // Verify required metadata fields (current schema, event type, non-zero sequence).
+        evt.SchemaVersion.Should().Be(
+            QueueEventSchemaVersions.Current,
+            "persisted and emitted event schema versions must match");
         evt.EventType.Should().Be(BedClearAcknowledgementService.BackendStartCommandEventType,
             "outbox event type must be the canonical BackendStartCommand type");
         evt.Sequence.Should().BeGreaterThan(0, "outbox event must have a non-zero monotonic sequence");
         evt.AggregateId.Should().Be(jobId, "aggregate ID must match the print job ID");
         evt.AggregateType.Should().Be("PrintJob", "aggregate type must be PrintJob");
         evt.PrinterId.Should().Be(printerId, "printer ID must be present in the outbox event");
+        evt.CalibrationAttemptId.Should().Be(job.CalibrationAttemptId);
         evt.PayloadJson.Should().NotBeNullOrWhiteSpace("payload must be non-empty");
         evt.Status.Should().Be(QueueOutboxEventStatus.Pending, "new events must start in Pending state");
         evt.CreatedAtUtc.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
@@ -1309,6 +1314,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         acknowledged.BedClearCommandId.Should().NotBeNull();
         acknowledged.BedClearExpiresAtUtc.Should().NotBeNull();
         acknowledged.AttemptId.Should().BeNull();
+        acknowledged.CalibrationAttemptId.Should().Be(job.CalibrationAttemptId);
     }
 
     [Fact]
@@ -1328,10 +1334,15 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             .FirstOrDefaultAsync(e => e.EventType == "PrintFarmer.Queue.JobDispatchStarted.v1");
 
         claimEvent.Should().NotBeNull("claim must write a JobDispatchStarted outbox event");
-        claimEvent!.SchemaVersion.Should().Be("1");
+        claimEvent!.SchemaVersion.Should().Be(QueueEventSchemaVersions.Current);
         claimEvent.Sequence.Should().BeGreaterThan(0);
         claimEvent.AggregateId.Should().Be(jobId);
         claimEvent.PrinterId.Should().Be(printerId);
+        claimEvent.CalibrationAttemptId.Should().Be(
+            await verifyCtx.PrintJobs
+                .Where(job => job.Id == jobId)
+                .Select(job => job.CalibrationAttemptId)
+                .SingleAsync());
     }
 
     // =========================================================================

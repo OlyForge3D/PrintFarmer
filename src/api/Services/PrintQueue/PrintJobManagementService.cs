@@ -283,7 +283,7 @@ public class PrintJobManagementService(
                                 out string? version)
                                 ? version
                                 : null;
-                        dto.Job.DispatchResult = MapDispatchAttemptResult(
+                        dto.Job.DispatchResult = QueueDispatchAttemptResultMapper.Map(
                             attempt,
                             job,
                             dispatchVersion);
@@ -3837,12 +3837,13 @@ public class PrintJobManagementService(
             AggregateRowVersion = job.RowVersion,
             PrinterId = job.AssignedPrinterId,
             ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            CalibrationAttemptId = job.CalibrationAttemptId,
             JobStatus = job.Status.ToString(),
             JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             DispatchStateRowVersion = dispatchState.RowVersion,
             AttemptId = attempt.Id,
             EventType = BackendControlCommandConsumerService.EventType,
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             PayloadJson = JsonSerializer.Serialize(new
             {
                 jobId = job.Id,
@@ -4336,32 +4337,10 @@ public class PrintJobManagementService(
         string? dispatchStateRevision = dispatchRevision is { Length: > 0 }
             ? Convert.ToBase64String(dispatchRevision)
             : null;
-        return MapDispatchAttemptResult(
+        return QueueDispatchAttemptResultMapper.Map(
             attempt,
             job,
             dispatchStateRevision);
-    }
-
-    private static DispatchAttemptResultDto MapDispatchAttemptResult(
-        QueueDispatchAttempt attempt,
-        PrintJob job,
-        string? dispatchStateRevision)
-    {
-        return new DispatchAttemptResultDto
-        {
-            AttemptId = attempt.Id,
-            AttemptNumber = attempt.AttemptNumber,
-            Outcome = attempt.Outcome,
-            BackendAcceptedAtUtc = attempt.BackendAcceptedAtUtc,
-            ErrorCode = attempt.ErrorCode,
-            ErrorDetail = attempt.ErrorDetail,
-            IsRetryable = attempt.IsRetryable,
-            RequiresReconciliation = attempt.RequiresReconciliation,
-            JobRevision = job.RowVersion is { Length: > 0 }
-                ? Convert.ToBase64String(job.RowVersion)
-                : null,
-            DispatchStateRevision = dispatchStateRevision,
-        };
     }
 
     private QueueGcodeFileMetaDto MapToQueueGcodeFileMetaDto(GcodeFile file)
@@ -4418,7 +4397,31 @@ public class PrintJobManagementService(
 
             PrintJob? job = await _repository.GetByIdWithGcodeFileAsync(Guid.Parse(jobId), cancellationToken);
 
-            return job != null ? MapToQueuedPrintJobDto(job) : null;
+            if (job is null)
+            {
+                return null;
+            }
+
+            QueuedPrintJobDto dto = MapToQueuedPrintJobDto(job);
+            if (_appDbContext is not null)
+            {
+                QueueDispatchAttempt? attempt = await _appDbContext
+                    .QueueDispatchAttempts
+                    .AsNoTracking()
+                    .Where(candidate => candidate.PrintJobId == job.Id)
+                    .OrderByDescending(candidate => candidate.AttemptNumber)
+                    .ThenByDescending(candidate => candidate.ClaimedAtUtc)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (attempt is not null)
+                {
+                    dto.DispatchResult = await MapDispatchAttemptResultAsync(
+                        attempt,
+                        job,
+                        cancellationToken);
+                }
+            }
+
+            return dto;
         }
         catch (Exception ex)
         {

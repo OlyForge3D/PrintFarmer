@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.SignalR;
+﻿using Farm.Infrastructure.Domain;
+
+namespace Farm.Infrastructure.Services.SignalR;
 
 /// <summary>
 /// Versioned envelope for authenticated SignalR queue events.
@@ -18,6 +20,7 @@
 /// <param name="JobId">Aggregate print job, when the event is job-scoped.</param>
 /// <param name="PrinterId">Printer the event relates to, when applicable.</param>
 /// <param name="ProjectId">Project the event relates to, when applicable.</param>
+/// <param name="CalibrationAttemptId">Calibration attempt the event belongs to, when applicable.</param>
 /// <param name="JobStatus">Print job status at write time.</param>
 /// <param name="JobKind">Print job kind at write time.</param>
 /// <param name="JobRevision">Base-64 job row version at write time.</param>
@@ -44,6 +47,7 @@ public sealed record QueueEventEnvelope(
     Guid? JobId,
     Guid? PrinterId,
     Guid? ProjectId,
+    Guid? CalibrationAttemptId,
     string? JobStatus,
     string? JobKind,
     string? JobRevision,
@@ -74,6 +78,7 @@ public sealed record QueueEventEnvelope(
     /// <param name="jobId">Aggregate print job.</param>
     /// <param name="printerId">Printer the event relates to.</param>
     /// <param name="projectId">Calibration or print project the event relates to.</param>
+    /// <param name="calibrationAttemptId">Calibration attempt the event belongs to.</param>
     /// <param name="jobStatus">Print job status at write time.</param>
     /// <param name="jobKind">Print job kind at write time.</param>
     /// <param name="jobRevision">Job row version at write time.</param>
@@ -91,6 +96,7 @@ public sealed record QueueEventEnvelope(
     /// <param name="payloadJson">Redacted payload.</param>
     /// <param name="jobLogicalRevision">Provider-independent resulting job revision.</param>
     /// <param name="dispatchStateLogicalRevision">Provider-independent resulting dispatch revision.</param>
+    /// <param name="schemaVersion">Persisted envelope schema version.</param>
     /// <returns>A durable, de-duplicable envelope.</returns>
     public static QueueEventEnvelope FromOutbox(
         Guid eventId,
@@ -100,6 +106,7 @@ public sealed record QueueEventEnvelope(
         Guid? jobId = null,
         Guid? printerId = null,
         Guid? projectId = null,
+        Guid? calibrationAttemptId = null,
         string? jobStatus = null,
         string? jobKind = null,
         byte[]? jobRevision = null,
@@ -116,9 +123,10 @@ public sealed record QueueEventEnvelope(
         bool? failureRequiresReconciliation = null,
         string? payloadJson = null,
         long? jobLogicalRevision = null,
-        long? dispatchStateLogicalRevision = null) =>
+        long? dispatchStateLogicalRevision = null,
+        string? schemaVersion = null) =>
         new(
-            "2",
+            schemaVersion ?? QueueEventSchemaVersions.Current,
             eventId,
             sequence,
             eventType,
@@ -126,6 +134,7 @@ public sealed record QueueEventEnvelope(
             jobId,
             printerId,
             projectId,
+            calibrationAttemptId,
             jobStatus,
             jobKind,
             Encode(jobRevision),
@@ -154,6 +163,7 @@ public sealed record QueueEventEnvelope(
             EventType = "PrintFarmer.Queue.PrinterStateChanged.v1",
             JobId = null,
             ProjectId = null,
+            CalibrationAttemptId = null,
             JobKind = null,
             JobRevision = null,
             DispatchStateRevision = null,

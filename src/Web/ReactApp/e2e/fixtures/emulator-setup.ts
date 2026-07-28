@@ -137,7 +137,10 @@ export const test = base.extend<EmulatorFixtures>({
 async function getOrCreateToken(page: Page): Promise<string | undefined> {
   // Try reading cached token first
   const cached = readCachedToken();
-  if (cached) return cached;
+  if (cached && await isTokenValid(page, cached)) return cached;
+  if (cached) {
+    try { fs.unlinkSync(TOKEN_CACHE_FILE); } catch { /* another worker removed it */ }
+  }
 
   // No cache — we need to create the admin and login.
   // Use a simple file-lock approach: first writer wins.
@@ -152,7 +155,7 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
     for (let i = 0; i < 30; i++) {
       await page.waitForTimeout(500);
       const t = readCachedToken();
-      if (t) return t;
+      if (t && await isTokenValid(page, t)) return t;
     }
     // Fallback: try login directly
     return await loginDirect(page);
@@ -182,6 +185,17 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
     return token;
   } finally {
     try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+  }
+}
+
+async function isTokenValid(page: Page, token: string): Promise<boolean> {
+  try {
+    const response = await page.request.get(`${API_BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.ok();
+  } catch {
+    return false;
   }
 }
 

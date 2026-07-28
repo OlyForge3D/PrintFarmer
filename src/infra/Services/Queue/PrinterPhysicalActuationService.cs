@@ -448,6 +448,7 @@ public sealed class PrinterPhysicalActuationService(
             AggregateRowVersion = activeJob.RowVersion,
             PrinterId = printerId,
             ProjectId = activeJob.CalibrationProjectId ?? activeJob.ProjectId,
+            CalibrationAttemptId = activeJob.CalibrationAttemptId,
             JobStatus = activeJob.Status.ToString(),
             JobKind = activeJob.JobKind?.ToString() ?? nameof(JobKind.Standard),
             DispatchStateRowVersion = state.RowVersion,
@@ -455,7 +456,7 @@ public sealed class PrinterPhysicalActuationService(
             AttemptNumber = attempt.AttemptNumber,
             AttemptOutcome = attempt.Outcome.ToString(),
             EventType = BackendControlCommandConsumerService.EventType,
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             PayloadJson = JsonSerializer.Serialize(new
             {
                 jobId = activeJob.Id,
@@ -607,6 +608,24 @@ public sealed class PrinterPhysicalActuationService(
         CancellationToken ct,
         bool? failureRequiresReconciliation = null)
     {
+        QueueDispatchAttempt? attempt = attemptId.HasValue
+            ? _db.QueueDispatchAttempts.Local.FirstOrDefault(
+                candidate => candidate.Id == attemptId.Value)
+                ?? await _db.QueueDispatchAttempts
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.Id == attemptId.Value,
+                        ct)
+            : null;
+        Guid? calibrationAttemptId = attempt?.PrintJobId is Guid printJobId
+            ? _db.PrintJobs.Local.FirstOrDefault(job => job.Id == printJobId)
+                ?.CalibrationAttemptId
+                ?? await _db.PrintJobs
+                    .AsNoTracking()
+                    .Where(job => job.Id == printJobId)
+                    .Select(job => job.CalibrationAttemptId)
+                    .FirstOrDefaultAsync(ct)
+            : null;
         _db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -616,8 +635,11 @@ public sealed class PrinterPhysicalActuationService(
             PrinterId = printerId,
             DispatchStateRowVersion = dispatchStateRowVersion,
             AttemptId = attemptId,
+            AttemptNumber = attempt?.AttemptNumber,
+            AttemptOutcome = attempt?.Outcome.ToString(),
+            CalibrationAttemptId = calibrationAttemptId,
             EventType = eventType,
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             FailureCode = failureCode,
             FailureRetryable = false,
             FailureRequiresReconciliation = failureRequiresReconciliation,

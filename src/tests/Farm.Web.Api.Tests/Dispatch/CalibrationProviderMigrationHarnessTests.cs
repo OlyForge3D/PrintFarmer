@@ -2,6 +2,7 @@
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -549,6 +550,7 @@ public class CalibrationProviderMigrationHarnessTests
         await AssertProviderBusinessRacesAsync(opts, providerName);
         await AssertProviderSchedulerOccurrencesAsync(opts, providerName);
         await AssertProviderDispatchPhasesAsync(opts, providerName);
+        await AssertProviderSchedulingHistoryWireAsync(opts, providerName);
 
         // No pending migrations must remain.
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();
@@ -1091,7 +1093,8 @@ public class CalibrationProviderMigrationHarnessTests
             db,
             snapshots.Object,
             new DbOutboxSequenceAllocator(),
-            NullLogger<DispatchClaimService>.Instance);
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy());
 
         DispatchClaimResult preClaim = await service.AcquireClaimAsync(
             ClaimRequest(preCall, "provider-phase"));
@@ -1159,6 +1162,96 @@ public class CalibrationProviderMigrationHarnessTests
             $"[{providerName}] persisted exception details must be redacted");
     }
 
+    private static async Task AssertProviderSchedulingHistoryWireAsync(
+        DbContextOptions<AppDbContext> options,
+        string providerName)
+    {
+        ProviderFixture fixture = await SeedProviderFixtureAsync(
+            options,
+            "schedule-history-wire",
+            PrintJobStatus.Assigned,
+            DispatchAttemptOutcome.InProgress,
+            createAttempt: false);
+        Guid actorId = Guid.NewGuid();
+        DateTime scheduledUtc = new(
+            2026,
+            11,
+            1,
+            8,
+            30,
+            0,
+            DateTimeKind.Utc);
+        await using var db = new AppDbContext(options);
+        var schedule = new JobSchedule
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = fixture.JobId,
+            RootPrintJobId = fixture.JobId,
+            ScheduledStartTime = scheduledUtc,
+            TimeZone = "America/New_York",
+            IsActive = true,
+            InitiatingActorSubject = actorId.ToString(),
+            RequiresOperatorReauthorization = false,
+            ScheduledAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        db.JobSchedules.Add(schedule);
+        db.JobExecutions.Add(new JobExecution
+        {
+            Id = Guid.NewGuid(),
+            JobScheduleId = schedule.Id,
+            OccurrencePrintJobId = fixture.JobId,
+            ScheduledExecutionTime = scheduledUtc,
+            ActualStartTime = scheduledUtc.AddSeconds(5),
+            Status = "Completed",
+            CreatedAt = scheduledUtc,
+            UpdatedAt = scheduledUtc.AddSeconds(5),
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var authorization = new Mock<IQueueResourceAuthorizationService>();
+        authorization.Setup(service => service.CanActorAccessJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        authorization.Setup(service => service.CanActorAccessPrinterAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        authorization.Setup(service => service.CanActorAccessProjectAsync(
+                It.IsAny<string>(),
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var scheduler = new JobSchedulingService(
+            db,
+            NullLogger<JobSchedulingService>.Instance,
+            Mock.Of<IPrintJobManagementService>(),
+            authorization.Object);
+
+        IReadOnlyList<JobExecutionDto>? history =
+            await scheduler.GetExecutionHistoryAsync(
+                fixture.JobId,
+                actorId.ToString());
+
+        JobExecutionDto execution = history.Should().ContainSingle().Subject;
+        execution.ScheduledExecutionTime.Kind.Should().Be(
+            DateTimeKind.Utc,
+            $"[{providerName}] provider timestamps must be normalized before serialization");
+        using JsonDocument wire = JsonDocument.Parse(JsonSerializer.Serialize(
+            execution,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        wire.RootElement.GetProperty("scheduledExecutionTime")
+            .GetString().Should().Be("2026-11-01T08:30:00Z");
+        wire.RootElement.GetProperty("actualStartTime")
+            .GetString().Should().Be("2026-11-01T08:30:05Z");
+    }
+
     private static DispatchClaimService CreateProviderClaim(
         AppDbContext db,
         Guid printerId) =>
@@ -1166,7 +1259,8 @@ public class CalibrationProviderMigrationHarnessTests
             db,
             DispatchTestDoubles.OnlineIdleReader(printerId),
             new DbOutboxSequenceAllocator(),
-            NullLogger<DispatchClaimService>.Instance);
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy());
 
     private static BedClearAcknowledgementService CreateProviderAck(
         AppDbContext db,
@@ -1175,7 +1269,8 @@ public class CalibrationProviderMigrationHarnessTests
             db,
             new DbOutboxSequenceAllocator(),
             DispatchTestDoubles.OnlineIdleReader(printerId),
-            NullLogger<BedClearAcknowledgementService>.Instance);
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy());
 
     private static DispatchClaimRequest ClaimRequest(
         ProviderFixture fixture,

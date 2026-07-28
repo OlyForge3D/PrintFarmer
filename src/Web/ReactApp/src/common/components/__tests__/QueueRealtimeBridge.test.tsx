@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
     | ((event: { jobId?: string; printerId?: string }) => void)
     | undefined;
   let connectionCallback: ((connected: boolean) => void) | undefined;
+  let resourcesChangedCallback: (() => void) | undefined;
   return {
     getQueueSubscriptionResources: vi.fn(),
     getPrinters: vi.fn(),
@@ -26,9 +27,14 @@ const mocks = vi.hoisted(() => {
         return vi.fn();
       }
     ),
+    onQueueResourcesChanged: vi.fn((callback: () => void) => {
+      resourcesChangedCallback = callback;
+      return vi.fn();
+    }),
     emitQueueEvent: (event: { jobId?: string; printerId?: string }) =>
       queueCallback?.(event),
     emitConnection: (connected: boolean) => connectionCallback?.(connected),
+    emitResourcesChanged: () => resourcesChangedCallback?.(),
   };
 });
 
@@ -47,6 +53,7 @@ vi.mock('@/services/printer-signalr', () => ({
     disconnect: mocks.disconnect,
     onQueueEvent: mocks.onQueueEvent,
     onConnectionStateChange: mocks.onConnectionStateChange,
+    onQueueResourcesChanged: mocks.onQueueResourcesChanged,
   },
 }));
 
@@ -61,7 +68,7 @@ describe('QueueRealtimeBridge', () => {
     mocks.getPrinters.mockResolvedValue([{ id: 'visible-printer' }]);
   });
 
-  it('reconciles all resources and refetches real queue keys for new events', async () => {
+  it('discovers a post-connect resource from the server hint and refetches queue keys', async () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -88,7 +95,7 @@ describe('QueueRealtimeBridge', () => {
       jobIds: ['job-2'],
       projectIds: ['project-2'],
     });
-    mocks.emitQueueEvent({ jobId: 'job-2', printerId: 'new-printer' });
+    mocks.emitResourcesChanged();
 
     await waitFor(() =>
       expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenLastCalledWith({
@@ -97,11 +104,7 @@ describe('QueueRealtimeBridge', () => {
         projectIds: ['project-2'],
       })
     );
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: ['printers', 'new-printer'],
-    });
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: ['scheduled-jobs', 'job-2'],
-    });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
   });
 });

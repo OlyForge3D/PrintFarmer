@@ -434,6 +434,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 allocator,
                 DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
                 NullLogger<BedClearAcknowledgementService>.Instance,
+                DispatchTestDoubles.TelemetryFreshnessPolicy(),
                 DispatchTestDoubles.ValidByteIntegrityVerifier());
 
             return await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
@@ -536,6 +537,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
             new DbOutboxSequenceAllocator(),
             DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
             NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
 
         AcknowledgeBedClearResult result = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(
@@ -634,6 +636,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
                 new DbOutboxSequenceAllocator(),
                 DispatchTestDoubles.OnlineIdleReader(Guid.Empty),
                 NullLogger<BedClearAcknowledgementService>.Instance,
+                DispatchTestDoubles.TelemetryFreshnessPolicy(),
                 DispatchTestDoubles.ValidByteIntegrityVerifier());
 
             var r = await ackSvc.AcknowledgeAsync(new AcknowledgeBedClearRequest(

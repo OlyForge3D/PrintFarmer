@@ -162,6 +162,136 @@ test.describe('Queue realtime authentication — Emulator', () => {
     await expect.poll(() => queueStatsResponses).toBeGreaterThan(statsBaseline);
   });
 
+  test('discovers a server-created queue job after connect and refetches queue data', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.PrintFarmerDebug = { printerSignalR: true };
+    });
+    let resourceResponses = 0;
+    let queueListResponses = 0;
+    let queueStatsResponses = 0;
+    page.on('response', (response) => {
+      if (response.status() !== 200) return;
+      const path = new URL(response.url()).pathname;
+      if (path === '/api/job-queue/subscription-resources') {
+        resourceResponses++;
+      } else if (path === '/api/job-queue-analytics') {
+        queueListResponses++;
+      } else if (path === '/api/job-queue-analytics/stats') {
+        queueStatsResponses++;
+      }
+    });
+
+    await page.goto('/printQueue');
+    await page.waitForLoadState('networkidle');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                window.PrintFarmerDebug?.printerSignalRService as
+                  | { isConnected?: boolean }
+                  | undefined
+              )?.isConnected === true
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe(true);
+    const baseline = {
+      resources: resourceResponses,
+      queue: queueListResponses,
+      stats: queueStatsResponses,
+    };
+
+    const jobId = await page.evaluate(async () => {
+      const token = localStorage.getItem('auth-token');
+      const authorization = { Authorization: `Bearer ${token ?? ''}` };
+      const printersResponse = await fetch('/api/printers', {
+        headers: authorization,
+      });
+      if (!printersResponse.ok) {
+        throw new Error(`Printers failed: ${printersResponse.status}`);
+      }
+      const printerPayload = (await printersResponse.json()) as
+        | Array<{ id: string; name?: string }>
+        | { items?: Array<{ id: string; name?: string }> };
+      const printers = Array.isArray(printerPayload)
+        ? printerPayload
+        : (printerPayload.items ?? []);
+      const printer =
+        printers.find((candidate) => candidate.name === 'Test Printer Alpha') ??
+        printers[0];
+      if (!printer) {
+        throw new Error('No emulator printer is available');
+      }
+      const form = new FormData();
+      form.append(
+        'file',
+        new Blob(['; server-driven resource discovery\nG28\n'], {
+          type: 'text/plain',
+        }),
+        `realtime-${crypto.randomUUID()}.gcode`
+      );
+      const uploadResponse = await fetch('/api/gcode-files/upload', {
+        method: 'POST',
+        headers: authorization,
+        body: form,
+      });
+      if (!uploadResponse.ok) {
+        throw new Error(
+          `Upload failed: ${uploadResponse.status} ${await uploadResponse.text()}`
+        );
+      }
+
+      const upload = (await uploadResponse.json()) as { id: string };
+      const queueResponse = await fetch('/api/job-queue', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token ?? ''}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gcodeFileId: upload.id,
+          assignedPrinterId: printer.id,
+          priority: 2,
+          idempotencyKey: crypto.randomUUID(),
+        }),
+      });
+      if (!queueResponse.ok) {
+        throw new Error(
+          `Queue creation failed: ${queueResponse.status} ${await queueResponse.text()}`
+        );
+      }
+
+      return ((await queueResponse.json()) as { id: string }).id;
+    });
+
+    await expect
+      .poll(() => resourceResponses, { timeout: 15_000 })
+      .toBeGreaterThan(baseline.resources);
+    await expect
+      .poll(
+        () =>
+          page.evaluate((id) => {
+            const service = window.PrintFarmerDebug!
+              .printerSignalRService as {
+              getQueueSubscriptionSnapshot: () => { jobIds: string[] };
+            };
+            return service.getQueueSubscriptionSnapshot().jobIds.includes(id);
+          }, jobId),
+        { timeout: 15_000 }
+      )
+      .toBe(true);
+    await expect
+      .poll(() => queueListResponses, { timeout: 15_000 })
+      .toBeGreaterThan(baseline.queue);
+    await expect
+      .poll(() => queueStatsResponses, { timeout: 15_000 })
+      .toBeGreaterThan(baseline.stats);
+  });
+
   test('maintenance client traffic never uses the retired raw G-code route', async ({
     page,
   }) => {

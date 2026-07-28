@@ -103,6 +103,27 @@ public class PrinterHubTests
     }
 
     [Fact]
+    public async Task OnConnectedAsync_QueueReader_JoinsResourceDiscoveryGroup()
+    {
+        _contextMock.Setup(c => c.User).Returns(new ClaimsPrincipal(
+            new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, _userId.ToString()),
+                new Claim(
+                    PrintFarmerPermissions.ClaimType,
+                    PrintFarmerPermissions.Queue.Read),
+            ],
+            "Test")));
+
+        await _hub.OnConnectedAsync();
+
+        _groupsMock.Verify(group => group.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.QueueReaders,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task JoinDiscoveryGroupAsync_AddsClientToGroup()
     {
         // Arrange

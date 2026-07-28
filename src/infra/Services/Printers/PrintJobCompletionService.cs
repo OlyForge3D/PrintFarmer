@@ -895,19 +895,31 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             return;
         }
 
+        QueueDispatchAttempt? dispatchAttempt = _db.QueueDispatchAttempts.Local
+            .Where(attempt => attempt.PrintJobId == job.Id)
+            .OrderByDescending(attempt => attempt.AttemptNumber)
+            .ThenByDescending(attempt => attempt.ClaimedAtUtc)
+            .FirstOrDefault()
+            ?? await _db.QueueDispatchAttempts
+                .AsNoTracking()
+                .Where(attempt => attempt.PrintJobId == job.Id)
+                .OrderByDescending(attempt => attempt.AttemptNumber)
+                .ThenByDescending(attempt => attempt.ClaimedAtUtc)
+                .FirstOrDefaultAsync(ct);
         await DispatchClaimService.AddLifecycleOutboxEventAsync(
             _db,
             _sequenceAllocator,
             eventType,
             aggregateId: job.Id,
             printerId: printerId,
-            attemptId: null,
+            attemptId: dispatchAttempt?.Id,
             aggregateRowVersion: job.RowVersion,
             failureCode: failureCode,
             payloadJson: System.Text.Json.JsonSerializer.Serialize(new
             {
                 jobId = job.Id,
                 printerId,
+                attemptId = dispatchAttempt?.Id,
                 jobStatus = job.Status.ToString(),
                 jobKind = job.JobKind?.ToString() ?? "Standard",
                 failureReason = job.FailureReason,
@@ -1124,13 +1136,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         dispatchState.ActiveJobId = null;
         dispatchState.ActiveDispatchAttemptId = null;
 
-        // Close the dispatch attempt (if still InProgress or Accepted — do not overwrite a
-        // FailedBeforeStart that was set by ReleaseClaimOnKnownFailureAsync).
+        // A dispatch attempt records whether the backend accepted the start, not the later
+        // print lifecycle result. Preserve Accepted when a normally-started print later fails.
+        // Only an unresolved InProgress attempt inherits the terminal observation.
         QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
             .FirstOrDefaultAsync(a => a.Id == attemptId, ct);
 
-        if (attempt is not null &&
-            attempt.Outcome is DispatchAttemptOutcome.InProgress or DispatchAttemptOutcome.Accepted)
+        if (attempt?.Outcome == DispatchAttemptOutcome.InProgress)
         {
             attempt.Outcome = terminalOutcome;
             attempt.UpdatedAtUtc = DateTime.UtcNow;
@@ -1154,7 +1166,8 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             dispatchStateRowVersion: dispatchState.RowVersion,
             detail: new
             {
-                terminalOutcome = terminalOutcome.ToString(),
+                dispatchOutcome = attempt?.Outcome.ToString(),
+                printTerminalOutcome = terminalOutcome.ToString(),
                 leaseReleasedAtTerminal = true,
             });
 

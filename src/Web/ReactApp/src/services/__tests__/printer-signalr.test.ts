@@ -142,11 +142,12 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
         hasMore: false,
         events: [
           {
-            schemaVersion: '2',
+            schemaVersion: '3',
             eventId: 'event-1',
             sequence: 1,
             eventType: 'queue.updated',
             occurredAtUtc: '2026-07-28T00:00:00Z',
+            calibrationAttemptId: 'calibration-attempt-1',
           },
         ],
       });
@@ -158,10 +159,26 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       await printerSignalRService.connect();
 
       expect(callback).toHaveBeenCalledWith(
-        expect.objectContaining({ sequence: 1 })
+        expect.objectContaining({
+          sequence: 1,
+          schemaVersion: '3',
+          calibrationAttemptId: 'calibration-attempt-1',
+        })
       );
       expect(printerSignalRService.getQueueSubscriptionSnapshot().lastSequence)
         .toBe(1);
+      printerSignalRService.dispose();
+    });
+
+    it('delivers payload-free queue resource discovery hints', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      const callback = vi.fn();
+      printerSignalRService.onQueueResourcesChanged(callback);
+
+      signalRTestState.connectionHandlers.get('queueresourceschanged')?.();
+
+      expect(callback).toHaveBeenCalledOnce();
       printerSignalRService.dispose();
     });
 

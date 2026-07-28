@@ -79,6 +79,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             reader,
             allocator,
             NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
@@ -106,6 +107,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
             allocator,
             statusReader,
             NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 

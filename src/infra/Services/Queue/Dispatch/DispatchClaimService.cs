@@ -20,12 +20,10 @@ public sealed class DispatchClaimService(
     IPrinterStatusSnapshotReader statusReader,
     IDbOutboxSequenceAllocator sequenceAllocator,
     ILogger<DispatchClaimService> logger,
+    IPrinterTelemetryFreshnessPolicy telemetryFreshnessPolicy,
     IStoredGcodeIntegrityVerifier? integrityVerifier = null,
     IQueueResourceAuthorizationService? resourceAuthorization = null) : IDispatchClaimService
 {
-    /// <summary>Maximum age of a telemetry snapshot for calibration dispatch.</summary>
-    internal static readonly TimeSpan TelemetryFreshnessLimit = TimeSpan.FromMinutes(5);
-
     private static readonly HashSet<string> ExplicitIdleStates = new(StringComparer.OrdinalIgnoreCase)
     {
         "idle",
@@ -38,6 +36,11 @@ public sealed class DispatchClaimService(
     private readonly IPrinterStatusSnapshotReader _statusReader = statusReader ?? throw new ArgumentNullException(nameof(statusReader));
     private readonly IDbOutboxSequenceAllocator _sequenceAllocator = sequenceAllocator ?? throw new ArgumentNullException(nameof(sequenceAllocator));
     private readonly ILogger<DispatchClaimService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+    private readonly IPrinterTelemetryFreshnessPolicy _telemetryFreshnessPolicy =
+        telemetryFreshnessPolicy ??
+        throw new ArgumentNullException(nameof(telemetryFreshnessPolicy));
+
     private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
         resourceAuthorization;
@@ -191,7 +194,19 @@ public sealed class DispatchClaimService(
 
         // --- Telemetry freshness and online/idle check ---
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
-        DispatchClaimResult? telemetryGate = EvaluateTelemetryGates(snapshot, request.PrinterId);
+        if (!_telemetryFreshnessPolicy.TryGetMaximumObservationAge(
+                printer.Backend,
+                out TimeSpan telemetryFreshnessLimit))
+        {
+            return DispatchClaimResult.Fail(
+                "telemetry_sla_unavailable",
+                "The printer backend does not advertise a telemetry freshness SLA.");
+        }
+
+        DispatchClaimResult? telemetryGate = EvaluateTelemetryGates(
+            snapshot,
+            request.PrinterId,
+            telemetryFreshnessLimit);
         if (telemetryGate is not null)
         {
             await WriteDeniedAuditAsync(request, telemetryGate, job, dispatchState, ct);
@@ -336,11 +351,12 @@ public sealed class DispatchClaimService(
             BedClearExpiresAtUtc = bedClearCommand?.ExpiresAtUtc,
             PrinterId = request.PrinterId,
             ProjectId = job.CalibrationProjectId ?? job.ProjectId,
+            CalibrationAttemptId = job.CalibrationAttemptId,
             JobStatus = PrintJobStatus.Starting.ToString(),
             JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
             PrinterConfigRevision = job.PinnedPrinterConfigRevision,
             EventType = "PrintFarmer.Queue.JobDispatchStarted.v1",
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             PayloadJson = BuildOutboxPayload(job, attempt),
             Status = QueueOutboxEventStatus.Pending,
             CreatedAtUtc = nowUtc,
@@ -531,6 +547,15 @@ public sealed class DispatchClaimService(
 
         // An ad-hoc start applies the same fail-closed telemetry gate as queue claims:
         // missing or stale telemetry is a hard stop (never permitted to pass on absence of data).
+        if (!_telemetryFreshnessPolicy.TryGetMaximumObservationAge(
+                printer.Backend,
+                out TimeSpan telemetryFreshnessLimit))
+        {
+            return DispatchClaimResult.Fail(
+                "telemetry_sla_unavailable",
+                "The printer backend does not advertise a telemetry freshness SLA.");
+        }
+
         PrinterStatusSnapshot? snapshot = _statusReader.GetStatusSnapshot(request.PrinterId);
         if (snapshot is null)
         {
@@ -541,11 +566,11 @@ public sealed class DispatchClaimService(
 
         DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
         bool isFresh = observedAt.HasValue &&
-                       (DateTime.UtcNow - observedAt.Value) <= TelemetryFreshnessLimit;
+                       (DateTime.UtcNow - observedAt.Value) <= telemetryFreshnessLimit;
         if (!isFresh)
         {
             string staleMsg =
-                $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes. " +
+                $"Printer telemetry exceeds the backend SLA of {telemetryFreshnessLimit.TotalSeconds:F0} seconds. " +
                 "Ad-hoc dispatch requires a fresh online+idle observation.";
             return DispatchClaimResult.Fail("telemetry_stale", staleMsg);
         }
@@ -1374,7 +1399,8 @@ public sealed class DispatchClaimService(
 
     private static DispatchClaimResult? EvaluateTelemetryGates(
         PrinterStatusSnapshot? snapshot,
-        Guid printerId)
+        Guid printerId,
+        TimeSpan telemetryFreshnessLimit)
     {
         // Every physical start fails closed without authoritative telemetry.
         if (snapshot is null)
@@ -1389,12 +1415,12 @@ public sealed class DispatchClaimService(
         // stopped reporting must not be treated as idle.
         DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
         bool isFresh = observedAt.HasValue &&
-                       (DateTime.UtcNow - observedAt.Value) <= TelemetryFreshnessLimit;
+                       (DateTime.UtcNow - observedAt.Value) <= telemetryFreshnessLimit;
 
         if (!isFresh)
         {
             string staleDetail =
-                $"Printer telemetry is older than {TelemetryFreshnessLimit.TotalMinutes:F0} minutes. " +
+                $"Printer telemetry exceeds the backend SLA of {telemetryFreshnessLimit.TotalSeconds:F0} seconds. " +
                 "Dispatch requires a fresh online+idle observation.";
             return DispatchClaimResult.Fail("telemetry_stale", staleDetail);
         }
@@ -1798,6 +1824,7 @@ public sealed class DispatchClaimService(
             AggregateRowVersion = aggregateRowVersion,
             PrinterId = printerId,
             ProjectId = projectId ?? job?.CalibrationProjectId ?? job?.ProjectId,
+            CalibrationAttemptId = job?.CalibrationAttemptId,
             JobStatus = jobStatus ?? job?.Status.ToString(),
             JobKind = jobKind ?? job?.JobKind?.ToString() ?? nameof(JobKind.Standard),
             AttemptId = attemptId,
@@ -1807,7 +1834,7 @@ public sealed class DispatchClaimService(
             BedClearCommandId = bedClearCommandId,
             BedClearExpiresAtUtc = bedClearExpiresAtUtc,
             EventType = eventType,
-            SchemaVersion = "1",
+            SchemaVersion = QueueEventSchemaVersions.Current,
             FailureCode = failureCode,
             FailureRetryable = failureRetryable ?? attempt?.IsRetryable,
             FailureRequiresReconciliation =

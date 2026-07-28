@@ -584,11 +584,12 @@ public class JobQueueService : IJobQueueService
                 AggregateRowVersion = job.RowVersion,
                 PrinterId = job.AssignedPrinterId,
                 ProjectId = job.CalibrationProjectId,
+                CalibrationAttemptId = job.CalibrationAttemptId,
                 JobStatus = job.Status.ToString(),
                 JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 PrinterConfigRevision = job.PinnedPrinterConfigRevision,
                 EventType = "PrintFarmer.Queue.CalibrationJobQueued.v1",
-                SchemaVersion = "1",
+                SchemaVersion = QueueEventSchemaVersions.Current,
                 PayloadJson = BuildCalibrationQueueOutboxPayload(job),
                 Status = QueueOutboxEventStatus.Pending,
                 CreatedAtUtc = utcNow,
@@ -648,8 +649,38 @@ public class JobQueueService : IJobQueueService
         }
         else
         {
-            await _repo.AddAsync(job, ct);
-            await _repo.SaveChangesAsync(ct);
+            if (_db is not null && _sequenceAllocator is not null)
+            {
+                QueueDispatchOutbox outboxEvent = new()
+                {
+                    Id = Guid.NewGuid(),
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = job.Id,
+                    AggregateRowVersion = job.RowVersion,
+                    PrinterId = job.AssignedPrinterId,
+                    ProjectId = job.ProjectId,
+                    JobStatus = job.Status.ToString(),
+                    JobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
+                    EventType = "PrintFarmer.Queue.JobQueued.v1",
+                    SchemaVersion = QueueEventSchemaVersions.Current,
+                    PayloadJson = BuildCalibrationQueueOutboxPayload(job),
+                    Status = QueueOutboxEventStatus.Pending,
+                    CreatedAtUtc = utcNow,
+                };
+                await using QueueOutboxTransactionScope transaction =
+                    await QueueOutboxTransactionScope.BeginAsync(_db, ct);
+                outboxEvent.Sequence =
+                    await _sequenceAllocator.AllocateAsync(_db, ct);
+                _db.PrintJobs.Add(job);
+                _db.QueueDispatchOutbox.Add(outboxEvent);
+                await _db.SaveChangesAsync(ct);
+                await transaction.CommitAsync(ct);
+            }
+            else
+            {
+                await _repo.AddAsync(job, ct);
+                await _repo.SaveChangesAsync(ct);
+            }
         }
 
         // Notify auto-dispatch that a new job was queued for this printer.
@@ -709,6 +740,7 @@ public class JobQueueService : IJobQueueService
         // If-Match for job mutations AND for dispatch-state (bed-clear) mutations.
         string? dispatchStateEtag = null;
         long? dispatchStateRevision = null;
+        QueueDispatchAttempt? latestAttempt = null;
         if (job.AssignedPrinterId.HasValue && _db is not null)
         {
             PrinterDispatchState? ds = await _db.PrinterDispatchStates
@@ -719,7 +751,17 @@ public class JobQueueService : IJobQueueService
             dispatchStateRevision = ds?.Revision;
         }
 
-        return new JobQueuePrintJobDto
+        if (_db is not null)
+        {
+            latestAttempt = await _db.QueueDispatchAttempts
+                .AsNoTracking()
+                .Where(attempt => attempt.PrintJobId == job.Id)
+                .OrderByDescending(attempt => attempt.AttemptNumber)
+                .ThenByDescending(attempt => attempt.ClaimedAtUtc)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        JobQueuePrintJobDto dto = new()
         {
             Id = job.Id,
             RowVersion = ToBase64RowVersion(job.RowVersion),
@@ -760,6 +802,15 @@ public class JobQueueService : IJobQueueService
             UpdatedAt = job.UpdatedAt,
             ToolheadUsages = MapToolheadUsages(job)
         };
+        if (latestAttempt is not null)
+        {
+            dto.DispatchResult = QueueDispatchAttemptResultMapper.Map(
+                latestAttempt,
+                job,
+                dispatchStateEtag);
+        }
+
+        return dto;
     }
 
     /// <summary>

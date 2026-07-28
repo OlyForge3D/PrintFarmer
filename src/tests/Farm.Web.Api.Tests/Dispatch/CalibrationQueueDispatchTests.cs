@@ -990,6 +990,7 @@ public class CalibrationQueueDispatchTests
             reader,
             allocMock.Object,
             Mock.Of<ILogger<DispatchClaimService>>(),
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 
@@ -1008,6 +1009,7 @@ public class CalibrationQueueDispatchTests
             allocMock.Object,
             statusReader,
             Mock.Of<ILogger<BedClearAcknowledgementService>>(),
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
             DispatchTestDoubles.ValidByteIntegrityVerifier());
     }
 

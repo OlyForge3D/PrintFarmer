@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 
 namespace Farm.Infrastructure;
 
@@ -285,6 +286,12 @@ public class JobQueuePrintJobDto
     public string? DispatchStateRowVersion { get; set; }
 
     public long? DispatchStateRevision { get; set; }
+
+    /// <summary>
+    /// Latest durable dispatch attempt. Authoritative recovery clients use this
+    /// identity to reject delayed progress from an older physical start attempt.
+    /// </summary>
+    public DispatchAttemptResultDto? DispatchResult { get; set; }
 
     /// <summary>Server-derived job classification (never client-supplied).</summary>
     public JobKind? JobKind { get; set; }

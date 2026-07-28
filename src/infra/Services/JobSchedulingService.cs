@@ -405,18 +405,26 @@ public class JobSchedulingService(
             .OrderByDescending(je => je.ScheduledExecutionTime)
             .ToListAsync(cancellationToken);
 
-        return executions.Select(je => new JobExecutionDto
+        return executions.Select(je =>
         {
-            Id = je.Id,
-            ScheduledExecutionTime = je.ScheduledExecutionTime,
-            ActualStartTime = je.ActualStartTime,
-            Status = je.Status,
-            Message = je.Message,
-            OccurrenceJobId = je.OccurrencePrintJobId,
-            DispatchAttemptId = je.DispatchAttemptId,
-            DurationSeconds = je.ActualStartTime.HasValue
-                ? (int)(DateTime.UtcNow - je.ActualStartTime.Value).TotalSeconds
-                : null
+            DateTime scheduledUtc = NormalizePersistedUtc(
+                je.ScheduledExecutionTime);
+            DateTime? actualStartUtc = je.ActualStartTime.HasValue
+                ? NormalizePersistedUtc(je.ActualStartTime.Value)
+                : null;
+            return new JobExecutionDto
+            {
+                Id = je.Id,
+                ScheduledExecutionTime = scheduledUtc,
+                ActualStartTime = actualStartUtc,
+                Status = je.Status,
+                Message = je.Message,
+                OccurrenceJobId = je.OccurrencePrintJobId,
+                DispatchAttemptId = je.DispatchAttemptId,
+                DurationSeconds = actualStartUtc.HasValue
+                    ? (int)(DateTime.UtcNow - actualStartUtc.Value).TotalSeconds
+                    : null
+            };
         }).ToList();
     }
 
@@ -1091,6 +1099,14 @@ public class JobSchedulingService(
         schedule.RootPrintJobId == Guid.Empty
             ? schedule.PrintJobId
             : schedule.RootPrintJobId;
+
+    private static DateTime NormalizePersistedUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
 
     private static void EnsureRecurrenceSupported(
         PrintJob job,

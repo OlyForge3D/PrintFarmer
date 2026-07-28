@@ -43,7 +43,8 @@ public sealed class DispatchPhaseIntegrityTests
             db,
             snapshots.Object,
             new DbOutboxSequenceAllocator(),
-            NullLogger<DispatchClaimService>.Instance);
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy());
 
         DispatchClaimResult preClaim = await service.AcquireClaimAsync(
             Request(preCall));

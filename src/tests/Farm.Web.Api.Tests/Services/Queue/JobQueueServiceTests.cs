@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.PrinterGroups;
@@ -12,6 +13,7 @@ using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -1119,6 +1121,66 @@ public class JobQueueServiceTests
         result.Should().NotBeNull();
         result!.Id.Should().Be(job.Id);
         result.Status.Should().Be(PrintJobStatus.Queued);
+    }
+
+    [Fact]
+    public async Task GetJobAsync_AfterOtherClientStartsAttemptB_HydratesLatestAttemptFence()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using AppDbContext db = new(options);
+        PrintJob job = new PrintJobBuilder()
+            .WithAssignedPrinterId(null)
+            .AsQueued()
+            .Build();
+        Guid printerId = Guid.NewGuid();
+        QueueDispatchAttempt attemptA = new()
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            AttemptNumber = 1,
+            ActorSubject = "user:a",
+            StartPathKind = "Manual",
+            ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            Outcome = DispatchAttemptOutcome.Accepted,
+        };
+        QueueDispatchAttempt attemptB = new()
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            AttemptNumber = 2,
+            ActorSubject = "user:b",
+            StartPathKind = "Manual",
+            ClaimedAtUtc = DateTime.UtcNow,
+            Outcome = DispatchAttemptOutcome.Unknown,
+            RequiresReconciliation = true,
+        };
+        db.PrintJobs.Add(job);
+        db.QueueDispatchAttempts.AddRange(attemptA, attemptB);
+        await db.SaveChangesAsync();
+        _mockDataService
+            .Setup(service => service.GetPrintJobByIdAsync(
+                job.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        JobQueueService service = new(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            db: db);
+
+        JobQueuePrintJobDto? result =
+            await service.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.DispatchResult.Should().NotBeNull();
+        result.DispatchResult!.AttemptId.Should().Be(attemptB.Id);
+        result.DispatchResult.AttemptNumber.Should().Be(2);
+        result.DispatchResult.Outcome.Should().Be(DispatchAttemptOutcome.Unknown);
     }
 
     #endregion

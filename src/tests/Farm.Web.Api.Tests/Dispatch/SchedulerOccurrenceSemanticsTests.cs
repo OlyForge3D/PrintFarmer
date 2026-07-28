@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -285,6 +286,69 @@ public sealed class SchedulerOccurrenceSemanticsTests
         execution.Status.Should().Be("Completed");
         execution.Message.Should().NotContain("private");
         execution.Message.Should().NotContain("token");
+    }
+
+    [Fact]
+    public async Task ExecutionHistory_UnspecifiedProviderValues_SerializeAsUtc()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseSqlite(connection)
+                .Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        Guid actorId = Guid.NewGuid();
+        (PrintJob job, JobSchedule schedule) = await SeedScheduleAsync(
+            db,
+            actorId,
+            DateTime.UtcNow.AddDays(1),
+            recurring: false);
+        DateTime scheduled = new(
+            2026,
+            11,
+            1,
+            8,
+            30,
+            0,
+            DateTimeKind.Unspecified);
+        DateTime actual = scheduled.AddSeconds(5);
+        db.JobExecutions.Add(new JobExecution
+        {
+            Id = Guid.NewGuid(),
+            JobScheduleId = schedule.Id,
+            OccurrencePrintJobId = job.Id,
+            ScheduledExecutionTime = scheduled,
+            ActualStartTime = actual,
+            Status = "Completed",
+            CreatedAt = scheduled,
+            UpdatedAt = actual,
+        });
+        await db.SaveChangesAsync();
+        JobSchedulingService service = CreateService(
+            db,
+            Mock.Of<IPrintJobManagementService>());
+
+        IReadOnlyList<JobExecutionDto>? history =
+            await service.GetExecutionHistoryAsync(
+                job.Id,
+                actorId.ToString());
+
+        JobExecutionDto execution = history.Should().ContainSingle().Subject;
+        execution.ScheduledExecutionTime.Kind.Should().Be(DateTimeKind.Utc);
+        execution.ActualStartTime!.Value.Kind.Should().Be(DateTimeKind.Utc);
+        using JsonDocument wire = JsonDocument.Parse(JsonSerializer.Serialize(
+            execution,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+        string scheduledWire = wire.RootElement
+            .GetProperty("scheduledExecutionTime")
+            .GetString()!;
+        string actualWire = wire.RootElement
+            .GetProperty("actualStartTime")
+            .GetString()!;
+        scheduledWire.Should().Be("2026-11-01T08:30:00Z");
+        actualWire.Should().Be("2026-11-01T08:30:05Z");
     }
 
     private static QueuedPrintJobDto DispatchResponse(
