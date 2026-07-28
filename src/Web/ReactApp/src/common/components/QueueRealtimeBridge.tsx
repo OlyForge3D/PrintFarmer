@@ -4,13 +4,19 @@ import { queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerSignalRService } from '@/services/printer-signalr';
 
+const resourceRefreshRetryDelaysMs = [100, 250, 500] as const;
+
 export function QueueRealtimeBridge() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
     let disposed = false;
     let refreshInFlight: Promise<void> | null = null;
-    let refreshDirty = false;
+    let requestedRefreshGeneration = 0;
+    let completedRefreshGeneration = 0;
+    let exhaustedRefreshGeneration = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let resolveRetryDelay: (() => void) | undefined;
 
     const invalidateAuthority = async () => {
       await Promise.all([
@@ -37,19 +43,71 @@ export function QueueRealtimeBridge() {
         jobIds: resources.jobIds,
         projectIds: resources.projectIds,
       });
+      if (!disposed) {
+        await printerSignalRService.connect();
+      }
     };
+
+    const waitForRetryDelay = (delayMs: number) =>
+      new Promise<void>((resolve) => {
+        resolveRetryDelay = resolve;
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          resolveRetryDelay = undefined;
+          resolve();
+        }, delayMs);
+      });
 
     const startRefreshLoop = () => {
       if (refreshInFlight || disposed) return;
       refreshInFlight = (async () => {
-        do {
-          refreshDirty = false;
-          await invalidateAuthority();
-          await reconcileSubscriptions();
-        } while (refreshDirty && !disposed);
+        while (
+          completedRefreshGeneration < requestedRefreshGeneration &&
+          exhaustedRefreshGeneration < requestedRefreshGeneration &&
+          !disposed
+        ) {
+          const targetGeneration = requestedRefreshGeneration;
+          let refreshed = false;
+          for (
+            let attempt = 0;
+            attempt <= resourceRefreshRetryDelaysMs.length && !disposed;
+            attempt += 1
+          ) {
+            try {
+              await invalidateAuthority();
+              await reconcileSubscriptions();
+              completedRefreshGeneration = targetGeneration;
+              refreshed = true;
+              break;
+            } catch (error) {
+              console.error(
+                '[QueueRealtimeBridge] authoritative refresh failed',
+                error
+              );
+              if (
+                disposed ||
+                attempt === resourceRefreshRetryDelaysMs.length
+              ) {
+                break;
+              }
+              await waitForRetryDelay(
+                resourceRefreshRetryDelaysMs[attempt]
+              );
+            }
+          }
+
+          if (!refreshed && requestedRefreshGeneration === targetGeneration) {
+            exhaustedRefreshGeneration = targetGeneration;
+            return;
+          }
+        }
       })().finally(() => {
         refreshInFlight = null;
-        if (refreshDirty && !disposed) {
+        if (
+          completedRefreshGeneration < requestedRefreshGeneration &&
+          exhaustedRefreshGeneration < requestedRefreshGeneration &&
+          !disposed
+        ) {
           startRefreshLoop();
         }
       });
@@ -57,7 +115,7 @@ export function QueueRealtimeBridge() {
 
     const refreshAuthority = () => {
       if (!disposed) {
-        refreshDirty = true;
+        requestedRefreshGeneration += 1;
         startRefreshLoop();
       }
       return refreshInFlight;
@@ -85,6 +143,7 @@ export function QueueRealtimeBridge() {
         void refreshAuthority();
       }) ?? (() => {});
 
+    void refreshAuthority();
     void printerSignalRService.connect();
 
     return () => {
@@ -92,12 +151,21 @@ export function QueueRealtimeBridge() {
       unsubscribeQueue();
       unsubscribeConnection();
       unsubscribeResources();
-      void printerSignalRService.replaceQueueResourceSubscriptions({
-        printerIds: [],
-        jobIds: [],
-        projectIds: [],
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = undefined;
+      resolveRetryDelay?.();
+      resolveRetryDelay = undefined;
+      void (async () => {
+        const releaseGeneration =
+          await printerSignalRService.replaceQueueResourceSubscriptions({
+            printerIds: [],
+            jobIds: [],
+            projectIds: [],
+          });
+        await printerSignalRService.disconnect(releaseGeneration);
+      })().catch((error) => {
+        console.error('[QueueRealtimeBridge] cleanup failed', error);
       });
-      void printerSignalRService.disconnect();
     };
   }, [queryClient]);
 

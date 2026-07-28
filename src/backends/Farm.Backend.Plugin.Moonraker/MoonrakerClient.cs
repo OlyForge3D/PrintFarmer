@@ -2351,12 +2351,14 @@ public class MoonrakerClient(
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
             if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return null;
+                throw new HistoryJobNotFoundException(
+                    $"Moonraker history job {jobId} was not found.");
             }
 
             resp.EnsureSuccessStatusCode();
             MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
-            return response?.Result;
+            return response?.Result ?? throw new InvalidDataException(
+                $"Moonraker returned an empty history detail payload for {jobId}.");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

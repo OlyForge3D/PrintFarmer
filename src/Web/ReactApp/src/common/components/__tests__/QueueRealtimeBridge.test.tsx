@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -162,5 +163,140 @@ describe('QueueRealtimeBridge', () => {
       })
     );
     expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a lone failed authoritative refresh and applies recovered resources', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.getQueueSubscriptionResources
+      .mockRejectedValueOnce(new Error('snapshot unavailable'))
+      .mockResolvedValueOnce({
+        printerIds: ['recovered-printer'],
+        jobIds: ['recovered-job'],
+        projectIds: ['recovered-project'],
+      });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: ['visible-printer', 'recovered-printer'],
+        jobIds: ['recovered-job'],
+        projectIds: ['recovered-project'],
+      })
+    );
+    expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(2);
+    expect(error).toHaveBeenCalledWith(
+      '[QueueRealtimeBridge] authoritative refresh failed',
+      expect.any(Error)
+    );
+    error.mockRestore();
+  });
+
+  it('bounds failed retries and lets a later hint restart recovery', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.getQueueSubscriptionResources.mockRejectedValue(
+      new Error('snapshot unavailable')
+    );
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+
+    await waitFor(
+      () =>
+        expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(4),
+      { timeout: 2_000 }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(4);
+
+    mocks.getQueueSubscriptionResources.mockResolvedValue({
+      printerIds: ['later-printer'],
+      jobIds: ['later-job'],
+      projectIds: ['later-project'],
+    });
+    mocks.emitResourcesChanged();
+
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: ['visible-printer', 'later-printer'],
+        jobIds: ['later-job'],
+        projectIds: ['later-project'],
+      })
+    );
+    expect(mocks.getQueueSubscriptionResources).toHaveBeenCalledTimes(5);
+    error.mockRestore();
+  });
+
+  it('queues empty ownership before disconnect when unmounted during an apply', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const inFlightApply = deferred<void>();
+    mocks.replaceQueueResourceSubscriptions
+      .mockImplementationOnce(() => inFlightApply.promise)
+      .mockImplementationOnce(async () => {
+        await inFlightApply.promise;
+      });
+    const rendered = render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+    mocks.emitConnection(true);
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: ['visible-printer', 'assigned-printer'],
+        jobIds: ['job-1'],
+        projectIds: ['project-1'],
+      })
+    );
+
+    rendered.unmount();
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: [],
+        jobIds: [],
+        projectIds: [],
+      })
+    );
+    expect(mocks.disconnect).not.toHaveBeenCalled();
+
+    inFlightApply.resolve();
+    await waitFor(() => expect(mocks.disconnect).toHaveBeenCalledOnce());
+  });
+
+  it('keeps the latest mounted owner in React StrictMode', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <QueueRealtimeBridge />
+        </QueryClientProvider>
+      </StrictMode>
+    );
+
+    mocks.emitConnection(true);
+
+    await waitFor(() =>
+      expect(mocks.replaceQueueResourceSubscriptions).toHaveBeenCalledWith({
+        printerIds: ['visible-printer', 'assigned-printer'],
+        jobIds: ['job-1'],
+        projectIds: ['project-1'],
+      })
+    );
+    expect(mocks.onQueueEvent).toHaveBeenCalledTimes(2);
   });
 });

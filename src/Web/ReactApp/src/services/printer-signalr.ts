@@ -336,6 +336,12 @@ export class PrinterSignalRService {
   private subscribedPrinters = new Set<string>();
   private subscribedQueueJobs = new Set<string>();
   private subscribedProjects = new Set<string>();
+  private desiredQueuePrinters = new Set<string>();
+  private desiredQueueJobs = new Set<string>();
+  private desiredQueueProjects = new Set<string>();
+  private queueSubscriptionGeneration = 0;
+  private queueSubscriptionTail: Promise<void> = Promise.resolve();
+  private disposed = false;
   private lastQueueSequence = 0;
   private queueDrain: Promise<void> | null = null;
 
@@ -550,6 +556,11 @@ export class PrinterSignalRService {
   }
 
   public async subscribeToPrinter(printerId: string): Promise<void> {
+    this.desiredQueuePrinters.add(printerId);
+    await this.applySubscribeToPrinter(printerId);
+  }
+
+  private async applySubscribeToPrinter(printerId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToPrinterAsync", printerId);
     }
@@ -557,13 +568,23 @@ export class PrinterSignalRService {
   }
 
   public async unsubscribeFromPrinter(printerId: string): Promise<void> {
-    this.subscribedPrinters.delete(printerId);
+    this.desiredQueuePrinters.delete(printerId);
+    await this.applyUnsubscribeFromPrinter(printerId);
+  }
+
+  private async applyUnsubscribeFromPrinter(printerId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("UnsubscribeFromPrinterAsync", printerId);
     }
+    this.subscribedPrinters.delete(printerId);
   }
 
   public async subscribeToQueueJob(jobId: string): Promise<void> {
+    this.desiredQueueJobs.add(jobId);
+    await this.applySubscribeToQueueJob(jobId);
+  }
+
+  private async applySubscribeToQueueJob(jobId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToQueueJobAsync", jobId);
     }
@@ -571,13 +592,23 @@ export class PrinterSignalRService {
   }
 
   public async unsubscribeFromQueueJob(jobId: string): Promise<void> {
-    this.subscribedQueueJobs.delete(jobId);
+    this.desiredQueueJobs.delete(jobId);
+    await this.applyUnsubscribeFromQueueJob(jobId);
+  }
+
+  private async applyUnsubscribeFromQueueJob(jobId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("UnsubscribeFromQueueJobAsync", jobId);
     }
+    this.subscribedQueueJobs.delete(jobId);
   }
 
   public async subscribeToProject(projectId: string): Promise<void> {
+    this.desiredQueueProjects.add(projectId);
+    await this.applySubscribeToProject(projectId);
+  }
+
+  private async applySubscribeToProject(projectId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("SubscribeToProjectAsync", projectId);
     }
@@ -585,42 +616,91 @@ export class PrinterSignalRService {
   }
 
   public async unsubscribeFromProject(projectId: string): Promise<void> {
-    this.subscribedProjects.delete(projectId);
+    this.desiredQueueProjects.delete(projectId);
+    await this.applyUnsubscribeFromProject(projectId);
+  }
+
+  private async applyUnsubscribeFromProject(projectId: string): Promise<void> {
     if (this.connection?.state === HubConnectionState.Connected) {
       await this.connection.invoke("UnsubscribeFromProjectAsync", projectId);
     }
+    this.subscribedProjects.delete(projectId);
   }
 
   public async replaceQueueResourceSubscriptions(resources: {
     printerIds: Iterable<string>;
     jobIds: Iterable<string>;
     projectIds: Iterable<string>;
-  }): Promise<void> {
+  }): Promise<number> {
     const nextPrinters = new Set(resources.printerIds);
     const nextJobs = new Set(resources.jobIds);
     const nextProjects = new Set(resources.projectIds);
-    const operations: Promise<void>[] = [];
+    this.desiredQueuePrinters = nextPrinters;
+    this.desiredQueueJobs = nextJobs;
+    this.desiredQueueProjects = nextProjects;
+    const generation = ++this.queueSubscriptionGeneration;
 
-    for (const id of this.subscribedPrinters) {
-      if (!nextPrinters.has(id)) operations.push(this.unsubscribeFromPrinter(id));
-    }
-    for (const id of this.subscribedQueueJobs) {
-      if (!nextJobs.has(id)) operations.push(this.unsubscribeFromQueueJob(id));
-    }
-    for (const id of this.subscribedProjects) {
-      if (!nextProjects.has(id)) operations.push(this.unsubscribeFromProject(id));
-    }
-    for (const id of nextPrinters) {
-      if (!this.subscribedPrinters.has(id)) operations.push(this.subscribeToPrinter(id));
-    }
-    for (const id of nextJobs) {
-      if (!this.subscribedQueueJobs.has(id)) operations.push(this.subscribeToQueueJob(id));
-    }
-    for (const id of nextProjects) {
-      if (!this.subscribedProjects.has(id)) operations.push(this.subscribeToProject(id));
-    }
+    await this.enqueueQueueSubscriptionOperation(generation, async () => {
+      const operations: Array<() => Promise<void>> = [];
+      for (const id of this.subscribedPrinters) {
+        if (!nextPrinters.has(id)) {
+          operations.push(() => this.applyUnsubscribeFromPrinter(id));
+        }
+      }
+      for (const id of this.subscribedQueueJobs) {
+        if (!nextJobs.has(id)) {
+          operations.push(() => this.applyUnsubscribeFromQueueJob(id));
+        }
+      }
+      for (const id of this.subscribedProjects) {
+        if (!nextProjects.has(id)) {
+          operations.push(() => this.applyUnsubscribeFromProject(id));
+        }
+      }
+      for (const id of nextPrinters) {
+        if (!this.subscribedPrinters.has(id)) {
+          operations.push(() => this.applySubscribeToPrinter(id));
+        }
+      }
+      for (const id of nextJobs) {
+        if (!this.subscribedQueueJobs.has(id)) {
+          operations.push(() => this.applySubscribeToQueueJob(id));
+        }
+      }
+      for (const id of nextProjects) {
+        if (!this.subscribedProjects.has(id)) {
+          operations.push(() => this.applySubscribeToProject(id));
+        }
+      }
 
-    await Promise.all(operations);
+      for (const operation of operations) {
+        await operation();
+        if (this.disposed) {
+          this.clearQueueSubscriptionState();
+          return;
+        }
+        if (generation !== this.queueSubscriptionGeneration) {
+          return;
+        }
+      }
+    });
+    return generation;
+  }
+
+  private enqueueQueueSubscriptionOperation(
+    generation: number,
+    operation: () => Promise<void>
+  ): Promise<void> {
+    const queued = this.queueSubscriptionTail
+      .catch(() => undefined)
+      .then(async () => {
+        if (this.disposed || generation !== this.queueSubscriptionGeneration) {
+          return;
+        }
+        await operation();
+      });
+    this.queueSubscriptionTail = queued.catch(() => undefined);
+    return queued;
   }
 
   public onQueueEvent(callback: QueueEventCallback): () => void {
@@ -729,33 +809,48 @@ export class PrinterSignalRService {
   }
 
   private async restoreResourceSubscriptions(): Promise<void> {
-    if (this.connection?.state !== HubConnectionState.Connected) return;
-    const subscriptions = [
-      ...Array.from(this.subscribedPrinters, (id) => ({
-        id,
-        method: "SubscribeToPrinterAsync",
-        values: this.subscribedPrinters,
-      })),
-      ...Array.from(this.subscribedQueueJobs, (id) => ({
-        id,
-        method: "SubscribeToQueueJobAsync",
-        values: this.subscribedQueueJobs,
-      })),
-      ...Array.from(this.subscribedProjects, (id) => ({
-        id,
-        method: "SubscribeToProjectAsync",
-        values: this.subscribedProjects,
-      })),
-    ];
-    const outcomes = await Promise.allSettled(
-      subscriptions.map(({ id, method }) =>
-        this.connection!.invoke(method, id)
-      )
-    );
-    outcomes.forEach((outcome, index) => {
-      if (outcome.status === "rejected") {
-        subscriptions[index].values.delete(subscriptions[index].id);
+    const generation = this.queueSubscriptionGeneration;
+    await this.enqueueQueueSubscriptionOperation(generation, async () => {
+      if (this.connection?.state !== HubConnectionState.Connected) return;
+      const subscriptions = [
+        ...Array.from(this.desiredQueuePrinters, (id) => ({
+          id,
+          method: "SubscribeToPrinterAsync",
+          desiredValues: this.desiredQueuePrinters,
+          appliedValues: this.subscribedPrinters,
+        })),
+        ...Array.from(this.desiredQueueJobs, (id) => ({
+          id,
+          method: "SubscribeToQueueJobAsync",
+          desiredValues: this.desiredQueueJobs,
+          appliedValues: this.subscribedQueueJobs,
+        })),
+        ...Array.from(this.desiredQueueProjects, (id) => ({
+          id,
+          method: "SubscribeToProjectAsync",
+          desiredValues: this.desiredQueueProjects,
+          appliedValues: this.subscribedProjects,
+        })),
+      ];
+      const outcomes = await Promise.allSettled(
+        subscriptions.map(({ id, method }) =>
+          this.connection!.invoke(method, id)
+        )
+      );
+      if (
+        this.disposed ||
+        generation !== this.queueSubscriptionGeneration
+      ) {
+        return;
       }
+      outcomes.forEach((outcome, index) => {
+        if (outcome.status === "rejected") {
+          subscriptions[index].desiredValues.delete(subscriptions[index].id);
+          subscriptions[index].appliedValues.delete(subscriptions[index].id);
+        } else {
+          subscriptions[index].appliedValues.add(subscriptions[index].id);
+        }
+      });
     });
   }
 
@@ -835,12 +930,28 @@ export class PrinterSignalRService {
     }
   }
 
-  public async disconnect(): Promise<void> {
+  public async disconnect(expectedQueueGeneration?: number): Promise<void> {
+    if (expectedQueueGeneration !== undefined) {
+      await this.queueSubscriptionTail.catch(() => undefined);
+      if (
+        expectedQueueGeneration !== this.queueSubscriptionGeneration ||
+        this.hasDesiredQueueSubscriptions()
+      ) {
+        return;
+      }
+    }
     if (
       this.connection &&
       this.connection.state === HubConnectionState.Connected
     ) {
       await this.connection.stop();
+      if (
+        expectedQueueGeneration !== undefined &&
+        expectedQueueGeneration !== this.queueSubscriptionGeneration &&
+        this.hasDesiredQueueSubscriptions()
+      ) {
+        await this.connect();
+      }
     }
   }
 
@@ -910,6 +1021,8 @@ export class PrinterSignalRService {
     return this.connection?.connectionId ?? null;
   }
   dispose(): void {
+    this.disposed = true;
+    this.queueSubscriptionGeneration += 1;
     if (this.authListener) {
       window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
       this.authListener = null;
@@ -926,13 +1039,28 @@ export class PrinterSignalRService {
     this.autoDispatchStatusCallbacks = [];
     this.queueEventCallbacks = [];
     this.queueResourcesChangedCallbacks = [];
-    this.subscribedPrinters.clear();
-    this.subscribedQueueJobs.clear();
-    this.subscribedProjects.clear();
+    this.clearQueueSubscriptionState();
     if (this.connection) {
       this.connection.stop();
       this.connection = null;
     }
+  }
+
+  private clearQueueSubscriptionState(): void {
+    this.desiredQueuePrinters.clear();
+    this.desiredQueueJobs.clear();
+    this.desiredQueueProjects.clear();
+    this.subscribedPrinters.clear();
+    this.subscribedQueueJobs.clear();
+    this.subscribedProjects.clear();
+  }
+
+  private hasDesiredQueueSubscriptions(): boolean {
+    return (
+      this.desiredQueuePrinters.size > 0 ||
+      this.desiredQueueJobs.size > 0 ||
+      this.desiredQueueProjects.size > 0
+    );
   }
 }
 

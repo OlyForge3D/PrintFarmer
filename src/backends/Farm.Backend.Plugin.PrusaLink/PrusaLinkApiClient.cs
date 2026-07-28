@@ -713,7 +713,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     limit,
                     start,
                     since);
-                return new HistoryListResponse { Count = 0, Jobs = [] };
+                return null;
             }
 
             string content = await response.Content.ReadAsStringAsync(ct);
@@ -724,7 +724,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     "PrusaLink history response parse failed for {RequestUrl} (payloadLength={PayloadLength})",
                     requestUrl,
                     content.Length);
-                return new HistoryListResponse { Count = 0, Jobs = [] };
+                return null;
             }
 
             if (since.HasValue)
@@ -751,7 +751,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 limit,
                 start,
                 since);
-            return new HistoryListResponse { Count = 0, Jobs = [] };
+            return null;
         }
     }
 
@@ -766,12 +766,20 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             using HttpResponseMessage response = await client.SendAsync(request, ct);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return null;
+                throw new HistoryJobNotFoundException(
+                    $"PrusaLink history job {jobId} was not found.");
             }
 
             response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync(ct);
-            return ParseOctoPrintHistoryJob(content);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
+            {
+                throw new InvalidDataException(
+                    $"PrusaLink returned malformed history detail for {jobId}.");
+            }
+
+            return parsed;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -850,16 +858,21 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             }
 
             List<HistoryJob> jobs = [];
-            if (root.TryGetProperty("results", out JsonElement resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
+            if (!root.TryGetProperty("results", out JsonElement resultsProp) ||
+                resultsProp.ValueKind != JsonValueKind.Array)
             {
-                foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+                return null;
+            }
+
+            foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+            {
+                HistoryJob? job = ParseOctoPrintJobElement(jobElement);
+                if (job is null)
                 {
-                    HistoryJob? job = ParseOctoPrintJobElement(jobElement);
-                    if (job != null)
-                    {
-                        jobs.Add(job);
-                    }
+                    return null;
                 }
+
+                jobs.Add(job);
             }
 
             int count = jobs.Count;

@@ -284,6 +284,19 @@ public interface IPrintersService
     Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
 
     /// <summary>
+    /// Probes one exact backend history ID without treating malformed, unavailable,
+    /// or unsupported responses as authoritative absence.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="jobId">Backend-specific history identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed exact-detail authority result.</returns>
+    Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct);
+
+    /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
     /// </summary>
     /// <param name="printerId">The printer ID</param>

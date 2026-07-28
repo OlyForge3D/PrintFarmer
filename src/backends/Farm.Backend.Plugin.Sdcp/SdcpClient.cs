@@ -238,7 +238,7 @@ public class SdcpHistoryIdsAckData
 
 public class SdcpHistoryIdsResult
 {
-    public int Ack { get; set; }
+    public int? Ack { get; set; }
 
     /// <summary>Ordered list of task IDs (UUIDs). Spec field name: HistoryData.</summary>
     public List<string>? HistoryData { get; set; }
@@ -274,7 +274,7 @@ public class SdcpHistoryDetailAckData
 /// </summary>
 public class SdcpHistoryDetailResult
 {
-    public int Ack { get; set; }
+    public int? Ack { get; set; }
 
     /// <summary>Array of history detail records. Spec field: HistoryDetailList.</summary>
     public List<SdcpHistoryDetail>? HistoryDetailList { get; set; }
@@ -1915,13 +1915,20 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 string? idsResponseJson = await ReceiveTextMessageAsync(ws, "GetHistoryIds", requestId, cts.Token);
                 if (string.IsNullOrWhiteSpace(idsResponseJson))
                 {
-                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                    return null;
                 }
 
                 var idsResponse = JsonSerializer.Deserialize<SdcpHistoryIdsAckResponse>(idsResponseJson, JsonOptions);
                 var idsResult = idsResponse?.Data?.Data;
 
-                if (idsResult is null || idsResult.Ack != 0 || idsResult.HistoryData is null or { Count: 0 })
+                if (idsResult is null ||
+                    idsResult.Ack is not 0 ||
+                    idsResult.HistoryData is null)
+                {
+                    return null;
+                }
+
+                if (idsResult.HistoryData.Count == 0)
                 {
                     return new HistoryListResponse { Count = 0, Jobs = [] };
                 }
@@ -1987,20 +1994,28 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         string? detailJson = await ReceiveTextMessageAsync(ws, "GetHistoryDetail", correlationId, ct);
         if (string.IsNullOrWhiteSpace(detailJson))
         {
-            return null;
+            throw new InvalidDataException(
+                $"SDCP returned a blank history detail response for {taskId}.");
         }
 
         try
         {
             var detailResponse = JsonSerializer.Deserialize<SdcpHistoryDetailAckResponse>(detailJson, JsonOptions);
             var detailResult = detailResponse?.Data?.Data;
-            if (detailResult is null || detailResult.Ack != 0 ||
+            if (detailResult is null || detailResult.Ack is not 0 ||
                 detailResult.HistoryDetailList is null or { Count: 0 })
             {
-                return null;
+                throw new InvalidDataException(
+                    $"SDCP returned an incomplete history detail response for {taskId}.");
             }
 
             var detail = detailResult.HistoryDetailList[0];
+            if (string.IsNullOrWhiteSpace(detail.TaskId) ||
+                !string.Equals(detail.TaskId, taskId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"SDCP returned mismatched history detail for {taskId}.");
+            }
 
             // Apply client-side since filter
             if (since.HasValue && detail.BeginTime > 0)
@@ -2016,9 +2031,10 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (JsonException ex)
         {
-            // Tolerate unknown fields per acceptance criteria
             LogSdcp(LogLevel.Debug, $"Failed to parse history detail for {taskId}", ex);
-            return null;
+            throw new InvalidDataException(
+                $"SDCP returned malformed history detail for {taskId}.",
+                ex);
         }
     }
 

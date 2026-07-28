@@ -356,7 +356,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         attempt.BackendFileIdentity.Should().Be("a.gcode");
         (await verify.PrintJobs.FindAsync(jobId))!.Status.Should().Be(
             PrintJobStatus.Completed);
-        printers.Verify(service => service.GetHistoryJobAsync(
+        printers.Verify(service => service.ProbeHistoryJobAsync(
             It.IsAny<Guid>(),
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Never);

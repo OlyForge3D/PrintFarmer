@@ -117,4 +117,39 @@ public class OctoPrintClientTests
         List<string?> keys = doc.RootElement.GetProperty("plugins").EnumerateArray().Select(p => p.GetProperty("key").GetString()).ToList();
         _ = keys.Should().Contain(new[] { "display_current_position", "spoolmanager", "spoolman" });
     }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_Explicit404_ThrowsKeyNotFound()
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+            new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        Func<Task> action = async () => await client.GetHistoryJobAsync(
+            "http://octo",
+            "missing",
+            new PrinterCredential { ApiKey = "key" });
+
+        await action.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Theory]
+    [InlineData("""{"success":false}""")]
+    [InlineData("""{"success":true}""")]
+    [InlineData("""not-json""")]
+    public async Task GetHistoryJobAsync_InvalidApplicationOrPayload_ThrowsInvalidData(
+        string payload)
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json"),
+            });
+
+        Func<Task> action = async () => await client.GetHistoryJobAsync(
+            "http://octo",
+            "provider-job",
+            new PrinterCredential { ApiKey = "key" });
+
+        await action.Should().ThrowAsync<InvalidDataException>();
+    }
 }

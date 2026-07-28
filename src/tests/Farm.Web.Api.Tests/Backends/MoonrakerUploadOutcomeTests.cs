@@ -94,6 +94,46 @@ public sealed class MoonrakerUploadOutcomeTests
         handler.LastRequestUri.Should().Contain("server/history/job?uid=uid-123");
     }
 
+    [Fact]
+    public async Task GetHistoryJobAsync_Explicit404_ThrowsKeyNotFound()
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.NotFound));
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        Func<Task> action = async () =>
+            await client.GetHistoryJobAsync("http://moonraker/", "missing");
+
+        await action.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_SuccessWithNullResult_ThrowsInvalidData()
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """{"result":null}""",
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        Func<Task> action = async () =>
+            await client.GetHistoryJobAsync("http://moonraker/", "provider-job");
+
+        await action.Should().ThrowAsync<InvalidDataException>();
+    }
+
     private sealed class ResponseLostAfterContentHandler : HttpMessageHandler
     {
         public bool ContentWasRead { get; private set; }

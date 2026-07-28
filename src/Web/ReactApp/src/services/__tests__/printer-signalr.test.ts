@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AutoDispatchStatus } from '@/types/api';
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 const signalRTestState = vi.hoisted(() => {
   const connectionHandlers = new Map<string, (...args: unknown[]) => void>();
   let reconnectedHandler: (() => void) | undefined;
@@ -258,6 +266,210 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
           projectIds: ['project-1'],
         })
       );
+      printerSignalRService.dispose();
+    });
+
+    it('serializes an in-flight subscription behind the latest empty generation', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      const subscribeStarted = deferred<void>();
+      const releaseSubscribe = deferred<void>();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (method === 'SubscribeToPrinterAsync' && id === 'printer-a') {
+            subscribeStarted.resolve();
+            await releaseSubscribe.promise;
+          }
+        }
+      );
+
+      const staleApply =
+        printerSignalRService.replaceQueueResourceSubscriptions({
+          printerIds: ['printer-a'],
+          jobIds: [],
+          projectIds: [],
+        });
+      await subscribeStarted.promise;
+      const cleanup = printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: [],
+        projectIds: [],
+      });
+      releaseSubscribe.resolve();
+      await Promise.all([staleApply, cleanup]);
+
+      expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
+        expect.objectContaining({
+          printerIds: [],
+          jobIds: [],
+          projectIds: [],
+        })
+      );
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'UnsubscribeFromPrinterAsync',
+        'printer-a'
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('logout clears desired ownership so reconnect restores no stale groups', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: ['printer-logout'],
+        jobIds: ['job-logout'],
+        projectIds: ['project-logout'],
+      });
+      signalRTestState.connection.invoke.mockClear();
+
+      const releaseGeneration =
+        await printerSignalRService.replaceQueueResourceSubscriptions({
+          printerIds: [],
+          jobIds: [],
+          projectIds: [],
+        });
+      await printerSignalRService.disconnect(releaseGeneration);
+
+      expect(printerSignalRService.getQueueSubscriptionSnapshot()).toEqual(
+        expect.objectContaining({
+          printerIds: [],
+          jobIds: [],
+          projectIds: [],
+        })
+      );
+      signalRTestState.connection.invoke.mockClear();
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+      expect(signalRTestState.connection.invoke).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^SubscribeTo/),
+        expect.anything()
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('reconnect waits for an in-flight generation and observes newer cleanup', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      const subscribeStarted = deferred<void>();
+      const releaseSubscribe = deferred<void>();
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (method === 'SubscribeToQueueJobAsync' && id === 'job-stale') {
+            subscribeStarted.resolve();
+            await releaseSubscribe.promise;
+          }
+        }
+      );
+
+      const staleApply =
+        printerSignalRService.replaceQueueResourceSubscriptions({
+          printerIds: [],
+          jobIds: ['job-stale'],
+          projectIds: [],
+        });
+      await subscribeStarted.promise;
+      const cleanup = printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: [],
+        projectIds: [],
+      });
+      signalRTestState.triggerReconnected();
+      releaseSubscribe.resolve();
+      await Promise.all([staleApply, cleanup]);
+      await flushMicrotasks();
+      signalRTestState.connection.invoke.mockClear();
+
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(printerSignalRService.getQueueSubscriptionSnapshot().jobIds).toEqual(
+        []
+      );
+      expect(signalRTestState.connection.invoke).not.toHaveBeenCalledWith(
+        'SubscribeToQueueJobAsync',
+        'job-stale'
+      );
+      printerSignalRService.dispose();
+    });
+
+    it('retains a failed unsubscribe in applied state and retries it', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: ['printer-retry'],
+        jobIds: [],
+        projectIds: [],
+      });
+      let unsubscribeAttempts = 0;
+      signalRTestState.connection.invoke.mockImplementation(
+        async (method: string, id: string) => {
+          if (
+            method === 'UnsubscribeFromPrinterAsync' &&
+            id === 'printer-retry'
+          ) {
+            unsubscribeAttempts++;
+            if (unsubscribeAttempts === 1) {
+              throw new Error('transient unsubscribe failure');
+            }
+          }
+        }
+      );
+
+      await expect(
+        printerSignalRService.replaceQueueResourceSubscriptions({
+          printerIds: [],
+          jobIds: [],
+          projectIds: [],
+        })
+      ).rejects.toThrow('transient unsubscribe failure');
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().printerIds
+      ).toEqual(['printer-retry']);
+
+      await printerSignalRService.replaceQueueResourceSubscriptions({
+        printerIds: [],
+        jobIds: [],
+        projectIds: [],
+      });
+
+      expect(unsubscribeAttempts).toBe(2);
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().printerIds
+      ).toEqual([]);
+      printerSignalRService.dispose();
+    });
+
+    it('hydrates applied state when reconnect restores a transiently failed group', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+      signalRTestState.connection.state = 'Connected';
+      signalRTestState.connection.invoke.mockRejectedValueOnce(
+        new Error('transient subscribe failure')
+      );
+
+      await expect(
+        printerSignalRService.subscribeToQueueJob('job-recover')
+      ).rejects.toThrow('transient subscribe failure');
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().jobIds
+      ).toEqual([]);
+
+      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.triggerReconnected();
+      await flushMicrotasks();
+
+      expect(signalRTestState.connection.invoke).toHaveBeenCalledWith(
+        'SubscribeToQueueJobAsync',
+        'job-recover'
+      );
+      expect(
+        printerSignalRService.getQueueSubscriptionSnapshot().jobIds
+      ).toEqual(['job-recover']);
       printerSignalRService.dispose();
     });
   });

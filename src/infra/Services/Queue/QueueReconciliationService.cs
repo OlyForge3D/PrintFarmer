@@ -778,45 +778,37 @@ public sealed class QueueReconciliationService(
             if (hasBackendJobId)
             {
                 string authoritativeBackendJobId = backendJobId!;
-                try
-                {
-                    HistoryJob? historyJob = await printersSvc.GetHistoryJobAsync(
+                HistoryJobProbeResult? detailProbe =
+                    await printersSvc.ProbeHistoryJobAsync(
                         attempt.PrinterId,
                         authoritativeBackendJobId,
                         ct);
-                    if (historyJob is null)
-                    {
-                        logger.LogWarning(
-                            "[Reconciliation] Provider-id probe returned null for '{Identity}' on printer {PrinterId}; " +
-                            "the result is unavailable, not authoritative absence",
-                            authoritativeBackendJobId,
-                            attempt.PrinterId);
-                        return BackendReconciliationOutcome.BackendIndeterminate;
-                    }
-
-                    attempt.BackendFileIdentity = historyJob.Filename;
+                if (detailProbe?.Status == HistoryDetailProbeStatus.Found &&
+                    detailProbe.Job is not null)
+                {
+                    attempt.BackendFileIdentity = detailProbe.Job.Filename;
                     logger.LogInformation(
                         "[Reconciliation] Attempt {AttemptId} found by provider history id '{Identity}'",
                         attempt.Id,
                         authoritativeBackendJobId);
                     return BackendReconciliationOutcome.CompletedOnBackend;
                 }
-                catch (KeyNotFoundException)
+
+                if (detailProbe?.Status != HistoryDetailProbeStatus.NotFound)
                 {
-                    logger.LogDebug(
-                        "[Reconciliation] Provider history id '{Identity}' is authoritatively absent on printer {PrinterId}",
+                    logger.LogWarning(
+                        "[Reconciliation] Provider-id probe for '{Identity}' on printer {PrinterId} was {Status}; " +
+                        "absence cannot be proven and every dispatch fence is retained",
                         authoritativeBackendJobId,
-                        attempt.PrinterId);
-                }
-                catch (Exception histEx) when (histEx is not OperationCanceledException)
-                {
-                    logger.LogDebug(
-                        histEx,
-                        "[Reconciliation] Provider-id probe failed for '{Identity}' on printer {PrinterId}",
-                        authoritativeBackendJobId,
-                        attempt.PrinterId);
+                        attempt.PrinterId,
+                        detailProbe?.Status.ToString() ?? "null");
                     return BackendReconciliationOutcome.BackendIndeterminate;
                 }
+
+                logger.LogDebug(
+                    "[Reconciliation] Provider history id '{Identity}' is authoritatively absent on printer {PrinterId}",
+                    authoritativeBackendJobId,
+                    attempt.PrinterId);
             }
 
             HistoryListProbeResult? historyProbe =

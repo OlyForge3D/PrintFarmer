@@ -227,7 +227,7 @@ public sealed class SdcpClientParsingTests
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_IdsAckNonZero_ReturnsEmptyJobs()
+    public async Task GetHistoryListAsync_IdsAckNonZero_IsUnavailable()
     {
         string idsResponse = BuildHistoryIdsResponse(ack: 1, taskIds: ["task-001"]);
 
@@ -237,9 +237,136 @@ public sealed class SdcpClientParsingTests
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
             env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
 
-        result.Should().NotBeNull();
-        result!.Count.Should().Be(0);
-        result.Jobs.Should().BeEmpty();
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_BlankIdsResponse_IsUnavailable()
+    {
+        await using var env = await CreateSdcpHistoryServer(
+            string.Empty,
+            new Dictionary<string, string>());
+
+        ISupportsHistory historyClient = env.Client;
+        HistoryListResponse? result = await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: null,
+            start: null,
+            since: null,
+            credential: null,
+            CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_MissingAck_IsUnavailable()
+    {
+        string idsResponse = JsonSerializer.Serialize(new
+        {
+            Data = new
+            {
+                Cmd = 320,
+                Data = new
+                {
+                    HistoryData = Array.Empty<string>(),
+                },
+            },
+        });
+        await using var env = await CreateSdcpHistoryServer(
+            idsResponse,
+            new Dictionary<string, string>());
+
+        ISupportsHistory historyClient = env.Client;
+        HistoryListResponse? result = await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: null,
+            start: null,
+            since: null,
+            credential: null,
+            CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_PositiveCountWithFailedDetail_IsUnavailable()
+    {
+        const string taskId = "task-incomplete";
+        string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
+        string failedDetail = BuildHistoryDetailResponse(
+            ack: 1,
+            taskId,
+            "ignored.gcode",
+            status: 0,
+            startTime: 0,
+            endTime: 0);
+        await using var env = await CreateSdcpHistoryServer(
+            idsResponse,
+            new Dictionary<string, string> { [taskId] = failedDetail });
+
+        ISupportsHistory historyClient = env.Client;
+        HistoryListResponse? result = await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: null,
+            start: null,
+            since: null,
+            credential: null,
+            CancellationToken.None);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_MalformedDetail_ThrowsInvalidData()
+    {
+        await using var env = await CreateSdcpServer("not-json");
+        ISupportsHistory historyClient = env.Client;
+
+        Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
+            env.BaseUrl,
+            "task-malformed",
+            credential: null,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_BlankDetail_ThrowsInvalidData()
+    {
+        await using var env = await CreateSdcpServer(string.Empty);
+        ISupportsHistory historyClient = env.Client;
+
+        Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
+            env.BaseUrl,
+            "task-blank",
+            credential: null,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidDataException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_MismatchedDetailIdentity_ThrowsInvalidData()
+    {
+        string detail = BuildHistoryDetailResponse(
+            ack: 0,
+            taskId: "different-task",
+            filename: "wrong.gcode",
+            status: 1,
+            startTime: 1700000000,
+            endTime: 1700001000);
+        await using var env = await CreateSdcpServer(detail);
+        ISupportsHistory historyClient = env.Client;
+
+        Func<Task> action = async () => await historyClient.GetHistoryJobAsync(
+            env.BaseUrl,
+            "requested-task",
+            credential: null,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<InvalidDataException>();
     }
 
     [Fact]

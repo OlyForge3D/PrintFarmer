@@ -614,8 +614,16 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync();
-            return ParseOctoPrintHistoryList(content);
+            HistoryListResponse? parsed = ParseOctoPrintHistoryList(content);
+            if (parsed is null)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint returned malformed history list data.");
+            }
+
+            return parsed;
         }
         catch (Exception ex)
         {
@@ -635,12 +643,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             HttpResponseMessage response = await SendWithRetryAsync(request);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return null;
+                throw new HistoryJobNotFoundException(
+                    $"OctoPrint history job {jobId} was not found.");
             }
 
             response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync();
-            return ParseOctoPrintHistoryJob(content);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
+            {
+                throw new InvalidDataException(
+                    $"OctoPrint returned malformed history detail for {jobId}.");
+            }
+
+            return parsed;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

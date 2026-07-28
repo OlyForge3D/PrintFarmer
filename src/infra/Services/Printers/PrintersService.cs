@@ -354,27 +354,116 @@ public class PrintersService(
             throw new ArgumentException("Job ID is required", nameof(jobId));
         }
 
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryJobProbeResult probe = await ProbeHistoryJobAsync(
+            printerId,
+            jobId,
+            ct);
+        if (probe.Status == HistoryDetailProbeStatus.Found &&
+            probe.Job is not null)
+        {
+            return probe.Job;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryDetailProbeStatus.NotFound =>
+                new KeyNotFoundException($"History job {jobId} was not found."),
+            HistoryDetailProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryDetailProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history detail is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ => new InvalidOperationException("Printer history detail could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return HistoryJobProbeResult.Error("history_job_id_required");
+        }
+
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryJobProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            return HistoryJobProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryJob? job = await historyClient!.GetHistoryJobAsync(
+                printer.BackendUrl,
+                jobId,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (job is null)
             {
-                throw new InvalidOperationException("History is only available for backends that support it");
+                _logger.LogWarning(
+                    "[History] Backend detail returned null for printer {PrinterId}, job {JobId}; treating as unavailable",
+                    printerId,
+                    jobId);
+                return HistoryJobProbeResult.Unavailable();
             }
 
-            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            if (string.IsNullOrWhiteSpace(job.JobId))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_missing");
+            }
 
-            // Set ThumbnailUrl
+            if (!string.Equals(job.JobId, jobId, StringComparison.Ordinal))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_mismatch");
+            }
+
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-            return job;
+            return HistoryJobProbeResult.Found(job);
+        }
+        catch (HistoryJobNotFoundException)
+        {
+            return HistoryJobProbeResult.NotFound();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail transport unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable();
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail socket unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable();
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable();
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve job {JobId} for printer {PrinterId}: {Message}", jobId, printerId, ex.Message);
-            throw;
+            _logger.LogWarning(ex, "[History] Invalid detail for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Error();
         }
     }
 

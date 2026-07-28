@@ -139,6 +139,170 @@ public sealed class PrintersServiceHistoryProbeTests
             CancellationToken.None)).Should().BeSameAs(emptyHistory);
     }
 
+    [Fact]
+    public async Task ProbeHistoryJobAsync_ValidDetailIsFound()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                "provider-job",
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob
+            {
+                JobId = "provider-job",
+                Filename = "calibration.gcode",
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Found);
+        result.Job!.JobId.Should().Be("provider-job");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_ExplicitNotFoundIsAuthoritative()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HistoryJobNotFoundException("missing"));
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "missing", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.NotFound);
+        result.Job.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_UnsupportedBackendIsNonAuthoritative()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.FlashForge);
+        PrintersService service = CreateService(db, printer, historyClient: null);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Unsupported);
+        result.Job.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_NullAdapterResponseIsUnavailable()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((HistoryJob?)null);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Unavailable);
+        result.Job.Should().BeNull();
+        Func<Task> legacyRead = async () => await service.GetHistoryJobAsync(
+            printer.Id,
+            "provider-job",
+            CancellationToken.None);
+        await legacyRead.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_MissingAdapterJobIdIsError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob { Filename = "calibration.gcode" });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Error);
+        result.FailureCode.Should().Be("history_job_id_missing");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_MismatchedAdapterJobIdIsError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob
+            {
+                JobId = "different-provider-job",
+                Filename = "calibration.gcode",
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Error);
+        result.FailureCode.Should().Be("history_job_id_mismatch");
+    }
+
+    [Theory]
+    [InlineData(typeof(HttpRequestException), HistoryDetailProbeStatus.Unavailable)]
+    [InlineData(typeof(InvalidDataException), HistoryDetailProbeStatus.Error)]
+    [InlineData(typeof(KeyNotFoundException), HistoryDetailProbeStatus.Error)]
+    public async Task ProbeHistoryJobAsync_AdapterFailureIsNonAuthoritative(
+        Type exceptionType,
+        HistoryDetailProbeStatus expectedStatus)
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(expectedStatus);
+        result.Job.Should().BeNull();
+    }
+
     private static AppDbContext CreateDbContext()
     {
         DbContextOptions<AppDbContext> options =
