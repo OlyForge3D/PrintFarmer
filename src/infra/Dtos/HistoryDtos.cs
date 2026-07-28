@@ -15,6 +15,34 @@ public class HistoryListResponse
 
     [JsonPropertyName("jobs")]
     public HistoryJob[] Jobs { get; set; } = [];
+
+    [JsonIgnore]
+    public HistoryListAuthorityEvidence? AuthorityEvidence { get; set; }
+}
+
+/// <summary>
+/// Provider-generated proof that a history response covers an unambiguous source range.
+/// </summary>
+/// <param name="Provider">Provider that evaluated its source response.</param>
+/// <param name="SourceEntryCount">Explicit entry count reported by the provider source.</param>
+/// <param name="ExaminedEntryCount">Number of source entries actually examined by the adapter.</param>
+/// <param name="StartsAtBeginning">Whether the examined range starts at the first source entry.</param>
+/// <param name="HasUnambiguousEnd">Whether provider semantics prove no unseen trailing page.</param>
+public sealed record HistoryListAuthorityEvidence(
+    string Provider,
+    int SourceEntryCount,
+    int ExaminedEntryCount,
+    bool StartsAtBeginning,
+    bool HasUnambiguousEnd)
+{
+    /// <summary>Whether the evidence proves that the complete source range was examined.</summary>
+    [JsonIgnore]
+    public bool ProvesCompleteSource =>
+        !string.IsNullOrWhiteSpace(Provider) &&
+        SourceEntryCount >= 0 &&
+        SourceEntryCount == ExaminedEntryCount &&
+        StartsAtBeginning &&
+        HasUnambiguousEnd;
 }
 
 /// <summary>

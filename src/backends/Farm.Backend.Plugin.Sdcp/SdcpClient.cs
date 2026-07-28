@@ -3,6 +3,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -379,6 +380,8 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private readonly BackendTimeoutSettings _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));
 
     private const int SdcpWebSocketPort = 3030;
+    private const string WebSocketConnectionFailureMessage =
+        "SDCP WS connection failed for all candidates.";
 
     /// <summary>
     /// Maximum chunk size for SDCP file uploads (1 MB), matching OrcaSlicer ElegooLink implementation.
@@ -782,7 +785,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             }
         }
 
-        throw new InvalidOperationException("SDCP WS connection failed for all candidates.", lastException);
+        throw new InvalidOperationException(
+            WebSocketConnectionFailureMessage,
+            lastException);
     }
 
     public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default)
@@ -1930,7 +1935,17 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
                 if (idsResult.HistoryData.Count == 0)
                 {
-                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                    return new HistoryListResponse
+                    {
+                        Count = 0,
+                        Jobs = [],
+                        AuthorityEvidence = new HistoryListAuthorityEvidence(
+                            "sdcp",
+                            0,
+                            0,
+                            !start.HasValue || start.Value <= 0,
+                            true),
+                    };
                 }
 
                 List<string> taskIds = idsResult.HistoryData;
@@ -1955,12 +1970,50 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
                 LogSdcp(LogLevel.Debug, $"SDCP history: {jobs.Count} jobs from {taskIds.Count} total");
-                return new HistoryListResponse { Count = taskIds.Count, Jobs = jobs.ToArray() };
+                return new HistoryListResponse
+                {
+                    Count = taskIds.Count,
+                    Jobs = jobs.ToArray(),
+                    AuthorityEvidence = new HistoryListAuthorityEvidence(
+                        "sdcp",
+                        taskIds.Count,
+                        pageIds.Count,
+                        skipCount == 0,
+                        skipCount + pageIds.Count >= taskIds.Count),
+                };
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP history list timed out", ex);
+            throw new TimeoutException("SDCP history list request timed out.", ex);
+        }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message == WebSocketConnectionFailureMessage)
+        {
+            throw new HttpRequestException(
+                "SDCP history WebSocket connection failed.",
+                ex);
+        }
+        catch (WebSocketException ex)
+        {
+            throw new HttpRequestException(
+                "SDCP history WebSocket transport failed.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                "SDCP history socket transport failed.",
+                ex);
         }
         catch (Exception ex)
         {
@@ -2092,6 +2145,39 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogSdcp(
+                LogLevel.Debug,
+                $"SDCP history job detail timed out for {jobId}",
+                ex);
+            throw new TimeoutException(
+                $"SDCP history job detail timed out for {jobId}.",
+                ex);
+        }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message == WebSocketConnectionFailureMessage)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job WebSocket connection failed for {jobId}.",
+                ex);
+        }
+        catch (WebSocketException ex)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job WebSocket transport failed for {jobId}.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job socket transport failed for {jobId}.",
+                ex);
         }
         catch (Exception ex)
         {

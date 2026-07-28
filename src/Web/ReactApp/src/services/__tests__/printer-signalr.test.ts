@@ -728,6 +728,12 @@ describe('PrinterSignalRService settings reload on authentication', () => {
     signalRTestState.getSettings.mockReset();
     signalRTestState.connectionHandlers.clear();
     signalRTestState.connection.state = 'Disconnected';
+    signalRTestState.connection.start.mockImplementation(async () => {
+      signalRTestState.connection.state = 'Connected';
+    });
+    signalRTestState.connection.stop.mockImplementation(async () => {
+      signalRTestState.connection.state = 'Disconnected';
+    });
     window.PrintFarmerDebug = undefined;
   });
 
@@ -777,6 +783,40 @@ describe('PrinterSignalRService settings reload on authentication', () => {
     expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2);
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
 
+    printerSignalRService.dispose();
+  });
+
+  it('does not reconnect when logout supersedes a deferred settings stop', async () => {
+    signalRTestState.getSettings.mockResolvedValueOnce({
+      logLevel: 'Information',
+      consoleLoggingEnabled: false,
+    });
+    const { printerSignalRService } = await import('../printer-signalr');
+    await flushMicrotasks();
+    await printerSignalRService.connect();
+    expect(signalRTestState.connection.start).toHaveBeenCalledOnce();
+
+    signalRTestState.getSettings.mockResolvedValueOnce({
+      logLevel: 'Information',
+      consoleLoggingEnabled: true,
+    });
+    const stopEntered = deferred<void>();
+    const releaseStop = deferred<void>();
+    signalRTestState.connection.stop.mockImplementation(async () => {
+      signalRTestState.connection.state = 'Disconnecting';
+      stopEntered.resolve();
+      await releaseStop.promise;
+      signalRTestState.connection.state = 'Disconnected';
+    });
+
+    const refresh = printerSignalRService.refreshSettings();
+    await stopEntered.promise;
+    const logout = printerSignalRService.disconnect();
+    releaseStop.resolve();
+    await Promise.all([refresh, logout]);
+
+    expect(signalRTestState.connection.start).toHaveBeenCalledOnce();
+    expect(printerSignalRService.isConnected).toBe(false);
     printerSignalRService.dispose();
   });
 });

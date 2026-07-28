@@ -190,6 +190,56 @@ public sealed class MoonrakerUploadOutcomeTests
         history!.Count.Should().Be(1);
         history.Jobs.Should().ContainSingle();
         history.Jobs[0].JobId.Should().Be("uid-1");
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task HistoryList_LowercaseAuxiliaryData_MatchesDetailContract()
+    {
+        const string job =
+            """
+            {"job_id":"uid-aux","filename":"aux.gcode","status":"completed","auxiliary_data":[{"provider":"spoolman","name":"spool_id","value":"42","description":"Physical spool","units":"id"}]}
+            """;
+        string listPayload = "{\"result\":{\"count\":1,\"jobs\":[" + job + "]}}";
+        string detailPayload = "{\"result\":" + job + "}";
+        using var handler = new InlineHandler(request =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    request.RequestUri!.AbsolutePath.EndsWith(
+                        "/list",
+                        StringComparison.Ordinal)
+                        ? listPayload
+                        : detailPayload,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        HistoryListResponse? list = await client.GetHistoryListAsync(
+            "http://moonraker/");
+        HistoryJob? detail = await client.GetHistoryJobAsync(
+            "http://moonraker/",
+            "uid-aux");
+
+        list.Should().NotBeNull();
+        detail.Should().NotBeNull();
+        AuxiliaryData listAuxiliary = list!.Jobs.Single().AuxiliaryData!.Single();
+        AuxiliaryData detailAuxiliary = detail!.AuxiliaryData!.Single();
+        listAuxiliary.Provider.Should().Be("spoolman");
+        listAuxiliary.Name.Should().Be("spool_id");
+        listAuxiliary.Description.Should().Be("Physical spool");
+        listAuxiliary.Units.Should().Be("id");
+        listAuxiliary.Provider.Should().Be(detailAuxiliary.Provider);
+        listAuxiliary.Name.Should().Be(detailAuxiliary.Name);
+        listAuxiliary.Value.ToString().Should().Be(
+            detailAuxiliary.Value.ToString());
+        listAuxiliary.Description.Should().Be(detailAuxiliary.Description);
+        listAuxiliary.Units.Should().Be(detailAuxiliary.Units);
     }
 
     private sealed class ResponseLostAfterContentHandler : HttpMessageHandler

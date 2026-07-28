@@ -48,7 +48,11 @@ public sealed class PrusaLinkHistoryAuthorityTests
     [Theory]
     [InlineData("not-json")]
     [InlineData("""{"success":true,"count":0}""")]
+    [InlineData("""{"success":true,"results":[]}""")]
+    [InlineData("""{"success":true,"count":2,"results":[{"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode"}}}]}""")]
     [InlineData("""{"success":true,"count":1,"results":[{}]}""")]
+    [InlineData("""{"success":true,"count":1,"results":[{"id":"job-1"}]}""")]
+    [InlineData("""{"success":true,"count":1,"results":[{"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode"}}}]}""")]
     public async Task GetHistoryListAsync_MalformedOrIncompletePayload_IsUnavailable(
         string payload)
     {
@@ -83,6 +87,53 @@ public sealed class PrusaLinkHistoryAuthorityTests
         history.Should().NotBeNull();
         history!.Count.Should().Be(0);
         history.Jobs.Should().BeEmpty();
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_CompleteEntry_IsAuthoritative()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"count":1,"results":[{"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode"}}}]}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/");
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle();
+        history.Jobs[0].StartTime.Should().Be(1700000000);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_FullRequestedPage_IsPaginationAmbiguous()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"count":1,"results":[{"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode"}}}]}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/",
+            limit: 1,
+            start: 0);
+
+        history.Should().NotBeNull();
+        history!.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
     }
 
     [Fact]

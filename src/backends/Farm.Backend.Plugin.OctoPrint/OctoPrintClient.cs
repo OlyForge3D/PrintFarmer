@@ -625,6 +625,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     "OctoPrint returned malformed history list data.");
             }
 
+            bool startsAtBeginning = !start.HasValue || start.Value <= 0;
+            bool hasUnambiguousEnd =
+                !limit.HasValue ||
+                limit.Value <= 0 ||
+                parsed.Jobs.Length < limit.Value;
+            parsed.AuthorityEvidence = new HistoryListAuthorityEvidence(
+                "octoprint",
+                parsed.Count,
+                parsed.Jobs.Length,
+                startsAtBeginning,
+                hasUnambiguousEnd);
             return parsed;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1581,13 +1592,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 jobs.Add(job);
             }
 
-            int count = jobs.Count;
-            if (root.TryGetProperty("count", out JsonElement countProp))
+            if (!root.TryGetProperty("count", out JsonElement countProp) ||
+                !countProp.TryGetInt32(out int count) ||
+                count < 0 ||
+                count != jobs.Count)
             {
-                if (!countProp.TryGetInt32(out count) || count < 0)
-                {
-                    return null;
-                }
+                return null;
             }
 
             return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };

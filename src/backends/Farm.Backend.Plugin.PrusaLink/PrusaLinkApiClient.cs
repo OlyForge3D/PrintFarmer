@@ -727,13 +727,29 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 return null;
             }
 
+            bool startsAtBeginning = !start.HasValue || start.Value <= 0;
+            bool hasUnambiguousEnd =
+                !limit.HasValue ||
+                limit.Value <= 0 ||
+                parsed.Jobs.Length < limit.Value;
+            parsed.AuthorityEvidence = new HistoryListAuthorityEvidence(
+                "prusalink",
+                parsed.Count,
+                parsed.Jobs.Length,
+                startsAtBeginning,
+                hasUnambiguousEnd);
             if (since.HasValue)
             {
                 DateTime sinceUtc = since.Value;
                 HistoryJob[] filtered = parsed.Jobs
                     .Where(job => DateTimeOffset.FromUnixTimeSeconds((long)job.StartTime).UtcDateTime > sinceUtc)
                     .ToArray();
-                return new HistoryListResponse { Count = filtered.Length, Jobs = filtered };
+                return new HistoryListResponse
+                {
+                    Count = filtered.Length,
+                    Jobs = filtered,
+                    AuthorityEvidence = parsed.AuthorityEvidence,
+                };
             }
 
             return parsed;
@@ -866,7 +882,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             foreach (JsonElement jobElement in resultsProp.EnumerateArray())
             {
-                HistoryJob? job = ParseOctoPrintJobElement(jobElement);
+                HistoryJob? job = ParseOctoPrintJobElement(
+                    jobElement,
+                    requireCompleteListEntry: true);
                 if (job is null)
                 {
                     return null;
@@ -875,10 +893,12 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 jobs.Add(job);
             }
 
-            int count = jobs.Count;
-            if (root.TryGetProperty("count", out JsonElement countProp) && countProp.ValueKind == JsonValueKind.Number)
+            if (!root.TryGetProperty("count", out JsonElement countProp) ||
+                !countProp.TryGetInt32(out int count) ||
+                count < 0 ||
+                count != jobs.Count)
             {
-                count = countProp.GetInt32();
+                return null;
             }
 
             return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
@@ -902,7 +922,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
+    private static HistoryJob? ParseOctoPrintJobElement(
+        JsonElement jobElement,
+        bool requireCompleteListEntry = false)
     {
         try
         {
@@ -918,16 +940,39 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 return null;
             }
 
-            if (jobElement.TryGetProperty("state", out JsonElement stateProp))
+            bool hasState =
+                jobElement.TryGetProperty("state", out JsonElement stateProp) &&
+                stateProp.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(stateProp.GetString());
+            string? filename = null;
+            if (jobElement.TryGetProperty("job", out JsonElement jobProp) &&
+                jobProp.ValueKind == JsonValueKind.Object &&
+                jobProp.TryGetProperty("file", out JsonElement fileProp) &&
+                fileProp.ValueKind == JsonValueKind.Object &&
+                fileProp.TryGetProperty("name", out JsonElement nameProp) &&
+                nameProp.ValueKind == JsonValueKind.String)
+            {
+                filename = nameProp.GetString();
+            }
+
+            bool hasFilename = !string.IsNullOrWhiteSpace(filename);
+            bool hasStartTime =
+                jobElement.TryGetProperty("startTime", out JsonElement startProp) &&
+                startProp.ValueKind == JsonValueKind.Number;
+            if (requireCompleteListEntry &&
+                (!hasState || !hasFilename || !hasStartTime))
+            {
+                return null;
+            }
+
+            if (hasState)
             {
                 job.Status = stateProp.GetString() ?? string.Empty;
             }
 
-            if (jobElement.TryGetProperty("job", out JsonElement jobProp)
-                && jobProp.TryGetProperty("file", out JsonElement fileProp)
-                && fileProp.TryGetProperty("name", out JsonElement nameProp))
+            if (hasFilename)
             {
-                job.Filename = nameProp.GetString() ?? string.Empty;
+                job.Filename = filename!;
             }
 
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind == JsonValueKind.Number)
@@ -935,7 +980,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 job.PrintDuration = printTimeProp.GetDouble();
             }
 
-            if (jobElement.TryGetProperty("startTime", out JsonElement startProp) && startProp.ValueKind == JsonValueKind.Number)
+            if (hasStartTime)
             {
                 job.StartTime = startProp.GetDouble();
             }

@@ -500,6 +500,40 @@ public sealed class SdcpClientParsingTests
         result.Jobs[0].Filename.Should().Be("new.gcode");
     }
 
+    [Fact]
+    public async Task GetHistoryListAsync_ExhaustedWebSocketCandidates_ThrowsTransportFailure()
+    {
+        await using SdcpTestEnvironment env = await CreateRejectingSdcpServer();
+        ISupportsHistory historyClient = env.Client;
+
+        Func<Task> action = async () => await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: null,
+            start: null,
+            since: null,
+            credential: null,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_SilentWebSocket_ThrowsTimeout()
+    {
+        await using SdcpTestEnvironment env = await CreateSilentSdcpServer();
+        ISupportsHistory historyClient = env.Client;
+
+        Func<Task> action = async () => await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: null,
+            start: null,
+            since: null,
+            credential: null,
+            CancellationToken.None);
+
+        await action.Should().ThrowAsync<TimeoutException>();
+    }
+
     // ==================== File Delete Tests (Cmd 259) ====================
 
     [Fact]
@@ -818,6 +852,81 @@ public sealed class SdcpClientParsingTests
         var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
         return new SdcpTestEnvironment(app, client, baseUrl);
+    }
+
+    private static async Task<SdcpTestEnvironment> CreateSilentSdcpServer()
+    {
+        int port = GetFreeTcpPort();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            new WebApplicationOptions
+            {
+                EnvironmentName = Environments.Development,
+            });
+        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        WebApplication app = builder.Build();
+        app.UseWebSockets();
+        app.Map("/websocket", async context =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+
+            using WebSocket ws = await context.WebSockets.AcceptWebSocketAsync();
+            byte[] buffer = new byte[8192];
+            await ws.ReceiveAsync(buffer, context.RequestAborted);
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), context.RequestAborted);
+            }
+            catch (OperationCanceledException)
+            {
+                // The client timeout closes the test socket.
+            }
+        });
+        await app.StartAsync();
+
+        using var http = new HttpClient();
+        var client = new SdcpClient(
+            http,
+            Mock.Of<ILogger<SdcpClient>>(),
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings
+            {
+                CommandTimeoutSeconds = 1,
+            });
+        return new SdcpTestEnvironment(
+            app,
+            client,
+            $"http://127.0.0.1:{port}");
+    }
+
+    private static async Task<SdcpTestEnvironment> CreateRejectingSdcpServer()
+    {
+        int port = GetFreeTcpPort();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(
+            new WebApplicationOptions
+            {
+                EnvironmentName = Environments.Development,
+            });
+        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        WebApplication app = builder.Build();
+        app.Map("/websocket", context =>
+        {
+            context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
+            return Task.CompletedTask;
+        });
+        await app.StartAsync();
+
+        using var http = new HttpClient();
+        var client = new SdcpClient(
+            http,
+            Mock.Of<ILogger<SdcpClient>>(),
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        return new SdcpTestEnvironment(
+            app,
+            client,
+            $"http://127.0.0.1:{port}");
     }
 
     /// <summary>

@@ -153,7 +153,10 @@ public sealed class PrintersServiceHistoryProbeTests
     {
         await using AppDbContext db = CreateDbContext();
         Printer printer = CreatePrinter(PrinterBackend.Moonraker);
-        var emptyHistory = new HistoryListResponse();
+        var emptyHistory = new HistoryListResponse
+        {
+            AuthorityEvidence = CompleteEvidence(0),
+        };
         Mock<ISupportsHistory> historyClient = CreateHistoryClient();
         historyClient
             .Setup(client => client.GetHistoryListAsync(
@@ -179,6 +182,71 @@ public sealed class PrintersServiceHistoryProbeTests
             null,
             "desc",
             CancellationToken.None)).Should().BeSameAs(emptyHistory);
+    }
+
+    [Fact]
+    public async Task ProbeHistoryListAsync_NonNullWithoutCompletenessEvidenceIsError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.OctoPrint);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse());
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Error);
+        result.FailureCode.Should().Be("history_completeness_unproven");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryListAsync_AmbiguousPaginationEvidenceIsError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse
+            {
+                Count = 100,
+                Jobs = Enumerable.Range(0, 100)
+                    .Select(index => new HistoryJob
+                    {
+                        JobId = $"job-{index}",
+                        Filename = $"job-{index}.gcode",
+                        Status = "completed",
+                    })
+                    .ToArray(),
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                    "prusalink",
+                    100,
+                    100,
+                    StartsAtBeginning: true,
+                    HasUnambiguousEnd: false),
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Error);
+        result.FailureCode.Should().Be("history_completeness_unproven");
     }
 
     [Fact]
@@ -403,6 +471,14 @@ public sealed class PrintersServiceHistoryProbeTests
     };
 
     private static Mock<ISupportsHistory> CreateHistoryClient() => new();
+
+    private static HistoryListAuthorityEvidence CompleteEvidence(int count) =>
+        new(
+            "test",
+            count,
+            count,
+            StartsAtBeginning: true,
+            HasUnambiguousEnd: true);
 
     private static PrintersService CreateService(
         AppDbContext db,

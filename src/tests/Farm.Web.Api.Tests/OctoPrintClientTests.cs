@@ -156,6 +156,8 @@ public class OctoPrintClientTests
 
     [Theory]
     [InlineData("""{"success":true,"count":0}""")]
+    [InlineData("""{"success":true,"results":[]}""")]
+    [InlineData("""{"success":true,"count":2,"results":[{"name":"a.gcode","success":true,"timestamp":1700000000}]}""")]
     [InlineData("""{"success":true,"count":1,"results":[{}]}""")]
     [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","timestamp":1700000000}]}""")]
     [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","success":true}]}""")]
@@ -200,5 +202,30 @@ public class OctoPrintClientTests
         history.Should().NotBeNull();
         history!.Jobs.Should().ContainSingle();
         history.Jobs[0].JobId.Should().Be("a.gcode");
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_FullRequestedPage_IsPaginationAmbiguous()
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"success":true,"count":1,"results":[{"name":"a.gcode","success":true,"timestamp":1700000000}]}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 1,
+            start: 0,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        history.Should().NotBeNull();
+        history!.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
     }
 }

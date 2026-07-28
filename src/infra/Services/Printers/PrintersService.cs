@@ -285,6 +285,16 @@ public class PrintersService(
                 return HistoryListProbeResult.Unavailable();
             }
 
+            if (response.AuthorityEvidence?.ProvesCompleteSource != true)
+            {
+                _logger.LogWarning(
+                    "[History] Backend {Backend} did not prove complete history coverage for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Error(
+                    "history_completeness_unproven");
+            }
+
             _logger.LogInformation(
                 "[History] Got {Count} authoritative jobs from {Backend}",
                 response.Count,

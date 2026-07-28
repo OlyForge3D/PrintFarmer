@@ -428,7 +428,7 @@ export class PrinterSignalRService {
         this.connection?.state === HubConnectionState.Reconnecting;
       const shouldReconnect = this.connectionRequested || wasActive;
       const previousConnection = this.connection;
-      this.connectionIntentGeneration++;
+      const refreshIntentGeneration = ++this.connectionIntentGeneration;
       this.clearManualReconnectTimer();
       this.invalidateConnectionEpoch();
       if (
@@ -437,12 +437,15 @@ export class PrinterSignalRService {
       ) {
         await previousConnection.stop();
       }
+      const refreshWasSuperseded =
+        refreshIntentGeneration !== this.connectionIntentGeneration ||
+        (shouldReconnect && !this.connectionRequested);
       if (previousConnection === this.connection) {
         this.connection = null;
       }
       if (this.disposed) return;
       this.buildConnection();
-      if (shouldReconnect) {
+      if (!refreshWasSuperseded && shouldReconnect) {
         await this.connect();
       }
     } finally {

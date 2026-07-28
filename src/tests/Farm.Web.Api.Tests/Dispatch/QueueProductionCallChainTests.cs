@@ -9,6 +9,7 @@ using System.Text.Json;
 using Farm.Api.Services.PrintQueue;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Backend.Plugin.OctoPrint;
+using Farm.Backend.Plugin.PrusaLink;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -1380,6 +1381,86 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await AssertIndeterminateFencesAsync(fixture, attemptId);
         handler.RequestPaths.Should().Contain("/api/history");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_OctoPrintFullPageAmbiguity_RetainsEveryFence()
+    {
+        const string backendJobId = "octoprint-full-page";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.OctoPrint);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        printer.Credential = new PrinterCredential { ApiKey = "test-api-key" };
+        string payload = JsonSerializer.Serialize(new
+        {
+            success = true,
+            count = 100,
+            results = Enumerable.Range(0, 100).Select(index => new
+            {
+                name = $"page-{index}.gcode",
+                success = true,
+                timestamp = 1700000000 + index,
+            }),
+        });
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains(
+                backendJobId,
+                StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(payload));
+        using var http = new HttpClient(handler);
+        var history = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new BackendTimeoutSettings());
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_PrusaLinkMissingStartTime_RetainsEveryFence()
+    {
+        const string backendJobId = "prusalink-missing-start";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.PrusaLink);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains(
+                backendJobId,
+                StringComparison.Ordinal)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : JsonResponse(
+                    """
+                    {"success":true,"count":1,"results":[{"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode"}}}]}
+                    """));
+        using var http = new HttpClient(handler);
+        var history = new PrusaLinkClient(
+            http,
+            NullLogger<PrusaLinkClient>.Instance);
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
     }
 
     [Fact]

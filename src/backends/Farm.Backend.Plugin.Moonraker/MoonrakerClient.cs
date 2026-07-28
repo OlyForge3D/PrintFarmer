@@ -46,6 +46,8 @@ public class MoonrakerClient(
     ISupportsPerExtruderFilamentUsage
 {
     private const int MaxExcludeObjectNameLength = 256;
+    private static readonly JsonSerializerOptions WebJsonOptions =
+        new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
@@ -2314,13 +2316,26 @@ public class MoonrakerClient(
             }
 
             MoonrakerResponse<HistoryListResponse>? response =
-                JsonSerializer.Deserialize<MoonrakerResponse<HistoryListResponse>>(content);
+                JsonSerializer.Deserialize<MoonrakerResponse<HistoryListResponse>>(
+                    content,
+                    WebJsonOptions);
             if (response?.Result == null)
             {
                 _logger.LogWarning($"[Moonraker] History response deserialization returned null");
                 return null;
             }
 
+            bool startsAtBeginning = !start.HasValue || start.Value <= 0;
+            bool hasUnambiguousEnd =
+                !limit.HasValue ||
+                limit.Value <= 0 ||
+                response.Result.Jobs.Length < limit.Value;
+            response.Result.AuthorityEvidence = new HistoryListAuthorityEvidence(
+                "moonraker",
+                response.Result.Count,
+                response.Result.Jobs.Length,
+                startsAtBeginning,
+                hasUnambiguousEnd);
             _logger.LogInformation("[Moonraker] Successfully fetched {Count} history items", response.Result.Count);
             return response.Result;
         }
