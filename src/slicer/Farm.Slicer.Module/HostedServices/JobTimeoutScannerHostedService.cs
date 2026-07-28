@@ -171,7 +171,7 @@ public class JobTimeoutScannerHostedService : BackgroundService
                 SliceJobMetrics? metrics = scope.ServiceProvider.GetService<SliceJobMetrics>();
                 metrics?.RecordJobRetry();
                 metrics?.RecordJobTimedOut();
-                if (job.RetryCount + 1 > _retrySettings.MaxAttempts)
+                if (job.RetryCount >= _retrySettings.MaxAttempts)
                 {
                     _logger.LogWarning("Job {JobId} exceeded max retries and was marked Failed", job.Id);
                 }

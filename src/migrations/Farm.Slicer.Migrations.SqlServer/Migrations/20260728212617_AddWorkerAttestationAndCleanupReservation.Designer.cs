@@ -4,6 +4,7 @@ using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Slicer.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(SlicerDbContext))]
-    partial class SlicerDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728212617_AddWorkerAttestationAndCleanupReservation")]
+    partial class AddWorkerAttestationAndCleanupReservation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -31,9 +34,6 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
 
                     b.Property<Guid?>("ClaimToken")
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
-                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("CleanupReservationToken")
                         .HasColumnType("uniqueidentifier");

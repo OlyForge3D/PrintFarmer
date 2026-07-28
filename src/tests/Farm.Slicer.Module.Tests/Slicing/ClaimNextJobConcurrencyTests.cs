@@ -38,8 +38,14 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         Guid secondWorker = Guid.NewGuid();
 
         SliceJob?[] claims = await Task.WhenAll(
-            firstRepository.ClaimNextJobAsync(firstWorker, ["orcaslicer"], 30),
-            secondRepository.ClaimNextJobAsync(secondWorker, ["orcaslicer"], 30));
+            firstRepository.ClaimNextJobAsync(
+                WorkerClaimIdentity.CreateUnattested(firstWorker, ["orcaslicer"]),
+                30,
+                3),
+            secondRepository.ClaimNextJobAsync(
+                WorkerClaimIdentity.CreateUnattested(secondWorker, ["orcaslicer"]),
+                30,
+                3));
 
         claims.Count(claim => claim is not null).Should().Be(1);
         claims.Count(claim => claim is null).Should().Be(1);
@@ -75,8 +81,14 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         var secondRepository = new EfSliceJobRepository(secondContext);
 
         SliceJob?[] claims = await Task.WhenAll(
-            firstRepository.ClaimNextJobAsync(Guid.NewGuid(), ["orcaslicer"], 30),
-            secondRepository.ClaimNextJobAsync(Guid.NewGuid(), ["orcaslicer"], 30));
+            firstRepository.ClaimNextJobAsync(
+                WorkerClaimIdentity.CreateUnattested(Guid.NewGuid(), ["orcaslicer"]),
+                30,
+                3),
+            secondRepository.ClaimNextJobAsync(
+                WorkerClaimIdentity.CreateUnattested(Guid.NewGuid(), ["orcaslicer"]),
+                30,
+                3));
 
         claims.Should().OnlyContain(claim => claim != null);
         claims.Select(claim => claim!.Id).Should().OnlyHaveUniqueItems();
@@ -145,21 +157,22 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         var repository = new EfSliceJobRepository(context);
 
         SliceJob firstClaim = (await repository.ClaimNextJobAsync(
-            workerId,
-            ["orcaslicer"],
-            30))!;
+            WorkerClaimIdentity.CreateUnattested(workerId, ["orcaslicer"]),
+            30,
+            3))!;
         _ = await context.SliceJobs
             .Where(job => job.Id == firstClaim.Id)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddSeconds(-1)));
         SliceJob secondClaim = (await repository.ClaimNextJobAsync(
-            workerId,
-            ["orcaslicer"],
-            30))!;
+            WorkerClaimIdentity.CreateUnattested(workerId, ["orcaslicer"]),
+            30,
+            3))!;
 
         firstClaim.ClaimToken.Should().NotBeNull();
         secondClaim.ClaimToken.Should().NotBeNull();
         secondClaim.ClaimToken!.Value.Should().NotBe(firstClaim.ClaimToken!.Value);
+        secondClaim.RetryCount.Should().Be(1);
         Guid staleClaimToken = firstClaim.ClaimToken!.Value;
         (await repository.GetByActiveWorkerLeaseAsync(
             firstClaim.Id,
@@ -196,6 +209,53 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         persisted.ProgressPercent.Should().Be(0);
     }
 
+    [Fact]
+    public async Task ClaimNextJobAsync_RepeatedExpiry_StopsAtRetryLimit()
+    {
+        string connectionString = $"Data Source={_databasePath};Cache=Shared;Default Timeout=10";
+        Guid workerId = Guid.NewGuid();
+        await using SlicerDbContext context = CreateContext(connectionString);
+        _ = await context.Database.EnsureCreatedAsync();
+        _ = context.SliceJobs.Add(CreateQueuedJob());
+        _ = await context.SaveChangesAsync();
+        var repository = new EfSliceJobRepository(context);
+
+        SliceJob? claim = await repository.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(workerId, ["orcaslicer"]),
+            30,
+            3);
+        for (int retry = 1; retry <= 3; retry++)
+        {
+            _ = claim.Should().NotBeNull();
+            _ = await context.SliceJobs
+                .Where(job => job.Id == claim!.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddSeconds(-1)));
+
+            claim = await repository.ClaimNextJobAsync(
+                WorkerClaimIdentity.CreateUnattested(workerId, ["orcaslicer"]),
+                30,
+                3);
+            _ = claim.Should().NotBeNull();
+            _ = claim!.RetryCount.Should().Be(retry);
+        }
+
+        _ = await context.SliceJobs
+            .Where(job => job.Id == claim!.Id)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(job => job.LeaseExpiresAt, DateTime.UtcNow.AddSeconds(-1)));
+        SliceJob? exhausted = await repository.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(workerId, ["orcaslicer"]),
+            30,
+            3);
+
+        await using SlicerDbContext verification = CreateContext(connectionString);
+        SliceJob persisted = await verification.SliceJobs.AsNoTracking().SingleAsync();
+        _ = exhausted.Should().BeNull();
+        _ = persisted.Status.Should().Be(SliceJobStatus.Failed);
+        _ = persisted.RetryCount.Should().Be(3);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(0)]
@@ -207,9 +267,9 @@ public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
         var repository = new EfSliceJobRepository(context);
 
         Func<Task> claim = () => repository.ClaimNextJobAsync(
-            Guid.NewGuid(),
-            ["orcaslicer"],
-            leaseDurationSeconds);
+            WorkerClaimIdentity.CreateUnattested(Guid.NewGuid(), ["orcaslicer"]),
+            leaseDurationSeconds,
+            3);
 
         await claim.Should().ThrowAsync<ArgumentOutOfRangeException>();
     }

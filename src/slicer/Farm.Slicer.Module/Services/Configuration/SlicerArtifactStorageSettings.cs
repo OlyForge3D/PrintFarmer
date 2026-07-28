@@ -43,4 +43,7 @@ public sealed class SlicerArtifactStorageSettings
 
     /// <summary>Interval in hours between cleanup service scans.</summary>
     public int CleanupIntervalHours { get; set; } = 24;
+
+    /// <summary>Minutes before an abandoned cleanup reservation becomes eligible for takeover.</summary>
+    public int CleanupReservationTimeoutMinutes { get; set; } = 30;
 }

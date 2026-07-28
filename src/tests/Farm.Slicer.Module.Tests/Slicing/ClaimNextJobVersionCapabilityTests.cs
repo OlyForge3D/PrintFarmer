@@ -67,18 +67,22 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
 
         // Worker at 2.4.0 advertises generic + its own version — must NOT claim the 2.3.1 job.
         SliceJob? claimed = await repo.ClaimNextJobAsync(
-            Guid.NewGuid(),
-            new[] { "orcaslicer", "orcaslicer:2.4.0", "stl-processing" },
+            WorkerClaimIdentity.CreateUnattested(
+                Guid.NewGuid(),
+                ["orcaslicer", "orcaslicer:2.4.0", "stl-processing"]),
             30,
+            3,
             CancellationToken.None);
 
         _ = claimed.Should().BeNull("worker at 2.4.0 must not pick up job pinned to 2.3.1");
 
         // Sanity: matching worker CAN claim.
         SliceJob? claimedRight = await repo.ClaimNextJobAsync(
-            Guid.NewGuid(),
-            new[] { "orcaslicer", "orcaslicer:2.3.1", "stl-processing" },
+            WorkerClaimIdentity.CreateUnattested(
+                Guid.NewGuid(),
+                ["orcaslicer", "orcaslicer:2.3.1", "stl-processing"]),
             30,
+            3,
             CancellationToken.None);
 
         _ = claimedRight.Should().NotBeNull();
@@ -93,9 +97,11 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
         EfSliceJobRepository repo = new EfSliceJobRepository(_db);
 
         SliceJob? claimed = await repo.ClaimNextJobAsync(
-            Guid.NewGuid(),
-            new[] { "orcaslicer", "orcaslicer:2.3.1", "stl-processing" },
+            WorkerClaimIdentity.CreateUnattested(
+                Guid.NewGuid(),
+                ["orcaslicer", "orcaslicer:2.3.1", "stl-processing"]),
             30,
+            3,
             CancellationToken.None);
 
         _ = claimed.Should().NotBeNull();

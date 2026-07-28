@@ -26,6 +26,15 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("ClaimToken")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("CleanupReservationToken")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("CleanupReservedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -728,6 +737,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("OperationId")
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("PinnedWorkerId")
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("TEXT");
 
@@ -764,6 +776,10 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<int>("RetryCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("SlicerBinarySha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
@@ -775,11 +791,11 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<int>("SlicerEngine")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("SlicerEngineVersion")
+                    b.Property<string>("SlicerEngineName")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("SlicerEngineName")
+                    b.Property<string>("SlicerEngineVersion")
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 

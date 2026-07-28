@@ -78,8 +78,14 @@ public interface ISliceJobRepository
         string errorMessage,
         CancellationToken ct = default);
 
-    /// <summary>Atomically claims the next queued job matching capabilities (worker pull model).</summary>
-    Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
+    /// <summary>
+    /// Atomically claims the next eligible job using a registered worker identity and bounded retry policy.
+    /// </summary>
+    Task<SliceJob?> ClaimNextJobAsync(
+        WorkerClaimIdentity worker,
+        int leaseDurationSeconds,
+        int maxRetries,
+        CancellationToken ct = default);
 
     /// <summary>Finds an existing job by correlation ID and checksum (idempotency lookup).</summary>
     Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default);

@@ -193,6 +193,52 @@ public class SliceJobTimeoutRecoveryTests
     }
 
     [Fact]
+    public async Task TryRecoverExpiredLeaseAsync_ClaimReclaimsAfterSelection_CountsOneRetry()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using var scannerDb = new SlicerDbContext(options);
+        _ = await scannerDb.Database.EnsureCreatedAsync();
+        SliceJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Status = SliceJobStatus.Processing,
+            WorkerId = Guid.NewGuid(),
+            ClaimToken = Guid.NewGuid(),
+            LeaseExpiresAt = DateTime.UtcNow.AddMinutes(-1),
+        };
+        _ = scannerDb.SliceJobs.Add(job);
+        _ = await scannerDb.SaveChangesAsync();
+        var scannerRepository = new EfSliceJobRepository(scannerDb);
+        SliceJob selected = Assert.Single(await scannerRepository.GetExpiredLeaseJobsAsync());
+
+        Guid replacementWorkerId = Guid.NewGuid();
+        await using var claimantDb = new SlicerDbContext(options);
+        var claimantRepository = new EfSliceJobRepository(claimantDb);
+        SliceJob? reclaimed = await claimantRepository.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(replacementWorkerId, ["orcaslicer"]),
+            300,
+            3);
+        bool recovered = await scannerRepository.TryRecoverExpiredLeaseAsync(
+            selected.Id,
+            selected.WorkerId,
+            selected.ClaimToken,
+            selected.LeaseExpiresAt!.Value,
+            maxRetries: 3);
+
+        await using var verificationDb = new SlicerDbContext(options);
+        SliceJob persisted = await verificationDb.SliceJobs.AsNoTracking().SingleAsync();
+        Assert.NotNull(reclaimed);
+        Assert.False(recovered);
+        Assert.Equal(SliceJobStatus.Processing, persisted.Status);
+        Assert.Equal(replacementWorkerId, persisted.WorkerId);
+        Assert.Equal(1, persisted.RetryCount);
+    }
+
+    [Fact]
     public async Task TryRecoverExpiredLeaseAsync_LeaseChangedButStillExpired_DoesNotOverwriteObservedClaim()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

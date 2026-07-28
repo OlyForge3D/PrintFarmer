@@ -281,7 +281,9 @@ public sealed class DatabaseMigrationTests
             "20260725173232_AlignDevelopmentSlicerSchema",
             "20260725185010_AddOwnerScopedPromotionOperationKey",
             "20260726084205_AddSliceJobSlicerEngineVersion",
-            "20260726170804_AddSliceJobClaimIncarnation");
+            "20260726170804_AddSliceJobClaimIncarnation",
+            "20260728212624_AddWorkerAttestationAndCleanupReservation",
+            "20260728230034_AddArtifactCleanupDeletionState");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -882,6 +884,58 @@ public sealed class DatabaseMigrationTests
         // Existing non-calibration artifacts have never been promoted, so nothing may become required.
         _ = artifactColumns.Should().OnlyContain(operation => operation.IsNullable);
         _ = migration.UpOperations.OfType<CreateTableOperation>().Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite", "TEXT")]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL", "timestamp with time zone")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer", "datetime2")]
+    public void ArtifactCleanupDeletionStateMigration_ForEveryProvider_AddsRecoverableTombstone(
+        string provider,
+        string migrationAssembly,
+        string expectedColumnType)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddArtifactCleanupDeletionState");
+
+        AddColumnOperation added = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Should().ContainSingle()
+            .Which;
+        _ = added.Table.Should().Be("Artifacts");
+        _ = added.Name.Should().Be(nameof(Artifact.CleanupDeletionStartedAtUtc));
+        _ = added.ColumnType.Should().Be(expectedColumnType);
+        _ = added.IsNullable.Should().BeTrue();
+
+        DropColumnOperation removed = migration.DownOperations
+            .OfType<DropColumnOperation>()
+            .Should().ContainSingle()
+            .Which;
+        _ = removed.Table.Should().Be("Artifacts");
+        _ = removed.Name.Should().Be(nameof(Artifact.CleanupDeletionStartedAtUtc));
     }
 
     private static Migration CreateMigration(
