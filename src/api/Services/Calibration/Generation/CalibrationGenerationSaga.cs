@@ -968,13 +968,18 @@ public sealed class CalibrationGenerationSaga(
 
         string root = _storagePaths.GetModelUploadDirectory();
         _ = Directory.CreateDirectory(root);
-        (Guid modelId, string storageIdentity) =
-            await ResolveGeneratedModelStorageIdentityAsync(
-                project.OwnerUserId,
-                upperDigest,
-                ownerScopedHash,
-                cancellationToken);
-        string storedFileName = $"{storageIdentity}.stl";
+        string stagingIdentity = ComputeGeneratedModelStagingIdentity(
+            project.OwnerUserId,
+            upperDigest,
+            orchestration.Id);
+        Guid modelId = await ResolveGeneratedModelIdAsync(
+            stagingIdentity,
+            cancellationToken);
+
+        // The orchestration-scoped path is the filesystem ownership fence. Concurrent attempts for
+        // the same owner and content never share bytes, so one failed attempt can only delete its
+        // own deterministic staging file.
+        string storedFileName = $"{stagingIdentity}.stl";
         string storedPath = Path.Combine(root, storedFileName);
         bool persisted = false;
         bool preserveStagedBytes = false;
@@ -1115,32 +1120,33 @@ public sealed class CalibrationGenerationSaga(
             contentSha256,
         }).ToUpperInvariant();
 
-    private async Task<(Guid ModelId, string StorageIdentity)>
-        ResolveGeneratedModelStorageIdentityAsync(
-            Guid ownerUserId,
-            string contentSha256,
-            string ownerScopedHash,
-            CancellationToken cancellationToken)
+    private static string ComputeGeneratedModelStagingIdentity(
+        Guid ownerUserId,
+        string contentSha256,
+        Guid orchestrationId) =>
+        CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-staging",
+            ownerUserId,
+            contentSha256,
+            orchestrationId,
+        }).ToUpperInvariant();
+
+    private async Task<Guid> ResolveGeneratedModelIdAsync(
+        string stagingIdentity,
+        CancellationToken cancellationToken)
     {
-        string storageIdentity = ownerScopedHash;
-        for (int collision = 0; collision < 16; collision++)
+        for (int collisionSlot = 0; collisionSlot < 16; collisionSlot++)
         {
             Guid modelId = DeterministicGuid(
-                $"calibration-generated-model:{storageIdentity}");
-            Model3D? occupied = await _models!.GetByIdAsync(modelId, cancellationToken);
+                $"calibration-generated-model:{stagingIdentity}:{collisionSlot}");
+            Model3D? occupied = await _models!.GetByIdUnfilteredAsync(
+                modelId,
+                cancellationToken);
             if (occupied is null)
             {
-                return (modelId, storageIdentity);
+                return modelId;
             }
-
-            storageIdentity = CalibrationCanonicalJson.ComputeSha256(new
-            {
-                purpose = "calibration-generated-model-storage-collision",
-                ownerUserId,
-                contentSha256,
-                occupiedModelId = occupied.Id,
-                priorStorageIdentity = storageIdentity,
-            }).ToUpperInvariant();
         }
 
         throw new InvalidOperationException(

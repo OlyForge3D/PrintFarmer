@@ -710,6 +710,129 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = Convert.ToHexString(SHA256.HashData(recoveredBytes)).Should().Be(expectedDigest);
     }
 
+    [Fact(DisplayName = "Invalid and unattributed model ID collisions remain fenced across restart")]
+    public async Task ResumeAsync_WithInvalidUnattributedIdCollisions_UsesUnfilteredOccupancy()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-invalid-id-collision");
+        GeneratedModelStorageKeys keys = ComputeGeneratedModelStorageKeys(fixture);
+        Guid[] collisionIds = await SeedGeneratedModelCollisionsAsync(keys, isValid: false);
+        ModelSaveNoCommitUncertainGate gate = new();
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            ModelRepositoryDecorator = gate.Decorate,
+        };
+
+        Func<Task> interrupted = () => _harness.CreateSaga(options)
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        _ = await interrupted.Should().ThrowAsync<DbUpdateException>();
+        string stagedPath = Directory.GetFiles(_harness.ModelRoot, "*.stl")
+            .Should().ContainSingle().Subject;
+
+        _ = await _harness.CreateSaga().ResumeAsync(
+            fixture.OrchestrationId,
+            CancellationToken.None);
+
+        SliceJob job = (await _harness.FindSliceJobAsync(fixture.OrchestrationId))!;
+        _ = job.Model3DId.Should().NotBeNull();
+        _ = collisionIds.Should().NotContain(job.Model3DId!.Value);
+        await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
+        Model3D stored = await slicer.Models3D.AsNoTracking()
+            .SingleAsync(model => model.Id == job.Model3DId);
+        _ = Path.Combine(_harness.ModelRoot, stored.FileName).Should().Be(stagedPath);
+        _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
+    }
+
+    [Fact(DisplayName = "Collision-row changes cannot strand uncertain generated-model staging")]
+    public async Task ResumeAsync_WhenCollisionRowsChange_ReusesCollisionIndependentStagingPath()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-changing-id-collision");
+        GeneratedModelStorageKeys keys = ComputeGeneratedModelStorageKeys(fixture);
+        Guid[] collisionIds = await SeedGeneratedModelCollisionsAsync(keys, isValid: true);
+        ModelSaveNoCommitUncertainGate gate = new();
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            ModelRepositoryDecorator = gate.Decorate,
+        };
+
+        Func<Task> interrupted = () => _harness.CreateSaga(options)
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        _ = await interrupted.Should().ThrowAsync<DbUpdateException>();
+        string stagedPath = Directory.GetFiles(_harness.ModelRoot, "*.stl")
+            .Should().ContainSingle().Subject;
+        await using (Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext())
+        {
+            _ = await slicer.Models3D
+                .Where(model => collisionIds.Contains(model.Id))
+                .ExecuteDeleteAsync();
+        }
+
+        _ = await _harness.CreateSaga().ResumeAsync(
+            fixture.OrchestrationId,
+            CancellationToken.None);
+
+        SliceJob job = (await _harness.FindSliceJobAsync(fixture.OrchestrationId))!;
+        await using Farm.Slicer.Module.Data.SlicerDbContext verify = _harness.CreateSlicerContext();
+        Model3D stored = await verify.Models3D.AsNoTracking()
+            .SingleAsync(model => model.Id == job.Model3DId);
+        string recoveredPath = Path.Combine(_harness.ModelRoot, stored.FileName);
+        _ = recoveredPath.Should().Be(stagedPath);
+        _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
+        byte[] bytes = await File.ReadAllBytesAsync(recoveredPath);
+        _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(job.ModelSha256);
+    }
+
+    [Fact(DisplayName = "A failed same-owner generation cannot delete a concurrent attempt's staging")]
+    public async Task ResumeAsync_WithConcurrentSameOwnerFailure_PreservesSurvivorBytes()
+    {
+        Guid owner = Guid.NewGuid();
+        CalibrationGenerationFixture failedFixture = await _harness.SeedAttemptAsync(ownerId: owner);
+        CalibrationGenerationFixture survivorFixture = await _harness.SeedAttemptAsync(ownerId: owner);
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(failedFixture, "generate-same-owner-failed");
+        await AcceptAsync(survivorFixture, "generate-same-owner-survivor");
+        SameOwnerModelSaveFailureGate gate = new();
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            ModelRepositoryDecorator = gate.Decorate,
+        };
+        ICalibrationGenerationSaga failedSaga = _harness.CreateSaga(options);
+        ICalibrationGenerationSaga survivorSaga = _harness.CreateSaga(options);
+
+        Task survivor = survivorSaga.ResumeAsync(
+            survivorFixture.OrchestrationId,
+            CancellationToken.None);
+        await gate.SurvivorSaveReached.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Func<Task> failed = () => failedSaga.ResumeAsync(
+                failedFixture.OrchestrationId,
+                CancellationToken.None);
+            _ = await failed.Should().ThrowAsync<DbUpdateException>();
+        }
+        finally
+        {
+            gate.ReleaseSurvivor();
+        }
+
+        await survivor;
+
+        _ = gate.FailedFileName.Should().NotBe(gate.SurvivorFileName);
+        SliceJob job = (await _harness.FindSliceJobAsync(survivorFixture.OrchestrationId))!;
+        await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
+        Model3D stored = await slicer.Models3D.AsNoTracking()
+            .SingleAsync(model => model.Id == job.Model3DId);
+        string storedPath = Path.Combine(_harness.ModelRoot, stored.FileName);
+        _ = File.Exists(storedPath).Should().BeTrue();
+        _ = Directory.GetFiles(_harness.ModelRoot, "*.stl")
+            .Should().ContainSingle().Which.Should().Be(storedPath);
+        byte[] bytes = await File.ReadAllBytesAsync(storedPath);
+        _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(job.ModelSha256);
+    }
+
     [Fact(DisplayName = "A run reaches completion and promotes a verified, annotated artifact")]
     public async Task ResumeAsync_CompletesAndPromotesVerifiedArtifact()
     {
@@ -1178,6 +1301,150 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = failed.LastErrorCode.Should().Be(CalibrationGenerationProblemCodes.GcodeMalformed);
     }
 
+    private async Task<Guid[]> SeedGeneratedModelCollisionsAsync(
+        GeneratedModelStorageKeys keys,
+        bool isValid)
+    {
+        Guid[] collisionIds = [keys.LegacyModelId, keys.StagingModelId];
+        DateTime now = DateTime.UtcNow;
+        await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
+        slicer.Models3D.AddRange(collisionIds.Select(id => new Model3D
+        {
+            Id = id,
+            Name = "occupied generated-model identity",
+            FileName = $"{id:N}.collision.stl",
+            FilePath = string.Empty,
+            FileSizeBytes = 1,
+            FileHash = Convert.ToHexString(SHA256.HashData(
+                Encoding.UTF8.GetBytes($"collision:{id:N}"))),
+            FileFormat = ModelFileFormat.STL,
+            UploadedByUserId = null,
+            UploadedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            IsValid = isValid,
+        }));
+        _ = await slicer.SaveChangesAsync();
+        return collisionIds;
+    }
+
+    private static GeneratedModelStorageKeys ComputeGeneratedModelStorageKeys(
+        CalibrationGenerationFixture fixture)
+    {
+        CalibrationGeneratedGeometry geometry =
+            CalibrationBodyGeometryFactory.Build(fixture.Specification);
+        string contentSha256 = Convert.ToHexString(SHA256.HashData(geometry.Content.Span));
+        string ownerScopedHash = CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-storage",
+            ownerUserId = fixture.Owner.UserId,
+            contentSha256,
+        }).ToUpperInvariant();
+        string stagingIdentity = CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-staging",
+            ownerUserId = fixture.Owner.UserId,
+            contentSha256,
+            orchestrationId = fixture.OrchestrationId,
+        }).ToUpperInvariant();
+
+        return new GeneratedModelStorageKeys(
+            ComputeDeterministicGuid($"calibration-generated-model:{ownerScopedHash}"),
+            ComputeDeterministicGuid($"calibration-generated-model:{stagingIdentity}:0"));
+    }
+
+    private static Guid ComputeDeterministicGuid(string value)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private sealed record GeneratedModelStorageKeys(
+        Guid LegacyModelId,
+        Guid StagingModelId);
+
+    private sealed class SameOwnerModelSaveFailureGate
+    {
+        private readonly TaskCompletionSource _survivorSaveReached =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _releaseSurvivor =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _participantCount;
+
+        public Task SurvivorSaveReached => _survivorSaveReached.Task;
+
+        public string? FailedFileName { get; private set; }
+
+        public string? SurvivorFileName { get; private set; }
+
+        public void ReleaseSurvivor() => _releaseSurvivor.TrySetResult();
+
+        public IModel3DFileRepository Decorate(IModel3DFileRepository inner)
+        {
+            int participant = Interlocked.Increment(ref _participantCount);
+            if (participant > 2)
+            {
+                throw new InvalidOperationException(
+                    "The same-owner model gate supports exactly two repositories.");
+            }
+
+            Mock<IModel3DFileRepository> gated = new(MockBehavior.Strict);
+            _ = gated.Setup(repository => repository.GetByHashAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string hash, CancellationToken cancellationToken) =>
+                    inner.GetByHashAsync(hash, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdUnfilteredAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdUnfilteredAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdForReconciliationAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.AddAsync(
+                    It.IsAny<Model3D>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Model3D model, CancellationToken cancellationToken) =>
+                {
+                    if (participant == 1)
+                    {
+                        FailedFileName = model.FileName;
+                    }
+                    else
+                    {
+                        SurvivorFileName = model.FileName;
+                    }
+
+                    return inner.AddAsync(model, cancellationToken);
+                });
+            _ = gated.Setup(repository => repository.SaveChangesAsync(
+                    It.IsAny<CancellationToken>()))
+                .Returns(async (CancellationToken cancellationToken) =>
+                {
+                    if (participant == 1)
+                    {
+                        throw new DbUpdateException(
+                            "The failed same-owner model save did not commit.");
+                    }
+
+                    _survivorSaveReached.TrySetResult();
+                    await _releaseSurvivor.Task.WaitAsync(
+                        TimeSpan.FromSeconds(10),
+                        cancellationToken);
+                    await inner.SaveChangesAsync(cancellationToken);
+                });
+            return gated.Object;
+        }
+    }
+
     private sealed class ModelStorageRaceGate
     {
         private readonly TaskCompletionSource _bothHashesRead =
@@ -1220,6 +1487,11 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
                     It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken cancellationToken) =>
                     inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdUnfilteredAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdUnfilteredAsync(id, cancellationToken));
             _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<CancellationToken>()))
@@ -1283,6 +1555,11 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
                     It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken cancellationToken) =>
                     inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdUnfilteredAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdUnfilteredAsync(id, cancellationToken));
             _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<CancellationToken>()))
@@ -1321,6 +1598,11 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
                     It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken cancellationToken) =>
                     inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdUnfilteredAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdUnfilteredAsync(id, cancellationToken));
             _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
                     It.IsAny<Guid>(),
                     It.IsAny<CancellationToken>()))
