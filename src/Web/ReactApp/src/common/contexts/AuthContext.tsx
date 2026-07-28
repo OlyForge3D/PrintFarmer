@@ -52,17 +52,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
       } catch (err) {
         console.error('Failed to get current user:', err);
-        if (!isCurrentToken()) {
-          return;
-        }
-
-        // Remove invalid token
-        await resetAuthenticatedSignalRSession();
-        if (isCurrentToken()) {
-          localStorage.removeItem('auth-token');
-          setUser(null);
-          setError(null);
-        }
       } finally {
         if (ownsTransition()) {
           setIsLoading(false);
@@ -106,9 +95,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
           }
         } catch (err) {
           console.error('Failed to synchronize authentication state:', err);
-          if (isCurrentTransition() && expectedToken) {
-            localStorage.removeItem('auth-token');
-          }
         } finally {
           if (ownsTransition()) {
             setIsLoading(false);
