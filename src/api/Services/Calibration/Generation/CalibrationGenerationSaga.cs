@@ -961,6 +961,7 @@ public sealed class CalibrationGenerationSaga(
         string storedFileName = $"{modelId:N}.stl";
         string storedPath = Path.Combine(root, storedFileName);
         bool persisted = false;
+        bool preserveStagedBytes = false;
         try
         {
             await File.WriteAllBytesAsync(
@@ -994,17 +995,59 @@ public sealed class CalibrationGenerationSaga(
             await _models.AddAsync(model, cancellationToken);
             try
             {
-                await _models.SaveChangesAsync(cancellationToken);
+                try
+                {
+                    await _models.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException ex) when (
+                    byHash is null &&
+                    IsModelFileHashUniqueConflict(ex))
+                {
+                    // A competing generator inserted the same real digest after our lookup. Keep this
+                    // owner's staged bytes, but move the legacy unique key to the same synthetic
+                    // per-model form used when the competing row was visible before the write.
+                    model.FileHash = modelId.ToString("N");
+                    await _models.SaveChangesAsync(cancellationToken);
+                }
             }
-            catch (DbUpdateException ex) when (
-                byHash is null &&
-                IsModelFileHashUniqueConflict(ex))
+            catch (DbUpdateException)
             {
-                // A competing generator inserted the same real digest after our lookup. Keep this
-                // owner's staged bytes, but move the legacy unique key to the same synthetic
-                // per-model form used when the competing row was visible before the write.
-                model.FileHash = modelId.ToString("N");
-                await _models.SaveChangesAsync(cancellationToken);
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
+            }
+            catch (DbException)
+            {
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
             }
 
             persisted = true;
@@ -1012,7 +1055,7 @@ public sealed class CalibrationGenerationSaga(
         }
         finally
         {
-            if (!persisted)
+            if (!persisted && !preserveStagedBytes)
             {
                 DeleteUnpersistedGeneratedModel(storedPath, modelId);
             }
@@ -1045,6 +1088,71 @@ public sealed class CalibrationGenerationSaga(
         || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
         || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
 
+    private async Task<GeneratedModelSaveOutcome> ReconcileGeneratedModelSaveAsync(Model3D expected)
+    {
+        try
+        {
+            Model3D? stored = await _models!.GetByIdForReconciliationAsync(
+                expected.Id,
+                CancellationToken.None);
+            if (stored is null)
+            {
+                return GeneratedModelSaveOutcome.Absent;
+            }
+
+            bool matches =
+                stored.UploadedByUserId == expected.UploadedByUserId &&
+                string.Equals(stored.FileName, expected.FileName, StringComparison.Ordinal) &&
+                string.Equals(stored.FilePath, expected.FilePath, StringComparison.Ordinal) &&
+                string.Equals(stored.FileHash, expected.FileHash, StringComparison.Ordinal) &&
+                stored.FileSizeBytes == expected.FileSizeBytes &&
+                stored.FileFormat == expected.FileFormat &&
+                stored.IsValid == expected.IsValid;
+            if (!matches)
+            {
+                _logger.LogWarning(
+                    "Generated model {ModelId} was found after an unknown save outcome but did not match the staged owner, hash, or path",
+                    expected.Id);
+            }
+
+            return matches
+                ? GeneratedModelSaveOutcome.Committed
+                : GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (DbException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+    }
+
     private void DeleteUnpersistedGeneratedModel(string storedPath, Guid modelId)
     {
         try
@@ -1058,6 +1166,13 @@ public sealed class CalibrationGenerationSaga(
                 "Failed to remove unpersisted generated model bytes for {ModelId}",
                 modelId);
         }
+    }
+
+    private enum GeneratedModelSaveOutcome
+    {
+        Absent,
+        Committed,
+        Uncertain,
     }
 
     private async Task SubmitSliceJobAsync(

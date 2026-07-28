@@ -590,6 +590,34 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         }
     }
 
+    [Fact(DisplayName = "A model save that throws after commit retains its durable bytes")]
+    public async Task ResumeAsync_WhenModelSaveThrowsAfterCommit_ReconcilesDurableModel()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        _ = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-commit-unknown");
+        ModelSaveCommitUnknownGate gate = new();
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            ModelRepositoryDecorator = gate.Decorate,
+        };
+
+        _ = await _harness.CreateSaga(options)
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        SliceJob job = (await _harness.FindSliceJobAsync(fixture.OrchestrationId))!;
+        _ = job.Model3DId.Should().NotBeNull();
+        _ = job.ModelSha256.Should().MatchRegex("^[A-F0-9]{64}$");
+        await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
+        Model3D model = await slicer.Models3D.AsNoTracking()
+            .SingleAsync(candidate => candidate.Id == job.Model3DId);
+        string storedPath = Path.Combine(_harness.ModelRoot, model.FileName);
+        _ = File.Exists(storedPath).Should().BeTrue();
+        byte[] storedBytes = await File.ReadAllBytesAsync(storedPath);
+        _ = Convert.ToHexString(SHA256.HashData(storedBytes)).Should().Be(job.ModelSha256);
+        _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
+    }
+
     [Fact(DisplayName = "A run reaches completion and promotes a verified, annotated artifact")]
     public async Task ResumeAsync_CompletesAndPromotesVerifiedArtifact()
     {
@@ -1100,6 +1128,11 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
                     It.IsAny<CancellationToken>()))
                 .Returns((Guid id, CancellationToken cancellationToken) =>
                     inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdForReconciliationAsync(id, cancellationToken));
             _ = gated.Setup(repository => repository.AddAsync(
                     It.IsAny<Model3D>(),
                     It.IsAny<CancellationToken>()))
@@ -1136,6 +1169,46 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
                         TimeSpan.FromSeconds(10),
                         cancellationToken);
                     await inner.SaveChangesAsync(cancellationToken);
+                });
+            return gated.Object;
+        }
+    }
+
+    private sealed class ModelSaveCommitUnknownGate
+    {
+        private int _throwAfterCommit = 1;
+
+        public IModel3DFileRepository Decorate(IModel3DFileRepository inner)
+        {
+            Mock<IModel3DFileRepository> gated = new(MockBehavior.Strict);
+            _ = gated.Setup(repository => repository.GetByHashAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((string hash, CancellationToken cancellationToken) =>
+                    inner.GetByHashAsync(hash, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.GetByIdForReconciliationAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid id, CancellationToken cancellationToken) =>
+                    inner.GetByIdForReconciliationAsync(id, cancellationToken));
+            _ = gated.Setup(repository => repository.AddAsync(
+                    It.IsAny<Model3D>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((Model3D model, CancellationToken cancellationToken) =>
+                    inner.AddAsync(model, cancellationToken));
+            _ = gated.Setup(repository => repository.SaveChangesAsync(It.IsAny<CancellationToken>()))
+                .Returns(async (CancellationToken cancellationToken) =>
+                {
+                    await inner.SaveChangesAsync(cancellationToken);
+                    if (Interlocked.Exchange(ref _throwAfterCommit, 0) == 1)
+                    {
+                        throw new DbUpdateException("The model commit outcome is unknown.");
+                    }
                 });
             return gated.Object;
         }
