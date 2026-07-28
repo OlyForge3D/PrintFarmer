@@ -559,6 +559,29 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = orchestration.WorkerId.Should().Be(workerId);
     }
 
+    [Fact(DisplayName = "A reclaimed job promotes only the artifact accepted by its current claim")]
+    public async Task ResumeAsync_AfterReclaim_SelectsAcceptedCurrentClaimArtifact()
+    {
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync();
+        Guid currentWorkerId = await _harness.AddAttestedWorkerAsync();
+        await AcceptAsync(fixture, "generate-reclaimed-artifact");
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+        (Guid staleArtifactId, Guid acceptedArtifactId) =
+            await _harness.CompleteReclaimedWorkerJobAsync(
+                fixture.OrchestrationId,
+                Guid.NewGuid(),
+                currentWorkerId);
+
+        _ = await _harness.CreateSaga().ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        CalibrationOrchestration orchestration =
+            await _harness.GetOrchestrationAsync(fixture.OrchestrationId);
+        _ = orchestration.Status.Should().Be(CalibrationOrchestrationStatus.Completed);
+        _ = orchestration.SourceArtifactId.Should().Be(acceptedArtifactId);
+        _ = orchestration.SourceArtifactId.Should().NotBe(staleArtifactId);
+        _ = orchestration.WorkerId.Should().Be(currentWorkerId);
+    }
+
     [Fact(DisplayName = "The promoted library file carries the calibration lineage and pinned identity")]
     public async Task ResumeAsync_PromotesGcodeFileWithLineage()
     {

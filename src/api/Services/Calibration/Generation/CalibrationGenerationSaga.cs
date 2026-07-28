@@ -632,7 +632,14 @@ public sealed class CalibrationGenerationSaga(
 
         if (orchestration.CurrentStep == CalibrationGenerationSteps.SubmittingSliceJob)
         {
-            await SubmitSliceJobAsync(project, orchestration, run, plan, pinned, cancellationToken);
+            await SubmitSliceJobAsync(
+                project,
+                orchestration,
+                run,
+                resolved.Value!,
+                plan,
+                pinned,
+                cancellationToken);
         }
 
         if (orchestration.CurrentStep == CalibrationGenerationSteps.AwaitingWorker)
@@ -986,6 +993,7 @@ public sealed class CalibrationGenerationSaga(
         CalibrationProject project,
         CalibrationOrchestration orchestration,
         CalibrationRunContext run,
+        CalibrationValidatedModel validatedModel,
         OrcaCalibrationPlan plan,
         CalibrationPinnedSlicerIdentity pinned,
         CancellationToken cancellationToken)
@@ -1025,7 +1033,7 @@ public sealed class CalibrationGenerationSaga(
                 ModelFileUrl = $"/api/slice/{jobId}/model",
                 ModelFileName = string.IsNullOrWhiteSpace(model.Name) ? model.FileName : model.Name,
                 Model3DId = model.Id,
-                ModelSha256 = model.FileHash,
+                ModelSha256 = validatedModel.Sha256.ToUpperInvariant(),
                 SlicerEngine = (int)SlicerEngineType.OrcaSlicer,
                 SlicerEngineName = SlicerEngineType.OrcaSlicer.ToString(),
                 MachineProfileId = plan.MachineProfile.Id,
@@ -1044,6 +1052,8 @@ public sealed class CalibrationGenerationSaga(
                 SlicerDistribution = plan.Manifest.SlicerDistribution,
                 SlicerVersion = plan.Manifest.SlicerVersion,
                 SlicerContainerDigest = pinned.ContainerDigest,
+                PinnedWorkerId = pinned.WorkerId,
+                SlicerBinarySha256 = pinned.BinarySha256,
                 RequiredCapabilitiesJson = JsonSerializer.Serialize(
                     new[] { CalibrationContractConstants.UpstreamSlicerCapability }),
                 CalibrationProjectId = project.Id,
@@ -1149,14 +1159,25 @@ public sealed class CalibrationGenerationSaga(
         CalibrationOrchestration orchestration,
         CancellationToken cancellationToken)
     {
+        SliceJob? completedJob =
+            await _sliceJobs!.GetByIdAsync(orchestration.SliceJobId!.Value, cancellationToken);
+        IReadOnlyList<Guid> acceptedArtifactIds = ParseArtifactIds(completedJob?.ArtifactIdsCsv);
         IReadOnlyList<Artifact> produced =
             await _artifacts!.ListByJobAsync(orchestration.SliceJobId!.Value, cancellationToken);
-        Artifact? sliced = produced
-            .Where(artifact =>
-                string.Equals(artifact.Kind, SlicerArtifactKinds.Gcode, StringComparison.OrdinalIgnoreCase) &&
-                artifact.WorkerId is not null)
-            .OrderBy(artifact => artifact.CreatedAt)
-            .FirstOrDefault();
+        Dictionary<Guid, Artifact> producedById = produced.ToDictionary(artifact => artifact.Id);
+        Artifact? sliced = completedJob?.WorkerId is { } workerId &&
+            completedJob.ClaimToken is { } claimToken
+                ? acceptedArtifactIds
+                    .Select(id => producedById.GetValueOrDefault(id))
+                    .FirstOrDefault(artifact =>
+                        artifact is not null &&
+                        string.Equals(
+                            artifact.Kind,
+                            SlicerArtifactKinds.Gcode,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        artifact.WorkerId == workerId &&
+                        artifact.ClaimToken == claimToken)
+                : null;
         if (sliced is null)
         {
             await FailTerminallyAsync(
@@ -1214,6 +1235,30 @@ public sealed class CalibrationGenerationSaga(
         await CheckpointAsync(orchestration, CalibrationGenerationSteps.ComposingGcode, cancellationToken);
         await AppendEventAsync(project, orchestration, "slice-artifact-verified", null, [], cancellationToken);
         return true;
+    }
+
+    private static List<Guid> ParseArtifactIds(string? artifactIdsCsv)
+    {
+        if (string.IsNullOrWhiteSpace(artifactIdsCsv))
+        {
+            return [];
+        }
+
+        string[] values = artifactIdsCsv.Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var artifactIds = new List<Guid>(values.Length);
+        foreach (string value in values)
+        {
+            if (!Guid.TryParse(value, out Guid artifactId))
+            {
+                return [];
+            }
+
+            artifactIds.Add(artifactId);
+        }
+
+        return artifactIds;
     }
 
     private async Task<bool> ComposeFinalGcodeAsync(
