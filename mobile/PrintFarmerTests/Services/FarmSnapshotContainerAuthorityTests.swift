@@ -67,6 +67,57 @@ private final class OrphanProbeSignalR: SignalRServiceProtocol, @unchecked Senda
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) { base.onFallbackGroupsUpdated(handler) }
 }
 
+@MainActor
+private final class BlockingCapabilitiesService: SystemCapabilitiesServiceProtocol, @unchecked Sendable {
+    let resolved: ResolvedSystemCapabilities
+    let refreshBarrier = AsyncBarrier()
+
+    init(resolved: ResolvedSystemCapabilities = .defaults) {
+        self.resolved = resolved
+    }
+
+    func refresh() async {
+        await refreshBarrier.arriveAndWait()
+    }
+
+    func close() {
+        refreshBarrier.close()
+    }
+}
+
+private final class BlockingLogoutAuthService: AuthServiceProtocol, @unchecked Sendable {
+    let logoutBarrier = AsyncBarrier()
+
+    func login(
+        serverURL: String,
+        username: String,
+        password: String,
+        operation: AuthOperationToken
+    ) async throws -> AuthLoginOutcome {
+        throw NetworkError.authFailed("not used")
+    }
+
+    func logout(operation: AuthOperationToken) async {
+        await logoutBarrier.arriveAndWait()
+    }
+
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
+        .noSession
+    }
+
+    func currentUser() async throws -> UserDTO {
+        throw NetworkError.unauthorized
+    }
+
+    var isAuthenticated: Bool {
+        get async { true }
+    }
+
+    func close() {
+        logoutBarrier.close()
+    }
+}
+
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
 @MainActor
@@ -96,6 +147,136 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
     private func registry() -> ServerRegistry {
         ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
+    }
+
+    func testStaleCapabilitiesRefreshCannotGateOrReplayNewIdentity() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let serverA = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let serverB = try reg.add(
+            displayName: "B",
+            baseURL: URL(string: "https://b.example.com")!
+        )
+        let userA = UUID()
+        let userB = UUID()
+        owners.setOwner(userID: userA, serverID: serverA.id)
+        owners.setOwner(userID: userB, serverID: serverB.id)
+        try reg.setActive(id: serverA.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: serverA.id
+        )
+        credentials.save(
+            ServerCredentials(accessToken: "token-b", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: serverB.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: store,
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false
+        )
+
+        let slowA = BlockingCapabilitiesService()
+        defer { slowA.close() }
+        container.capabilitiesService = slowA
+        let staleSync = Task { await container.syncOfflineWriteQueue() }
+        await slowA.refreshBarrier.waitUntilArrived()
+
+        try reg.setActive(id: serverB.id)
+        container.switchToReal()
+        container.authorizeOfflineWriteReplayBinding()
+        container.capabilitiesService = StubSystemCapabilitiesService(
+            resolved: ResolvedSystemCapabilities(
+                attentionEnabled: true,
+                nativePushEnabled: false,
+                filamentCoverageEnabled: true,
+                guidedSwapEnabled: true,
+                multiSlotFallbackEnabled: true,
+                shiftPlanEnabled: true,
+                printedPartsInventoryEnabled: true,
+                offlineWriteReplayEnabled: false
+            )
+        )
+        await container.syncOfflineWriteQueue()
+        slowA.refreshBarrier.release()
+        await staleSync.value
+
+        let identity = await container.offlineWriteQueue.activeIdentity
+        XCTAssertEqual(identity?.serverID, serverB.id)
+        XCTAssertEqual(identity?.userID, userB)
+        let replayEnabled = await container.offlineWriteQueue.isReplayEnabled
+        XCTAssertFalse(replayEnabled, "server B's disabled gate must survive stale A completion")
+    }
+
+    func testLogoutInvalidatesOfflineReplayAuthorityBeforeAuthTeardownCompletes() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let server = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let user = UUID()
+        owners.setOwner(userID: user, serverID: server.id)
+        try reg.setActive(id: server.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: server.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: store,
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        container.capabilitiesService = StubSystemCapabilitiesService()
+        await container.syncOfflineWriteQueue()
+        XCTAssertNil(
+            container.currentOfflineWriteReplayIdentity,
+            "persisted credentials must not bind replay before verified session restoration"
+        )
+
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+        XCTAssertEqual(container.currentOfflineWriteReplayIdentity?.userID, user)
+
+        let blockingAuth = BlockingLogoutAuthService()
+        defer { blockingAuth.close() }
+        container.authService = blockingAuth
+        let viewModel = AuthViewModel(services: container)
+        let logout = Task { await viewModel.logout() }
+        await blockingAuth.logoutBarrier.waitUntilArrived()
+
+        XCTAssertNil(
+            container.currentOfflineWriteReplayIdentity,
+            "replay authority must be synchronously revoked before auth teardown awaits"
+        )
+
+        blockingAuth.logoutBarrier.release()
+        await logout.value
     }
 
     // MARK: Structural: activation resolves the settled server's OWN owner

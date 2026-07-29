@@ -124,6 +124,9 @@ final class AuthViewModelTests: XCTestCase {
         services.authService = authService
         viewModel = AuthViewModel(services: services)
         mockAPIClient.requestHandler = { _ in
+            // Reproduce the CI interleaving: an unrelated container request starts
+            // after this private-host request and must not replace its TLS diagnostics.
+            TLSDiagnostics.beginRequest(host: "print.example.com")
             throw URLError(
                 .cannotConnectToHost,
                 userInfo: ["_kCFStreamErrorCodeKey": 61]

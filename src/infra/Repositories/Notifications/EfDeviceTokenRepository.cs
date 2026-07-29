@@ -36,12 +36,12 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         DateTime nowUtc = DateTime.UtcNow;
 
         // Retry loop for concurrent-registration TOCTOU: a race between two
-        // (userId, installationId) upserts can produce two "existing is null"
-        // observations, and the second SaveChangesAsync trips the unique index.
+        // installation claims can produce two "existing is null" observations,
+        // and the second SaveChangesAsync trips the global owner index.
         for (int attempt = 0; attempt < UpsertMaxAttempts; attempt++)
         {
             DeviceToken? existing = await _dbContext.DeviceTokens
-                .FirstOrDefaultAsync(t => t.UserId == userId && t.InstallationId == installationId, cancellationToken);
+                .FirstOrDefaultAsync(t => t.InstallationId == installationId, cancellationToken);
 
             if (existing is null)
             {
@@ -74,6 +74,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                 }
             }
 
+            existing.UserId = userId;
             existing.Token = token;
             existing.Platform = platform;
             existing.Environment = environment;
@@ -102,7 +103,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        const string indexName = "IX_DeviceTokens_UserId_InstallationId";
+        const string indexName = "IX_DeviceTokens_InstallationId";
         return exception.InnerException switch
         {
             SqliteException sqlite =>
@@ -133,7 +134,7 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
             .Trim('\'', '"', '.');
         return string.Equals(
             columns,
-            "DeviceTokens.UserId, DeviceTokens.InstallationId",
+            "DeviceTokens.InstallationId",
             StringComparison.OrdinalIgnoreCase);
     }
 

@@ -14,6 +14,20 @@ protocol OfflineWriteReplayTransport: Sendable {
     /// Re-sends one frozen operation and classifies the result. Never throws —
     /// every terminal/transient condition maps onto an outcome.
     func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome
+
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedIdentity: OfflineWriteReplayIdentity
+    ) async -> OfflineWriteReplayOutcome
+}
+
+extension OfflineWriteReplayTransport {
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedIdentity: OfflineWriteReplayIdentity
+    ) async -> OfflineWriteReplayOutcome {
+        await replay(operation)
+    }
 }
 
 // MARK: - Classifier
@@ -185,15 +199,18 @@ extension OfflineWriteQueue: OfflineWriteEnqueuing {}
 /// `printers`. One bundle keeps the four allowlisted kinds behind a single
 /// replay owner (F10-Q2, #790) — no parallel queue/transport per kind.
 struct OfflineReplayServices {
+    let identity: OfflineWriteReplayIdentity?
     let parts: (any PartsInventoryServiceProtocol)?
     let tasks: (any ShiftTaskServiceProtocol)?
     let printers: (any PrinterServiceProtocol)?
 
     init(
+        identity: OfflineWriteReplayIdentity? = nil,
         parts: (any PartsInventoryServiceProtocol)? = nil,
         tasks: (any ShiftTaskServiceProtocol)? = nil,
         printers: (any PrinterServiceProtocol)? = nil
     ) {
+        self.identity = identity
         self.parts = parts
         self.tasks = tasks
         self.printers = printers
@@ -210,6 +227,22 @@ struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
     func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
         let services = await provider()
         return await OfflineWriteReplayExecutor.execute(operation, using: services)
+    }
+
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedIdentity: OfflineWriteReplayIdentity
+    ) async -> OfflineWriteReplayOutcome {
+        let services = await provider()
+        guard services.identity == expectedIdentity else {
+            return .identityChanged
+        }
+        let outcome = await OfflineWriteReplayExecutor.execute(operation, using: services)
+        let servicesAfterReplay = await provider()
+        guard servicesAfterReplay.identity == expectedIdentity else {
+            return .identityChanged
+        }
+        return outcome
     }
 }
 

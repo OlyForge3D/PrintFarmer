@@ -53,10 +53,11 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
             .HasForeignKey(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Upsert key: one active token row per installation per user.
-        _ = builder.HasIndex(t => new { t.UserId, t.InstallationId })
+        // Installation ownership is global: one physical app installation can
+        // belong to exactly one authenticated user at a time.
+        _ = builder.HasIndex(t => t.InstallationId)
             .IsUnique()
-            .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
+            .HasDatabaseName("IX_DeviceTokens_InstallationId");
 
         // Non-unique provider-token lookup for diagnostics; invalidation uses the row Id.
         _ = builder.HasIndex(t => t.Token)

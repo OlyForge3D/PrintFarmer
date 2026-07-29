@@ -245,7 +245,9 @@ New entity `DeviceToken` (main app, `AppDbContext`):
 
 Indexes:
 
-- Unique `(UserId, InstallationId)` — one token per installation per user; upsert.
+- Unique `(InstallationId)` — one active owner per physical app installation.
+  A successful registration by another user atomically rotates the existing row's
+  `UserId` and `RegistrationVersion`.
 - Non-unique `(Token)` for provider-token diagnostics. Provider outcomes never
   use token text as identity; every mutation is conditional on the dispatched
   `(DeviceToken.Id, RegistrationVersion)` incarnation.

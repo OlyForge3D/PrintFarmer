@@ -4179,12 +4179,14 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("InstallationId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_DeviceTokens_InstallationId");
+
                     b.HasIndex("Token")
                         .HasDatabaseName("IX_DeviceTokens_Token");
 
-                    b.HasIndex("UserId", "InstallationId")
-                        .IsUnique()
-                        .HasDatabaseName("IX_DeviceTokens_UserId_InstallationId");
+                    b.HasIndex("UserId");
 
                     b.ToTable("DeviceTokens");
                 });

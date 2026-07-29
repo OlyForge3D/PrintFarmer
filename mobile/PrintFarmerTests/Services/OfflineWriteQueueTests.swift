@@ -108,9 +108,16 @@ final class OfflineWriteQueueTests: XCTestCase {
         store: OfflineWriteQueueStoring,
         transport: OfflineWriteReplayTransport,
         clock: OfflineQueueClock,
-        config: OfflineWriteQueueConfiguration = .default
+        config: OfflineWriteQueueConfiguration = .default,
+        authority: OfflineWriteReplayAuthority = OfflineWriteReplayAuthority()
     ) -> OfflineWriteQueue {
-        OfflineWriteQueue(store: store, transport: transport, clock: clock, configuration: config)
+        OfflineWriteQueue(
+            store: store,
+            transport: transport,
+            clock: clock,
+            configuration: config,
+            replayAuthority: authority
+        )
     }
 
     private func enqueuedItem(_ result: OfflineWriteEnqueueResult) -> OfflineWriteItem? {
@@ -422,6 +429,94 @@ final class OfflineWriteQueueTests: XCTestCase {
         XCTAssertEqual(retained.count, 1, "logout cancels the in-flight replay; the item is retained")
     }
 
+    func testSynchronousLogoutAuthorityInvalidationFencesInFlightSuccess() async {
+        let store = InMemoryOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+        let authority = OfflineWriteReplayAuthority()
+        let transport = ScriptedReplayTransport(fallback: .success)
+        let started = CallOrderGate()
+        let hold = CallOrderGate()
+        await transport.installGates(started: started, hold: hold)
+        let queue = makeQueue(
+            store: store,
+            transport: transport,
+            clock: clock,
+            authority: authority
+        )
+        await queue.bind(serverID: serverA, userID: userA)
+        _ = await queue.enqueue(OfflineQueueFixtures.adjust(sku: "SKU-A", key: "a1"))
+
+        let replay = Task { await queue.replayPending() }
+        await started.wait(0)
+
+        authority.invalidate()
+        await hold.release(0)
+        await replay.value
+
+        XCTAssertNil(authority.currentIdentity)
+        let retained = await queue.items(forServer: serverA, user: userA)
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertTrue(retained.first?.status.isPending == true)
+    }
+
+    func testSameServerUserSwitchRequiresVerifiedRebindBeforeReplay() async {
+        let store = InMemoryOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+        let authority = OfflineWriteReplayAuthority()
+        let parts = MockPartsInventoryService()
+        parts.adjustmentToReturn = PartAdjustmentResponse(
+            id: UUID(),
+            partInventoryId: UUID(),
+            sku: "SKU-B",
+            binId: nil,
+            binCode: nil,
+            delta: -1,
+            resultingBalance: 4,
+            reason: .qcReject,
+            printJobId: nil,
+            operationKey: nil,
+            notes: nil,
+            userId: nil,
+            createdAt: OfflineQueueFixtures.epoch
+        )
+        let published = OfflineReplayIdentityBox(
+            OfflineWriteReplayIdentity(serverID: serverA, userID: userA)
+        )
+        let transport = DynamicOfflineReplayTransport {
+            OfflineReplayServices(identity: published.value, parts: parts)
+        }
+        let queue = makeQueue(
+            store: store,
+            transport: transport,
+            clock: clock,
+            authority: authority
+        )
+        let bindingA = authority.bind(serverID: serverA, userID: userA)
+        let didBindA = await queue.bind(binding: bindingA)
+        XCTAssertTrue(didBindA)
+        _ = await queue.enqueue(OfflineQueueFixtures.adjust(sku: "SKU-A", key: "a1"))
+
+        authority.invalidate()
+        let bindingB = authority.bind(serverID: serverA, userID: userB)
+        published.value = bindingB.identity
+
+        await queue.replayPending()
+        XCTAssertEqual(parts.adjustPartCalls.count, 0)
+        let didRebindA = await queue.bind(binding: bindingA)
+        XCTAssertFalse(didRebindA, "an abandoned A binding stays fenced")
+        let didBindB = await queue.bind(binding: bindingB)
+        XCTAssertTrue(didBindB)
+        _ = await queue.enqueue(OfflineQueueFixtures.adjust(sku: "SKU-B", key: "b1"))
+        await queue.replayPending()
+
+        XCTAssertEqual(parts.adjustPartCalls.count, 1)
+        XCTAssertEqual(parts.adjustPartCalls.first?.sku, "SKU-B")
+        let retainedA = await queue.items(forServer: serverA, user: userA)
+        let remainingB = await queue.items(forServer: serverA, user: userB)
+        XCTAssertEqual(retainedA.count, 1)
+        XCTAssertTrue(remainingB.isEmpty)
+    }
+
     // MARK: Gate disable / pause / re-enable
 
     func testDisableReplayPausesRetainsAndRefusesNewEnqueue() async {
@@ -514,5 +609,27 @@ final class OfflineWriteQueueTests: XCTestCase {
         let entries = await queue.activeEntries()
         XCTAssertEqual(entries.count, 1, "a session-lost outcome does not drop the intent")
         XCTAssertEqual(entries.first?.item.status.isPending, true)
+    }
+}
+
+private final class OfflineReplayIdentityBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: OfflineWriteReplayIdentity
+
+    init(_ value: OfflineWriteReplayIdentity) {
+        storedValue = value
+    }
+
+    var value: OfflineWriteReplayIdentity {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedValue
+        }
+        set {
+            lock.lock()
+            storedValue = newValue
+            lock.unlock()
+        }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain.Notifications;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using FluentAssertions;
@@ -48,9 +49,81 @@ public sealed class DatabaseMigrationTests
             "20260727170353_CompleteCalibrationDispatchFencing",
             "20260727215428_RequireScheduleOperatorReauthorization",
             "20260728023427_AddScheduledOccurrenceIdentity",
-            "20260728063711_AddCalibrationAttemptToQueueEvents");
+            "20260728063711_AddCalibrationAttemptToQueueEvents",
+            "20260729191406_EnforceGlobalDeviceTokenInstallationOwner");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
+        (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_ExistingShippedEpic705History_UpgradesWithoutRenamingAppliedMigration()
+    {
+        const string shippedMigration = "20260726090013_ReconcileEpic705AppSchema";
+        const string rejectedRenamedMigration = "20260729155050_ReconcileEpic705AppSchema";
+        const string installationId = "existing-history-installation";
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        DateTime older = DateTime.UtcNow.AddMinutes(-5);
+        DateTime newer = DateTime.UtcNow;
+
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(shippedMigration);
+
+        context.Users.AddRange(
+            new User
+            {
+                Id = userA,
+                Username = $"existing-history-a-{userA:N}",
+                Email = $"existing-history-a-{userA:N}@example.com",
+                PasswordHash = "x",
+            },
+            new User
+            {
+                Id = userB,
+                Username = $"existing-history-b-{userB:N}",
+                Email = $"existing-history-b-{userB:N}@example.com",
+                PasswordHash = "x",
+            });
+        context.DeviceTokens.AddRange(
+            new DeviceToken
+            {
+                UserId = userA,
+                RegistrationVersion = 1,
+                InstallationId = installationId,
+                Token = new string('a', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = older,
+                LastUsedAt = older,
+                IsActive = true,
+            },
+            new DeviceToken
+            {
+                UserId = userB,
+                RegistrationVersion = 2,
+                InstallationId = installationId,
+                Token = new string('b', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = newer,
+                LastUsedAt = newer,
+                IsActive = true,
+            });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        await migrator.MigrateAsync();
+
+        string[] history = [.. await context.Database.GetAppliedMigrationsAsync()];
+        history.Should().Contain(shippedMigration);
+        history.Should().NotContain(rejectedRenamedMigration);
+        DeviceToken retained = await context.DeviceTokens.AsNoTracking().SingleAsync(
+            token => token.InstallationId == installationId);
+        retained.UserId.Should().Be(userB);
+        retained.RegistrationVersion.Should().Be(2);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

@@ -29,12 +29,20 @@ private struct TLSDiagnosticSnapshot: Sendable {
 }
 
 enum TLSDiagnostics {
+    static let summaryUserInfoKey = "PrintFarmerTLSDiagnosticSummary"
+
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var snapshot: TLSDiagnosticSnapshot?
+    nonisolated(unsafe) private static var snapshots: [String: TLSDiagnosticSnapshot] = [:]
+    nonisolated(unsafe) private static var mostRecentKey: String?
+
+    private static func key(for host: String?) -> String {
+        host?.lowercased() ?? ""
+    }
 
     static func beginRequest(host: String?) {
+        let key = key(for: host)
         lock.lock()
-        snapshot = TLSDiagnosticSnapshot(
+        snapshots[key] = TLSDiagnosticSnapshot(
             requestHost: host,
             challengeHost: nil,
             authenticationMethod: nil,
@@ -44,6 +52,7 @@ enum TLSDiagnostics {
             certificateWarning: nil,
             timestamp: Date()
         )
+        mostRecentKey = key
         lock.unlock()
     }
 
@@ -55,9 +64,10 @@ enum TLSDiagnostics {
         trustError: String? = nil,
         certificateWarning: String? = nil
     ) {
+        let key = key(for: host)
         lock.lock()
-        let requestHost = snapshot?.requestHost
-        snapshot = TLSDiagnosticSnapshot(
+        let requestHost = snapshots[key]?.requestHost
+        snapshots[key] = TLSDiagnosticSnapshot(
             requestHost: requestHost ?? host,
             challengeHost: host,
             authenticationMethod: authenticationMethod,
@@ -67,12 +77,14 @@ enum TLSDiagnostics {
             certificateWarning: certificateWarning,
             timestamp: Date()
         )
+        mostRecentKey = key
         lock.unlock()
     }
 
-    static func recentSummary(maxAge: TimeInterval = 60) -> String? {
+    static func recentSummary(for host: String? = nil, maxAge: TimeInterval = 60) -> String? {
         lock.lock()
-        let current = snapshot
+        let selectedKey = host.map { key(for: $0) } ?? mostRecentKey
+        let current = selectedKey.flatMap { snapshots[$0] }
         lock.unlock()
 
         guard let current,
@@ -109,7 +121,18 @@ enum TLSDiagnostics {
 
     static func clear() {
         lock.lock()
-        snapshot = nil
+        snapshots.removeAll()
+        mostRecentKey = nil
+        lock.unlock()
+    }
+
+    static func clear(host: String?) {
+        let key = key(for: host)
+        lock.lock()
+        snapshots.removeValue(forKey: key)
+        if mostRecentKey == key {
+            mostRecentKey = nil
+        }
         lock.unlock()
     }
 }
@@ -847,11 +870,12 @@ actor APIClient {
         body: B,
         headers: [String: String]
     ) async throws -> T {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         apply(headers: headers, to: &request)
-        return try await execute(request)
+        return try await execute(request, session: requestSession)
     }
 
     func post<T: Decodable & Sendable, B: Encodable & Sendable>(
@@ -860,18 +884,23 @@ actor APIClient {
         headers: [String: String],
         accepting statusCodes: Set<Int>
     ) async throws -> HTTPDecodedResponse<T> {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        try await checkTokenExpiry(session: requestSession)
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         apply(headers: headers, to: &request)
-        try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
+        try validateResponseGeneration(session: requestSession)
         guard let http = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
         if !statusCodes.contains(http.statusCode) {
-            try validateResponse(response, data: data)
+            try validateResponse(
+                response,
+                data: data,
+                authSessionToken: requestSession.authSessionToken
+            )
         }
         do {
             return HTTPDecodedResponse(
@@ -890,16 +919,21 @@ actor APIClient {
         headers: [String: String],
         accepting statusCodes: Set<Int>
     ) async throws -> HTTPDecodedResponse<T> {
-        var request = try buildRequest(path: path, method: "POST")
+        let requestSession = captureRequestSession()
+        try await checkTokenExpiry(session: requestSession)
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         apply(headers: headers, to: &request)
-        try await checkTokenExpiry()
         let (data, response) = try await performRequest(request)
-        try validateActiveServerGeneration()
+        try validateResponseGeneration(session: requestSession)
         guard let http = response as? HTTPURLResponse else {
             throw NetworkError.invalidResponse
         }
         if !statusCodes.contains(http.statusCode) {
-            try validateResponse(response, data: data)
+            try validateResponse(
+                response,
+                data: data,
+                authSessionToken: requestSession.authSessionToken
+            )
         }
         do {
             return HTTPDecodedResponse(
@@ -1215,12 +1249,18 @@ actor APIClient {
     }
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
-        TLSDiagnostics.beginRequest(host: request.url?.host)
+        let requestHost = request.url?.host
+        TLSDiagnostics.beginRequest(host: requestHost)
         do {
             let result = try await session.data(for: request)
-            TLSDiagnostics.clear()
+            TLSDiagnostics.clear(host: requestHost)
             return result
         } catch let error as URLError {
+            var diagnosticUserInfo = error.userInfo
+            if let summary = TLSDiagnostics.recentSummary(for: requestHost) {
+                diagnosticUserInfo[TLSDiagnostics.summaryUserInfoKey] = summary
+            }
+            let diagnosticError = URLError(error.code, userInfo: diagnosticUserInfo)
             let isPrivateHTTPSRequest = request.url?.scheme?.lowercased() == "https"
                 && (request.url?.host.map(PrivateNetworkSessionDelegate.isPrivateHost) ?? false)
 
@@ -1231,13 +1271,13 @@ actor APIClient {
                 throw NetworkError.timeout
             case .cannotFindHost, .cannotConnectToHost:
                 if isPrivateHTTPSRequest {
-                    throw NetworkError.transportError(error)
+                    throw NetworkError.transportError(diagnosticError)
                 }
                 throw NetworkError.serverUnreachable
             case .appTransportSecurityRequiresSecureConnection:
-                throw NetworkError.transportError(error)
+                throw NetworkError.transportError(diagnosticError)
             default:
-                throw NetworkError.transportError(error)
+                throw NetworkError.transportError(diagnosticError)
             }
         }
     }
@@ -1428,7 +1468,8 @@ enum NetworkError: LocalizedError, Sendable {
         case .unexpectedStatus(let code): return "Unexpected status (\(code))"
         case .decodingFailed(let failure): return failure.userMessage
         case .transportError(let error):
-            let tlsSummary = TLSDiagnostics.recentSummary()
+            let tlsSummary = error.userInfo[TLSDiagnostics.summaryUserInfoKey] as? String
+                ?? TLSDiagnostics.recentSummary()
             let base: String
             if let streamComponent = Self.formattedStreamComponent(from: error) {
                 base = "Network error (\(error.code.rawValue), \(streamComponent)): \(error.localizedDescription)"

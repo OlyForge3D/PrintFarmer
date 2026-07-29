@@ -7,6 +7,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Repositories.Notifications;
@@ -38,6 +40,62 @@ public sealed class DeviceTokenInstallationIdentityTests
 
         GetInstallationId(postgreSql).GetCollation().Should().BeNull();
         GetInstallationId(sqlite).GetCollation().Should().BeNull();
+    }
+
+    [Fact]
+    public void InstallationId_AllProviderModels_EnforceOneGlobalOwner()
+    {
+        IModel[] models =
+        [
+            BuildModel(builder => builder.UseSqlServer(
+                "Server=(localdb)\\ModelOnly;Database=model_only;Trusted_Connection=True;TrustServerCertificate=True")),
+            BuildModel(builder => builder.UseNpgsql(
+                "Host=localhost;Database=model_only;Username=model_only;Password=model_only")),
+            BuildModel(builder => builder.UseSqlite("DataSource=:memory:")),
+        ];
+
+        foreach (IModel model in models)
+        {
+            IEntityType entity = model.FindEntityType(typeof(DeviceToken))!;
+            IIndex ownerIndex = entity.GetIndexes()
+                .Single(index => index.GetDatabaseName() == "IX_DeviceTokens_InstallationId");
+
+            ownerIndex.IsUnique.Should().BeTrue();
+            ownerIndex.Properties.Select(property => property.Name)
+                .Should().Equal(nameof(DeviceToken.InstallationId));
+            entity.GetIndexes().Should().NotContain(index =>
+                index.GetDatabaseName() == "IX_DeviceTokens_UserId_InstallationId");
+        }
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_Sqlite_DeduplicatesBeforeGlobalIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.Sqlite.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "\"DeviceTokens\"",
+            "\"InstallationId\"",
+            "\"RegistrationVersion\" DESC");
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_PostgreSql_DeduplicatesBeforeGlobalIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.PostgreSQL.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "\"DeviceTokens\"",
+            "\"InstallationId\"",
+            "\"RegistrationVersion\" DESC");
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_SqlServer_DeduplicatesBeforeGlobalIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.SqlServer.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "[DeviceTokens]",
+            "[InstallationId]",
+            "[RegistrationVersion] DESC");
     }
 
     [Fact]
@@ -101,5 +159,38 @@ public sealed class DeviceTokenInstallationIdentityTests
             ?.FindProperty(nameof(DeviceToken.InstallationId));
         property.Should().NotBeNull();
         return property!;
+    }
+
+    private static void AssertOwnerMigration(
+        Migration migration,
+        string tableIdentifier,
+        string installationIdentifier,
+        string versionOrdering)
+    {
+        IReadOnlyList<MigrationOperation> up = migration.UpOperations;
+        up.Should().HaveCount(4);
+        SqlOperation deduplication = up[0].Should().BeOfType<SqlOperation>().Subject;
+        deduplication.Sql.Should().Contain("ROW_NUMBER()");
+        deduplication.Sql.Should().Contain(tableIdentifier);
+        deduplication.Sql.Should().Contain(installationIdentifier);
+        deduplication.Sql.Should().Contain(versionOrdering);
+
+        DropIndexOperation droppedOwnerIndex = up[1].Should().BeOfType<DropIndexOperation>().Subject;
+        droppedOwnerIndex.Name.Should().Be("IX_DeviceTokens_UserId_InstallationId");
+
+        CreateIndexOperation globalOwnerIndex = up[2].Should().BeOfType<CreateIndexOperation>().Subject;
+        globalOwnerIndex.Name.Should().Be("IX_DeviceTokens_InstallationId");
+        globalOwnerIndex.Columns.Should().Equal(nameof(DeviceToken.InstallationId));
+        globalOwnerIndex.IsUnique.Should().BeTrue();
+
+        CreateIndexOperation userIndex = up[3].Should().BeOfType<CreateIndexOperation>().Subject;
+        userIndex.Name.Should().Be("IX_DeviceTokens_UserId");
+        userIndex.IsUnique.Should().BeFalse();
+
+        migration.DownOperations.OfType<SqlOperation>().Should().BeEmpty();
+        migration.DownOperations.OfType<CreateIndexOperation>()
+            .Should().ContainSingle(index =>
+                index.Name == "IX_DeviceTokens_UserId_InstallationId"
+                && index.IsUnique);
     }
 }

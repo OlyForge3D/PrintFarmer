@@ -58,7 +58,116 @@ final class APIClientAuthSessionTests: XCTestCase {
         )
     }
 
+    private struct AcceptedPostResponse: Decodable, Sendable {}
+
+    private enum AcceptedPostVariant: Sendable {
+        case body
+        case headerOnly
+    }
+
+    private func assertAcceptedPostUsesOneRequestSession(
+        _ variant: AcceptedPostVariant,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let observer = ExpiryObserver()
+        let epoch = AuthOperationEpoch()
+        let gen = ActiveServerGeneration()
+        _ = gen.advance()
+        let transport = MockURLProtocol.makeSession()
+        let client = await makeClient(gen: gen, transport: transport)
+        let t1 = epoch.advance()
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: URL(string: "https://a.example.com")!,
+            identity: AuthenticatedIdentity(
+                accessToken: "bearer-T1",
+                serverID: Self.testServerID
+            ),
+            epoch: epoch,
+            token: t1
+        )
+
+        let checkerBarrier = AsyncBarrier()
+        addTeardownBlock { checkerBarrier.close() }
+        await client.setTokenExpiryChecker { [weak checkerBarrier] in
+            await checkerBarrier?.arriveAndWait()
+            return false
+        }
+        transport.requestHandler = { request in
+            (TestData.httpResponse(url: request.url, statusCode: 401), Data())
+        }
+
+        let requestTask = Task { () -> NetworkError? in
+            do {
+                switch variant {
+                case .body:
+                    let _: HTTPDecodedResponse<AcceptedPostResponse> = try await client.post(
+                        "/api/accepted-body",
+                        body: ["value": 1],
+                        headers: ["X-Test": "body"],
+                        accepting: [202]
+                    )
+                case .headerOnly:
+                    let _: HTTPDecodedResponse<AcceptedPostResponse> = try await client.post(
+                        "/api/accepted-header",
+                        headers: ["X-Test": "header"],
+                        accepting: [202]
+                    )
+                }
+                return nil
+            } catch let error as NetworkError {
+                return error
+            } catch {
+                return nil
+            }
+        }
+        await checkerBarrier.waitUntilArrived()
+
+        let t2 = epoch.advance()
+        _ = await client.applyAuthenticatedSessionIfCurrent(
+            baseURL: URL(string: "https://b.example.com")!,
+            identity: AuthenticatedIdentity(
+                accessToken: "bearer-T2",
+                serverID: Self.testServerID
+            ),
+            epoch: epoch,
+            token: t2
+        )
+        checkerBarrier.release()
+
+        let error = await requestTask.value
+        if case .unauthorized? = error {
+        } else {
+            XCTFail("expected unauthorized, got \(String(describing: error))", file: file, line: line)
+        }
+        let request = try XCTUnwrap(transport.capturedRequests.first, file: file, line: line)
+        XCTAssertEqual(request.url?.host, "a.example.com", file: file, line: line)
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "Authorization"),
+            "Bearer bearer-T1",
+            file: file,
+            line: line
+        )
+        let events = observer.snapshot()
+        XCTAssertEqual(events.count, 1, file: file, line: line)
+        XCTAssertEqual(
+            events.first?.authSessionToken,
+            t1,
+            "the 401 must retain the same T1 identity used for URL and bearer",
+            file: file,
+            line: line
+        )
+    }
+
     // MARK: - A tests
+
+    func testAcceptedStatusBodyPostUsesOneRequestSessionAcrossT1ToT2Race() async throws {
+        try await assertAcceptedPostUsesOneRequestSession(.body)
+    }
+
+    func testAcceptedStatusHeaderPostUsesOneRequestSessionAcrossT1ToT2Race() async throws {
+        try await assertAcceptedPostUsesOneRequestSession(.headerOnly)
+    }
 
     /// A: T1 request enters expiry checker → parks on await → T2 (a newer login)
     /// re-applies the shared client to a different auth-session identity → T1's
@@ -315,6 +424,13 @@ final class APIClientAuthSessionTests: XCTestCase {
             Case(name: "get") { c in let _: [String: String] = try await c.get("/api/g") },
             Case(name: "post-decode") { c in
                 let _: [String: String] = try await c.post("/api/p", body: ["x": 1])
+            },
+            Case(name: "post-decode-headers") { c in
+                let _: [String: String] = try await c.post(
+                    "/api/ph",
+                    body: ["x": 1],
+                    headers: ["X-Test": "value"]
+                )
             },
             Case(name: "post-void") { c in try await c.postVoid("/api/pv") },
             Case(name: "post-void-body") { c in try await c.postVoid("/api/pvb", body: ["x": 1]) },
@@ -588,6 +704,13 @@ final class APIClientAuthSessionTests: XCTestCase {
             Case(name: "get") { c in let _: [String: String] = try await c.get("/api/g") },
             Case(name: "post-decode") { c in
                 let _: [String: String] = try await c.post("/api/p", body: ["x": 1])
+            },
+            Case(name: "post-decode-headers") { c in
+                let _: [String: String] = try await c.post(
+                    "/api/ph",
+                    body: ["x": 1],
+                    headers: ["X-Test": "value"]
+                )
             },
             Case(name: "post-void") { c in try await c.postVoid("/api/pv") },
             Case(name: "post-void-body") { c in try await c.postVoid("/api/pvb", body: ["x": 1]) },
