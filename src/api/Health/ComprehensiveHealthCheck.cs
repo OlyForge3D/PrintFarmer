@@ -300,7 +300,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         try
         {
             // Select printers to probe for external service health based on settings
-            List<Printer> printers;
+            List<ExternalServicePrinter> printers;
             int printersToCheck = 0; // default fallback: don't check external printers by default
             try
             {
@@ -320,16 +320,20 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             }
             else
             {
+                IQueryable<ExternalServicePrinter> printerQuery = dbContext.Printers
+                    .AsNoTracking()
+                    .Select(p => new ExternalServicePrinter(p.Id, p.Name, p.ServerUrl, p.Backend));
+
                 printers = printersToCheck < 0
-                    ? await dbContext.Printers.ToListAsync(cancellationToken)
-                    : await dbContext.Printers.Take(printersToCheck).ToListAsync(cancellationToken);
+                    ? await printerQuery.ToListAsync(cancellationToken)
+                    : await printerQuery.Take(printersToCheck).ToListAsync(cancellationToken);
             }
 
             int externalServiceCount = 0;
             int failedServices = 0;
             List<object> failedDetails = new();
 
-            foreach (Printer? printer in printers)
+            foreach (ExternalServicePrinter printer in printers)
             {
                 // Check Moonraker printers
                 if (printer.Backend == (int)PrinterBackend.Moonraker)
@@ -480,6 +484,8 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
 
         return result;
     }
+
+    private sealed record ExternalServicePrinter(Guid Id, string Name, string ServerUrl, int Backend);
 }
 
 // Re-enable warning at end of file

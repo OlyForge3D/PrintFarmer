@@ -1,10 +1,14 @@
-﻿using Farm.Infrastructure;
+﻿using System.Net;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Services;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -290,6 +294,78 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
+    public async Task ComprehensiveHealthCheck_WhenCheckingExternalServices_DoesNotTrackPrinters()
+    {
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        Manufacturer manufacturer = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Performance Test Manufacturer"
+        };
+
+        PrinterModel model = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Performance Test Model",
+            ManufacturerId = manufacturer.Id
+        };
+
+        dbContext.Manufacturers.Add(manufacturer);
+        dbContext.PrinterModels.Add(model);
+        dbContext.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "PLA"
+        });
+        dbContext.Printers.Add(new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Performance Test Printer",
+            ServerUrl = "http://printer.local:7125",
+            Backend = (int)PrinterBackend.Moonraker,
+            BackendPort = 7125,
+            ManufacturerId = manufacturer.Id,
+            ModelId = model.Id
+        });
+
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings
+            {
+                PrintersToCheck = -1,
+                PercentFailedThreshold = 100
+            });
+
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Testing");
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new SuccessfulHttpClientFactory(),
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+        _ = dbContext.ChangeTracker.Entries<Printer>().Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task ComprehensiveHealthCheck_WithEnabledDiscovery_RequiresValidSubnets()
     {
         // Arrange
@@ -457,4 +533,25 @@ public class HealthCheckDiscoveryTests
     }
 
     #endregion
+
+    private sealed class SuccessfulHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            return new HttpClient(new SuccessfulHttpMessageHandler());
+        }
+    }
+
+    private sealed class SuccessfulHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]")
+            };
+
+            return Task.FromResult(response);
+        }
+    }
 }
