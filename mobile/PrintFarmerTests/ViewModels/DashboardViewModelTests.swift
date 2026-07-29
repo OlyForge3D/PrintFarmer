@@ -937,6 +937,8 @@ final class DashboardViewModelSnapshotTests: XCTestCase {
         XCTAssertEqual(DashboardViewModel.classify(NetworkError.decodingFailed(decodeFailure)), .decodeFailure)
         XCTAssertEqual(DashboardViewModel.classify(CancellationError()), .cancelled)
         XCTAssertEqual(DashboardViewModel.classify(NetworkError.notFound), .serverError)
+        XCTAssertEqual(DashboardViewModel.classify(NetworkError.preconditionFailed(nil)), .serverError)
+        XCTAssertEqual(DashboardViewModel.classify(NetworkError.preconditionRequired(nil)), .serverError)
     }
 }
 

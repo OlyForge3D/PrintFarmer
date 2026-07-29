@@ -80,6 +80,14 @@ enum OfflineWriteReplayClassifier {
                 message: "The server rejected this action as conflicting with the current state."
             ))
 
+        case .preconditionFailed(let apiError), .preconditionRequired(let apiError):
+            return .conflict(OfflineWriteConflict(
+                reason: .staleState,
+                message: apiError?.detail
+                    ?? error.errorDescription
+                    ?? "The server requires a refreshed revision before this action can be retried."
+            ))
+
         case .methodNotAllowed:
             return .conflict(OfflineWriteConflict(
                 reason: .businessConflict,

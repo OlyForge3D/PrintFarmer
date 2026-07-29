@@ -137,13 +137,16 @@ final class OfflineWriteAllowlistTests: XCTestCase {
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .notFound)), .businessConflict)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .methodNotAllowed)), .businessConflict)
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .clientError(409, nil))), .businessConflict)
+        XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .preconditionFailed(nil))), .staleState)
+        XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .preconditionRequired(nil))), .staleState)
 
         let idempotencyConflict = APIError(title: nil, status: 409, detail: "dup", errors: nil, message: nil, code: "idempotencyKeyConflict")
         XCTAssertEqual(reason(OfflineWriteReplayClassifier.outcome(for: .clientError(409, idempotencyConflict))), .sameKeyDifferentBody)
 
         // None of the terminal rejections may be silently re-enqueued.
         for error in [NetworkError.forbidden, .clientError(422, nil), .clientError(409, idempotencyConflict),
-                     .partsInventoryConflict(wrongBinConflict()), .notFound] {
+                     .partsInventoryConflict(wrongBinConflict()), .notFound,
+                     .preconditionFailed(nil), .preconditionRequired(nil)] {
             XCTAssertFalse(OfflineWriteReplayClassifier.isEnqueueableOfflineFailure(error), "\(error) must NOT be enqueued")
         }
     }
