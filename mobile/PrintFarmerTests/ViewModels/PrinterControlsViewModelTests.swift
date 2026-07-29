@@ -271,7 +271,8 @@ final class PrinterControlsViewModelTests: XCTestCase {
                     status: 412,
                     detail: "Printer changed after review.",
                     errors: nil,
-                    message: nil
+                    message: nil,
+                    code: nil
                 )
             )
         )

@@ -887,7 +887,8 @@ final class HarvestViewModelTests: XCTestCase {
 
     private func makeJob(gcodeFileId: UUID? = nil, projectFileId: UUID? = nil, copies: Int = 1) -> PrintJob {
         PrintJob(
-            id: UUID(), status: .completed, priority: 1, queuePosition: 0,
+            id: UUID(), rowVersion: nil, dispatchStateRowVersion: nil,
+            status: .completed, priority: 1, queuePosition: 0,
             gcodeFileId: gcodeFileId, gcodeFileName: "part.gcode",
             assignedPrinterId: nil, assignedPrinterName: nil,
             createdAt: .now, updatedAt: .now, actualStartTime: nil, actualEndTime: nil,
