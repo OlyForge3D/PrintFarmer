@@ -2428,30 +2428,49 @@ public class MoonrakerClient(
         foreach (JsonElement jobElement in jobsElement.EnumerateArray())
         {
             bool included = false;
-            try
+            if (jobElement.ValueKind == JsonValueKind.Object)
             {
-                HistoryJob? job = jobElement.Deserialize<HistoryJob>(WebJsonOptions);
-                if (job is not null &&
-                    !string.IsNullOrWhiteSpace(job.JobId) &&
-                    !string.IsNullOrWhiteSpace(job.Filename) &&
-                    !string.IsNullOrWhiteSpace(job.Status) &&
-                    job.StartTime > 0)
+                try
                 {
-                    jobs.Add(job);
-                    included = true;
+                    HistoryJob? job = jobElement.Deserialize<HistoryJob>(WebJsonOptions);
+                    if (job is not null &&
+                        !string.IsNullOrWhiteSpace(job.JobId) &&
+                        !string.IsNullOrWhiteSpace(job.Filename) &&
+                        !string.IsNullOrWhiteSpace(job.Status) &&
+                        job.StartTime > 0)
+                    {
+                        jobs.Add(job);
+                        included = true;
+                    }
                 }
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "[Moonraker] Excluding malformed history entry at source offset {SourceOffset}",
-                    start + sourceIndex);
+                catch (JsonException ex)
+                {
+                    _logger.LogDebug(
+                        ex,
+                        "[Moonraker] Excluding malformed history entry at source offset {SourceOffset}",
+                        start + sourceIndex);
+                }
             }
 
             if (!included)
             {
-                excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
+                try
+                {
+                    excludedEntries.Add(
+                        CreateExcludedHistoryEvidence(jobElement));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "[Moonraker] History evidence extraction failed at source offset {SourceOffset}",
+                        start + sourceIndex);
+                    excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                        BackendJobId: null,
+                        Filename: null,
+                        StartTime: null,
+                        Reason: "malformed_history_entry"));
+                }
             }
 
             sourceIndex++;
@@ -2469,6 +2488,15 @@ public class MoonrakerClient(
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
         JsonElement entry)
     {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
         string? filename = TryReadHistoryString(entry, "filename");
         double? startTime =
             entry.TryGetProperty("start_time", out JsonElement start) &&

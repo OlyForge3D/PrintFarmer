@@ -745,6 +745,53 @@ public sealed class DispatchClaimService(
         string errorDetail,
         CancellationToken ct = default)
     {
+        const int MaxConcurrencyAttempts = 3;
+        for (int concurrencyAttempt = 1;
+             concurrencyAttempt <= MaxConcurrencyAttempts;
+             concurrencyAttempt++)
+        {
+            try
+            {
+                return await ReleaseClaimOnKnownFailureOnceAsync(
+                    attemptId,
+                    errorCode,
+                    ct);
+            }
+            catch (DbUpdateConcurrencyException ex)
+                when (concurrencyAttempt < MaxConcurrencyAttempts)
+            {
+                _db.ChangeTracker.Clear();
+                _logger.LogWarning(
+                    ex,
+                    "Concurrency conflict releasing known-failure attempt {AttemptId}; retrying ({Attempt}/{MaxAttempts})",
+                    attemptId,
+                    concurrencyAttempt,
+                    MaxConcurrencyAttempts);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
+                    ct);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                _db.ChangeTracker.Clear();
+                _logger.LogError(
+                    ex,
+                    "Known-failure attempt {AttemptId} could not be terminalized after {MaxAttempts} concurrency attempts",
+                    attemptId,
+                    MaxConcurrencyAttempts);
+                throw;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Known-failure concurrency retry loop terminated unexpectedly.");
+    }
+
+    private async Task<bool> ReleaseClaimOnKnownFailureOnceAsync(
+        Guid attemptId,
+        string errorCode,
+        CancellationToken ct)
+    {
         QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
             .Include(a => a.PrintJob)
             .FirstOrDefaultAsync(a => a.Id == attemptId, ct);
@@ -830,7 +877,18 @@ public sealed class DispatchClaimService(
         {
             dispatchState.ActiveJobId = null;
             dispatchState.ActiveDispatchAttemptId = null;
-            ClearPhysicalBarrier(dispatchState, attemptId);
+            if (dispatchState.PhysicalControlCommandId == attemptId ||
+                (pendingIntent is not null &&
+                 dispatchState.PhysicalControlCommandId == pendingIntent.Command.Id))
+            {
+                dispatchState.PhysicalControlCommandId = null;
+                dispatchState.PhysicalControlAttemptId = null;
+                dispatchState.PhysicalControlOperation = null;
+                dispatchState.PhysicalControlActorSubject = null;
+                dispatchState.PhysicalControlStartedAtUtc = null;
+                dispatchState.PhysicalControlRequiresReconciliation = false;
+            }
+
             if (pendingIntent is not null)
             {
                 dispatchState.QueueRevision++;

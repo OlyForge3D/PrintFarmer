@@ -3898,6 +3898,8 @@ public class PrintJobManagementService(
             CreatedAtUtc = now,
         };
         _appDbContext.QueueDispatchOutbox.Add(command);
+        dispatchState.QueueRevision++;
+        dispatchState.Revision = Math.Max(1, dispatchState.Revision) + 1;
         if (!dispatchState.PhysicalControlCommandId.HasValue)
         {
             dispatchState.PhysicalControlCommandId = command.Id;

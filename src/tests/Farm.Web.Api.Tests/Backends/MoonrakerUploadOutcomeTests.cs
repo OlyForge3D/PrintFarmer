@@ -282,6 +282,44 @@ public sealed class MoonrakerUploadOutcomeTests
     }
 
     [Fact]
+    public async Task GetHistoryListAsync_ScalarEntries_AreExcludedWithoutShiftingValidRange()
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"result":{"count":5,"jobs":[null,"malformed",42,{"job_id":"first","filename":"first.gcode","status":"completed","start_time":1700000000},{"job_id":"second","filename":"second.gcode","status":"completed","start_time":1700000001}]}}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://moonraker/",
+            limit: 1,
+            start: 1);
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle()
+            .Which.JobId.Should().Be("second");
+        history.ExaminedSourceEntries.Should().Be(5);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        history.AuthorityEvidence.ExcludedEntryCount.Should().Be(3);
+        history.ExcludedEntries.Should().HaveCount(3)
+            .And.OnlyContain(entry =>
+                entry.BackendJobId == null &&
+                entry.Filename == null &&
+                entry.StartTime == null);
+    }
+
+    [Fact]
     public async Task HistoryList_LowercaseAuxiliaryData_MatchesDetailContract()
     {
         const string job =

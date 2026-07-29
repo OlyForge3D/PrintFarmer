@@ -1754,7 +1754,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
-                    excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
+                    try
+                    {
+                        excludedEntries.Add(
+                            CreateExcludedHistoryEvidence(jobElement));
+                    }
+                    catch (Exception)
+                    {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            BackendJobId: null,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_entry"));
+                    }
+
                     continue;
                 }
 
@@ -1880,6 +1893,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
         JsonElement entry)
     {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
         string? filename = TryReadString(entry, "name");
         return new HistoryExcludedEntryEvidence(
             TryReadString(entry, "id") ?? filename,

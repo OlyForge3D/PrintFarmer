@@ -540,19 +540,55 @@ public sealed class QueueReconciliationService(
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
                 attempt.TerminalAtUtc = DateTime.UtcNow;
+                FinalizedBackendControlIntent? pendingIntent =
+                    await FinalizePendingBackendControlCommandsAsync(
+                        db,
+                        attempt,
+                        ct);
+                attempt.IsRetryable =
+                    attempt.PrintJobId is not null &&
+                    (pendingIntent is null ||
+                     string.Equals(
+                         pendingIntent.Operation,
+                         "abort",
+                         StringComparison.Ordinal));
                 ClearStartBarrier(activeState, attempt.Id);
+                if (pendingIntent is not null &&
+                    activeState.PhysicalControlCommandId == pendingIntent.CommandId)
+                {
+                    activeState.PhysicalControlCommandId = null;
+                    activeState.PhysicalControlAttemptId = null;
+                    activeState.PhysicalControlOperation = null;
+                    activeState.PhysicalControlActorSubject = null;
+                    activeState.PhysicalControlStartedAtUtc = null;
+                    activeState.PhysicalControlRequiresReconciliation = false;
+                }
 
                 if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
                 {
-                    attempt.PrintJob.Status = PrintJobStatus.Assigned;
+                    PrintJobStatus targetStatus = pendingIntent?.Operation switch
+                    {
+                        "cancel" => PrintJobStatus.Cancelled,
+                        "abort" => PrintJobStatus.Queued,
+                        _ => PrintJobStatus.Assigned,
+                    };
+                    attempt.PrintJob.Status = targetStatus;
                     attempt.PrintJob.ActualStartTime = null;
+                    attempt.PrintJob.ActualEndTime =
+                        targetStatus == PrintJobStatus.Cancelled
+                            ? DateTime.UtcNow
+                            : null;
+                    attempt.PrintJob.FailureReason = null;
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
+                    string historyNote = pendingIntent is null
+                        ? "Backend reconciliation proved the start absent."
+                        : $"Pending {pendingIntent.Operation} honored after backend absence.";
                     AddHistory(
                         db,
                         attempt.PrintJob.Id,
                         PrintJobStatus.Starting,
-                        PrintJobStatus.Assigned,
-                        "Backend reconciliation proved the start absent.");
+                        targetStatus,
+                        historyNote);
                 }
 
                 // Clear the active lease on the printer dispatch state (queue and ad-hoc).
@@ -561,6 +597,10 @@ public sealed class QueueReconciliationService(
                     activeState.ActiveJobId = null;
                     activeState.ActiveDispatchAttemptId = null;
                     activeState.QueueRevision++;
+                    if (pendingIntent is not null)
+                    {
+                        ClearAcknowledgement(activeState);
+                    }
                 }
 
                 await SetBedClearCommandStatusAsync(
@@ -582,26 +622,50 @@ public sealed class QueueReconciliationService(
                     reasonCode: "reconciliation_absent",
                     detail: new { startPathKind = attempt.StartPathKind });
 
-                // Emit a durable lifecycle event for the absent-from-backend reconciliation
-                // so the outbox publisher broadcasts the lease release to authorized groups.
+                // Emit the resolved local intent, or the absent reconciliation when no
+                // terminal intent was queued.
                 if (attempt.PrintJobId is not null && sequenceAllocator is not null)
                 {
-                    await DispatchClaimService.AddLifecycleOutboxEventAsync(
-                        db,
-                        sequenceAllocator,
-                        DispatchClaimService.EventTypeReconciliationAbsent,
-                        aggregateId: attempt.PrintJobId.Value,
-                        printerId: attempt.PrinterId,
-                        attemptId: attempt.Id,
-                        aggregateRowVersion: attempt.PrintJob?.RowVersion,
-                        failureCode: "reconciliation_absent",
-                        payloadJson: JsonSerializer.Serialize(new
+                    string eventType = pendingIntent?.Operation switch
+                    {
+                        "cancel" => QueueLifecycleEventWriter.EventTypeJobCancelled,
+                        "abort" => QueueLifecycleEventWriter.EventTypeJobAborted,
+                        _ => DispatchClaimService.EventTypeReconciliationAbsent,
+                    };
+                    string? failureCode = pendingIntent is null
+                        ? "reconciliation_absent"
+                        : null;
+                    string absentTerminalStatus =
+                        attempt.PrintJob?.Status.ToString() ??
+                        PrintJobStatus.Cancelled.ToString();
+                    string absentTerminalJobKind =
+                        attempt.PrintJob?.JobKind?.ToString() ??
+                        nameof(JobKind.Standard);
+                    string payloadJson = pendingIntent is null
+                        ? JsonSerializer.Serialize(new
                         {
                             jobId = attempt.PrintJobId,
                             printerId = attempt.PrinterId,
                             attemptId = attempt.Id,
                             startPathKind = attempt.StartPathKind,
-                        }),
+                        })
+                        : QueueLifecycleEventWriter.BuildTerminalPayload(
+                            attempt.PrintJobId.Value,
+                            attempt.PrinterId,
+                            attempt.Id,
+                            absentTerminalStatus,
+                            absentTerminalJobKind,
+                            failureCode: null);
+                    await DispatchClaimService.AddLifecycleOutboxEventAsync(
+                        db,
+                        sequenceAllocator,
+                        eventType,
+                        aggregateId: attempt.PrintJobId.Value,
+                        printerId: attempt.PrinterId,
+                        attemptId: attempt.Id,
+                        aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                        failureCode: failureCode,
+                        payloadJson: payloadJson,
                         ct);
                 }
 
@@ -614,7 +678,7 @@ public sealed class QueueReconciliationService(
                     ct);
 
                 logger.LogWarning(
-                    "[Reconciliation] Attempt {AttemptId} absent from backend → lease released, job re-queued",
+                    "[Reconciliation] Attempt {AttemptId} absent from backend → lease released and local intent resolved",
                     attempt.Id);
                 break;
             default:
@@ -699,6 +763,18 @@ public sealed class QueueReconciliationService(
         state.PhysicalControlRequiresReconciliation = false;
     }
 
+    private static void ClearAcknowledgement(PrinterDispatchState state)
+    {
+        state.AcknowledgedJobId = null;
+        state.AcknowledgedAtUtc = null;
+        state.AcknowledgedBySubject = null;
+        state.AcknowledgementIdempotencyKey = null;
+        state.AcknowledgementExpiresAtUtc = null;
+        state.AcknowledgedJobRowVersion = null;
+        state.AcknowledgedQueueRevision = null;
+        state.AcknowledgedPrinterConfigRevision = null;
+    }
+
     private static void AddHistory(
         AppDbContext db,
         Guid jobId,
@@ -767,14 +843,15 @@ public sealed class QueueReconciliationService(
         }
     }
 
-    private static async Task FinalizePendingBackendControlCommandsAsync(
+    private static async Task<FinalizedBackendControlIntent?>
+        FinalizePendingBackendControlCommandsAsync(
         AppDbContext db,
         QueueDispatchAttempt attempt,
         CancellationToken ct)
     {
         if (attempt.PrintJobId is null)
         {
-            return;
+            return null;
         }
 
         List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
@@ -783,16 +860,44 @@ public sealed class QueueReconciliationService(
                 command.Status == QueueOutboxEventStatus.Pending &&
                 command.AttemptId == attempt.Id &&
                 command.AggregateId == attempt.PrintJobId.Value)
+            .OrderBy(command => command.Sequence)
             .ToListAsync(ct);
         DateTime now = DateTime.UtcNow;
+        FinalizedBackendControlIntent? intent = null;
         foreach (QueueDispatchOutbox command in commands)
         {
+            if (intent is null)
+            {
+                try
+                {
+                    using JsonDocument document =
+                        JsonDocument.Parse(command.PayloadJson);
+                    if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                        document.RootElement.TryGetProperty(
+                            "operation",
+                            out JsonElement operationElement) &&
+                        operationElement.ValueKind == JsonValueKind.String &&
+                        operationElement.GetString() is "cancel" or "abort")
+                    {
+                        intent = new FinalizedBackendControlIntent(
+                            command.Id,
+                            operationElement.GetString()!);
+                    }
+                }
+                catch (JsonException)
+                {
+                    // Finalize malformed commands without letting them drive job semantics.
+                }
+            }
+
             command.Status = QueueOutboxEventStatus.Published;
             command.FailureCode = null;
             command.LastError = null;
             command.CompletedAtUtc = now;
             command.RetryAfterUtc = null;
         }
+
+        return intent;
     }
 
     private async Task<BackendReconciliationOutcome> QueryBackendOutcomeAsync(
@@ -1113,7 +1218,7 @@ public sealed class QueueReconciliationService(
             new DateTimeOffset(NormalizeUtc(attempt.ClaimedAtUtc))
                 .ToUnixTimeMilliseconds() / 1000d;
         if (history.StartTime <= 0 ||
-            history.StartTime + 2 < claimedAtSeconds)
+            history.StartTime < Math.Floor(claimedAtSeconds))
         {
             return BackendReconciliationOutcome.BackendIndeterminate;
         }
@@ -1161,6 +1266,10 @@ public sealed class QueueReconciliationService(
             yield return attempt.BackendCorrelationId;
         }
     }
+
+    private sealed record FinalizedBackendControlIntent(
+        Guid CommandId,
+        string Operation);
 
     private enum BackendReconciliationOutcome
     {

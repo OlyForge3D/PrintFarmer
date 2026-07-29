@@ -974,7 +974,20 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
-                    excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
+                    try
+                    {
+                        excludedEntries.Add(
+                            CreateExcludedHistoryEvidence(jobElement));
+                    }
+                    catch (Exception)
+                    {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            BackendJobId: null,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_entry"));
+                    }
+
                     continue;
                 }
 
@@ -1020,6 +1033,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         JsonElement jobElement,
         bool requireCompleteListEntry = false)
     {
+        if (jobElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
         try
         {
             var job = new HistoryJob();
@@ -1103,6 +1121,15 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
         JsonElement entry)
     {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
         string? backendJobId = TryReadHistoryString(entry, "id");
         string? filename = null;
         if (entry.TryGetProperty("job", out JsonElement job) &&

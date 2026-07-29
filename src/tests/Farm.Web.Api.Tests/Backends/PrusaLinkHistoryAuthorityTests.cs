@@ -145,6 +145,39 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
+    public async Task GetHistoryListAsync_ScalarEntries_AreExcludedWithoutShiftingValidRange()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"count":5,"results":[null,"malformed",42,{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}},{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/",
+            limit: 1,
+            start: 1);
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle()
+            .Which.JobId.Should().Be("second");
+        history.ExaminedSourceEntries.Should().Be(5);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        history.AuthorityEvidence.ExcludedEntryCount.Should().Be(3);
+        history.ExcludedEntries.Should().HaveCount(3)
+            .And.OnlyContain(entry =>
+                entry.BackendJobId == null &&
+                entry.Filename == null &&
+                entry.StartTime == null);
+    }
+
+    [Fact]
     public async Task GetHistoryListAsync_Total250Limit100_ProvesRequestedRange()
     {
         var entries = Enumerable.Range(0, 250)
