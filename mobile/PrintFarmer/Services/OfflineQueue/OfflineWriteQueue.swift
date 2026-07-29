@@ -70,9 +70,11 @@ actor OfflineWriteQueue {
         items = await store.loadAll()
     }
 
-    private func persist() async {
-        await store.saveAll(items)
+    @discardableResult
+    private func persist() async -> Bool {
+        let saved = await store.saveAll(items)
         changeHandler?()
+        return saved
     }
 
     func setChangeHandler(_ handler: @escaping @Sendable () -> Void) {
@@ -171,7 +173,15 @@ actor OfflineWriteQueue {
             prerequisiteItemID: prerequisiteItemID
         )
         items.append(item)
-        await persist()
+        // Durability contract: the item must be on disk BEFORE the caller is told
+        // it is safely queued. If the durable write fails, roll back the in-memory
+        // append (by id — a concurrent identity/gate transition may have mutated
+        // `items` across the await) and report the failure so the caller surfaces
+        // the original error instead of a false "saved offline".
+        guard await persist() else {
+            items.removeAll { $0.id == item.id }
+            return .persistenceFailed
+        }
         return .enqueued(item)
     }
 
@@ -214,7 +224,7 @@ actor OfflineWriteQueue {
             }
 
             replayingItemID = item.id
-            let outcome = await transport.replay(item.operation)
+            let outcome = await transport.replay(item.operation, expectedServerID: server)
             replayingItemID = nil
 
             // Re-validate ownership after the suspension: a switch/logout/disable

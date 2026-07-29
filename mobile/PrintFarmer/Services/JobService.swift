@@ -127,10 +127,15 @@ actor JobService: JobServiceProtocol {
         try await apiClient.get("/api/job-queue/\(jobId)/candidates")
     }
 
-    func dispatchTo(jobId: UUID, printerId: UUID) async throws {
+    func dispatchTo(jobId: UUID, printerId: UUID, reviewedRowVersion: String) async throws {
+        // #900 revision guard: `POST /api/job-queue/{id}/dispatch-to` is If-Match
+        // protected (scored job dispatch). Omitting the header makes the server
+        // reject every attempt with 428 precondition_required, so the job's
+        // reviewed row version travels as the mandatory `If-Match`.
         try await apiClient.postVoid(
             "/api/job-queue/\(jobId)/dispatch-to",
-            body: DispatchToRequest(printerId: printerId)
+            body: DispatchToRequest(printerId: printerId),
+            headers: preconditionHeaders(reviewedRowVersion)
         )
     }
 }

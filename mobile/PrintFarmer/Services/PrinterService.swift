@@ -138,12 +138,20 @@ actor PrinterService: PrinterServiceProtocol {
         printerId: UUID,
         toolheadIndex: Int,
         request: ToolheadSpoolBindRequest,
-        idempotencyKey: String
+        idempotencyKey: String,
+        reviewedRowVersion: String
     ) async throws -> CommandResult {
+        // #900 revision guard: this binding endpoint is If-Match protected. The
+        // printer's current row version travels as the mandatory `If-Match`
+        // precondition (a missing header is rejected with 428), alongside the
+        // idempotency key that makes an ambiguous replay apply exactly once.
         try await apiClient.put(
             "/api/printers/\(printerId)/toolheads/\(toolheadIndex)/spool",
             body: request,
-            headers: ["Idempotency-Key": idempotencyKey]
+            headers: [
+                "If-Match": "\"\(reviewedRowVersion)\"",
+                "Idempotency-Key": idempotencyKey
+            ]
         )
     }
 

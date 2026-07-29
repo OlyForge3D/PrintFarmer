@@ -14,6 +14,33 @@ protocol OfflineWriteReplayTransport: Sendable {
     /// Re-sends one frozen operation and classifies the result. Never throws —
     /// every terminal/transient condition maps onto an outcome.
     func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome
+
+    /// Re-sends one frozen operation ONLY when the transport's currently-resolved
+    /// identity still matches `expectedServerID` — the namespace the queue is
+    /// draining. This closes the server-switch TOCTOU (#787): the container
+    /// publishes the next server's service instances synchronously in
+    /// `rebuildRealServices`, but the durable outbox is not rebound until the
+    /// later `syncOfflineWriteQueue()`. In that window a still-in-flight drain for
+    /// server A resolves the CURRENT (server-B) services through the dynamic
+    /// provider; without this fence it would execute A's frozen write against B.
+    /// Identity-agnostic transports (scripted test doubles) inherit the default
+    /// below, which ignores the pin.
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedServerID: UUID?
+    ) async -> OfflineWriteReplayOutcome
+}
+
+extension OfflineWriteReplayTransport {
+    /// Default: transports that do not resolve a server identity (deterministic
+    /// test doubles) ignore the pin and behave exactly as the single-argument
+    /// `replay(_:)`.
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedServerID: UUID?
+    ) async -> OfflineWriteReplayOutcome {
+        await replay(operation)
+    }
 }
 
 // MARK: - Classifier
@@ -185,15 +212,23 @@ extension OfflineWriteQueue: OfflineWriteEnqueuing {}
 /// `printers`. One bundle keeps the four allowlisted kinds behind a single
 /// replay owner (F10-Q2, #790) — no parallel queue/transport per kind.
 struct OfflineReplayServices {
+    /// The active server the resolved services belong to, captured atomically
+    /// with them on the main actor (the container swaps `activeServerID` and the
+    /// service instances together in one synchronous `rebuildRealServices`). Lets
+    /// the transport fence a replay whose queued item is pinned to a DIFFERENT
+    /// server than the one whose services are currently published.
+    let serverID: UUID?
     let parts: (any PartsInventoryServiceProtocol)?
     let tasks: (any ShiftTaskServiceProtocol)?
     let printers: (any PrinterServiceProtocol)?
 
     init(
+        serverID: UUID? = nil,
         parts: (any PartsInventoryServiceProtocol)? = nil,
         tasks: (any ShiftTaskServiceProtocol)? = nil,
         printers: (any PrinterServiceProtocol)? = nil
     ) {
+        self.serverID = serverID
         self.parts = parts
         self.tasks = tasks
         self.printers = printers
@@ -208,7 +243,23 @@ struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
     let provider: @Sendable @MainActor () -> OfflineReplayServices
 
     func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
+        await replay(operation, expectedServerID: nil)
+    }
+
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedServerID: UUID?
+    ) async -> OfflineWriteReplayOutcome {
         let services = await provider()
+        // Identity fence (#787 switch window): if the container has already
+        // switched to another server — its published services now belong to a
+        // different identity than the item being drained — defer instead of
+        // executing server A's frozen write against server B. `.retryable` stops
+        // the drain WITHOUT mutating the item, so the correct namespace replays
+        // it exactly once after the outbox rebinds.
+        if let expectedServerID, services.serverID != expectedServerID {
+            return .retryable
+        }
         return await OfflineWriteReplayExecutor.execute(operation, using: services)
     }
 }
@@ -350,11 +401,20 @@ enum OfflineWriteReplayExecutor {
                     message: "This toolhead's spool changed since the bind was queued."
                 ))
             }
+            // #900: the bind endpoint is If-Match protected. Reuse the printer
+            // revision carried by the SAME details read the toolhead state was
+            // validated against, so the precondition matches the state we just
+            // checked. A details response without a revision cannot satisfy the
+            // guard, so defer as transient rather than provoke a certain 428.
+            guard let reviewedRowVersion = details.rowVersion, !reviewedRowVersion.isEmpty else {
+                return .retryable
+            }
             _ = try await service.bindToolheadSpool(
                 printerId: printerID,
                 toolheadIndex: toolheadIndex,
                 request: request,
-                idempotencyKey: idempotencyKey
+                idempotencyKey: idempotencyKey,
+                reviewedRowVersion: reviewedRowVersion
             )
             return .success
         } catch {

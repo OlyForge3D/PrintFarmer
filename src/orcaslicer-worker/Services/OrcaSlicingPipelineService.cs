@@ -104,7 +104,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 LayerCount = metadata.LayerCount,
                 Success = true
             };
-            result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
+            result.Metadata["SlicerVersion"] = $"OrcaSlicer {WorkerConstants.SlicerVersion}";
             result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
             result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
             if (modelFilePaths.Count > 1)
@@ -1115,7 +1115,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                     }
                 }
 
-                // OrcaSlicer CLI (both 2.3.1 and 2.3.2) expects all scalar values as
+                // OrcaSlicer CLI expects all scalar values as
                 // JSON strings — matching the native profile format. Arrays are the
                 // only exception (written as native JSON arrays above).
                 writer.WriteStringValue(value);

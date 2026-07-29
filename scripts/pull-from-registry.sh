@@ -5,7 +5,7 @@
 set -e
 
 REGISTRY_HOST=${REGISTRY_HOST:-}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
 
 if [ -z "$REGISTRY_HOST" ]; then
     echo "❌ REGISTRY_HOST environment variable is required"

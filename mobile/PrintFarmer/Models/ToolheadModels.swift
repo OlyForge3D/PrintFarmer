@@ -157,6 +157,11 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
     let toolheads: [Toolhead]
     let fallbackGroups: [FilamentFallbackGroup]
     let supportsPerToolAttribution: Bool
+    /// Base-64 printer revision used as the public ETag. The toolhead spool-bind
+    /// endpoint (`PUT /toolheads/{index}/spool`) is If-Match protected, so a
+    /// replay reuses this value from the same details read it validates the
+    /// toolhead against. Optional/absent on older servers.
+    let rowVersion: String?
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -170,6 +175,7 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         toolheads = heads.sorted { $0.index < $1.index }
         fallbackGroups = try c.decodeIfPresent([FilamentFallbackGroup].self, forKey: .fallbackGroups) ?? []
         supportsPerToolAttribution = try c.decodeIfPresent(Bool.self, forKey: .supportsPerToolAttribution) ?? false
+        rowVersion = try c.decodeIfPresent(String.self, forKey: .rowVersion)
     }
 
     init(
@@ -181,7 +187,8 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         modelName: String? = nil,
         toolheads: [Toolhead] = [],
         fallbackGroups: [FilamentFallbackGroup] = [],
-        supportsPerToolAttribution: Bool = false
+        supportsPerToolAttribution: Bool = false,
+        rowVersion: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -192,10 +199,11 @@ struct PrinterDetails: Codable, Identifiable, Sendable, Equatable {
         self.toolheads = toolheads.sorted { $0.index < $1.index }
         self.fallbackGroups = fallbackGroups
         self.supportsPerToolAttribution = supportsPerToolAttribution
+        self.rowVersion = rowVersion
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, backend, hasMmu, manufacturerName, modelName
-        case toolheads, fallbackGroups, supportsPerToolAttribution
+        case toolheads, fallbackGroups, supportsPerToolAttribution, rowVersion
     }
 }

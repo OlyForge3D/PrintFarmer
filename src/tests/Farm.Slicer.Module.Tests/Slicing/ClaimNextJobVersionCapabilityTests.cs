@@ -61,32 +61,32 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
     public async Task WrongVersionWorker_DoesNotClaimPinnedJob()
     {
         // Pinned job: only carries versioned tag, as SubmitAsync now derives.
-        Guid pinnedTo231 = await InsertQueuedJobAsync(CapsJson("orcaslicer:2.3.1"), "2.3.1");
+        Guid pinnedToCurrent = await InsertQueuedJobAsync(CapsJson("orcaslicer:2.4.2"), "2.4.2");
 
         EfSliceJobRepository repo = new EfSliceJobRepository(_db);
 
-        // Worker at 2.4.0 advertises generic + its own version — must NOT claim the 2.3.1 job.
+        // A worker advertising a different version must not claim the current-version job.
         SliceJob? claimed = await repo.ClaimNextJobAsync(
             WorkerClaimIdentity.CreateUnattested(
                 Guid.NewGuid(),
-                ["orcaslicer", "orcaslicer:2.4.0", "stl-processing"]),
+                ["orcaslicer", "orcaslicer:9.9.9", "stl-processing"]),
             30,
             3,
             CancellationToken.None);
 
-        _ = claimed.Should().BeNull("worker at 2.4.0 must not pick up job pinned to 2.3.1");
+        _ = claimed.Should().BeNull("a mismatched worker must not pick up a version-pinned job");
 
         // Sanity: matching worker CAN claim.
         SliceJob? claimedRight = await repo.ClaimNextJobAsync(
             WorkerClaimIdentity.CreateUnattested(
                 Guid.NewGuid(),
-                ["orcaslicer", "orcaslicer:2.3.1", "stl-processing"]),
+                ["orcaslicer", "orcaslicer:2.4.2", "stl-processing"]),
             30,
             3,
             CancellationToken.None);
 
         _ = claimedRight.Should().NotBeNull();
-        _ = claimedRight!.Id.Should().Be(pinnedTo231);
+        _ = claimedRight!.Id.Should().Be(pinnedToCurrent);
     }
 
     [Fact(DisplayName = "Unpinned job (generic capability only) is claimable by any orcaslicer worker")]
@@ -99,7 +99,7 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
         SliceJob? claimed = await repo.ClaimNextJobAsync(
             WorkerClaimIdentity.CreateUnattested(
                 Guid.NewGuid(),
-                ["orcaslicer", "orcaslicer:2.3.1", "stl-processing"]),
+                ["orcaslicer", "orcaslicer:2.4.2", "stl-processing"]),
             30,
             3,
             CancellationToken.None);

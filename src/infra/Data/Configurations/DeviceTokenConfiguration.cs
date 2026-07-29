@@ -61,5 +61,13 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
         // Non-unique provider-token lookup for diagnostics; invalidation uses the row Id.
         _ = builder.HasIndex(t => t.Token)
             .HasDatabaseName("IX_DeviceTokens_Token");
+
+        // Non-unique installation lookup (#705): EfDeviceTokenRepository.UpsertAsync
+        // scans for another account's active row on this exact installation on every
+        // registration, to transfer ownership atomically. The composite index above
+        // cannot serve that scan efficiently because InstallationId is its second
+        // (non-leading) column.
+        _ = builder.HasIndex(t => t.InstallationId)
+            .HasDatabaseName("IX_DeviceTokens_InstallationId");
     }
 }

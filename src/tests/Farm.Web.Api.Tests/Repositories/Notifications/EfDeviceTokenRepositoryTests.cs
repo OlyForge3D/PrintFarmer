@@ -326,6 +326,76 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         owners.Should().BeEquivalentTo(new[] { userA, userB });
     }
 
+    // Issue #705: a reused mobile installation must never stay "active" for
+    // two accounts at once — see EfDeviceTokenRepository.UpsertAsync ownership
+    // transfer and the DeviceToken remarks.
+    [Fact]
+    public async Task Upsert_DifferentUserSameInstallation_DeactivatesPriorOwnersRow()
+    {
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        // userA registered on this installation, then their logout unregister
+        // call failed or never arrived — their row is still active.
+        DeviceToken ownedByA = await _repo.UpsertAsync(
+            userA, "shared-install", "token-a", "ios", "production", null);
+        // Snapshot before the second upsert: ownedByA and priorOwnerRow below
+        // are the same tracked instance on this shared _db context, so its
+        // properties mutate in place once userB registers.
+        long ownedByAOriginalVersion = ownedByA.RegistrationVersion;
+
+        // userB now signs in on the same physical installation.
+        DeviceToken ownedByB = await _repo.UpsertAsync(
+            userB, "shared-install", "token-b", "ios", "production", null);
+
+        ownedByB.UserId.Should().Be(userB);
+        ownedByB.IsActive.Should().BeTrue();
+        (await _db.DeviceTokens.CountAsync()).Should().Be(2, "the prior owner's row is deactivated, not deleted");
+
+        DeviceToken staleARow = await _db.DeviceTokens.AsNoTracking().SingleAsync(t => t.Id == ownedByA.Id);
+        staleARow.IsActive.Should().BeFalse();
+        staleARow.RegistrationVersion.Should().Be(
+            ownedByAOriginalVersion + 1,
+            "the surrendered row's version rotates so a late provider outcome for userA's incarnation cannot resurrect it");
+
+        (await _repo.GetActiveByUserAsync(userA)).Should().BeEmpty("userA's push can no longer reach this device");
+        (await _repo.GetActiveByUserAsync(userB)).Should().ContainSingle(t => t.Id == ownedByB.Id);
+        (await _repo.GetActiveTokenOwnersAsync()).Should().BeEquivalentTo(new[] { userB });
+    }
+
+    [Fact]
+    public async Task Upsert_OwnershipReturnsToOriginalUser_DeactivatesInterimOwnersRow()
+    {
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        DeviceToken ownedByA = await _repo.UpsertAsync(
+            userA, "shared-install", "token-a", "ios", "production", null);
+        await _repo.UpsertAsync(userB, "shared-install", "token-b", "ios", "production", null);
+
+        // userA signs back in on the same physical installation.
+        DeviceToken ownedByAAgain = await _repo.UpsertAsync(
+            userA, "shared-install", "token-a2", "ios", "production", null);
+
+        ownedByAAgain.Id.Should().Be(ownedByA.Id, "the same account re-registering the same installation reactivates its own row");
+        ownedByAAgain.IsActive.Should().BeTrue();
+        (await _repo.GetActiveByUserAsync(userB)).Should().BeEmpty();
+        (await _repo.GetActiveTokenOwnersAsync()).Should().BeEquivalentTo(new[] { userA });
+    }
+
+    [Fact]
+    public async Task Upsert_DifferentUserDifferentInstallation_LeavesOtherRowsUntouched()
+    {
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        DeviceToken ownedByA = await _repo.UpsertAsync(
+            userA, "install-a", "token-a", "ios", "production", null);
+
+        await _repo.UpsertAsync(userB, "install-b", "token-b", "ios", "production", null);
+
+        DeviceToken stillA = await _db.DeviceTokens.AsNoTracking().SingleAsync(t => t.Id == ownedByA.Id);
+        stillA.IsActive.Should().BeTrue();
+        stillA.RegistrationVersion.Should().Be(ownedByA.RegistrationVersion, "unrelated installations must not be touched");
+    }
+
     [Fact]
     public async Task Upsert_ConcurrentFirstCreate_RealUniqueViolationRetriesExactlyOnce()
     {
@@ -499,6 +569,101 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         finally
         {
             interceptor.ReleaseFirstUpdate.TrySetCanceled();
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    // Issue #705: two different accounts racing to claim the same abandoned
+    // installation (e.g. userA's failed logout unregister overlapping with
+    // userB's and userC's near-simultaneous sign-ins on the same device) must
+    // still converge to exactly one active owner, with the loser transparently
+    // retried rather than surfacing a concurrency exception to the caller.
+    [Fact]
+    public async Task Upsert_ConcurrentDifferentUsersSameAbandonedInstallation_ConvergesToExactlyOneActiveOwner()
+    {
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"device-token-ownership-race-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var interceptor = new ConcurrentOwnershipTransferBarrierInterceptor();
+        DbContextOptions<AppDbContext> racingOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+        Guid oldUser = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        Guid userC = Guid.NewGuid();
+
+        try
+        {
+            await using (AppDbContext seed = new(plainOptions))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.AddRange(
+                    new Farm.Infrastructure.Domain.User
+                    {
+                        Id = oldUser,
+                        Username = $"ownership-race-old-{oldUser:N}",
+                        Email = $"ownership-race-old-{oldUser:N}@example.com",
+                        PasswordHash = "x",
+                    },
+                    new Farm.Infrastructure.Domain.User
+                    {
+                        Id = userB,
+                        Username = $"ownership-race-b-{userB:N}",
+                        Email = $"ownership-race-b-{userB:N}@example.com",
+                        PasswordHash = "x",
+                    },
+                    new Farm.Infrastructure.Domain.User
+                    {
+                        Id = userC,
+                        Username = $"ownership-race-c-{userC:N}",
+                        Email = $"ownership-race-c-{userC:N}@example.com",
+                        PasswordHash = "x",
+                    });
+                await seed.SaveChangesAsync();
+
+                // Simulates oldUser's logout unregister never arriving: their
+                // row is still active for this installation.
+                _ = await new EfDeviceTokenRepository(seed).UpsertAsync(
+                    oldUser, "abandoned-install", new string('o', 64), "ios", "production", null);
+            }
+
+            await using AppDbContext contextB = new(racingOptions);
+            await using AppDbContext contextC = new(racingOptions);
+            var repositoryB = new EfDeviceTokenRepository(contextB);
+            var repositoryC = new EfDeviceTokenRepository(contextC);
+
+            Task<DeviceToken> registerB = repositoryB.UpsertAsync(
+                userB, "abandoned-install", new string('b', 64), "ios", "production", "com.example.app");
+            Task<DeviceToken> registerC = repositoryC.UpsertAsync(
+                userC, "abandoned-install", new string('c', 64), "ios", "production", "com.example.app");
+
+            await interceptor.BothTransfersReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            DeviceToken[] results = await Task.WhenAll(registerB, registerC).WaitAsync(TimeSpan.FromSeconds(10));
+
+            results.Should().HaveCount(2);
+            results.Select(r => r.UserId).Should().BeEquivalentTo(new[] { userB, userC });
+            results.Should().OnlyContain(r => r.IsActive);
+
+            await using AppDbContext verify = new(plainOptions);
+            List<DeviceToken> allRows = await verify.DeviceTokens.AsNoTracking()
+                .Where(row => row.InstallationId == "abandoned-install")
+                .ToListAsync();
+            allRows.Should().HaveCount(3, "the original owner's row and both racing registrations are all retained");
+            allRows.Count(row => row.IsActive).Should().Be(
+                1,
+                "an installation can only ever be actively owned by one account, even when two different accounts race to claim an abandoned one");
+            new[] { userB, userC }.Should().Contain(allRows.Single(row => row.IsActive).UserId);
+            allRows.Single(row => row.UserId == oldUser).IsActive.Should().BeFalse();
+        }
+        finally
+        {
             File.Delete(databasePath);
             File.Delete(databasePath + "-shm");
             File.Delete(databasePath + "-wal");
@@ -702,6 +867,69 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
         {
             Failures.Enqueue(eventData.Exception);
             return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Forces two concurrent <see cref="EfDeviceTokenRepository.UpsertAsync"/>
+    /// calls by different accounts for the same installation to reach their
+    /// ownership-transfer save at the same time, so the second one observes a
+    /// real <see cref="DbUpdateConcurrencyException"/> on the shared prior
+    /// owner row instead of racing non-deterministically. Unlike
+    /// <see cref="ConcurrentInsertBarrierInterceptor"/>, the barrier here keys
+    /// off a <see cref="EntityState.Modified"/> <see cref="DeviceToken"/> entry
+    /// (the row losing ownership), since the two accounts' own new rows never
+    /// collide with each other. Retries beyond the first two arrivals proceed
+    /// immediately — by then the initial race has already been resolved.
+    /// </summary>
+    private sealed class ConcurrentOwnershipTransferBarrierInterceptor : SaveChangesInterceptor
+    {
+        private readonly TaskCompletionSource _winnerSaved =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _transferArrivals;
+        private DbContextId? _winnerContextId;
+
+        public TaskCompletionSource BothTransfersReached { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            bool transfersOwnership = eventData.Context!.ChangeTracker.Entries<DeviceToken>()
+                .Any(entry => entry.State == EntityState.Modified);
+            if (!transfersOwnership)
+            {
+                return result;
+            }
+
+            int arrival = Interlocked.Increment(ref _transferArrivals);
+            if (arrival == 1)
+            {
+                _winnerContextId = eventData.Context!.ContextId;
+                await BothTransfersReached.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+            else if (arrival == 2)
+            {
+                BothTransfersReached.TrySetResult();
+                await _winnerSaved.Task.WaitAsync(TimeSpan.FromSeconds(10), cancellationToken);
+            }
+
+            return result;
+        }
+
+        public override ValueTask<int> SavedChangesAsync(
+            SaveChangesCompletedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            if (_winnerContextId == eventData.Context!.ContextId)
+            {
+                _winnerSaved.TrySetResult();
+            }
+
+            return ValueTask.FromResult(result);
         }
     }
 

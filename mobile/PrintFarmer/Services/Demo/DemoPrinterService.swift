@@ -182,7 +182,7 @@ final class DemoPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         CommandResult(success: true, message: "Spool set (demo)")
     }
 
-    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String, reviewedRowVersion: String) async throws -> CommandResult {
         CommandResult(success: true, message: "Toolhead spool bound (demo)")
     }
 

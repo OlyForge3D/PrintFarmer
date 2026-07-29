@@ -13,7 +13,7 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public const string SlicerVersion = "2.3.1";
+    public const string SlicerVersion = "2.4.2";
     public const string UpstreamDistributionCapability = "orcaslicer-upstream";
 
     // Legacy static capability list — retained for the diagnostic root endpoint.
@@ -228,7 +228,7 @@ public static class Program
         // is enabled. Without this the RegistrationBackgroundService + QueueConsumerService
         // start advertising and claiming version-pinned jobs even when the binary
         // reports a different version than the worker advertises — the queue would
-        // silently deliver v2.3.1 work to a v2.4.0 binary. WORKER_RELAXED_READINESS
+        // silently deliver version-pinned work to a mismatched binary. WORKER_RELAXED_READINESS
         // (already respected below for the readiness endpoint) also disables this
         // startup gate so local dev containers without a real binary still boot.
         if (!relaxedReadiness)

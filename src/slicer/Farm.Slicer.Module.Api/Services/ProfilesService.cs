@@ -2842,13 +2842,13 @@ public class ProfilesService(
     /// Selects an OrcaSlicer worker URL for profile browsing / metadata queries.
     /// Issue #578: when <paramref name="engineVersion"/> is supplied, prefer a
     /// worker whose registered <c>SlicerService.Version</c> matches — otherwise
-    /// a UI pinned to 2.3.1 could read profile metadata from a 2.4.1 worker
-    /// (or vice versa) and hand version-exclusive profile names off to a
+    /// a UI pinned to one engine could read profile metadata from a different
+    /// worker version and hand version-exclusive profile names off to a
     /// worker that has never seen them, producing a "profile not found"
     /// slicing failure at the moment the job is claimed.
     /// </summary>
     /// <param name="engineVersion">
-    /// Optional exact engine version string (e.g. "2.4.1"). When null/empty the
+    /// Optional exact engine version string (e.g. "2.4.2"). When null/empty the
     /// caller does not care which version answers the query and any Online
     /// OrcaSlicer worker is acceptable.
     /// </param>
@@ -2859,12 +2859,10 @@ public class ProfilesService(
             // Query SlicerService entities via ISlicersService (not the old Worker table)
             IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
 
-            // SlicerType 1 = OrcaSlicer (per SlicerType enum). Materialize once
-            // to avoid multi-enumeration warnings when we probe four times.
+            // SlicerType 1 = OrcaSlicer (per SlicerType enum). Calibration
+            // compatibility is intentionally not required for profile browsing.
             List<SlicerService> orcaCandidates = allSlicers.Where(s =>
                 s.SlicerType == 1 &&
-                CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
-                CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
                 !string.IsNullOrEmpty(s.Host)).ToList();
 
             // Freshness cutoff mirrors SlicersController.ListEnginesAsync

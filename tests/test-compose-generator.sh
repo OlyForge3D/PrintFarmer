@@ -194,6 +194,9 @@ test_orcaslicer_worker_config() {
     # Validate OrcaSlicer worker configuration
     assert_contains "$compose_content" "target: orcaslicer-worker" "Should contain OrcaSlicer worker target"
     assert_contains "$compose_content" "orcaslicer-worker:" "Should have OrcaSlicer worker service"
+    assert_contains "$compose_content" 'ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.2}' "Should build the latest stable OrcaSlicer version"
+    assert_contains "$compose_content" 'ORCASLICER_SHA256: ${ORCASLICER_SHA256:-d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd}' "Should use the official v2.4.2 AppImage digest"
+    assert_not_contains "$compose_content" "orcaslicer-worker-previous" "Should not include a retired previous-version worker"
     
     # Validate multistage build targets for actual services
     assert_contains "$compose_content" "target: api-runtime" "Should contain api-runtime target"

@@ -813,10 +813,12 @@ extension PrinterDetailViewModelTests {
         assignedTo: UUID?,
         status: String,
         position: Int,
-        material: String? = nil
+        material: String? = nil,
+        rowVersion: String? = "cm93LXYx"
     ) -> QueuedPrintJobResponse {
         let job = QueuedJobInfo(
             id: id,
+            rowVersion: rowVersion,
             name: "job-\(id)",
             fileName: "job-\(id).gcode",
             assignedPrinterId: assignedTo?.uuidString,
@@ -1112,14 +1114,32 @@ extension PrinterDetailViewModelTests {
     func testDispatchToCallsServiceAndClearsTarget() async {
         let jobService = MockJobService()
         let vm = makeOperatorViewModel(jobService: jobService)
-        let job = makeQueuedJob(id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued", position: 1)
+        let job = makeQueuedJob(id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued", position: 1, rowVersion: "cm93LXY5")
         vm.dispatchTargetJob = job
 
         await vm.dispatch(job, to: TestData.testUUID2)
 
         XCTAssertEqual(jobService.dispatchToCalledWith?.jobId, job.job.jobUUID)
         XCTAssertEqual(jobService.dispatchToCalledWith?.printerId, TestData.testUUID2)
+        XCTAssertEqual(jobService.dispatchToReviewedRowVersion, "cm93LXY5",
+                       "dispatch-to must forward the reviewed job ETag as the mandatory If-Match precondition")
         XCTAssertNil(vm.dispatchTargetJob, "Successful dispatch clears the sheet")
+        XCTAssertFalse(vm.isDispatching)
+    }
+
+    func testDispatchToWithoutRowVersionSurfacesErrorAndDoesNotCallService() async {
+        // Without the job ETag the scored dispatch would provoke a deterministic
+        // 428, so the view model must refuse to fire and prompt a refresh.
+        let jobService = MockJobService()
+        let vm = makeOperatorViewModel(jobService: jobService)
+        let job = makeQueuedJob(id: UUID().uuidString, assignedTo: TestData.testUUID, status: "Queued", position: 1, rowVersion: nil)
+        vm.dispatchTargetJob = job
+
+        await vm.dispatch(job, to: TestData.testUUID2)
+
+        XCTAssertNil(jobService.dispatchToCalledWith,
+                     "A dispatch missing its precondition ETag must not be sent")
+        XCTAssertNotNil(vm.dispatchError)
         XCTAssertFalse(vm.isDispatching)
     }
 

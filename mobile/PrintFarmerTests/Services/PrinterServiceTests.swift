@@ -524,4 +524,29 @@ final class PrinterServiceTests: XCTestCase {
         XCTAssertFalse(caps.supportsBedTemperature)
         XCTAssertFalse(caps.supportsFanControl)
     }
+
+    // MARK: - bindToolheadSpool()
+
+    func testBindToolheadSpoolSendsIfMatchAndIdempotencyKey() async throws {
+        mockAPIClient.stubResponse(json: "{\"success\": true}", statusCode: 200)
+        let printerId = TestData.testUUID
+
+        _ = try await printerService.bindToolheadSpool(
+            printerId: printerId,
+            toolheadIndex: 1,
+            request: ToolheadSpoolBindRequest(spoolId: 9),
+            idempotencyKey: "bind-key-1",
+            reviewedRowVersion: "printer-v7"
+        )
+
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.httpMethod, "PUT")
+        XCTAssertEqual(request.url?.path, "/api/printers/\(printerId)/toolheads/1/spool")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "If-Match"),
+            "\"printer-v7\"",
+            "the toolhead spool bind is If-Match protected; omitting it forces a 428"
+        )
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "bind-key-1")
+    }
 }

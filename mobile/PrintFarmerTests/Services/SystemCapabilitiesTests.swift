@@ -6,7 +6,8 @@ import XCTest
 ///
 /// Verifies:
 /// * `SystemCapabilities` decodes the camelCase payload from
-///   `/api/system/capabilities`.
+///   `/api/system/capabilities`, reading the operator flags from the nested
+///   `operatorFeatures` envelope (not the top level).
 /// * Missing/omitted flags fall back to the documented defaults so an
 ///   older PrintFarmer server (predating #725) is treated as fully
 ///   enabled.
@@ -55,16 +56,21 @@ final class SystemCapabilitiesTests: XCTestCase {
     // MARK: - Decoding
 
     func testDecodesFullCamelCasePayload() throws {
+        // The server nests the operator flags under `operatorFeatures` (the
+        // shared PlatformCapabilitiesDto envelope). Every flag must be honored
+        // from that object.
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true,
-            "filamentCoverageEnabled": false,
-            "guidedSwapEnabled": false,
-            "multiSlotFallbackEnabled": false,
-            "shiftPlanEnabled": false,
-            "printedPartsInventoryEnabled": false,
-            "offlineWriteReplayEnabled": false
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true,
+                "filamentCoverageEnabled": false,
+                "guidedSwapEnabled": false,
+                "multiSlotFallbackEnabled": false,
+                "shiftPlanEnabled": false,
+                "printedPartsInventoryEnabled": false,
+                "offlineWriteReplayEnabled": false
+            }
         }
         """.data(using: .utf8)!
 
@@ -79,6 +85,56 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertFalse(resolved.shiftPlanEnabled)
         XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertFalse(resolved.offlineWriteReplayEnabled)
+    }
+
+    func testDecodesRealServerCapabilitiesEnvelopeIgnoringUnrelatedFields() throws {
+        // A representative `GET /api/system/capabilities` payload carries many
+        // platform fields alongside the nested `operatorFeatures` object. Only
+        // the nested flags drive `resolved`; the sibling platform fields are
+        // ignored without failing the decode.
+        let json = """
+        {
+            "apiContractVersion": "1.0",
+            "serverVersion": "9.9.9",
+            "architecture": "Arm64",
+            "slicingEnabled": true,
+            "operatorFeatures": {
+                "attentionEnabled": true,
+                "offlineWriteReplayEnabled": false
+            }
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
+        let resolved = decoded.resolved
+
+        XCTAssertTrue(resolved.attentionEnabled)
+        XCTAssertFalse(resolved.offlineWriteReplayEnabled,
+                       "The server kill switch nested under operatorFeatures must be honored")
+        XCTAssertTrue(resolved.filamentCoverageEnabled,
+                      "Flags omitted from the envelope keep their documented defaults")
+    }
+
+    func testTopLevelFlagsAreIgnoredWhenEnvelopeIsAbsent() throws {
+        // Regression guard for the nested-envelope contract: a payload that puts
+        // the flags at the TOP level (the shape an earlier iOS revision wrongly
+        // decoded) carries no `operatorFeatures` object, so every flag must
+        // resolve to its documented default — the misplaced values are ignored
+        // rather than silently honored.
+        let json = """
+        {
+            "attentionEnabled": false,
+            "offlineWriteReplayEnabled": false,
+            "nativePushEnabled": true
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(SystemCapabilities.self, from: json)
+
+        XCTAssertNil(decoded.operatorFeatures,
+                     "Top-level flags must NOT populate the operatorFeatures envelope")
+        XCTAssertEqual(decoded.resolved, ResolvedSystemCapabilities.defaults,
+                       "Flags placed outside operatorFeatures must be ignored, not honored")
     }
 
     func testMissingFlagsResolveToDocumentedDefaults() throws {
@@ -100,8 +156,10 @@ final class SystemCapabilitiesTests: XCTestCase {
         // default of `true`.
         let json = """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """.data(using: .utf8)!
 
@@ -159,8 +217,10 @@ final class SystemCapabilitiesTests: XCTestCase {
     func testRefreshUpdatesResolvedOnSuccessfulResponse() async {
         mockAPIClient.stubResponse(json: """
         {
-            "attentionEnabled": false,
-            "nativePushEnabled": true
+            "operatorFeatures": {
+                "attentionEnabled": false,
+                "nativePushEnabled": true
+            }
         }
         """)
 
@@ -206,7 +266,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         // subsequent transport error must NOT flip it back to the
         // enabled default (fail-open means "don't touch existing state").
         mockAPIClient.stubResponse(json: """
-        { "attentionEnabled": false }
+        { "operatorFeatures": { "attentionEnabled": false } }
         """)
 
         let service = SystemCapabilitiesService(apiClient: apiClient)

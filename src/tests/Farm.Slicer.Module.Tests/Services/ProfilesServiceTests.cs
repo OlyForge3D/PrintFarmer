@@ -338,7 +338,65 @@ public class ProfilesServiceTests
         Assert.EndsWith("/Valid%20Alias", requestedPaths[0], StringComparison.Ordinal);
     }
 
-    private static Mock<Farm.Slicer.Module.Services.ISlicersService> CreateOnlineSlicerService()
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_CurrentWorkerWithoutCalibrationCapability_ReturnsProfiles()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService =
+            CreateOnlineSlicerService(version: "2.4.2", includeCalibrationCapability: false);
+        Uri? requestedUri = null;
+        using HttpClient httpClient = new(new StubHttpMessageHandler(request =>
+        {
+            requestedUri = request.RequestUri;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "[{\"name\":\"Current Model 0.4 nozzle\",\"manufacturer\":\"Test\"}]")
+            };
+        }));
+
+        ProfilesService svc = CreateService(
+            mockRepo.Object,
+            NullLogger<ProfilesService>.Instance,
+            slicersService.Object);
+
+        IReadOnlyList<MachineProfileDto> result = await svc.GetMachineProfilesForCatalogModelAsync(
+            httpClient,
+            ["Current Model"],
+            CancellationToken.None);
+
+        MachineProfileDto profile = Assert.Single(result);
+        Assert.Equal("Current Model 0.4 nozzle", profile.Name);
+        Assert.Equal("worker", requestedUri?.Host);
+    }
+
+    [Fact]
+    public async Task GetMachineProfilesForCatalogModelAsync_RequestedVersionUnavailable_ThrowsWithoutCallingWorker()
+    {
+        Mock<IProfilesRepository> mockRepo = new(MockBehavior.Loose);
+        Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService =
+            CreateOnlineSlicerService(version: "2.4.2");
+        using HttpClient httpClient = new(new StubHttpMessageHandler(_ =>
+            throw new InvalidOperationException("A mismatched worker must not receive the request.")));
+
+        ProfilesService svc = CreateService(
+            mockRepo.Object,
+            NullLogger<ProfilesService>.Instance,
+            slicersService.Object);
+
+        HttpRequestException exception = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            svc.GetMachineProfilesForCatalogModelAsync(
+                httpClient,
+                ["Current Model"],
+                CancellationToken.None,
+                engineVersion: "9.9.9"));
+
+        Assert.Contains("not found", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Mock<Farm.Slicer.Module.Services.ISlicersService> CreateOnlineSlicerService(
+        string version = CalibrationContractConstants.SlicerVersion,
+        bool includeCalibrationCapability = true)
     {
         Mock<Farm.Slicer.Module.Services.ISlicersService> slicersService = new(MockBehavior.Strict);
         _ = slicersService
@@ -351,9 +409,11 @@ public class ProfilesServiceTests
                     SlicerType = 1,
                     Host = "http://worker",
                     Status = "Online",
-                    Version = CalibrationContractConstants.SlicerVersion,
-                    CapabilitiesJson =
-                        $"[\"{CalibrationContractConstants.UpstreamSlicerCapability}\"]"
+                    Version = version,
+                    LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = includeCalibrationCapability
+                        ? $"[\"{CalibrationContractConstants.UpstreamSlicerCapability}\"]"
+                        : "[]"
                 }
             });
 

@@ -5,7 +5,7 @@
 set -e
 
 REGISTRY_HOST=${REGISTRY_HOST:-localhost:5000}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
 # Short git SHA of the source commit, injected into the worker build so

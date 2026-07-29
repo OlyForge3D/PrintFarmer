@@ -126,6 +126,47 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         XCTAssertNotEqual(session?.userID, userA)
     }
 
+    // MARK: Kill switch honored on sync — capabilities refresh precedes the replay gate (#2)
+
+    func testSyncOfflineWriteQueueRefreshesCapabilitiesBeforeApplyingReplayGate() async throws {
+        let reg = registry()
+        let a = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        let userA = UUID()
+        let owners = ownerStore()
+        owners.setOwner(userID: userA, serverID: a.id)
+        try reg.setActive(id: a.id)
+
+        // The active server reports the offline-replay kill switch OFF, nested under
+        // the operatorFeatures envelope exactly as the real API serializes it. The
+        // stub is installed BEFORE the container is built so even the launch-time
+        // sync task observes it.
+        let mock = MockAPIClient(baseURL: URL(string: "https://a.example.com")!)
+        mock.stubResponse(json: "{\"operatorFeatures\":{\"offlineWriteReplayEnabled\":false}}")
+
+        let authority = FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!)
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: authority, farmSnapshotStore: store, farmSnapshotOwnerStore: owners,
+            apiClientFactory: { baseURL, generation, _, _, _ in
+                APIClient(baseURL: baseURL, session: mock.urlSession, serverGeneration: generation)
+            }
+        )
+
+        await container.syncOfflineWriteQueue()
+
+        XCTAssertFalse(
+            container.capabilitiesService.resolved.offlineWriteReplayEnabled,
+            "sync must refresh capabilities so the server kill switch is known"
+        )
+        let replayEnabled = await container.offlineWriteQueue.isReplayEnabled
+        XCTAssertFalse(
+            replayEnabled,
+            "the kill switch must gate the outbox before any replay — refresh precedes setReplayEnabled"
+        )
+    }
+
     // MARK: Blocker — no cross-bind across a settled registry switch (observeRegistry:true)
 
     func testActivationNeverCrossBindsAcrossSettledSwitch() async throws {

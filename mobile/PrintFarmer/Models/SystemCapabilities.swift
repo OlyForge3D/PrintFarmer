@@ -12,15 +12,19 @@ import Foundation
 /// parallel gate system — consult ``SystemCapabilitiesService`` (which
 /// caches this response) or read the resolved snapshot through
 /// ``AppRouter``.
+///
+/// The server nests the operator flags under an ``operatorFeatures`` envelope
+/// (the shared `PlatformCapabilitiesDto.OperatorFeatures` object exposed by
+/// `GET /api/system/capabilities`). Decoding the flags at the top level — as an
+/// earlier revision did — silently loses every flag and always resolves to the
+/// documented defaults, which defeats server-side kill switches such as
+/// `offlineWriteReplayEnabled`. They must be read from the nested object, exactly
+/// as the React client reads `operatorFeatures`.
 struct SystemCapabilities: Codable, Sendable, Equatable {
-    var attentionEnabled: Bool?
-    var nativePushEnabled: Bool?
-    var filamentCoverageEnabled: Bool?
-    var guidedSwapEnabled: Bool?
-    var multiSlotFallbackEnabled: Bool?
-    var shiftPlanEnabled: Bool?
-    var printedPartsInventoryEnabled: Bool?
-    var offlineWriteReplayEnabled: Bool?
+    /// The operator feature gate flags, nested under `operatorFeatures` in the
+    /// capabilities payload. `nil` when the server predates #725 or the object is
+    /// omitted, in which case ``resolved`` falls back to the documented defaults.
+    var operatorFeatures: OperatorFeatureFlags?
 
     /// Resolved, non-optional snapshot with the defaults documented in #725.
     ///
@@ -34,17 +38,34 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
     /// * `printedPartsInventoryEnabled` — `true`
     /// * `offlineWriteReplayEnabled` — `true`
     var resolved: ResolvedSystemCapabilities {
-        ResolvedSystemCapabilities(
-            attentionEnabled: attentionEnabled ?? true,
-            nativePushEnabled: nativePushEnabled ?? false,
-            filamentCoverageEnabled: filamentCoverageEnabled ?? true,
-            guidedSwapEnabled: guidedSwapEnabled ?? true,
-            multiSlotFallbackEnabled: multiSlotFallbackEnabled ?? true,
-            shiftPlanEnabled: shiftPlanEnabled ?? true,
-            printedPartsInventoryEnabled: printedPartsInventoryEnabled ?? true,
-            offlineWriteReplayEnabled: offlineWriteReplayEnabled ?? true
+        let flags = operatorFeatures
+        return ResolvedSystemCapabilities(
+            attentionEnabled: flags?.attentionEnabled ?? true,
+            nativePushEnabled: flags?.nativePushEnabled ?? false,
+            filamentCoverageEnabled: flags?.filamentCoverageEnabled ?? true,
+            guidedSwapEnabled: flags?.guidedSwapEnabled ?? true,
+            multiSlotFallbackEnabled: flags?.multiSlotFallbackEnabled ?? true,
+            shiftPlanEnabled: flags?.shiftPlanEnabled ?? true,
+            printedPartsInventoryEnabled: flags?.printedPartsInventoryEnabled ?? true,
+            offlineWriteReplayEnabled: flags?.offlineWriteReplayEnabled ?? true
         )
     }
+}
+
+/// Operator feature gate flags carried under the `operatorFeatures` envelope of
+/// `GET /api/system/capabilities`. Mirrors the shared `OperatorFeatureFlagsDto`
+/// (#725). Every flag is optional so older/newer servers that omit a subset still
+/// decode; missing values fall back to the documented defaults via
+/// ``SystemCapabilities/resolved``.
+struct OperatorFeatureFlags: Codable, Sendable, Equatable {
+    var attentionEnabled: Bool?
+    var nativePushEnabled: Bool?
+    var filamentCoverageEnabled: Bool?
+    var guidedSwapEnabled: Bool?
+    var multiSlotFallbackEnabled: Bool?
+    var shiftPlanEnabled: Bool?
+    var printedPartsInventoryEnabled: Bool?
+    var offlineWriteReplayEnabled: Bool?
 }
 
 /// Non-optional snapshot of the resolved operator feature gates.

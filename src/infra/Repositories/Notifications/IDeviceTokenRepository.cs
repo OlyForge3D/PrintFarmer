@@ -16,6 +16,14 @@ public interface IDeviceTokenRepository
     /// registration version is rotated atomically, the row is re-activated, and its
     /// consecutive-failure counter is reset.
     /// </summary>
+    /// <remarks>
+    /// Also performs an atomic ownership transfer (#705): the installation id is
+    /// scoped to <c>(userId, installationId)</c>, not globally unique, so a prior
+    /// account's row for this same installation can still be active (e.g. its
+    /// logout unregister call failed or never arrived). Any such row — for a
+    /// different <c>userId</c> — is deactivated as part of the same save, so an
+    /// installation can never remain active for two accounts at once.
+    /// </remarks>
     Task<DeviceToken> UpsertAsync(
         Guid userId,
         string installationId,

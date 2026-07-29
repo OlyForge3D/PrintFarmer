@@ -515,4 +515,95 @@ final class OfflineWriteQueueTests: XCTestCase {
         XCTAssertEqual(entries.count, 1, "a session-lost outcome does not drop the intent")
         XCTAssertEqual(entries.first?.item.status.isPending, true)
     }
+
+    // MARK: Cross-server switch window — item pinned to A never executes against B
+
+    func testReplayNeverExecutesAnItemAgainstADifferentServersPublishedServices() async {
+        let store = InMemoryOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+
+        let parts = MockPartsInventoryService()
+        parts.adjustmentToReturn = PartAdjustmentResponse(
+            id: UUID(), partInventoryId: UUID(), sku: "SKU-A", binId: nil, binCode: nil,
+            delta: -1, resultingBalance: 4, reason: .qcReject,
+            printJobId: nil, operationKey: nil, notes: nil, userId: nil, createdAt: OfflineQueueFixtures.epoch
+        )
+        // Reproduces the switch window: the container has already published
+        // server B's service instances, but the outbox is still bound to (and
+        // draining) server A. The dynamic transport resolves the CURRENT services.
+        let publishedServer = ServerIDBox(serverB)
+        let transport = DynamicOfflineReplayTransport {
+            OfflineReplayServices(serverID: publishedServer.value, parts: parts)
+        }
+        let queue = makeQueue(store: store, transport: transport, clock: clock)
+        await queue.bind(serverID: serverA, userID: userA)
+        _ = await queue.enqueue(OfflineQueueFixtures.adjust(sku: "SKU-A", key: "k1"))
+
+        // Drain while the published services still belong to server B.
+        await queue.replayPending()
+        XCTAssertEqual(parts.adjustPartCalls.count, 0,
+                       "A queued item pinned to server A must NEVER execute against server B's services")
+        let retained = await queue.items(forServer: serverA, user: userA)
+        XCTAssertEqual(retained.count, 1, "the item is retained for server A's own drain")
+        XCTAssertEqual(retained.first?.status.isPending, true)
+
+        // The container settles back onto server A; the same item now replays once.
+        publishedServer.value = serverA
+        await queue.replayPending()
+        XCTAssertEqual(parts.adjustPartCalls.count, 1,
+                       "once the published services match the bound identity, the item replays exactly once")
+        let afterMatch = await queue.items(forServer: serverA, user: userA)
+        XCTAssertTrue(afterMatch.isEmpty, "a successful replay removes the item")
+    }
+
+    // MARK: Durable persistence failure surfaces instead of a false "queued"
+
+    func testEnqueueReportsPersistenceFailureAndDoesNotRetainWhenDurableWriteFails() async {
+        let store = FailingOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+        let transport = ScriptedReplayTransport(fallback: .success)
+        let queue = makeQueue(store: store, transport: transport, clock: clock)
+        await queue.bind(serverID: serverA, userID: userA)
+
+        let result = await queue.enqueue(OfflineQueueFixtures.adjust(sku: "SKU-A", key: "k1"))
+
+        guard case .persistenceFailed = result else {
+            return XCTFail("A failed durable write must report .persistenceFailed, got \(result)")
+        }
+        XCTAssertEqual(store.saveAttempts, 1, "enqueue attempts exactly one durable write")
+        let entries = await queue.activeEntries()
+        XCTAssertTrue(entries.isEmpty, "an un-persisted intent must NOT be retained in the in-memory mirror")
+
+        // Nothing was ever durably queued, so a subsequent replay sends nothing.
+        await queue.replayPending()
+        let attempts = await transport.attemptCount
+        XCTAssertEqual(attempts, 0, "no replay attempt for an intent that was never persisted")
+    }
+}
+
+/// A thread-safe, mutable box for the currently-published server identity so a
+/// test can flip which server the dynamic transport resolves between drains.
+private final class ServerIDBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedValue: UUID?
+    init(_ value: UUID?) { storedValue = value }
+    var value: UUID? {
+        get { lock.lock(); defer { lock.unlock() }; return storedValue }
+        set { lock.lock(); storedValue = newValue; lock.unlock() }
+    }
+}
+
+/// A store whose durable write always fails, proving enqueue surfaces the
+/// persistence failure instead of a false "safely queued" acknowledgement.
+private final class FailingOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var loaded: [OfflineWriteItem]
+    private var attempts = 0
+    init(seed: [OfflineWriteItem] = []) { loaded = seed }
+    var saveAttempts: Int { lock.withLock { attempts } }
+    func loadAll() async -> [OfflineWriteItem] { lock.withLock { loaded } }
+    func saveAll(_ items: [OfflineWriteItem]) async -> Bool {
+        lock.withLock { attempts += 1 }
+        return false
+    }
 }

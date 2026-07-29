@@ -23,6 +23,8 @@ describe('clearSensitiveUserQueries', () => {
     queryClient.setQueryData(['printables', 'liked-models'], [{ id: 'model-1' }]);
     queryClient.setQueryData(['printables', 'download-history'], [{ id: 'dl-1' }]);
     queryClient.setQueryData(['slice-jobs'], [{ id: 'job-1' }]);
+    queryClient.setQueryData(['tasks', 'shift'], { mode: 'shift', plan: { groups: [] } });
+    queryClient.setQueryData(['tasks', 'count'], 2);
 
     await clearSensitiveUserQueries(queryClient);
 
@@ -36,6 +38,43 @@ describe('clearSensitiveUserQueries', () => {
     expect(queryClient.getQueryData(['printables', 'liked-models'])).toBeUndefined();
     expect(queryClient.getQueryData(['printables', 'download-history'])).toBeUndefined();
     expect(queryClient.getQueryData(['slice-jobs'])).toBeUndefined();
+    expect(queryClient.getQueryData(['tasks', 'shift'])).toBeUndefined();
+    expect(queryClient.getQueryData(['tasks', 'count'])).toBeUndefined();
+  });
+
+  // Issue #705: TasksWidget/TasksBadge cache admin-only (maintenance) task
+  // content under an identity-independent key (['tasks', 'shift'] /
+  // ['tasks', 'count']) — the server, not the query key, decides whether
+  // maintenance-sourced tasks are included (TasksController.IsAdmin). A
+  // cached admin snapshot must not survive into a subsequently signed-in
+  // non-admin session on the same tab/QueryClient.
+  it('purges a cached admin shift-plan snapshot so it cannot leak to the next identity', async () => {
+    const adminShiftPlan = {
+      mode: 'shift',
+      plan: {
+        generatedAt: '2026-07-29T00:00:00Z',
+        groups: [
+          {
+            anchorKind: 'Now',
+            tasks: [
+              {
+                id: 'maint-1',
+                title: 'Replace nozzle on Printer 3',
+                taskType: 'MaintenanceInIdleWindow',
+                sourceKind: 'Maintenance',
+              },
+            ],
+          },
+        ],
+      },
+    };
+    queryClient.setQueryData(['tasks', 'shift'], adminShiftPlan);
+    queryClient.setQueryData(['tasks', 'count'], 1);
+
+    await clearSensitiveUserQueries(queryClient);
+
+    expect(queryClient.getQueryData(['tasks', 'shift'])).toBeUndefined();
+    expect(queryClient.getQueryData(['tasks', 'count'])).toBeUndefined();
   });
 
   it('does not clear unrelated public/shared caches', async () => {

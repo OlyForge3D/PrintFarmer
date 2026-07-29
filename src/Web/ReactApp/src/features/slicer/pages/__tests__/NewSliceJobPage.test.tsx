@@ -151,7 +151,7 @@ const mockModelList = [
 ];
 
 const mockSlicers = [
-  { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
+  { id: '1', name: 'orcaslicer-worker-1', slicerType: 'OrcaSlicer', version: '2.4.2' },
   { id: '2', name: 'prusaslicer-worker-1', slicerType: 'PrusaSlicer', version: '2.7.0' }
 ];
 
@@ -391,8 +391,8 @@ describe('NewSliceJobPage', () => {
     it('should deduplicate slicer entries', async () => {
       // Mock multiple workers of the same type
       vi.mocked(slicerRegistry.getSlicers).mockResolvedValueOnce([
-        { id: '1', name: 'worker-1', slicerType: 'OrcaSlicer', version: '2.3.1' },
-        { id: '2', name: 'worker-2', slicerType: 'OrcaSlicer', version: '2.3.1' }, // duplicate
+        { id: '1', name: 'worker-1', slicerType: 'OrcaSlicer', version: '2.4.2' },
+        { id: '2', name: 'worker-2', slicerType: 'OrcaSlicer', version: '2.4.2' }, // duplicate
         { id: '3', name: 'worker-3', slicerType: 'PrusaSlicer', version: '2.7.0' },
       ]);
       

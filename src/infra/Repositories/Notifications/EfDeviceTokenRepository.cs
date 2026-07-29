@@ -38,14 +38,17 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         // Retry loop for concurrent-registration TOCTOU: a race between two
         // (userId, installationId) upserts can produce two "existing is null"
         // observations, and the second SaveChangesAsync trips the unique index.
+        // The same loop also retries the ownership-transfer deactivation below
+        // when two different accounts race to claim the same installation.
         for (int attempt = 0; attempt < UpsertMaxAttempts; attempt++)
         {
             DeviceToken? existing = await _dbContext.DeviceTokens
                 .FirstOrDefaultAsync(t => t.UserId == userId && t.InstallationId == installationId, cancellationToken);
 
+            DeviceToken current;
             if (existing is null)
             {
-                var created = new DeviceToken
+                current = new DeviceToken
                 {
                     UserId = userId,
                     RegistrationVersion = InitialRegistrationVersion,
@@ -59,43 +62,71 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
                     ConsecutiveFailureCount = 0,
                     IsActive = true,
                 };
-                _dbContext.DeviceTokens.Add(created);
-                try
-                {
-                    await _dbContext.SaveChangesAsync(cancellationToken);
-                    return created;
-                }
-                catch (DbUpdateException ex) when (attempt < UpsertMaxAttempts - 1 && IsUniqueDeviceTokenConflict(ex))
-                {
-                    // Concurrent registration won the race — detach the tracked
-                    // ghost entity and retry as an update.
-                    _dbContext.Entry(created).State = EntityState.Detached;
-                    continue;
-                }
+                _dbContext.DeviceTokens.Add(current);
+            }
+            else
+            {
+                current = existing;
+                current.Token = token;
+                current.Platform = platform;
+                current.Environment = environment;
+                current.AppBundleId = appBundleId;
+                current.RegistrationVersion = checked(current.RegistrationVersion + 1);
+                current.IsActive = true;
+                current.ConsecutiveFailureCount = 0;
+                current.LastUsedAt = nowUtc;
+                current.LastFailureAt = null;
             }
 
-            existing.Token = token;
-            existing.Platform = platform;
-            existing.Environment = environment;
-            existing.AppBundleId = appBundleId;
-            existing.RegistrationVersion = checked(existing.RegistrationVersion + 1);
-            existing.IsActive = true;
-            existing.ConsecutiveFailureCount = 0;
-            existing.LastUsedAt = nowUtc;
-            existing.LastFailureAt = null;
+            // Ownership transfer (issue #705): the mobile installation id is
+            // persisted in UserDefaults and survives logout, so a failed or
+            // never-sent unregister call can leave a previous account's row
+            // active for this exact installation. Any other account's active
+            // row for the same installation is therefore stale — the physical
+            // device/APNs token it references is now controlled by userId —
+            // so it is deactivated atomically with this upsert. Without this,
+            // both accounts would stay "active" for the same installation and
+            // push content addressed to the previous account could still be
+            // delivered to (and displayed on) this device.
+            List<DeviceToken> priorOwnerRows = await _dbContext.DeviceTokens
+                .Where(t => t.InstallationId == installationId && t.UserId != userId && t.IsActive)
+                .ToListAsync(cancellationToken);
+            foreach (DeviceToken priorOwnerRow in priorOwnerRows)
+            {
+                priorOwnerRow.IsActive = false;
+
+                // Rotate the surrendered row's version too so an in-flight
+                // provider outcome for the previous account's incarnation
+                // cannot resurrect it (see RegistrationVersion remarks).
+                priorOwnerRow.RegistrationVersion = checked(priorOwnerRow.RegistrationVersion + 1);
+            }
+
             try
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
-                return existing;
+                return current;
             }
-            catch (DbUpdateConcurrencyException) when (attempt < UpsertMaxAttempts - 1)
+            catch (DbUpdateException ex) when (attempt < UpsertMaxAttempts - 1
+                && (ex is DbUpdateConcurrencyException || IsUniqueDeviceTokenConflict(ex)))
             {
-                _dbContext.Entry(existing).State = EntityState.Detached;
+                // Concurrent registration (unique-index conflict) or a
+                // concurrent ownership transfer (concurrency-token conflict on
+                // a prior owner's row) won the race — detach everything this
+                // attempt touched and retry from a fresh read.
+                DetachTrackedDeviceTokens();
             }
         }
 
         throw new InvalidOperationException(
             $"DeviceToken upsert failed after retries for userId={userId} installationId={installationId}.");
+    }
+
+    private void DetachTrackedDeviceTokens()
+    {
+        foreach (var entry in _dbContext.ChangeTracker.Entries<DeviceToken>().ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     internal static bool IsUniqueDeviceTokenConflict(DbUpdateException exception)

@@ -979,6 +979,21 @@ actor APIClient {
         try await executeVoid(request, session: requestSession)
     }
 
+    func postVoid<B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String]
+    ) async throws {
+        let requestSession = captureRequestSession()
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        try await executeVoid(request, session: requestSession)
+    }
+
     func putVoid(_ path: String) async throws {
         let requestSession = captureRequestSession()
         let request = try buildRequest(session: requestSession, path: path, method: "PUT")

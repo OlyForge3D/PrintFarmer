@@ -124,6 +124,7 @@ final class ServiceContainer: @unchecked Sendable {
         let store = FileOfflineWriteQueueStore(directory: Self.offlineWriteQueueDirectory())
         let transport = DynamicOfflineReplayTransport { [weak self] in
             OfflineReplayServices(
+                serverID: self?.activeServerID,
                 parts: self?.partsInventoryService,
                 tasks: self?.shiftTaskService,
                 printers: self?.printerService
@@ -156,7 +157,17 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         await queue.bind(serverID: active.id, userID: ownerID)
-        await queue.setReplayEnabled(capabilitiesService.resolved.offlineWriteReplayEnabled)
+        // #715 kill switch: fetch the operator gate for the active server BEFORE
+        // enabling replay. Without this, the initial launch pass (line 351) and
+        // every switch rebind would apply the default (`true`) capability
+        // snapshot that precedes the first `refresh()`, replaying queued writes
+        // even when the server has `offlineWriteReplayEnabled=false`. Capture the
+        // service once so the refresh and the gate read target the same instance
+        // across the await. `refresh()` fails open on a transient error, matching
+        // the documented #725 contract.
+        let capabilities = capabilitiesService
+        await capabilities.refresh()
+        await queue.setReplayEnabled(capabilities.resolved.offlineWriteReplayEnabled)
         await queue.replayPending()
     }
 

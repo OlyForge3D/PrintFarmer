@@ -4192,6 +4192,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("InstallationId")
+                        .HasDatabaseName("IX_DeviceTokens_InstallationId");
+
                     b.HasIndex("Token")
                         .HasDatabaseName("IX_DeviceTokens_Token");
 

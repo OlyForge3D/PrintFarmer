@@ -23,8 +23,13 @@ protocol OfflineWriteQueueStoring: Sendable {
     /// Loads every persisted item across all namespaces, dropping any record
     /// that cannot be decoded. Never throws — a broken file yields `[]`.
     func loadAll() async -> [OfflineWriteItem]
-    /// Atomically persists the full item set (temp-write + rename).
-    func saveAll(_ items: [OfflineWriteItem]) async
+    /// Atomically persists the full item set (temp-write + rename). Returns
+    /// `true` only when the durable write actually succeeded; `false` on an
+    /// encode, temp-write, atomic-replacement, or filesystem failure — so a
+    /// caller that must guarantee durability (enqueue) can refuse to report the
+    /// intent as safely queued.
+    @discardableResult
+    func saveAll(_ items: [OfflineWriteItem]) async -> Bool
 }
 
 // MARK: - Envelope
@@ -80,7 +85,8 @@ final class FileOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked Sen
         lock.withLock { loadLocked() }
     }
 
-    func saveAll(_ items: [OfflineWriteItem]) async {
+    @discardableResult
+    func saveAll(_ items: [OfflineWriteItem]) async -> Bool {
         lock.withLock { saveLocked(items) }
     }
 
@@ -106,7 +112,11 @@ final class FileOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked Sen
         return envelope.items.compactMap { $0.value }
     }
 
-    private func saveLocked(_ items: [OfflineWriteItem]) {
+    /// Returns `true` only when the item set is durably on disk. Any encode,
+    /// temp-write, atomic-replacement, or move failure returns `false` (after
+    /// best-effort temp cleanup) so the coordinator never reports an unsaved
+    /// intent as enqueued.
+    private func saveLocked(_ items: [OfflineWriteItem]) -> Bool {
         ensureDirectoryLocked()
         let envelope = OfflineWriteQueueEnvelope(
             version: OfflineWriteQueueEnvelope.currentVersion,
@@ -114,21 +124,23 @@ final class FileOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked Sen
         )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        guard let data = try? encoder.encode(envelope) else { return }
+        guard let data = try? encoder.encode(envelope) else { return false }
         let tempURL = directory.appendingPathComponent(".\(UUID().uuidString).tmp")
         do {
             try data.write(to: tempURL, options: .atomic)
             // Replace atomically so a crash mid-write never yields a torn file.
             if fileManager.fileExists(atPath: fileURL.path) {
-                _ = try? fileManager.replaceItemAt(fileURL, withItemAt: tempURL)
+                _ = try fileManager.replaceItemAt(fileURL, withItemAt: tempURL)
                 if fileManager.fileExists(atPath: tempURL.path) {
                     try? fileManager.removeItem(at: tempURL)
                 }
             } else {
                 try fileManager.moveItem(at: tempURL, to: fileURL)
             }
+            return true
         } catch {
             try? fileManager.removeItem(at: tempURL)
+            return false
         }
     }
 
@@ -165,11 +177,13 @@ final class InMemoryOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked
         lock.withLock { items }
     }
 
-    func saveAll(_ items: [OfflineWriteItem]) async {
+    @discardableResult
+    func saveAll(_ items: [OfflineWriteItem]) async -> Bool {
         lock.withLock {
             self.items = items
             saveCount += 1
         }
+        return true
     }
 
     /// Test helper: current durable contents without going through `async`.

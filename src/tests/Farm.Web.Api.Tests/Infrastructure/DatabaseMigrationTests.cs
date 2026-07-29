@@ -39,7 +39,6 @@ public sealed class DatabaseMigrationTests
             "20260725184947_AddOwnerScopedPromotionOperationKey",
             "20260725203646_AddCalibrationPersistenceSync",
             "20260725204532_AddCalibrationGenerationOrchestration",
-            "20260726090013_ReconcileEpic705AppSchema",
             "20260726131553_AddCalibrationQueueDispatch",
             "20260726190525_AddOutboxDbSequenceAndRowVersion",
             "20260726215806_AddQueueAuditAndBackendIdentity",
@@ -48,9 +47,76 @@ public sealed class DatabaseMigrationTests
             "20260727170353_CompleteCalibrationDispatchFencing",
             "20260727215428_RequireScheduleOperatorReauthorization",
             "20260728023427_AddScheduledOccurrenceIdentity",
-            "20260728063711_AddCalibrationAttemptToQueueEvents");
+            "20260728063711_AddCalibrationAttemptToQueueEvents",
+            "20260729155050_ReconcileEpic705AppSchema",
+            "20260729161700_AddDeviceTokenInstallationIndex");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
+        (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_ReconciliationAfterDevelopmentBaseline_PreservesExistingColumnsAndData()
+    {
+        const string developmentBaselineMigration =
+            "20260728063711_AddCalibrationAttemptToQueueEvents";
+        const string reconciliationMigration =
+            "20260729155050_ReconcileEpic705AppSchema";
+        const int blockedReasonCode = 705;
+        const string blockedReasonJson = """{"reason":"sequential-upgrade"}""";
+
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(developmentBaselineMigration);
+        string[] baselineColumns = await GetPrintJobColumnNamesAsync(connection);
+        Guid printJobId = Guid.NewGuid();
+        DateTime now = DateTime.UtcNow;
+
+        await using (SqliteCommand insertCommand = connection.CreateCommand())
+        {
+            insertCommand.CommandText =
+                """
+                INSERT INTO "PrintJobs"
+                    ("Id", "Name", "Status", "QueuePosition", "CreatedAt", "UpdatedAt",
+                     "QueuedAt", "IsExternalPrint", "BlockedReasonCode", "BlockedReasonJson")
+                VALUES
+                    ($id, $name, $status, $queuePosition, $createdAt, $updatedAt,
+                     $queuedAt, $isExternalPrint, $blockedReasonCode, $blockedReasonJson);
+                """;
+            _ = insertCommand.Parameters.AddWithValue("$id", printJobId);
+            _ = insertCommand.Parameters.AddWithValue("$name", "Migration preservation sentinel");
+            _ = insertCommand.Parameters.AddWithValue("$status", 0);
+            _ = insertCommand.Parameters.AddWithValue("$queuePosition", 0);
+            _ = insertCommand.Parameters.AddWithValue("$createdAt", now);
+            _ = insertCommand.Parameters.AddWithValue("$updatedAt", now);
+            _ = insertCommand.Parameters.AddWithValue("$queuedAt", now);
+            _ = insertCommand.Parameters.AddWithValue("$isExternalPrint", false);
+            _ = insertCommand.Parameters.AddWithValue("$blockedReasonCode", blockedReasonCode);
+            _ = insertCommand.Parameters.AddWithValue("$blockedReasonJson", blockedReasonJson);
+            _ = await insertCommand.ExecuteNonQueryAsync();
+        }
+
+        DatabaseMigrationResult result = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        result.AppliedMigrations.Should().Contain(reconciliationMigration);
+        string[] migratedColumns = await GetPrintJobColumnNamesAsync(connection);
+        migratedColumns.Should().Contain(baselineColumns);
+        await using SqliteCommand selectCommand = connection.CreateCommand();
+        selectCommand.CommandText =
+            """
+            SELECT "BlockedReasonCode", "BlockedReasonJson"
+            FROM "PrintJobs"
+            WHERE "Id" = $id;
+            """;
+        _ = selectCommand.Parameters.AddWithValue("$id", printJobId);
+        await using SqliteDataReader reader = await selectCommand.ExecuteReaderAsync();
+        _ = (await reader.ReadAsync()).Should().BeTrue();
+        reader.GetInt32(0).Should().Be(blockedReasonCode);
+        reader.GetString(1).Should().Be(blockedReasonJson);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -986,6 +1052,20 @@ public sealed class DatabaseMigrationTests
                 sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"))
             .Options;
         return new SlicerDbContext(options);
+    }
+
+    private static async Task<string[]> GetPrintJobColumnNamesAsync(SqliteConnection connection)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """PRAGMA table_info("PrintJobs");""";
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        List<string> columns = [];
+        while (await reader.ReadAsync())
+        {
+            columns.Add(reader.GetString(1));
+        }
+
+        return [.. columns];
     }
 
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string tableName)

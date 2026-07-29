@@ -436,6 +436,12 @@ enum OfflineWriteEnqueueResult: Sendable, Equatable {
     case queueFull
     /// The intent carried no idempotency key and cannot be safely replayed.
     case missingIdempotencyKey
+    /// The intent could not be durably persisted (encode / atomic-write /
+    /// filesystem failure). It was NOT retained on disk, so callers must surface
+    /// the original failure instead of reporting the write as safely queued —
+    /// otherwise the durability contract ("persist before any attempt") is
+    /// silently violated and an acknowledged mutation is lost on relaunch.
+    case persistenceFailed
 }
 
 // MARK: Clock

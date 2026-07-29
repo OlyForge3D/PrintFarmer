@@ -15,7 +15,7 @@ using Xunit;
 namespace Farm.Slicer.Module.Tests.Slicing;
 
 /// <summary>
-/// Unit tests for the dual-engine (issue #578) version routing behaviour of
+/// Unit tests for version routing behaviour of
 /// <see cref="SliceJobController.SubmitAsync"/>. Focus is on the *server-derived*
 /// capability contract and the version-pin validation gate.
 /// </summary>
@@ -84,7 +84,7 @@ public class SliceJobControllerVersionRoutingTests
     [Fact(DisplayName = "SubmitAsync rejects unknown version with 400 listing registered versions")]
     public async Task Submit_UnknownVersion_Returns400_WithRegisteredVersions()
     {
-        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.0"), ("OrcaSlicer", "2.3.1"));
+        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.2"));
         Mock<ISliceJobRepository> repo = new Mock<ISliceJobRepository>();
         SliceJobController controller = BuildController(repo.Object, registry.Object);
 
@@ -101,14 +101,14 @@ public class SliceJobControllerVersionRoutingTests
 
         BadRequestObjectResult? bad = result as BadRequestObjectResult;
         _ = bad.Should().NotBeNull();
-        _ = bad!.Value!.ToString()!.Should().Contain("2.4.0").And.Contain("2.3.1").And.Contain("9.9.9");
+        _ = bad!.Value!.ToString()!.Should().Contain("2.4.2").And.Contain("9.9.9");
         repo.Verify(r => r.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact(DisplayName = "SubmitAsync pin persists version and derives ONLY versioned capability tag")]
     public async Task Submit_Pinned_PersistsVersion_AndServerDerivesCapability()
     {
-        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.0"), ("OrcaSlicer", "2.3.1"));
+        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.2"));
         SliceJob? captured = null;
         Mock<ISliceJobRepository> repo = new Mock<ISliceJobRepository>();
         _ = repo.Setup(r => r.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))
@@ -123,25 +123,25 @@ public class SliceJobControllerVersionRoutingTests
             ModelFileUrl = "http://example/m.stl",
             ModelFileName = "m.stl",
             SlicerEngine = 0,
-            SlicerEngineVersion = "2.3.1",
+            SlicerEngineVersion = "2.4.2",
             // Client tries to inject its own capabilities — must be ignored/overwritten.
-            RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer", "orcaslicer:2.4.0" }),
+            RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { "orcaslicer", "orcaslicer:9.9.9" }),
         };
 
         IActionResult result = await controller.SubmitAsync(req, CancellationToken.None);
 
         _ = result.Should().BeOfType<CreatedResult>();
         _ = captured.Should().NotBeNull();
-        _ = captured!.SlicerEngineVersion.Should().Be("2.3.1");
+        _ = captured!.SlicerEngineVersion.Should().Be("2.4.2");
 
         string[]? caps = JsonSerializer.Deserialize<string[]>(captured.RequiredCapabilitiesJson!);
-        _ = caps.Should().BeEquivalentTo(new[] { "orcaslicer:2.3.1" });
+        _ = caps.Should().BeEquivalentTo(new[] { "orcaslicer:2.4.2" });
     }
 
     [Fact(DisplayName = "SubmitAsync unpinned carries generic engine capability only")]
     public async Task Submit_Unpinned_CarriesGenericCapabilityOnly()
     {
-        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.0"));
+        Mock<ISlicerRegistry> registry = RegistryWith(("OrcaSlicer", "2.4.2"));
         SliceJob? captured = null;
         Mock<ISliceJobRepository> repo = new Mock<ISliceJobRepository>();
         _ = repo.Setup(r => r.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()))

@@ -39,7 +39,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var maintenanceCalledWith: (id: UUID, inMaintenance: Bool)?
     var queueOverviewCalled = false
     var setActiveSpoolCalledWith: (printerId: UUID, spoolId: Int?)?
-    var bindToolheadSpoolCalls: [(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String)] = []
+    var bindToolheadSpoolCalls: [(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String, reviewedRowVersion: String)] = []
     var listAvailableSpoolsCalledWith: UUID?
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
@@ -171,8 +171,8 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         return commandResultToReturn
     }
 
-    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
-        bindToolheadSpoolCalls.append((printerId, toolheadIndex, request, idempotencyKey))
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String, reviewedRowVersion: String) async throws -> CommandResult {
+        bindToolheadSpoolCalls.append((printerId, toolheadIndex, request, idempotencyKey, reviewedRowVersion))
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }

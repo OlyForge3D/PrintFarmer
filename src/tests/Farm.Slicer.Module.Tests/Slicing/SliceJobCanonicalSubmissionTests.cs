@@ -188,7 +188,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = claimed.MachineProfileSha256.Should().Be(Sha256(MachineProfileJson));
         _ = claimed.ProcessProfileSha256.Should().Be(Sha256(ProcessProfileJson));
         _ = claimed.FilamentProfileSha256.Should().Be(Sha256(FilamentProfileJson));
-        _ = claimed.SlicerVersion.Should().Be("2.3.1");
+        _ = claimed.SlicerVersion.Should().Be("2.4.2");
     }
 
     [Fact(DisplayName = "Completion rejects profile digests that differ from what was delivered")]
@@ -367,7 +367,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             Name = "Test Machine",
             SlicerType = SlicerType.OrcaSlicer,
             SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.1",
+            SlicerVersion = "2.4.2",
             ProfileFormat = "orca-json",
             RawJson = MachineProfileJson,
             Hash = Sha256(MachineProfileJson),
@@ -382,7 +382,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             Name = "Test Process",
             SlicerType = SlicerType.OrcaSlicer,
             SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.1",
+            SlicerVersion = "2.4.2",
             ProfileFormat = "orca-json",
             RawJson = ProcessProfileJson,
             Hash = Sha256(ProcessProfileJson),
@@ -397,7 +397,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
             Name = "Test Filament",
             SlicerType = SlicerType.OrcaSlicer,
             SlicerDistribution = "upstream",
-            SlicerVersion = "2.3.1",
+            SlicerVersion = "2.4.2",
             ProfileFormat = "orca-json",
             RawJson = FilamentProfileJson,
             Hash = Sha256(FilamentProfileJson),

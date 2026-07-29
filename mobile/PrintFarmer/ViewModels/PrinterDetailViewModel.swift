@@ -1337,10 +1337,21 @@ final class PrinterDetailViewModel {
 
     func dispatch(_ job: QueuedPrintJobResponse, to targetPrinterId: UUID) async {
         guard isViewActive, let jobService, let jobUUID = job.job.jobUUID else { return }
+        // `dispatch-to` is If-Match protected (scored job dispatch). Require the
+        // reviewed job revision so the request carries a valid precondition
+        // instead of provoking a deterministic 428.
+        guard let reviewedRowVersion = job.job.rowVersion, !reviewedRowVersion.isEmpty else {
+            dispatchError = "Refresh this printer before dispatching so the job revision is current."
+            return
+        }
         isDispatching = true
         dispatchError = nil
         do {
-            try await jobService.dispatchTo(jobId: jobUUID, printerId: targetPrinterId)
+            try await jobService.dispatchTo(
+                jobId: jobUUID,
+                printerId: targetPrinterId,
+                reviewedRowVersion: reviewedRowVersion
+            )
             guard isViewActive else { return }
             dispatchTargetJob = nil
             dispatchCandidates = []

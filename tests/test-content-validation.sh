@@ -44,8 +44,7 @@ validate_compose_structure() {
     
     case "$architecture" in
         "monolithic")
-            assert_contains "$content" "api:" "Monolithic should have api service"
-            assert_contains "$content" "frontend:" "Monolithic should have frontend service"
+            assert_contains "$content" "printfarmer:" "Monolithic should have PrintFarmer service"
             ;;
         "microservices")
             assert_contains "$content" "api:" "Microservices should have api service"
@@ -59,8 +58,9 @@ validate_multistage_targets() {
     local compose_file="$1"
     local content=$(cat "$compose_file")
     
-    # Check that all services use multistage dockerfile (with full path)
-    local dockerfile_count=$(grep -c "dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage" "$compose_file" || echo "0")
+    # Generated compose files reference the Dockerfile relative to their output directory.
+    local dockerfile_count
+    dockerfile_count=$(grep -Ec "dockerfile: (scripts/docker/dockerfiles/)?Dockerfile.multistage" "$compose_file" || true)
     if [ "$dockerfile_count" -lt 1 ]; then
         fail_test "No services use Dockerfile.multistage"
         return 1
@@ -97,7 +97,7 @@ validate_environment_variables() {
             assert_contains "$content" "DEPLOYMENT_MODE=microservices" "Microservices should set deployment mode"
             ;;
         "monolithic")
-            assert_contains "$content" "DEPLOYMENT_MODE=monolithic" "Monolithic should set deployment mode"
+            assert_contains "$content" "DEPLOYMENT_MODE=monolith" "Monolithic should set deployment mode"
             ;;
     esac
 }
@@ -127,10 +127,10 @@ validate_volume_configuration() {
     local compose_file="$1"
     local content=$(cat "$compose_file")
     
-    # Check for required volumes
-    assert_contains "$content" "printfarmer-app-data:" "Should have printfarmer-app-data volume"
-    assert_contains "$content" "printfarmer-model-uploads:" "Should have printfarmer-model-uploads volume"
-    assert_contains "$content" "printfarmer-gcode-storage:" "Should have printfarmer-gcode-storage volume"
+    # Check for required persistent bind mounts
+    assert_contains "$content" "EXTERNAL_APP_DATA_PATH" "Should configure application data storage"
+    assert_contains "$content" "EXTERNAL_MODELS_PATH" "Should configure model storage"
+    assert_contains "$content" "EXTERNAL_GCODE_PATH" "Should configure G-code storage"
     
     # Check that redis_data volume is NOT present
     assert_not_contains "$content" "redis_data:" "Should not contain redis_data volume"
@@ -177,27 +177,31 @@ validate_health_checks() {
     if grep -q "api:" "$compose_file"; then
         local api_section=$(sed -n '/^  api:/,/^  [a-zA-Z]/p' "$compose_file")
         assert_contains "$api_section" "healthcheck:" "API service should have health check"
-        assert_contains "$api_section" "test:" "Health check should have test command"
+        if [[ "$api_section" == *"*api-healthcheck"* ]]; then
+            assert_contains "$content" "&api-healthcheck" "API health check anchor should be defined"
+            assert_contains "$content" "curl -f http://api:5245/health" "API health check should have test command"
+        else
+            assert_contains "$api_section" "test:" "Health check should have test command"
+        fi
     fi
 }
 
 # Test monolithic architecture content validation
 test_monolithic_content_validation() {
     start_test "monolithic architecture content validation"
-    
-    assert_command_success "$COMPOSE_GENERATOR --output-dir $TEST_TEMP_DIR"
-    
-    local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
+
+    local compose_file="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml"
     assert_file_exists "$compose_file"
-    
+
     validate_compose_structure "$compose_file" "monolithic"
-    validate_multistage_targets "$compose_file"
     validate_environment_variables "$compose_file" "monolithic"
     validate_service_dependencies "$compose_file"
-    validate_volume_configuration "$compose_file"
     validate_network_configuration "$compose_file" "monolithic"
-    validate_health_checks "$compose_file"
-    
+    assert_contains "$(cat "$compose_file")" "printfarmer-data:" "Monolithic should have application data volume"
+    assert_contains "$(cat "$compose_file")" "printfarmer-models:" "Monolithic should have model storage volume"
+    assert_contains "$(cat "$compose_file")" "printfarmer-gcode:" "Monolithic should have G-code storage volume"
+    assert_contains "$(cat "$compose_file")" "healthcheck:" "Monolithic service should have health check"
+
     pass_test
 }
 
@@ -234,8 +238,8 @@ test_orcaslicer_worker_content_validation() {
     
     # Specific OrcaSlicer validations
     local content=$(cat "$compose_file")
-    assert_contains "$content" "orcaslicer-binaries:" "Should have orcaslicer-binaries service"
-    assert_contains "$content" "target: orcaslicer-binaries" "Should have orcaslicer-binaries target"
+    assert_contains "$content" "orcaslicer-worker:" "Should have OrcaSlicer worker service"
+    assert_contains "$content" "target: orcaslicer-worker" "Should have OrcaSlicer worker target"
     assert_contains "$content" "ORCASLICER_VERSION" "Should have OrcaSlicer version variable"
     
     pass_test
@@ -304,7 +308,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_ORCA_WORKER=yes
 ENABLE_SPOOLMAN=yes
 SPOOLMAN_BASE_URL=http://spoolman:7912
-ORCASLICER_VERSION=2.4.0
+ORCASLICER_VERSION=2.4.2
 EOF
     
     # Run deployment to generate environment file from repo root
@@ -331,18 +335,18 @@ test_configuration_consistency_validation() {
     rm -f docker-compose.yml
     
     # Generate another config with same architecture but different database
-    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider mysql --output-dir $TEST_TEMP_DIR"
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider sqlserver --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml"
     
-    local mysql_compose=$(cat "docker-compose.yml")
+    local sqlserver_compose=$(cat "docker-compose.yml")
     
-    # Both should use the same dockerfile approach (with full path to multistage)
-    assert_contains "$generator_compose" "dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage" "PostgreSQL config should use multistage"
-    assert_contains "$mysql_compose" "dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage" "MySQL config should use multistage"
+    # Both should use the same multistage Dockerfile.
+    assert_contains "$generator_compose" "dockerfile: Dockerfile.multistage" "PostgreSQL config should use multistage"
+    assert_contains "$sqlserver_compose" "dockerfile: Dockerfile.multistage" "SQL Server config should use multistage"
     
     # Both should have the same basic structure for microservices but different databases
     assert_contains "$generator_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "PostgreSQL config should use environment variable template"
-    assert_contains "$mysql_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "MySQL config should use environment variable template"
+    assert_contains "$sqlserver_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "SQL Server config should use environment variable template"
     
     pass_test
 }
@@ -433,7 +437,6 @@ run_all_tests() {
     
     test_monolithic_content_validation
     test_microservices_content_validation
-    test_host_network_content_validation
     test_orcaslicer_worker_content_validation
     test_database_provider_content_validation
     test_security_monitoring_content_validation

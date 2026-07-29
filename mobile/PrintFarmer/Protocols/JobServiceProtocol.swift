@@ -34,7 +34,8 @@ protocol JobServiceProtocol: Sendable {
     // ranks every printer for a job (`GET /api/job-queue/{id}/candidates`);
     // `dispatchTo` assigns and dispatches the job to a chosen printer
     // (`POST /api/job-queue/{id}/dispatch-to`). No scoring is recomputed
-    // on-device — the backend is the sole authority.
+    // on-device — the backend is the sole authority. `dispatch-to` is If-Match
+    // protected, so `reviewedRowVersion` (the job's ETag) is mandatory.
     func getCandidates(jobId: UUID) async throws -> [DispatchCandidate]
-    func dispatchTo(jobId: UUID, printerId: UUID) async throws
+    func dispatchTo(jobId: UUID, printerId: UUID, reviewedRowVersion: String) async throws
 }

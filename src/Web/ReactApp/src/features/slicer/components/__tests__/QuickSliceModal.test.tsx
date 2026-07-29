@@ -59,7 +59,7 @@ vi.mock('@/services/sliceJobService', () => ({
 vi.mock('@/services/slicerService', () => ({
   slicerService: {
     listEngines: vi.fn(() => Promise.resolve([
-      { engine: 'OrcaSlicer', versions: ['2.4.1'], versionEntries: [{ version: '2.4.1', available: true }], latest: '2.4.1' },
+      { engine: 'OrcaSlicer', versions: ['2.4.2'], versionEntries: [{ version: '2.4.2', available: true }], latest: '2.4.2' },
     ])),
   },
 }));

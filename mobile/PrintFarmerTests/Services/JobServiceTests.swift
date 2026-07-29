@@ -74,6 +74,26 @@ final class JobServiceTests: XCTestCase {
         )
     }
 
+    func testDispatchToSendsIfMatchPreconditionAndPostsToScoredRoute() async throws {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 200)
+        let printerId = UUID()
+
+        try await service.dispatchTo(
+            jobId: jobId,
+            printerId: printerId,
+            reviewedRowVersion: "job-v9"
+        )
+
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/job-queue/\(jobId)/dispatch-to")
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "If-Match"),
+            "\"job-v9\"",
+            "scored dispatch must send the mandatory If-Match precondition to avoid a 428"
+        )
+    }
+
     func testGetHydratesLatestAttemptFromAuthoritativeRecoveryBody() async throws {
         let attemptB = UUID()
         mockAPIClient.stubResponse(

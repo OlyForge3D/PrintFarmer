@@ -5,6 +5,7 @@
 /// <c>(UserId, InstallationId)</c>. See <c>docs/OPERATOR_NATIVE_PUSH.md</c> and issue #708.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Rows are only removed by:
 /// <list type="bullet">
 ///   <item>Explicit unregister (<c>DELETE /api/notifications/device-tokens</c>),</item>
@@ -13,6 +14,18 @@
 /// </list>
 /// Toggling the <c>OperatorFeatures.NativePushEnabled</c> flag off never mutates this table
 /// — tokens are retained so re-enable resumes delivery without re-registration.
+/// </para>
+/// <para>
+/// The unique index is scoped to <c>(UserId, InstallationId)</c>, not
+/// <c>InstallationId</c> alone, so a single physical installation can — for a
+/// brief window — have rows for two different accounts (e.g. a failed or
+/// never-sent unregister call on logout followed by a different account
+/// registering the same installation). The upsert closes that window itself:
+/// every successful registration deactivates (does not delete) any other
+/// account's active row for the same <see cref="InstallationId"/> as part of
+/// the same atomic save, so at most one account's row is ever
+/// <see cref="IsActive"/> for a given installation. See issue #705.
+/// </para>
 /// </remarks>
 public sealed class DeviceToken
 {
@@ -72,6 +85,10 @@ public sealed class DeviceToken
     /// </summary>
     public int ConsecutiveFailureCount { get; set; }
 
-    /// <summary>Whether this token participates in the delivery fan-out.</summary>
+    /// <summary>
+    /// Whether this token participates in the delivery fan-out. Soft-deactivated by
+    /// consecutive failures reaching the threshold, or when another account's
+    /// upsert claims ownership of this same <see cref="InstallationId"/> (#705).
+    /// </summary>
     public bool IsActive { get; set; } = true;
 }

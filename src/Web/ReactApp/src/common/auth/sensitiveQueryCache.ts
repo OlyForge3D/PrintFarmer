@@ -30,6 +30,15 @@ import { bumpAuthEpoch } from './authEpoch';
  * - slice-jobs: the signed-in user's own slice job list
  *   (`sliceJobService.getMyJobs`, see SliceJobsPanel.tsx /
  *   useSliceJobsRealtime.ts).
+ * - tasks: the compiled shift-plan/task list is role-scoped, not just
+ *   identity-scoped — `GET /api/tasks` and `?view=shift` (TasksWidget.tsx,
+ *   TasksBadge.tsx) return maintenance-sourced tasks only for `farm_admin`
+ *   callers (see TasksController.GetPendingTasksAsync /
+ *   UserTaskService.GetShiftPlanAsync). Because the query key itself
+ *   (`['tasks', 'shift']`, `['tasks', 'count']`) doesn't vary by caller, a
+ *   cached response fetched while signed in as an admin would otherwise be
+ *   served to a non-admin who signs in afterward on the same tab, until the
+ *   next natural refetch — see #705.
  */
 const SENSITIVE_QUERY_KEY_PREFIXES: QueryKey[] = [
   ['notifications'],
@@ -38,6 +47,7 @@ const SENSITIVE_QUERY_KEY_PREFIXES: QueryKey[] = [
   ['apiKeys'],
   ['printables'],
   ['slice-jobs'],
+  ['tasks'],
 ];
 
 function matchesSensitivePrefix(queryKey: QueryKey): boolean {

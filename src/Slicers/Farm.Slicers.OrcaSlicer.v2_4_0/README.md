@@ -1,6 +1,6 @@
 # Farm.Slicers.OrcaSlicer.v2_4_0
 
-OrcaSlicer v2.4.0 slicer library for PrintFarmer.
+OrcaSlicer 2.4 provider generation for PrintFarmer. The runtime engine version is 2.4.2.
 
 ## Structure
 
@@ -58,9 +58,9 @@ Official profiles and assets are embedded in the NuGet package as resources:
 The `OrcaSlicerUI` object in `ui/index.ts` exports all OrcaSlicer-specific UI:
 
 ```typescript
-import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_3_x/ui';
+import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_4_0/ui';
 
-slicerUIRegistry.registerUI('OrcaSlicer', '2.4.0', OrcaSlicerUI);
+slicerUIRegistry.registerUI('OrcaSlicer', '2.4.2', OrcaSlicerUI);
 ```
 
 ### UI Components (To Be Migrated)
@@ -97,15 +97,15 @@ services
 ### Frontend (App.tsx)
 
 ```typescript
-import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_3_x/ui';
+import { OrcaSlicerUI } from '@farm/slicers-orcaslicer-v2_4_0/ui';
 
 const slicerUIRegistry = new SlicerUIRegistry();
-slicerUIRegistry.registerUI('OrcaSlicer', '2.4.0', OrcaSlicerUI);
+slicerUIRegistry.registerUI('OrcaSlicer', '2.4.2', OrcaSlicerUI);
 ```
 
 ## Property Changes
 
-When OrcaSlicer updates to a new version (e.g., 2.4.0), changes to profile schemas are handled entirely within this library:
+When OrcaSlicer advances to a new provider generation, profile-schema changes are handled within this library:
 
 1. Update profile types in `ui/types/`
 2. Update UI components in `ui/components/`

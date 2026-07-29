@@ -249,6 +249,39 @@ Indexes:
 - Non-unique `(Token)` for provider-token diagnostics. Provider outcomes never
   use token text as identity; every mutation is conditional on the dispatched
   `(DeviceToken.Id, RegistrationVersion)` incarnation.
+- Non-unique `(InstallationId)` (#705) — supports the ownership-transfer scan
+  described below. The composite index above cannot serve a lookup that
+  ignores `UserId` (its second, non-leading column).
+
+### 5.1 Cross-account installation reuse (#705)
+
+The unique index is scoped to `(UserId, InstallationId)`, not `InstallationId`
+alone, so a physical installation can — for a window of time — have rows for
+two different accounts: the mobile app persists `InstallationId` in
+`UserDefaults` and reuses it across logout/login (see
+`NativePushInstallation.identifier()`), so if the outgoing account's
+`DELETE /api/notifications/device-tokens` call on logout fails or never
+arrives (offline, killed app, dropped request), that row stays active. If a
+different account then registers on the same installation,
+`EfDeviceTokenRepository.UpsertAsync` inserts a new row for the new account
+rather than seeing the old one (its lookup is scoped to the new account's own
+`userId`).
+
+Left unresolved, this would mean both accounts hold an active row for the
+same installation — since the actual APNs token for a reused installation is
+typically unchanged across a logout/login, push content addressed to the
+previous account could still be delivered to (and displayed on) the device
+now signed in as someone else.
+
+`UpsertAsync` closes this atomically: every successful upsert also scans for
+any *other* account's active row for the same `InstallationId` and
+deactivates it (`IsActive = false`, `RegistrationVersion` rotated) as part of
+the same `SaveChangesAsync` call. This uses the existing unique-index retry
+loop for concurrency — two different accounts racing to claim the same
+abandoned installation converge to exactly one active owner, with the loser
+transparently retried. No schema change was required to enforce this at the
+application layer; the extra `(InstallationId)` index above is purely a
+lookup-performance aid for the scan itself.
 
 Extension to `NotificationPreferences` (same entity, one new column):
 

@@ -547,7 +547,7 @@ public class OrcaSlicerLibraryTests
         var library = new OrcaSlicerLibrary_v2_4_0();
 
         library.SlicerName.Should().Be("OrcaSlicer");
-        library.SlicerVersion.Should().Be("2.4.1");
+        library.SlicerVersion.Should().Be("2.4.2");
         library.SlicerType.Should().Be("OrcaSlicer");
 
         library.ProfilesProvider.Should().NotBeNull();
@@ -566,10 +566,10 @@ public class OrcaSlicerUiProviderTests
         var ui = new OrcaSlicerUIProvider_v2_4_0();
 
         ui.SlicerName.Should().Be("OrcaSlicer");
-        ui.SlicerVersion.Should().Be("2.4.1");
+        ui.SlicerVersion.Should().Be("2.4.2");
         ui.HasBundleSupport.Should().BeTrue();
         ui.HasAssetCustomization.Should().BeTrue();
         ui.HasEngineSpecificSettings.Should().BeTrue();
-        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.0");
+        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.2");
     }
 }

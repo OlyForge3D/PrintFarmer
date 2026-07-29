@@ -88,14 +88,15 @@ private func taskSnapshot(taskID: String, status: ShiftTaskStatus) -> ShiftTaskS
     )
 }
 
-private func printerDetails(id: UUID, toolheadIndex: Int, currentSpoolId: Int?) -> PrinterDetails {
+private func printerDetails(id: UUID, toolheadIndex: Int, currentSpoolId: Int?, rowVersion: String? = "cHJpbnRlci12MQ==") -> PrinterDetails {
     PrinterDetails(
         id: id,
         name: "P",
         backend: .unknown,
         toolheads: [
             Toolhead(id: UUID(), name: "T\(toolheadIndex)", index: toolheadIndex, isPrimary: true, currentSpoolId: currentSpoolId)
-        ]
+        ],
+        rowVersion: rowVersion
     )
 }
 
@@ -181,8 +182,33 @@ final class OfflineWriteAdapterTests: XCTestCase {
         XCTAssertEqual(onlinePrinters.bindToolheadSpoolCalls.first?.idempotencyKey, "k-bind")
         XCTAssertEqual(onlinePrinters.bindToolheadSpoolCalls.first?.toolheadIndex, 1)
         XCTAssertEqual(onlinePrinters.bindToolheadSpoolCalls.first?.request.spoolId, 9)
+        XCTAssertEqual(onlinePrinters.bindToolheadSpoolCalls.first?.reviewedRowVersion, "cHJpbnRlci12MQ==",
+                       "toolhead bind must forward the printer revision as the mandatory If-Match precondition")
         let remaining = await second.activeEntries()
         XCTAssertTrue(remaining.isEmpty)
+    }
+
+    func testToolheadBindWithoutPrinterRevisionDefersWithoutBinding() async {
+        // The bind endpoint is If-Match protected: if the canonical details read
+        // carries no printer revision, the replay must defer (transient) instead
+        // of firing a request that would deterministically 428. The item is
+        // retained for a later attempt, never falsely marked applied.
+        let store = InMemoryOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+        let printerID = UUID()
+
+        let printers = MockPrinterService()
+        printers.detailsToReturn = printerDetails(id: printerID, toolheadIndex: 1, currentSpoolId: 3, rowVersion: nil)
+        let queue = makeQueue(store: store, transport: BundleReplayTransport(services: services(printers: printers)), clock: clock)
+        await queue.bind(serverID: serverA, userID: userA)
+        _ = await queue.enqueue(OfflineQueueFixtures.toolheadBind(
+            printerID: printerID, toolheadIndex: 1, key: "k-bind", spoolId: 9, expectedPriorSpoolId: 3
+        ))
+        await queue.replayPending()
+
+        XCTAssertEqual(printers.bindToolheadSpoolCalls.count, 0, "no precondition ETag → never bind")
+        let remaining = await queue.activeEntries()
+        XCTAssertEqual(remaining.count, 1, "the item is retained for a later attempt")
     }
 
     // MARK: Transport ambiguity reuses the exact key/body (no duplicate key)
