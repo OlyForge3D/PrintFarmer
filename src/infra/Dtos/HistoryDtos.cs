@@ -20,6 +20,13 @@ public class HistoryListResponse
     public HistoryListAuthorityEvidence? AuthorityEvidence { get; set; }
 
     /// <summary>
+    /// Recoverable identity from malformed provider rows that were examined but could not
+    /// safely become <see cref="HistoryJob"/> instances.
+    /// </summary>
+    [JsonIgnore]
+    public HistoryExcludedEntryEvidence[] ExcludedEntries { get; set; } = [];
+
+    /// <summary>
     /// Number of raw provider entries represented by this response before malformed rows
     /// were excluded. Adapters use this to prove pagination without treating bad rows as
     /// unseen rows.
@@ -40,13 +47,17 @@ public class HistoryListResponse
 /// Whether the adapter proved the exact requested page or temporal window, even when the
 /// provider has additional rows outside that request.
 /// </param>
+/// <param name="ExcludedEntryCount">
+/// Number of examined source rows excluded as malformed while preserving range authority.
+/// </param>
 public sealed record HistoryListAuthorityEvidence(
     string Provider,
     int SourceEntryCount,
     int ExaminedEntryCount,
     bool StartsAtBeginning,
     bool HasUnambiguousEnd,
-    bool CoversRequestedRange = false)
+    bool CoversRequestedRange = false,
+    int ExcludedEntryCount = 0)
 {
     /// <summary>Whether the evidence proves that the complete source range was examined.</summary>
     [JsonIgnore]
@@ -54,6 +65,8 @@ public sealed record HistoryListAuthorityEvidence(
         !string.IsNullOrWhiteSpace(Provider) &&
         SourceEntryCount >= 0 &&
         SourceEntryCount == ExaminedEntryCount &&
+        ExcludedEntryCount >= 0 &&
+        ExcludedEntryCount <= ExaminedEntryCount &&
         StartsAtBeginning &&
         HasUnambiguousEnd;
 
@@ -63,8 +76,24 @@ public sealed record HistoryListAuthorityEvidence(
         !string.IsNullOrWhiteSpace(Provider) &&
         SourceEntryCount >= 0 &&
         ExaminedEntryCount >= 0 &&
+        ExcludedEntryCount >= 0 &&
+        ExcludedEntryCount <= ExaminedEntryCount &&
         (CoversRequestedRange || ProvesCompleteSource);
 }
+
+/// <summary>
+/// Partial identity retained from a malformed history row so reconciliation cannot interpret
+/// an excluded candidate as authoritative absence.
+/// </summary>
+/// <param name="BackendJobId">Provider history identifier, when recoverable.</param>
+/// <param name="Filename">Provider file identity, when recoverable.</param>
+/// <param name="StartTime">Provider start timestamp, when recoverable and numeric.</param>
+/// <param name="Reason">Stable reason the source row was excluded.</param>
+public sealed record HistoryExcludedEntryEvidence(
+    string? BackendJobId,
+    string? Filename,
+    double? StartTime,
+    string Reason);
 
 /// <summary>
 /// Historical job entry mirroring Moonraker history schema.

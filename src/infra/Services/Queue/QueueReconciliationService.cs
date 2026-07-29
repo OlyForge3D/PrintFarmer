@@ -281,8 +281,7 @@ public sealed class QueueReconciliationService(
                     command =>
                         command.EventType == BackendControlCommandConsumerService.EventType &&
                         command.AttemptId == attempt.Id &&
-                        (command.Status == QueueOutboxEventStatus.Pending ||
-                         command.Status == QueueOutboxEventStatus.Processing ||
+                        (command.Status == QueueOutboxEventStatus.Processing ||
                          (command.Status == QueueOutboxEventStatus.DeadLettered &&
                           command.FailureCode == "manual_control_reconciliation_required")),
                     ct);
@@ -486,6 +485,10 @@ public sealed class QueueReconciliationService(
                     QueueOutboxEventStatus.Published,
                     failureCode: null,
                     lastError: null,
+                    ct);
+                await FinalizePendingBackendControlCommandsAsync(
+                    db,
+                    attempt,
                     ct);
 
                 if (attempt.PrintJobId is not null && sequenceAllocator is not null)
@@ -764,6 +767,34 @@ public sealed class QueueReconciliationService(
         }
     }
 
+    private static async Task FinalizePendingBackendControlCommandsAsync(
+        AppDbContext db,
+        QueueDispatchAttempt attempt,
+        CancellationToken ct)
+    {
+        if (attempt.PrintJobId is null)
+        {
+            return;
+        }
+
+        List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
+            .Where(command =>
+                command.EventType == BackendControlCommandConsumerService.EventType &&
+                command.Status == QueueOutboxEventStatus.Pending &&
+                command.AttemptId == attempt.Id &&
+                command.AggregateId == attempt.PrintJobId.Value)
+            .ToListAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        foreach (QueueDispatchOutbox command in commands)
+        {
+            command.Status = QueueOutboxEventStatus.Published;
+            command.FailureCode = null;
+            command.LastError = null;
+            command.CompletedAtUtc = now;
+            command.RetryAfterUtc = null;
+        }
+    }
+
     private async Task<BackendReconciliationOutcome> QueryBackendOutcomeAsync(
         IPrintersService printersSvc,
         QueueDispatchAttempt attempt,
@@ -924,6 +955,21 @@ public sealed class QueueReconciliationService(
                 return historyOutcome;
             }
 
+            HistoryExcludedEntryEvidence? excludedMatch =
+                historyProbe.History.ExcludedEntries.FirstOrDefault(
+                    candidate => MatchesExcludedHistoryIdentity(attempt, candidate));
+            if (excludedMatch is not null)
+            {
+                logger.LogWarning(
+                    "[Reconciliation] Malformed history evidence may represent attempt {AttemptId} " +
+                    "(backendJobId='{BackendJobId}', file='{FileName}', reason='{Reason}'); retaining every fence",
+                    attempt.Id,
+                    excludedMatch.BackendJobId ?? "(none)",
+                    excludedMatch.Filename ?? "(none)",
+                    excludedMatch.Reason);
+                return BackendReconciliationOutcome.BackendIndeterminate;
+            }
+
             if (!hasBackendJobId)
             {
                 logger.LogWarning(
@@ -1023,6 +1069,42 @@ public sealed class QueueReconciliationService(
                 StringComparison.OrdinalIgnoreCase));
     }
 
+    private static bool MatchesExcludedHistoryIdentity(
+        QueueDispatchAttempt attempt,
+        HistoryExcludedEntryEvidence evidence)
+    {
+        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId) &&
+            !string.IsNullOrWhiteSpace(evidence.BackendJobId))
+        {
+            return string.Equals(
+                evidence.BackendJobId,
+                attempt.BackendJobId,
+                StringComparison.Ordinal);
+        }
+
+        if (string.IsNullOrWhiteSpace(evidence.Filename))
+        {
+            return false;
+        }
+
+        if (evidence.StartTime is > 0)
+        {
+            double claimedAtSeconds =
+                new DateTimeOffset(NormalizeUtc(attempt.ClaimedAtUtc))
+                    .ToUnixTimeMilliseconds() / 1000d;
+            if (evidence.StartTime.Value + 2 < claimedAtSeconds)
+            {
+                return false;
+            }
+        }
+
+        return EnumerateBackendFileIdentities(attempt).Any(identity =>
+            string.Equals(
+                Path.GetFileName(NormalizeBackendIdentity(evidence.Filename)),
+                Path.GetFileName(NormalizeBackendIdentity(identity)),
+                StringComparison.OrdinalIgnoreCase));
+    }
+
     private static BackendReconciliationOutcome ClassifyHistoryOutcome(
         QueueDispatchAttempt attempt,
         HistoryJob history)
@@ -1030,7 +1112,8 @@ public sealed class QueueReconciliationService(
         double claimedAtSeconds =
             new DateTimeOffset(NormalizeUtc(attempt.ClaimedAtUtc))
                 .ToUnixTimeMilliseconds() / 1000d;
-        if (history.StartTime <= 0 || history.StartTime < claimedAtSeconds)
+        if (history.StartTime <= 0 ||
+            history.StartTime + 2 < claimedAtSeconds)
         {
             return BackendReconciliationOutcome.BackendIndeterminate;
         }
@@ -1043,9 +1126,10 @@ public sealed class QueueReconciliationService(
         {
             "completed" or "complete" or "finished" or "success" or "succeeded" =>
                 BackendReconciliationOutcome.CompletedOnBackend,
-            "cancelled" or "canceled" or "cancel" or "aborted" =>
+            "cancelled" or "canceled" or "cancel" or "aborted" or "stopped" =>
                 BackendReconciliationOutcome.CancelledOnBackend,
-            "failed" or "error" or "klippy_shutdown" or "shutdown" =>
+            "failed" or "error" or "klippy_shutdown" or "shutdown" or
+                "klippy_disconnect" or "server_exit" or "interrupted" =>
                 BackendReconciliationOutcome.FailedOnBackend,
             _ => BackendReconciliationOutcome.BackendIndeterminate,
         };

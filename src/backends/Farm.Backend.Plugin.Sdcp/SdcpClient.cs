@@ -1186,7 +1186,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             timeout: _timeouts.PrintControlTimeout,
             ct: ct);
 
-        if (result.Disposition != SdcpCommandDisposition.Accepted)
+        if (result.Disposition == SdcpCommandDisposition.Rejected)
         {
             // Secondary defense (#317): SDCP Ack codes don't distinguish "printer is printing" from
             // other errors (Ack=1 is a generic error). Query CurrentStatus to determine whether the
@@ -2045,16 +2045,15 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     limit is not > 0;
                 int skipCount = Math.Max(0, start ?? 0);
                 int takeCount = limit is > 0 ? limit.Value : taskIds.Count;
-                IEnumerable<string> candidateIds = requiresFullScan
-                    ? taskIds
-                    : taskIds.Skip(skipCount);
+                long requestedEnd = (long)skipCount + takeCount;
 
                 // Step 2: Request details for each task ID (Cmd 321)
                 List<HistoryJob> jobs = [];
+                List<HistoryExcludedEntryEvidence> excludedEntries = [];
                 int examinedCount = 0;
-                foreach (string taskId in candidateIds)
+                foreach (string taskId in taskIds)
                 {
-                    if (!requiresFullScan && jobs.Count >= takeCount)
+                    if (!requiresFullScan && jobs.Count >= requestedEnd)
                     {
                         break;
                     }
@@ -2076,6 +2075,11 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     }
                     catch (InvalidDataException ex)
                     {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            taskId,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_detail"));
                         LogSdcp(
                             LogLevel.Debug,
                             $"Excluding malformed SDCP history detail for '{taskId}'",
@@ -2108,15 +2112,16 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         ? filtered.OrderByDescending(job => job.StartTime)
                         : filtered;
                 HistoryJob[] filteredJobs = filtered.ToArray();
-                HistoryJob[] requestedJobs = requiresFullScan
-                    ? filteredJobs.Skip(skipCount).Take(takeCount).ToArray()
-                    : filteredJobs.Take(takeCount).ToArray();
+                HistoryJob[] requestedJobs = filteredJobs
+                    .Skip(skipCount)
+                    .Take(takeCount)
+                    .ToArray();
                 LogSdcp(
                     LogLevel.Debug,
                     $"SDCP history: {requestedJobs.Length} jobs from {taskIds.Count} total");
                 bool hasUnambiguousEnd =
                     requiresFullScan ||
-                    skipCount + examinedCount >= taskIds.Count;
+                    examinedCount >= taskIds.Count;
                 bool coversRequestedRange =
                     requiresFullScan ||
                     requestedJobs.Length >= takeCount ||
@@ -2130,9 +2135,11 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                         "sdcp",
                         taskIds.Count,
                         examinedCount,
-                        requiresFullScan || skipCount == 0,
+                        true,
                         hasUnambiguousEnd,
-                        CoversRequestedRange: coversRequestedRange),
+                        CoversRequestedRange: coversRequestedRange,
+                        ExcludedEntryCount: excludedEntries.Count),
+                    ExcludedEntries = excludedEntries.ToArray(),
                 };
             }
         }

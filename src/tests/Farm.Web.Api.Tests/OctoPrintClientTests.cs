@@ -203,29 +203,36 @@ public class OctoPrintClientTests
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_MalformedEntry_IsExcludedWithoutVoidingAuthority()
+    public async Task GetHistoryListAsync_MalformedEntry_DoesNotShiftRequestedValidRange()
     {
         (OctoPrintClient client, _, _) = CreateClient(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"success":true,"count":2,"results":[{"name":"bad.gcode","success":true},{"name":"good.gcode","success":true,"timestamp":1700000000}]}""",
+                    """{"success":true,"count":3,"results":[{"name":"bad.gcode","success":true},{"name":"first.gcode","success":true,"timestamp":1700000000},{"name":"second.gcode","success":true,"timestamp":1700000001}]}""",
                     Encoding.UTF8,
                     "application/json"),
             });
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://octo",
-            limit: 2,
-            start: 0,
+            limit: 1,
+            start: 1,
             credential: new PrinterCredential { ApiKey = "key" });
 
         history.Should().NotBeNull();
         history!.Jobs.Should().ContainSingle()
-            .Which.JobId.Should().Be("good.gcode");
-        history.ExaminedSourceEntries.Should().Be(2);
+            .Which.JobId.Should().Be("second.gcode");
+        history.ExaminedSourceEntries.Should().Be(3);
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
         history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        history.AuthorityEvidence.ExcludedEntryCount.Should().Be(1);
+        history.ExcludedEntries.Should().ContainSingle().Which.Should().Be(
+            new HistoryExcludedEntryEvidence(
+                "bad.gcode",
+                "bad.gcode",
+                StartTime: null,
+                Reason: "malformed_history_entry"));
     }
 
     [Fact]
@@ -329,6 +336,33 @@ public class OctoPrintClientTests
             new PrinterCredential { ApiKey = "key" });
 
         result.Outcome.Should().Be(UploadAndPrintOutcome.Unknown);
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task StartJobAsync_PostSendIOException_SendsExactlyOnce()
+    {
+        int requestCount = 0;
+        using var handler = new AsyncMessageHandler(async (request, ct) =>
+        {
+            requestCount++;
+            _ = await request.Content!.ReadAsByteArrayAsync(ct);
+            throw new HttpRequestException(
+                "Connection reset after start body was sent.",
+                new IOException("response lost"));
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+
+        Func<Task> action = async () => await client.StartJobAsync(
+            "http://octo",
+            new PrinterCredential { ApiKey = "key" },
+            "one-shot.gcode");
+
+        await action.Should().ThrowAsync<HttpRequestException>();
         requestCount.Should().Be(1);
     }
 

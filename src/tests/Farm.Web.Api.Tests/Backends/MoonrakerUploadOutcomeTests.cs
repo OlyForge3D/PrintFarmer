@@ -39,6 +39,59 @@ public sealed class MoonrakerUploadOutcomeTests
             "the transport failed only after the start-capable request body was sent");
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task UploadAndStartPrintAsync_Explicit4xx_IsFailedBeforeStart(
+        HttpStatusCode statusCode)
+    {
+        using var handler = new InlineHandler(
+            _ => new HttpResponseMessage(statusCode));
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        await using var content = new MemoryStream("G28\n"u8.ToArray());
+
+        UploadAndPrintResult result =
+            await ((ISupportsUploadAndPrint)client).UploadAndStartPrintAsync(
+                "http://moonraker/",
+                "rejected.gcode",
+                content,
+                ct: CancellationToken.None);
+
+        result.Outcome.Should().Be(UploadAndPrintOutcome.FailedBeforeStart);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.GatewayTimeout)]
+    public async Task UploadAndStartPrintAsync_5xx_IsUnknown(
+        HttpStatusCode statusCode)
+    {
+        using var handler = new InlineHandler(
+            _ => new HttpResponseMessage(statusCode));
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        await using var content = new MemoryStream("G28\n"u8.ToArray());
+
+        UploadAndPrintResult result =
+            await ((ISupportsUploadAndPrint)client).UploadAndStartPrintAsync(
+                "http://moonraker/",
+                "uncertain.gcode",
+                content,
+                ct: CancellationToken.None);
+
+        result.Outcome.Should().Be(UploadAndPrintOutcome.Unknown);
+    }
+
     [Fact]
     public async Task UploadAndStartPrintAsync_UploadPathIsFileIdentity_NotHistoryJobId()
     {
@@ -190,14 +243,14 @@ public sealed class MoonrakerUploadOutcomeTests
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_MalformedEntry_IsExcludedWithoutVoidingAuthority()
+    public async Task GetHistoryListAsync_MalformedEntry_DoesNotShiftRequestedValidRange()
     {
         using var handler = new InlineHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
                     """
-                    {"result":{"count":2,"jobs":[{"job_id":"bad","filename":"bad.gcode","status":"completed","start_time":"not-a-number"},{"job_id":"good","filename":"good.gcode","status":"completed","start_time":1700000000}]}}
+                    {"result":{"count":3,"jobs":[{"job_id":"bad","filename":"bad.gcode","status":"completed","start_time":"not-a-number"},{"job_id":"first","filename":"first.gcode","status":"completed","start_time":1700000000},{"job_id":"second","filename":"second.gcode","status":"completed","start_time":1700000001}]}}
                     """,
                     Encoding.UTF8,
                     "application/json"),
@@ -210,15 +263,22 @@ public sealed class MoonrakerUploadOutcomeTests
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://moonraker/",
-            limit: 2,
-            start: 0);
+            limit: 1,
+            start: 1);
 
         history.Should().NotBeNull();
         history!.Jobs.Should().ContainSingle()
-            .Which.JobId.Should().Be("good");
-        history.ExaminedSourceEntries.Should().Be(2);
+            .Which.JobId.Should().Be("second");
+        history.ExaminedSourceEntries.Should().Be(3);
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
         history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        history.AuthorityEvidence.ExcludedEntryCount.Should().Be(1);
+        history.ExcludedEntries.Should().ContainSingle().Which.Should().Be(
+            new HistoryExcludedEntryEvidence(
+                "bad",
+                "bad.gcode",
+                StartTime: null,
+                Reason: "malformed_history_entry"));
     }
 
     [Fact]

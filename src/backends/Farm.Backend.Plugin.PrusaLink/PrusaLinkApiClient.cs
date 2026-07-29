@@ -703,17 +703,23 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 before.HasValue ||
                 !string.IsNullOrWhiteSpace(order) ||
                 !requestedLimit.HasValue;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
 
             const int PageSize = 100;
-            int offset = requiresFullScan ? 0 : requestedStart;
+            int offset = 0;
             int sourceCount = 0;
             int examinedCount = 0;
             bool reachedSourceEnd = false;
             var allJobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
             while (true)
             {
                 int pageSize = !requiresFullScan && requestedLimit.HasValue
-                    ? Math.Min(PageSize, Math.Max(1, requestedLimit.Value - allJobs.Count))
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - allJobs.Count))
                     : PageSize;
                 HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
                     client,
@@ -731,13 +737,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
                 sourceCount = Math.Max(sourceCount, page.Count);
                 allJobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
                 offset += examined;
                 reachedSourceEnd = offset >= sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
                     requestedLimit.HasValue &&
-                    allJobs.Count >= requestedLimit.Value;
+                    allJobs.Count >= requestedEnd;
                 if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
@@ -766,7 +773,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     : filtered;
             HistoryJob[] filteredJobs = filtered.ToArray();
             HistoryJob[] requestedJobs = filteredJobs
-                .Skip(requiresFullScan ? requestedStart : 0)
+                .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
             bool coversRequestedRange = requiresFullScan
@@ -782,9 +789,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     "prusalink",
                     Math.Max(sourceCount, examinedCount),
                     examinedCount,
-                    StartsAtBeginning: requiresFullScan || requestedStart == 0,
+                    StartsAtBeginning: true,
                     HasUnambiguousEnd: reachedSourceEnd,
-                    CoversRequestedRange: coversRequestedRange),
+                    CoversRequestedRange: coversRequestedRange,
+                    ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -950,6 +959,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             }
 
             List<HistoryJob> jobs = [];
+            List<HistoryExcludedEntryEvidence> excludedEntries = [];
             if (!root.TryGetProperty("results", out JsonElement resultsProp) ||
                 resultsProp.ValueKind != JsonValueKind.Array)
             {
@@ -964,6 +974,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
+                    excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
                     continue;
                 }
 
@@ -983,6 +994,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 Count = count,
                 Jobs = jobs.ToArray(),
                 ExaminedSourceEntries = examinedEntries,
+                ExcludedEntries = excludedEntries.ToArray(),
             };
         }
         catch (JsonException)
@@ -1086,6 +1098,46 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         {
             return null;
         }
+    }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        string? backendJobId = TryReadHistoryString(entry, "id");
+        string? filename = null;
+        if (entry.TryGetProperty("job", out JsonElement job) &&
+            job.ValueKind == JsonValueKind.Object &&
+            job.TryGetProperty("file", out JsonElement file) &&
+            file.ValueKind == JsonValueKind.Object)
+        {
+            filename = TryReadHistoryString(file, "name");
+        }
+
+        double? startTime =
+            entry.TryGetProperty("startTime", out JsonElement start) &&
+            start.ValueKind == JsonValueKind.Number &&
+            start.TryGetDouble(out double value)
+                ? value
+                : null;
+        return new HistoryExcludedEntryEvidence(
+            backendJobId,
+            filename,
+            startTime,
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadHistoryString(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
     }
 
     /// <summary>

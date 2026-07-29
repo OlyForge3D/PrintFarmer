@@ -2263,16 +2263,22 @@ public class MoonrakerClient(
         {
             int requestedStart = Math.Max(0, start ?? 0);
             int? requestedLimit = limit is > 0 ? limit : null;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
             const int PageSize = 100;
-            int offset = requestedStart;
+            int offset = 0;
             int sourceCount = 0;
             int examinedCount = 0;
             bool reachedSourceEnd = false;
             var jobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
             while (true)
             {
                 int pageSize = requestedLimit.HasValue
-                    ? Math.Min(PageSize, Math.Max(1, requestedLimit.Value - jobs.Count))
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - jobs.Count))
                     : PageSize;
                 HistoryListResponse page = await FetchMoonrakerHistoryPageAsync(
                     baseUrl,
@@ -2293,10 +2299,11 @@ public class MoonrakerClient(
                 examinedCount += examined;
                 offset += examined;
                 jobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
                 reachedSourceEnd = offset >= sourceCount;
                 bool requestedRangeFilled =
                     requestedLimit.HasValue &&
-                    jobs.Count >= requestedLimit.Value;
+                    jobs.Count >= requestedEnd;
                 if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
@@ -2304,6 +2311,7 @@ public class MoonrakerClient(
             }
 
             HistoryJob[] requestedJobs = jobs
+                .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
             bool coversRequestedRange =
@@ -2319,9 +2327,11 @@ public class MoonrakerClient(
                 "moonraker",
                 Math.Max(sourceCount, examinedCount),
                 examinedCount,
-                StartsAtBeginning: requestedStart == 0,
+                StartsAtBeginning: true,
                 HasUnambiguousEnd: reachedSourceEnd,
-                CoversRequestedRange: coversRequestedRange),
+                CoversRequestedRange: coversRequestedRange,
+                ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
             };
             _logger.LogInformation(
                 "[Moonraker] Successfully fetched {ReturnedCount} of {SourceCount} history items",
@@ -2412,9 +2422,12 @@ public class MoonrakerClient(
         JsonElement resultElement = document.RootElement.GetProperty("result");
         JsonElement jobsElement = resultElement.GetProperty("jobs");
         var jobs = new List<HistoryJob>(jobsElement.GetArrayLength());
+        var excludedEntries =
+            new List<HistoryExcludedEntryEvidence>(jobsElement.GetArrayLength());
         int sourceIndex = 0;
         foreach (JsonElement jobElement in jobsElement.EnumerateArray())
         {
+            bool included = false;
             try
             {
                 HistoryJob? job = jobElement.Deserialize<HistoryJob>(WebJsonOptions);
@@ -2425,6 +2438,7 @@ public class MoonrakerClient(
                     job.StartTime > 0)
                 {
                     jobs.Add(job);
+                    included = true;
                 }
             }
             catch (JsonException ex)
@@ -2435,6 +2449,11 @@ public class MoonrakerClient(
                     start + sourceIndex);
             }
 
+            if (!included)
+            {
+                excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
+            }
+
             sourceIndex++;
         }
 
@@ -2443,7 +2462,39 @@ public class MoonrakerClient(
             Count = resultElement.GetProperty("count").GetInt32(),
             Jobs = jobs.ToArray(),
             ExaminedSourceEntries = jobsElement.GetArrayLength(),
+            ExcludedEntries = excludedEntries.ToArray(),
         };
+    }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        string? filename = TryReadHistoryString(entry, "filename");
+        double? startTime =
+            entry.TryGetProperty("start_time", out JsonElement start) &&
+            start.ValueKind == JsonValueKind.Number &&
+            start.TryGetDouble(out double value)
+                ? value
+                : null;
+        return new HistoryExcludedEntryEvidence(
+            TryReadHistoryString(entry, "job_id"),
+            filename,
+            startTime,
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadHistoryString(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
     }
 
     private static DateTime NormalizeUtc(DateTime value) =>
@@ -3142,9 +3193,15 @@ public class MoonrakerClient(
                     response.StatusCode,
                     body);
                 progress?.Report(UploadAndPrintStage.Failed);
-                return UploadAndPrintResult.Fail(
-                    UploadAndPrintStage.Uploading,
-                    $"Moonraker rejected upload and start with HTTP {(int)response.StatusCode}.");
+                string error =
+                    $"Moonraker rejected upload and start with HTTP {(int)response.StatusCode}.";
+                return (int)response.StatusCode is >= 400 and < 500
+                    ? UploadAndPrintResult.FailedBeforeStart(
+                        UploadAndPrintStage.Uploading,
+                        error)
+                    : UploadAndPrintResult.Unknown(
+                        UploadAndPrintStage.Uploading,
+                        error);
             }
 
             string? providerFileIdentity = await ReadMoonrakerUploadIdentityAsync(response, fileName, ct);

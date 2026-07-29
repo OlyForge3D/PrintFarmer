@@ -367,6 +367,102 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_SdcpLostAcknowledgement_RetainsStartFences()
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-sdcp-response-loss-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            DispatchClaimResult claim;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(
+                    seed,
+                    withAck: true,
+                    backend: PrinterBackend.SDCP);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    file => file.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+                claim = await CreateClaim(
+                        seed,
+                        DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    .AcquireClaimAsync(new DispatchClaimRequest(
+                        fixture.JobId,
+                        fixture.PrinterId,
+                        "operator-1",
+                        "BedClear",
+                        fixture.AckKey,
+                        null,
+                        null));
+                claim.Success.Should().BeTrue(claim.ErrorDetail);
+            }
+
+            var printers = new Mock<IPrintersService>();
+            printers.Setup(service => service.UploadAndStartPrintAsync(
+                    fixture.PrinterId,
+                    claim.Attempt!.BackendFileName!,
+                    It.IsAny<Stream>(),
+                    It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(UploadAndPrintResult.Unknown(
+                    UploadAndPrintStage.StartingPrint,
+                    "SDCP start acknowledgement was lost."));
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+            await using AppDbContext managementContext = CreateContext();
+            DispatchClaimService claimService = CreateClaim(
+                managementContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            var management = new PrintJobManagementService(
+                new EfPrintJobManagementRepository(managementContext),
+                NullLogger<PrintJobManagementService>.Instance,
+                printers.Object,
+                storage.Object,
+                CreateHubContext(),
+                Mock.Of<IStoredFileOperationsService>(),
+                Mock.Of<IPrinterStatusCacheReader>(),
+                dispatchClaimService: claimService,
+                appDbContext: managementContext,
+                outboxSequenceAllocator: new DbOutboxSequenceAllocator());
+            ServiceProvider provider = new ServiceCollection()
+                .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+                .AddSingleton<IPrintJobManagementService>(management)
+                .BuildServiceProvider();
+            await using (provider)
+            {
+                var consumer = new BackendStartCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendStartCommandConsumerService>.Instance);
+                await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+            }
+
+            printers.Verify(service => service.UploadAndStartPrintAsync(
+                fixture.PrinterId,
+                claim.Attempt!.BackendFileName!,
+                It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+            await AssertIndeterminateFencesAsync(fixture, claim.Attempt!.Id);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Forbidden)]
@@ -606,6 +702,101 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_RealMoonraker502_RetainsFences()
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-moonraker-502-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            DispatchClaimResult claim;
+            Printer printer;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(
+                    seed,
+                    withAck: true,
+                    backend: PrinterBackend.Moonraker);
+                printer = await seed.Printers.SingleAsync(
+                    candidate => candidate.Id == fixture.PrinterId);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    file => file.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+                claim = await CreateClaim(
+                        seed,
+                        DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    .AcquireClaimAsync(new DispatchClaimRequest(
+                        fixture.JobId,
+                        fixture.PrinterId,
+                        "operator-1",
+                        "BedClear",
+                        fixture.AckKey,
+                        null,
+                        null));
+                claim.Success.Should().BeTrue(claim.ErrorDetail);
+            }
+
+            using var handler = new HistoryAuthorityHandler(
+                _ => new HttpResponseMessage(HttpStatusCode.BadGateway));
+            using var http = new HttpClient(handler);
+            var adapter = new MoonrakerClient(
+                http,
+                NullLogger<MoonrakerClient>.Instance,
+                new BackendTimeoutSettings());
+            await using AppDbContext managementContext = CreateContext();
+            PrintersService printers = CreateConcreteUploadPrintersService(
+                managementContext,
+                printer,
+                adapter);
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+            DispatchClaimService claimService = CreateClaim(
+                managementContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            var management = new PrintJobManagementService(
+                new EfPrintJobManagementRepository(managementContext),
+                NullLogger<PrintJobManagementService>.Instance,
+                printers,
+                storage.Object,
+                CreateHubContext(),
+                Mock.Of<IStoredFileOperationsService>(),
+                Mock.Of<IPrinterStatusCacheReader>(),
+                dispatchClaimService: claimService,
+                appDbContext: managementContext,
+                outboxSequenceAllocator: new DbOutboxSequenceAllocator());
+            ServiceProvider provider = new ServiceCollection()
+                .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+                .AddSingleton<IPrintJobManagementService>(management)
+                .BuildServiceProvider();
+            await using (provider)
+            {
+                var consumer = new BackendStartCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendStartCommandConsumerService>.Instance);
+                await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+            }
+
+            handler.RequestPaths.Should().ContainSingle("/server/files/upload");
+            await AssertIndeterminateFencesAsync(fixture, claim.Attempt!.Id);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
     public async Task Cancel_DurableConsumer_BackendAcceptedTransitionsAndReleasesLeaseAtomically()
     {
         Fixture fixture;
@@ -698,6 +889,123 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         (await verify.QueueDispatchOutbox.AnyAsync(candidate =>
             candidate.EventType == QueueLifecycleEventWriter.EventTypeJobCancelled))
             .Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task ControlFenceTerminalDefer_MaxMinusOne_IsAtomicAndContinuesPoll()
+    {
+        Fixture fixture;
+        Guid attemptId;
+        Guid terminalCommandId = Guid.NewGuid();
+        Guid laterCommandId = Guid.NewGuid();
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            DispatchClaimService claimService = CreateClaim(
+                seed,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+                new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "Manual",
+                    fixture.AckKey,
+                    null,
+                    null));
+            claim.Success.Should().BeTrue(claim.ErrorDetail);
+            attemptId = claim.Attempt!.Id;
+            await claimService.RecordBackendAcceptedAsync(
+                attemptId,
+                claim.Attempt.BackendFileName);
+
+            PrinterDispatchState state = await seed.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+            state.PhysicalControlCommandId = Guid.NewGuid();
+            state.PhysicalControlAttemptId = attemptId;
+            state.PhysicalControlOperation = "start";
+            state.PhysicalControlStartedAtUtc = DateTime.UtcNow;
+            long nextCommandSequence =
+                await seed.QueueDispatchOutbox.MaxAsync(command => command.Sequence) + 1;
+            seed.QueueDispatchOutbox.AddRange(
+                new QueueDispatchOutbox
+                {
+                    Id = terminalCommandId,
+                    Sequence = nextCommandSequence,
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = fixture.JobId,
+                    PrinterId = fixture.PrinterId,
+                    AttemptId = attemptId,
+                    EventType = BackendControlCommandConsumerService.EventType,
+                    SchemaVersion = "1",
+                    PayloadJson = JsonSerializer.Serialize(new
+                    {
+                        jobId = fixture.JobId,
+                        printerId = fixture.PrinterId,
+                        attemptId,
+                        operation = "cancel",
+                        actorSubject = "operator-1",
+                    }),
+                    Status = QueueOutboxEventStatus.Pending,
+                    AttemptCount = 119,
+                    CreatedAtUtc = DateTime.UtcNow,
+                },
+                new QueueDispatchOutbox
+                {
+                    Id = laterCommandId,
+                    Sequence = nextCommandSequence + 1,
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = fixture.JobId,
+                    PrinterId = fixture.PrinterId,
+                    AttemptId = attemptId,
+                    EventType = BackendControlCommandConsumerService.EventType,
+                    SchemaVersion = "1",
+                    PayloadJson = "not-json",
+                    Status = QueueOutboxEventStatus.Pending,
+                    CreatedAtUtc = DateTime.UtcNow,
+                });
+            OutboxSequenceState sequenceState =
+                await seed.OutboxSequenceStates.SingleAsync();
+            sequenceState.NextSequence = long.MaxValue - 1;
+            await seed.SaveChangesAsync();
+        }
+
+        var printers = new Mock<IPrintersService>(MockBehavior.Strict);
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .AddScoped<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>()
+            .AddSingleton(printers.Object)
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var consumer = new BackendControlCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendControlCommandConsumerService>.Instance);
+            await consumer.ProcessPendingAsync(CancellationToken.None);
+        }
+
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox terminalCommand =
+            await verify.QueueDispatchOutbox.SingleAsync(
+                command => command.Id == terminalCommandId);
+        QueueDispatchOutbox laterCommand =
+            await verify.QueueDispatchOutbox.SingleAsync(
+                command => command.Id == laterCommandId);
+        terminalCommand.Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+        terminalCommand.FailureCode.Should().Be(
+            "manual_control_reconciliation_required");
+        laterCommand.Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+        laterCommand.FailureCode.Should().Be("invalid_control_command");
+        QueueDispatchOutbox rejectionEvent =
+            await verify.QueueDispatchOutbox.SingleAsync(command =>
+                command.EventType ==
+                    QueueLifecycleEventWriter.EventTypeControlRejected &&
+                command.AttemptId == attemptId);
+        rejectionEvent.Sequence.Should().Be(long.MaxValue);
+        printers.VerifyNoOtherCalls();
     }
 
     [Theory]
@@ -888,6 +1196,177 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 Directory.Delete(storageRoot, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task UnknownStart_QueuedCancel_TerminalHistoryCompletesExactlyOnce()
+    {
+        const string backendJobId = "unknown-start-cancel";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId);
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryJobAsync(
+                fixture.PrinterId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+            {
+                JobId = backendJobId,
+                Filename = "cancelled.gcode",
+                Status = "cancelled",
+                StartTime = DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds(),
+            }));
+        var storage = new Mock<IStoragePathService>();
+        await using (AppDbContext cancelContext = CreateContext())
+        {
+            PrintJob current = await cancelContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            PrintJobManagementService management = CreateManagementService(
+                cancelContext,
+                printers.Object,
+                storage.Object);
+            JobQueueController controller = CreateJobQueueController(
+                management,
+                Mock.Of<IBedClearAcknowledgementService>(),
+                cancelContext);
+            controller.Request.Headers.IfMatch =
+                $"\"{Convert.ToBase64String(current.RowVersion!)}\"";
+
+            IActionResult result = await controller.CancelJobAsync(fixture.JobId);
+
+            result.Should().BeOfType<AcceptedResult>();
+        }
+
+        await RunReconciliationAsync(printers.Object);
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob job = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+            candidate =>
+                candidate.EventType ==
+                    BackendControlCommandConsumerService.EventType &&
+                candidate.AttemptId == attemptId);
+        job.Status.Should().Be(PrintJobStatus.Cancelled);
+        command.Status.Should().Be(QueueOutboxEventStatus.Published);
+        state.ActiveJobId.Should().BeNull();
+        state.ActiveDispatchAttemptId.Should().BeNull();
+        state.PhysicalControlCommandId.Should().BeNull();
+        (await verify.QueueDispatchOutbox.CountAsync(candidate =>
+            candidate.EventType ==
+                QueueLifecycleEventWriter.EventTypeJobCancelled &&
+            candidate.AttemptId == attemptId)).Should().Be(1);
+        printers.Verify(service => service.ExecuteControlAsync(
+            fixture.PrinterId,
+            It.IsAny<BackendControlOperation>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "DbHeavy")]
+    public async Task KnownStartRejection_HonorsPendingCancelOrAbortWithoutBackendControl(
+        bool abort)
+    {
+        Fixture fixture;
+        Guid attemptId;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: true);
+            DispatchClaimService claimService = CreateClaim(
+                seed,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+                new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "Manual",
+                    fixture.AckKey,
+                    null,
+                    null));
+            claim.Success.Should().BeTrue(claim.ErrorDetail);
+            attemptId = claim.Attempt!.Id;
+            (await claimService.RecordBackendCallStartedAsync(attemptId))
+                .Should().BeTrue();
+        }
+
+        var printers = new Mock<IPrintersService>();
+        var storage = new Mock<IStoragePathService>();
+        await using (AppDbContext controlContext = CreateContext())
+        {
+            PrintJob current = await controlContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            PrintJobManagementService management = CreateManagementService(
+                controlContext,
+                printers.Object,
+                storage.Object);
+            JobQueueController controller = CreateJobQueueController(
+                management,
+                Mock.Of<IBedClearAcknowledgementService>(),
+                controlContext);
+            controller.Request.Headers.IfMatch =
+                $"\"{Convert.ToBase64String(current.RowVersion!)}\"";
+
+            IActionResult result = abort
+                ? await controller.AbortPrintAsync(fixture.JobId)
+                : await controller.CancelJobAsync(fixture.JobId);
+
+            result.Should().BeOfType<AcceptedResult>();
+        }
+
+        await using (AppDbContext failureContext = CreateContext())
+        {
+            bool released = await CreateClaim(
+                    failureContext,
+                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                .ReleaseClaimOnKnownFailureAsync(
+                    attemptId,
+                    "provider_rejected_start",
+                    "Provider rejected the start.");
+            released.Should().BeTrue();
+        }
+
+        await using AppDbContext verify = CreateContext();
+        PrintJob job = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+            candidate =>
+                candidate.EventType ==
+                    BackendControlCommandConsumerService.EventType &&
+                candidate.AttemptId == attemptId);
+        string expectedEventType = abort
+            ? QueueLifecycleEventWriter.EventTypeJobAborted
+            : QueueLifecycleEventWriter.EventTypeJobCancelled;
+        job.Status.Should().Be(
+            abort ? PrintJobStatus.Queued : PrintJobStatus.Cancelled);
+        command.Status.Should().Be(QueueOutboxEventStatus.Published);
+        state.ActiveJobId.Should().BeNull();
+        state.ActiveDispatchAttemptId.Should().BeNull();
+        state.PhysicalControlCommandId.Should().BeNull();
+        (await verify.QueueDispatchOutbox.CountAsync(candidate =>
+            candidate.EventType == expectedEventType &&
+            candidate.AttemptId == attemptId)).Should().Be(1);
+        (await verify.QueueDispatchOutbox.AnyAsync(candidate =>
+            candidate.EventType == DispatchClaimService.EventTypeKnownFailure &&
+            candidate.AttemptId == attemptId)).Should().BeFalse();
+        printers.Verify(service => service.ExecuteControlAsync(
+            fixture.PrinterId,
+            It.IsAny<BackendControlOperation>(),
+            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -1435,6 +1914,138 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Convert.ToBase64String(currentJob.RowVersion!));
         ReadResponseProperty(conflict, "dispatchStateETag").Should().Be(
             Convert.ToBase64String(currentDispatch.RowVersion!));
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task DispatchToRoute_FinalSaveRace_LoserReturns412WithCommittedEtags()
+    {
+        Fixture fixture;
+        byte[] initialJobRevision;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedStandardJobAsync(seed);
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.CurrentSpoolId = 123;
+            await seed.SaveChangesAsync();
+            PrintJob job = await seed.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            initialJobRevision = job.RowVersion!.ToArray();
+        }
+
+        var scorer = new Mock<IDispatchScorer>();
+        scorer.Setup(service => service.ScorePrintersForJobAsync(
+                fixture.JobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new DispatchScore(
+                    fixture.PrinterId,
+                    "printer",
+                    100,
+                    [],
+                    Eliminated: false,
+                    []),
+            ]);
+        var winnerEntered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var loserEntered = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWinner = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseLoser = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var winnerSpoolman = new Mock<ISpoolmanService>();
+        winnerSpoolman.Setup(service => service.GetSpoolByIdAsync(
+                123,
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                winnerEntered.TrySetResult(true);
+                await releaseWinner.Task;
+                return (SpoolmanSpoolDto?)null;
+            });
+        var loserSpoolman = new Mock<ISpoolmanService>();
+        loserSpoolman.Setup(service => service.GetSpoolByIdAsync(
+                123,
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                loserEntered.TrySetResult(true);
+                await releaseLoser.Task;
+                return (SpoolmanSpoolDto?)null;
+            });
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobAsync(
+                fixture.JobId.ToString(),
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto
+            {
+                Id = fixture.JobId.ToString(),
+            });
+        await using AppDbContext winnerContext = CreateContext();
+        await using AppDbContext loserContext = CreateContext();
+        var winnerDispatch = new JobDispatchService(
+            scorer.Object,
+            management.Object,
+            winnerSpoolman.Object,
+            winnerContext,
+            NullLogger<JobDispatchService>.Instance);
+        var loserDispatch = new JobDispatchService(
+            scorer.Object,
+            management.Object,
+            loserSpoolman.Object,
+            loserContext,
+            NullLogger<JobDispatchService>.Instance);
+        JobQueueController winnerController = CreateJobQueueController(
+            management.Object,
+            Mock.Of<IBedClearAcknowledgementService>(),
+            winnerContext,
+            winnerDispatch);
+        JobQueueController loserController = CreateJobQueueController(
+            management.Object,
+            Mock.Of<IBedClearAcknowledgementService>(),
+            loserContext,
+            loserDispatch);
+        string initialEtag = Convert.ToBase64String(initialJobRevision);
+        winnerController.Request.Headers.IfMatch = $"\"{initialEtag}\"";
+        loserController.Request.Headers.IfMatch = $"\"{initialEtag}\"";
+
+        Task<IActionResult> winnerTask = winnerController.DispatchToAsync(
+            fixture.JobId,
+            new DispatchJobDto { PrinterId = fixture.PrinterId });
+        Task<IActionResult> loserTask = loserController.DispatchToAsync(
+            fixture.JobId,
+            new DispatchJobDto { PrinterId = fixture.PrinterId });
+        await Task.WhenAll(
+            winnerEntered.Task.WaitAsync(TimeSpan.FromSeconds(10)),
+            loserEntered.Task.WaitAsync(TimeSpan.FromSeconds(10)));
+        releaseWinner.TrySetResult(true);
+        IActionResult winner = await winnerTask;
+        winner.Should().BeAssignableTo<ObjectResult>();
+        releaseLoser.TrySetResult(true);
+        IActionResult loser = await loserTask;
+
+        ObjectResult conflict = loser.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
+        await using AppDbContext committed = CreateContext();
+        PrintJob committedJob = await committed.PrintJobs.AsNoTracking().SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState committedDispatch =
+            await committed.PrinterDispatchStates.AsNoTracking().SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+        ReadResponseProperty(conflict, "jobETag").Should().Be(
+            Convert.ToBase64String(committedJob.RowVersion!));
+        ReadResponseProperty(conflict, "dispatchStateETag").Should().Be(
+            Convert.ToBase64String(committedDispatch.RowVersion!));
+        management.Verify(service => service.DispatchJobAsync(
+            fixture.JobId.ToString(),
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -2114,7 +2725,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_MoonrakerIncompleteList_RetainsEveryFence()
+    public async Task Reconciler_MoonrakerMalformedMatchingIdentity_RetainsEveryFence()
     {
         const string backendJobId = "moonraker-malformed-list";
         (Fixture fixture, Guid attemptId) =
@@ -2124,10 +2735,31 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext serviceDb = CreateContext();
         Printer printer = await serviceDb.Printers.SingleAsync(
             candidate => candidate.Id == fixture.PrinterId);
+        QueueDispatchAttempt attempt =
+            await serviceDb.QueueDispatchAttempts.SingleAsync(
+                candidate => candidate.Id == attemptId);
+        string backendFilename = attempt.BackendFileName
+            ?? attempt.BackendFileIdentity
+            ?? throw new InvalidOperationException(
+                "Seeded attempt must persist a backend filename.");
         using var handler = new HistoryAuthorityHandler(request =>
             request.RequestUri!.AbsolutePath == "/server/history/job"
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
-                : JsonResponse("""{"result":{"count":1,"jobs":[]}}"""));
+                : JsonResponse(JsonSerializer.Serialize(new
+                {
+                    result = new
+                    {
+                        count = 1,
+                        jobs = new[]
+                        {
+                            new
+                            {
+                                filename = backendFilename,
+                                status = "completed",
+                            },
+                        },
+                    },
+                })));
         using var http = new HttpClient(handler);
         var history = new MoonrakerClient(
             http,
@@ -2146,7 +2778,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_OctoPrintMalformedOnlyPage_ProvesAbsenceAndReleasesLease()
+    public async Task Reconciler_OctoPrintMalformedMatchingIdentity_RetainsEveryFence()
     {
         const string backendJobId = "octoprint-malformed-list";
         (Fixture fixture, Guid attemptId) =
@@ -2162,8 +2794,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 backendJobId,
                 StringComparison.Ordinal)
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
-                : JsonResponse(
-                    """{"success":true,"count":1,"results":[{"name":"a.gcode","success":true}]}"""));
+                : JsonResponse(JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = 1,
+                    results = new[]
+                    {
+                        new { name = backendJobId, success = true },
+                    },
+                })));
         using var http = new HttpClient(handler);
         var history = new OctoPrintClient(
             http,
@@ -2175,7 +2814,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             history);
         await RunReconciliationAsync(service);
 
-        await AssertAuthoritativeAbsenceReleasedAsync(fixture, attemptId);
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
         handler.RequestPaths.Should().Contain("/api/history");
     }
 
@@ -2301,6 +2940,26 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrintJobStatus.Failed,
         "PrintFarmer.Queue.JobFailed.v1",
         "reconciliation_failed")]
+    [InlineData(
+        "stopped",
+        PrintJobStatus.Cancelled,
+        "PrintFarmer.Queue.JobCancelled.v1",
+        "reconciliation_cancelled")]
+    [InlineData(
+        "klippy_disconnect",
+        PrintJobStatus.Failed,
+        "PrintFarmer.Queue.JobFailed.v1",
+        "reconciliation_failed")]
+    [InlineData(
+        "server_exit",
+        PrintJobStatus.Failed,
+        "PrintFarmer.Queue.JobFailed.v1",
+        "reconciliation_failed")]
+    [InlineData(
+        "interrupted",
+        PrintJobStatus.Failed,
+        "PrintFarmer.Queue.JobFailed.v1",
+        "reconciliation_failed")]
     [Trait("Category", "DbHeavy")]
     public async Task Reconciler_RealMoonrakerTerminalStatus_MapsLifecycleWithoutJobCompleted(
         string historyStatus,
@@ -2366,6 +3025,87 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_RealPrusaLinkStopped_MapsCancelledWithoutJobCompleted()
+    {
+        const string backendJobId = "prusalink-stopped";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.PrusaLink);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        long startTimestamp =
+            DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds();
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath.Contains(
+                backendJobId,
+                StringComparison.Ordinal)
+                ? JsonResponse(JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    id = backendJobId,
+                    state = "STOPPED",
+                    startTime = startTimestamp,
+                    endTime = startTimestamp + 30,
+                    job = new { file = new { name = "stopped.gcode" } },
+                }))
+                : throw new InvalidOperationException(
+                    "A found authoritative detail must not fall back to the list."));
+        using var http = new HttpClient(handler);
+        var history = new PrusaLinkClient(
+            http,
+            NullLogger<PrusaLinkClient>.Instance);
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertReconciledTerminalAsync(
+            fixture,
+            attemptId,
+            PrintJobStatus.Cancelled,
+            DispatchClaimService.EventTypeJobCancelled,
+            "reconciliation_cancelled");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_UnknownHistoryStatus_RemainsIndeterminate()
+    {
+        const string backendJobId = "future-terminal-status";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId);
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryJobAsync(
+                fixture.PrinterId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+            {
+                JobId = backendJobId,
+                Filename = "future.gcode",
+                Status = "future_terminal_state",
+                StartTime =
+                    DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds(),
+            }));
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
     public async Task Reconciler_RealMoonrakerPreClaimIdentity_RetainsEveryFence()
     {
         const string backendJobId = "moonraker-old-identity";
@@ -2416,7 +3156,98 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_PrusaLinkMalformedOnlyPage_ProvesAbsenceAndReleasesLease()
+    public async Task Reconciler_SameSecondProviderTimestamp_ResolvesCompleted()
+    {
+        const string backendJobId = "same-second-history";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId);
+        DateTime claimedAtUtc;
+        await using (AppDbContext read = CreateContext())
+        {
+            claimedAtUtc = (await read.QueueDispatchAttempts.SingleAsync(
+                candidate => candidate.Id == attemptId)).ClaimedAtUtc;
+        }
+
+        long providerTimestamp = new DateTimeOffset(
+            DateTime.SpecifyKind(claimedAtUtc, DateTimeKind.Utc))
+            .ToUnixTimeSeconds();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryJobAsync(
+                fixture.PrinterId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+            {
+                JobId = backendJobId,
+                Filename = "same-second.gcode",
+                Status = "completed",
+                StartTime = providerTimestamp,
+            }));
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertReconciledTerminalAsync(
+            fixture,
+            attemptId,
+            PrintJobStatus.Completed,
+            DispatchClaimService.EventTypeJobCompleted,
+            expectedFailureCode: null);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_ThirtySecondOldProviderTimestamp_RemainsIndeterminate()
+    {
+        const string backendJobId = "thirty-seconds-old-history";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(backendJobId);
+        DateTime claimedAtUtc;
+        await using (AppDbContext read = CreateContext())
+        {
+            claimedAtUtc = (await read.QueueDispatchAttempts.SingleAsync(
+                candidate => candidate.Id == attemptId)).ClaimedAtUtc;
+        }
+
+        long providerTimestamp = new DateTimeOffset(
+            DateTime.SpecifyKind(
+                claimedAtUtc.AddSeconds(-30),
+                DateTimeKind.Utc))
+            .ToUnixTimeSeconds();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.GetStatusDtoAsync(
+                fixture.PrinterId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: true,
+                State: "idle"));
+        printers.Setup(service => service.ProbeHistoryJobAsync(
+                fixture.PrinterId,
+                backendJobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+            {
+                JobId = backendJobId,
+                Filename = "old.gcode",
+                Status = "completed",
+                StartTime = providerTimestamp,
+            }));
+
+        await RunReconciliationAsync(printers.Object);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_PrusaLinkMalformedMatchingIdentity_RetainsEveryFence()
     {
         const string backendJobId = "prusalink-missing-start";
         (Fixture fixture, Guid attemptId) =
@@ -2431,10 +3262,20 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 backendJobId,
                 StringComparison.Ordinal)
                 ? new HttpResponseMessage(HttpStatusCode.NotFound)
-                : JsonResponse(
-                    """
-                    {"success":true,"count":1,"results":[{"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode"}}}]}
-                    """));
+                : JsonResponse(JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = 1,
+                    results = new[]
+                    {
+                        new
+                        {
+                            id = backendJobId,
+                            state = "completed",
+                            job = new { file = new { name = "attempt.gcode" } },
+                        },
+                    },
+                })));
         using var http = new HttpClient(handler);
         var history = new PrusaLinkClient(
             http,
@@ -2446,7 +3287,67 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await RunReconciliationAsync(service);
 
-        await AssertAuthoritativeAbsenceReleasedAsync(fixture, attemptId);
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_SdcpMalformedMatchingIdentity_RetainsEveryFence()
+    {
+        const string backendJobId = "sdcp-missing-start";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.SDCP);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        var history = new Mock<ISupportsHistory>();
+        history.Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                backendJobId,
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HistoryJobNotFoundException(backendJobId));
+        history.Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse
+            {
+                Count = 1,
+                Jobs = [],
+                ExaminedSourceEntries = 1,
+                ExcludedEntries =
+                [
+                    new HistoryExcludedEntryEvidence(
+                        backendJobId,
+                        Filename: null,
+                        StartTime: null,
+                        Reason: "malformed_history_detail"),
+                ],
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                    "sdcp",
+                    SourceEntryCount: 1,
+                    ExaminedEntryCount: 1,
+                    StartsAtBeginning: true,
+                    HasUnambiguousEnd: true,
+                    CoversRequestedRange: true,
+                    ExcludedEntryCount: 1),
+            });
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history.Object);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
     }
 
     [Fact]
@@ -4025,6 +4926,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
 
         await db.SaveChangesAsync();
+        (await claimService.RecordBackendCallStartedAsync(claim.Attempt.Id))
+            .Should().BeTrue();
         (await claimService.RecordUnknownOutcomeAsync(
             claim.Attempt.Id,
             "response lost")).Should().BeTrue();
@@ -4310,6 +5213,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         job.Status.Should().Be(PrintJobStatus.Starting);
         state.ActiveJobId.Should().Be(fixture.JobId);
         state.ActiveDispatchAttemptId.Should().Be(attemptId);
+        state.PhysicalControlCommandId.Should().Be(attemptId);
+        state.PhysicalControlAttemptId.Should().Be(attemptId);
+        state.PhysicalControlOperation.Should().Be("start");
+        state.PhysicalControlRequiresReconciliation.Should().BeTrue();
         acknowledgement.Status.Should().Be(BedClearCommandStatus.Unknown);
         startCommand.Status.Should().BeOneOf(
             QueueOutboxEventStatus.Pending,

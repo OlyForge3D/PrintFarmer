@@ -111,13 +111,13 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_MissingStartTime_IsExcludedWithoutVoidingAuthority()
+    public async Task GetHistoryListAsync_MissingStartTime_DoesNotShiftRequestedValidRange()
     {
         using var handler = new InlineHandler(_ =>
             JsonResponse(
                 HttpStatusCode.OK,
                 """
-                {"success":true,"count":2,"results":[{"id":"bad","state":"completed","job":{"file":{"name":"bad.gcode"}}},{"id":"good","state":"completed","startTime":1700000000,"job":{"file":{"name":"good.gcode"}}}]}
+                {"success":true,"count":3,"results":[{"id":"bad","state":"completed","job":{"file":{"name":"bad.gcode"}}},{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}},{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}
                 """));
         using var http = new HttpClient(handler);
         var client = new PrusaLinkApiClient(
@@ -126,15 +126,22 @@ public sealed class PrusaLinkHistoryAuthorityTests
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://prusalink/",
-            limit: 2,
-            start: 0);
+            limit: 1,
+            start: 1);
 
         history.Should().NotBeNull();
         history!.Jobs.Should().ContainSingle()
-            .Which.JobId.Should().Be("good");
-        history.ExaminedSourceEntries.Should().Be(2);
+            .Which.JobId.Should().Be("second");
+        history.ExaminedSourceEntries.Should().Be(3);
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
         history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        history.AuthorityEvidence.ExcludedEntryCount.Should().Be(1);
+        history.ExcludedEntries.Should().ContainSingle().Which.Should().Be(
+            new HistoryExcludedEntryEvidence(
+                "bad",
+                "bad.gcode",
+                StartTime: null,
+                Reason: "malformed_history_entry"));
     }
 
     [Fact]

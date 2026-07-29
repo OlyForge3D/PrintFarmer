@@ -93,7 +93,21 @@ public sealed class BackendControlCommandConsumerService(
 
         foreach (Guid commandId in commandIds)
         {
-            await ProcessOneAsync(commandId, ct);
+            try
+            {
+                await ProcessOneAsync(commandId, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Backend control command {CommandId} failed; continuing the current poll batch.",
+                    commandId);
+            }
         }
     }
 
@@ -266,6 +280,8 @@ public sealed class BackendControlCommandConsumerService(
             "The cancellation could not acquire the printer barrier; manual reconciliation is required.";
         command.CompletedAtUtc = now;
         command.RetryAfterUtc = null;
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(db, ct);
         PrintJob? job = await db.PrintJobs
             .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
         if (job is not null)
@@ -293,6 +309,7 @@ public sealed class BackendControlCommandConsumerService(
         }
 
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
 
     private async Task ApplyAcceptedAsync(

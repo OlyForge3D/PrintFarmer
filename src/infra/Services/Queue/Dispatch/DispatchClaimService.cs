@@ -777,11 +777,15 @@ public sealed class DispatchClaimService(
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         DateTime nowUtc = DateTime.UtcNow;
+        PendingControlIntent? pendingIntent =
+            await LoadPendingTerminalControlIntentAsync(attempt, ct);
 
         attempt.Outcome = DispatchAttemptOutcome.FailedBeforeStart;
         attempt.ErrorCode = errorCode;
         attempt.ErrorDetail = RedactedFailureDetail(errorCode);
-        attempt.IsRetryable = true;
+        attempt.IsRetryable =
+            pendingIntent is null ||
+            string.Equals(pendingIntent.Operation, "abort", StringComparison.Ordinal);
         attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
         attempt.TerminalAtUtc = nowUtc;
         attempt.UpdatedAtUtc = nowUtc;
@@ -795,8 +799,17 @@ public sealed class DispatchClaimService(
 
         if (attempt.PrintJob is not null && attempt.PrintJob.Status == PrintJobStatus.Starting)
         {
-            attempt.PrintJob.Status = PrintJobStatus.Assigned;
+            PrintJobStatus targetStatus = pendingIntent?.Operation switch
+            {
+                "cancel" => PrintJobStatus.Cancelled,
+                "abort" => PrintJobStatus.Queued,
+                _ => PrintJobStatus.Assigned,
+            };
+            attempt.PrintJob.Status = targetStatus;
             attempt.PrintJob.ActualStartTime = null;
+            attempt.PrintJob.ActualEndTime =
+                targetStatus == PrintJobStatus.Cancelled ? nowUtc : null;
+            attempt.PrintJob.FailureReason = null;
             attempt.PrintJob.UpdatedAt = nowUtc;
 
             _ = _db.JobStateHistories.Add(new JobStateHistory
@@ -804,10 +817,12 @@ public sealed class DispatchClaimService(
                 Id = Guid.NewGuid(),
                 JobId = attempt.PrintJob.Id,
                 FromState = PrintJobStatus.Starting.ToString(),
-                ToState = PrintJobStatus.Assigned.ToString(),
+                ToState = targetStatus.ToString(),
                 TransitionedAtUtc = nowUtc,
                 CreatedAt = nowUtc,
-                Notes = $"Dispatch released: {errorCode}",
+                Notes = pendingIntent is null
+                    ? $"Dispatch released: {errorCode}"
+                    : $"Pending {pendingIntent.Operation} honored after start rejection.",
             });
         }
 
@@ -816,6 +831,20 @@ public sealed class DispatchClaimService(
             dispatchState.ActiveJobId = null;
             dispatchState.ActiveDispatchAttemptId = null;
             ClearPhysicalBarrier(dispatchState, attemptId);
+            if (pendingIntent is not null)
+            {
+                dispatchState.QueueRevision++;
+                ClearAcknowledgement(dispatchState);
+            }
+        }
+
+        if (pendingIntent is not null)
+        {
+            pendingIntent.Command.Status = QueueOutboxEventStatus.Published;
+            pendingIntent.Command.FailureCode = null;
+            pendingIntent.Command.LastError = null;
+            pendingIntent.Command.CompletedAtUtc = nowUtc;
+            pendingIntent.Command.RetryAfterUtc = null;
         }
 
         _ = QueueAuditWriter.Add(
@@ -838,23 +867,54 @@ public sealed class DispatchClaimService(
         // the dispatch state changes above.
         if (attempt.PrintJobId is not null)
         {
-            await AddLifecycleOutboxEventAsync(
-                _db,
-                _sequenceAllocator,
-                EventTypeKnownFailure,
-                aggregateId: attempt.PrintJobId.Value,
-                printerId: attempt.PrinterId,
-                attemptId: attemptId,
-                aggregateRowVersion: attempt.PrintJob?.RowVersion,
-                failureCode: errorCode,
-                payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+            string eventType = pendingIntent?.Operation switch
+            {
+                "cancel" => EventTypeJobCancelled,
+                "abort" => QueueLifecycleEventWriter.EventTypeJobAborted,
+                _ => EventTypeKnownFailure,
+            };
+            string? lifecycleFailureCode = pendingIntent is null
+                ? errorCode
+                : pendingIntent.Operation == "cancel"
+                    ? "job_cancelled"
+                    : null;
+            string lifecyclePayload;
+            if (pendingIntent is null)
+            {
+                lifecyclePayload = System.Text.Json.JsonSerializer.Serialize(new
                 {
                     jobId = attempt.PrintJobId,
                     printerId = attempt.PrinterId,
                     attemptId,
                     errorCode,
                     startPathKind = attempt.StartPathKind,
-                }),
+                });
+            }
+            else
+            {
+                string terminalStatus = attempt.PrintJob?.Status.ToString()
+                    ?? PrintJobStatus.Cancelled.ToString();
+                string terminalJobKind = attempt.PrintJob?.JobKind?.ToString()
+                    ?? nameof(JobKind.Standard);
+                lifecyclePayload = QueueLifecycleEventWriter.BuildTerminalPayload(
+                    attempt.PrintJobId.Value,
+                    attempt.PrinterId,
+                    attemptId,
+                    terminalStatus,
+                    terminalJobKind,
+                    lifecycleFailureCode);
+            }
+
+            await AddLifecycleOutboxEventAsync(
+                _db,
+                _sequenceAllocator,
+                eventType,
+                aggregateId: attempt.PrintJobId.Value,
+                printerId: attempt.PrinterId,
+                attemptId: attemptId,
+                aggregateRowVersion: attempt.PrintJob?.RowVersion,
+                failureCode: lifecycleFailureCode,
+                payloadJson: lifecyclePayload,
                 ct);
         }
 
@@ -1701,6 +1761,53 @@ public sealed class DispatchClaimService(
         dispatchState.AcknowledgedPrinterConfigRevision = null;
     }
 
+    private async Task<PendingControlIntent?> LoadPendingTerminalControlIntentAsync(
+        QueueDispatchAttempt attempt,
+        CancellationToken ct)
+    {
+        if (attempt.PrintJobId is null)
+        {
+            return null;
+        }
+
+        List<QueueDispatchOutbox> commands = await _db.QueueDispatchOutbox
+            .Where(command =>
+                command.EventType == BackendControlCommandConsumerService.EventType &&
+                command.Status == QueueOutboxEventStatus.Pending &&
+                command.AttemptId == attempt.Id &&
+                command.AggregateId == attempt.PrintJobId.Value)
+            .OrderBy(command => command.Sequence)
+            .ToListAsync(ct);
+        foreach (QueueDispatchOutbox command in commands)
+        {
+            try
+            {
+                using System.Text.Json.JsonDocument document =
+                    System.Text.Json.JsonDocument.Parse(command.PayloadJson);
+                if (!document.RootElement.TryGetProperty(
+                        "operation",
+                        out System.Text.Json.JsonElement operationElement) ||
+                    operationElement.ValueKind !=
+                        System.Text.Json.JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? operation = operationElement.GetString();
+                if (operation is "cancel" or "abort")
+                {
+                    return new PendingControlIntent(command, operation);
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // The durable control consumer owns malformed-payload dead-lettering.
+            }
+        }
+
+        return null;
+    }
+
     private static void ClearPhysicalBarrier(
         PrinterDispatchState? state,
         Guid attemptId)
@@ -1717,6 +1824,10 @@ public sealed class DispatchClaimService(
         state.PhysicalControlStartedAtUtc = null;
         state.PhysicalControlRequiresReconciliation = false;
     }
+
+    private sealed record PendingControlIntent(
+        QueueDispatchOutbox Command,
+        string Operation);
 
     private async Task WriteDeniedAuditAsync(
         DispatchClaimRequest request,

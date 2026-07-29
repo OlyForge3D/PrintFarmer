@@ -309,7 +309,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            HttpResponseMessage response = await SendWithRetryAsync(
+                request,
+                allowRetry: false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -653,17 +655,23 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 before.HasValue ||
                 !string.IsNullOrWhiteSpace(order) ||
                 !requestedLimit.HasValue;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
 
             const int PageSize = 100;
-            int offset = requiresFullScan ? 0 : requestedStart;
+            int offset = 0;
             int sourceCount = 0;
             int examinedCount = 0;
             bool reachedSourceEnd = false;
             var allJobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
             while (true)
             {
                 int pageSize = !requiresFullScan && requestedLimit.HasValue
-                    ? Math.Min(PageSize, Math.Max(1, requestedLimit.Value - allJobs.Count))
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - allJobs.Count))
                     : PageSize;
                 HistoryListResponse page = await FetchOctoPrintHistoryPageAsync(
                     baseUrl,
@@ -680,13 +688,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
                 sourceCount = Math.Max(sourceCount, page.Count);
                 allJobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
                 offset += examined;
                 reachedSourceEnd = offset >= sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
                     requestedLimit.HasValue &&
-                    allJobs.Count >= requestedLimit.Value;
+                    allJobs.Count >= requestedEnd;
                 if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
@@ -715,7 +724,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     : filtered;
             HistoryJob[] filteredJobs = filtered.ToArray();
             HistoryJob[] requestedJobs = filteredJobs
-                .Skip(requiresFullScan ? requestedStart : 0)
+                .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
             bool coversRequestedRange = requiresFullScan
@@ -731,9 +740,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     "octoprint",
                     Math.Max(sourceCount, examinedCount),
                     examinedCount,
-                    StartsAtBeginning: requiresFullScan || requestedStart == 0,
+                    StartsAtBeginning: true,
                     HasUnambiguousEnd: reachedSourceEnd,
-                    CoversRequestedRange: coversRequestedRange),
+                    CoversRequestedRange: coversRequestedRange,
+                    ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
             };
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1734,6 +1745,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             }
 
             List<HistoryJob> jobs = new();
+            List<HistoryExcludedEntryEvidence> excludedEntries = new();
             int examinedEntries = resultsProp.GetArrayLength();
             foreach (JsonElement jobElement in resultsProp.EnumerateArray())
             {
@@ -1742,6 +1754,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
+                    excludedEntries.Add(CreateExcludedHistoryEvidence(jobElement));
                     continue;
                 }
 
@@ -1761,6 +1774,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 Count = count,
                 Jobs = jobs.ToArray(),
                 ExaminedSourceEntries = examinedEntries,
+                ExcludedEntries = excludedEntries.ToArray(),
             };
         }
         catch
@@ -1862,6 +1876,36 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             return null;
         }
     }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        string? filename = TryReadString(entry, "name");
+        return new HistoryExcludedEntryEvidence(
+            TryReadString(entry, "id") ?? filename,
+            filename,
+            TryReadNumber(entry, "timestamp"),
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+    }
+
+    private static double? TryReadNumber(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out JsonElement property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetDouble(out double value)
+            ? value
+            : null;
 
     /// <summary>
     /// Parses an OctoPrint history job detail JSON response into a HistoryJob object.

@@ -260,7 +260,34 @@ public class JobDispatchService(
             }
         }
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Scored dispatch lost a revision race for job {JobId} and printer {PrinterId}.",
+                jobId,
+                printerId);
+            db.ChangeTracker.Clear();
+            byte[]? currentJobRowVersion = await db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == jobId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(ct);
+            byte[]? currentDispatchStateRowVersion =
+                await db.PrinterDispatchStates
+                    .AsNoTracking()
+                    .Where(state => state.PrinterId == printerId)
+                    .Select(state => state.RowVersion)
+                    .SingleOrDefaultAsync(ct);
+            throw new QueueRevisionConflictException(
+                "The print job or printer dispatch revision changed during scored dispatch.",
+                currentJobRowVersion,
+                currentDispatchStateRowVersion);
+        }
 
         logger.LogInformation(
             "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",
