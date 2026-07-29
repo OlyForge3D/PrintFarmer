@@ -1013,7 +1013,26 @@ public class PrintJobManagementService(
             PrintJob job = dispatchJob;
             await EnsureActorCanAccessJobAsync(userId, job.Id, cancellationToken);
 
-            QueueRevisionGuard.EnsureIfMatch(ifMatchJobRowVersion, job.RowVersion, "job dispatch");
+            byte[]? expectedJobRowVersion = QueueRevisionGuard.DecodeIfMatch(
+                ifMatchJobRowVersion,
+                "job dispatch");
+            if (expectedJobRowVersion is not null &&
+                !expectedJobRowVersion.SequenceEqual(job.RowVersion ?? []))
+            {
+                byte[]? currentDispatchRevision = job.AssignedPrinterId.HasValue &&
+                                                  _appDbContext is not null
+                    ? await _appDbContext.PrinterDispatchStates
+                        .AsNoTracking()
+                        .Where(state => state.PrinterId == job.AssignedPrinterId.Value)
+                        .Select(state => state.RowVersion)
+                        .SingleOrDefaultAsync(cancellationToken)
+                    : null;
+                throw new QueueRevisionConflictException(
+                    "The resource has changed since the request was prepared (job dispatch). " +
+                    "Re-fetch the ETag and retry.",
+                    job.RowVersion,
+                    currentDispatchRevision);
+            }
 
             // Idempotent: if the job is already being dispatched (e.g. by auto-dispatch),
             // return its current state as success rather than erroring out.
@@ -1064,12 +1083,20 @@ public class PrintJobManagementService(
                     userId,
                     "Manual",
                     null,
-                    null,
+                    expectedJobRowVersion,
                     null),
                 cancellationToken);
 
             if (!claimResult.Success || claimResult.Attempt is null)
             {
+                if (claimResult.IsPreconditionFailure)
+                {
+                    throw new QueueRevisionConflictException(
+                        $"{claimResult.ErrorCode} {claimResult.ErrorDetail}".Trim(),
+                        claimResult.CurrentJobRowVersion,
+                        claimResult.CurrentDispatchStateRowVersion);
+                }
+
                 throw new InvalidOperationException($"{claimResult.ErrorCode} {claimResult.ErrorDetail}".Trim());
             }
 
@@ -1829,12 +1856,12 @@ public class PrintJobManagementService(
                     "backend_failed_before_start",
                     DispatchPrinterFailure,
                     attemptId,
-                    isRetryable: true)
+                    isRetryable: false)
                 : BackendStartOutcome.Rejected(
                     "backend_rejected",
                     DispatchPrinterFailure,
                     attemptId,
-                    isRetryable: true);
+                    isRetryable: false);
         }
         catch (OperationCanceledException)
         {
@@ -3826,6 +3853,19 @@ public class PrintJobManagementService(
                 "A lifecycle command for this dispatch attempt is already awaiting reconciliation.");
         }
 
+        bool canQueueBehindStart =
+            dispatchState.PhysicalControlCommandId.HasValue &&
+            string.Equals(
+                dispatchState.PhysicalControlOperation,
+                "start",
+                StringComparison.Ordinal) &&
+            operation is "cancel" or "abort";
+        if (dispatchState.PhysicalControlCommandId.HasValue && !canQueueBehindStart)
+        {
+            throw new QueueSemanticConflictException(
+                "Another physical command owns the printer barrier.");
+        }
+
         var command = new QueueDispatchOutbox
         {
             Id = Guid.NewGuid(),
@@ -3858,7 +3898,16 @@ public class PrintJobManagementService(
             CreatedAtUtc = now,
         };
         _appDbContext.QueueDispatchOutbox.Add(command);
-        job.UpdatedAt = now;
+        if (!dispatchState.PhysicalControlCommandId.HasValue)
+        {
+            dispatchState.PhysicalControlCommandId = command.Id;
+            dispatchState.PhysicalControlAttemptId = attempt.Id;
+            dispatchState.PhysicalControlOperation = operation;
+            dispatchState.PhysicalControlActorSubject = actorSubject;
+            dispatchState.PhysicalControlStartedAtUtc = null;
+            dispatchState.PhysicalControlRequiresReconciliation = false;
+        }
+
         string auditOperation = operation switch
         {
             "pause" => QueueAuditOperations.JobPause,

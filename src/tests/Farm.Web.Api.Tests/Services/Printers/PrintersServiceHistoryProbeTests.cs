@@ -47,6 +47,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((HistoryListResponse?)null);
@@ -74,6 +76,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("backend offline"));
@@ -108,6 +112,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync((Exception)Activator.CreateInstance(adapterExceptionType)!);
@@ -136,6 +142,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new FormatException("malformed backend response"));
@@ -164,6 +172,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(emptyHistory);
@@ -196,6 +206,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HistoryListResponse());
@@ -220,6 +232,8 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HistoryListResponse

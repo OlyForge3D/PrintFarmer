@@ -4102,10 +4102,23 @@ public class PrintersController(
             _logger.LogError(ex, "Socket error retrieving history for printer {Id}", id);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
+        catch (Farm.Infrastructure.Services.Printers.HistoryAuthorityException ex)
+        {
+            _logger.LogError(ex, "Printer {Id} could not prove the requested history range", id);
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new
+                {
+                    error = "history_completeness_unproven",
+                    detail = ex.Message,
+                });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get history for printer {Id}: {Message}", id, ex.Message);
-            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve printer history" });
         }
     }
 

@@ -8,6 +8,12 @@
 /// </summary>
 public sealed class QueueRevisionConflictException : InvalidOperationException
 {
+    /// <summary>Current print-job row version, when the conflicted operation targeted a job.</summary>
+    public byte[]? CurrentJobRowVersion { get; }
+
+    /// <summary>Current printer dispatch-state row version, when available.</summary>
+    public byte[]? CurrentDispatchStateRowVersion { get; }
+
     /// <summary>Initializes a new instance of the <see cref="QueueRevisionConflictException"/> class.</summary>
     public QueueRevisionConflictException()
     {
@@ -18,6 +24,19 @@ public sealed class QueueRevisionConflictException : InvalidOperationException
     public QueueRevisionConflictException(string message)
         : base(message)
     {
+    }
+
+    /// <summary>
+    /// Initializes a conflict carrying the authoritative revisions clients need to retry.
+    /// </summary>
+    public QueueRevisionConflictException(
+        string message,
+        byte[]? currentJobRowVersion,
+        byte[]? currentDispatchStateRowVersion)
+        : base(message)
+    {
+        CurrentJobRowVersion = currentJobRowVersion?.ToArray();
+        CurrentDispatchStateRowVersion = currentDispatchStateRowVersion?.ToArray();
     }
 
     /// <summary>Initializes a new instance of the <see cref="QueueRevisionConflictException"/> class.</summary>

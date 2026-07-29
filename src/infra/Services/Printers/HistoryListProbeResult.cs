@@ -1,5 +1,25 @@
 ﻿namespace Farm.Infrastructure.Services.Printers;
 
+/// <summary>
+/// Raised when a backend response cannot prove the exact requested history page or window.
+/// </summary>
+public sealed class HistoryAuthorityException : InvalidOperationException
+{
+    public HistoryAuthorityException()
+    {
+    }
+
+    public HistoryAuthorityException(string message)
+        : base(message)
+    {
+    }
+
+    public HistoryAuthorityException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}
+
 /// <summary>Stable failure reasons shared by list and detail history probes.</summary>
 public static class HistoryProbeFailureCodes
 {

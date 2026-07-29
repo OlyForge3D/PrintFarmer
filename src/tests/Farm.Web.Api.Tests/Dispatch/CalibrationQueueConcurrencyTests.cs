@@ -3,12 +3,14 @@ using System.Text;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -1003,71 +1005,84 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
 
     // =========================================================================
     // Test 11: BackendStartCommandConsumer crash recovery — stale Processing events
-    //          are reset to Pending by RecoverStaleLeases on restart.
+    //          are reset to Pending during every poll.
     // =========================================================================
 
     [Fact]
-    public async Task BackendStartConsumer_RecoverStaleProcessingEvent_ResetsToP_ending()
+    public async Task BackendStartConsumer_PollRecoversProcessingOnlyAfterStaleAge()
     {
-        // Arrange: create a BackendStartCommand event that is stuck in Processing
-        // with a LastAttemptedAtUtc older than StaleLeaseAge (simulate crashed process).
-        await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
-
-        var staleEvt = new QueueDispatchOutbox
+        Guid eventId = Guid.NewGuid();
+        await using (AppDbContext seedCtx = CreateContext())
         {
-            Id = Guid.NewGuid(),
-            Sequence = 9_999_999,
-            AggregateType = nameof(PrintJob),
-            AggregateId = jobId,
-            PrinterId = printerId,
-            EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
-            SchemaVersion = "1",
-            PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+            (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+            seedCtx.QueueDispatchOutbox.Add(new QueueDispatchOutbox
             {
-                jobId,
-                printerId,
-                actorSubject = "system",
-                acknowledgementKey = "crash-ack-key",
-            }),
-            Status = QueueOutboxEventStatus.Processing,
-            AttemptCount = 1,
-            // Simulate: this was last attempted 15 minutes ago (older than StaleLeaseAge=10min)
-            LastAttemptedAtUtc = DateTime.UtcNow.AddMinutes(-15),
-            CreatedAtUtc = DateTime.UtcNow.AddMinutes(-20),
-        };
-
-        seedCtx.QueueDispatchOutbox.Add(staleEvt);
-        await seedCtx.SaveChangesAsync();
-
-        // Act: simulate the consumer recovering stale leases (runs on startup).
-        await using AppDbContext recoveryCtx = CreateContext();
-        DateTime staleCutoff = DateTime.UtcNow.AddMinutes(-10); // StaleLeaseAge = 10 minutes
-        List<QueueDispatchOutbox> staleFound = await recoveryCtx.QueueDispatchOutbox
-            .Where(e =>
-                e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
-                e.Status == QueueOutboxEventStatus.Processing &&
-                e.LastAttemptedAtUtc < staleCutoff)
-            .ToListAsync();
-
-        staleFound.Should().HaveCount(1, "the stale Processing event must be found during recovery scan");
-
-        foreach (QueueDispatchOutbox evt in staleFound)
-        {
-            evt.Status = QueueOutboxEventStatus.Pending;
-            evt.LastError = "Recovered from stale lease (previous process crash).";
-            evt.RetryAfterUtc = DateTime.UtcNow;
+                Id = eventId,
+                Sequence = 9_999_999,
+                AggregateType = nameof(PrintJob),
+                AggregateId = jobId,
+                PrinterId = printerId,
+                EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+                SchemaVersion = "1",
+                PayloadJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    jobId,
+                    printerId,
+                    actorSubject = "system",
+                    acknowledgementKey = "crash-ack-key",
+                }),
+                Status = QueueOutboxEventStatus.Processing,
+                AttemptCount = 1,
+                LastAttemptedAtUtc = DateTime.UtcNow.AddSeconds(-30),
+                CreatedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            });
+            await seedCtx.SaveChangesAsync();
         }
 
-        await recoveryCtx.SaveChangesAsync();
+        var management = new Mock<IPrintJobManagementService>();
+        ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(_connectionString))
+            .AddSingleton(management.Object)
+            .BuildServiceProvider();
+        await using (provider)
+        {
+            var consumer = new BackendStartCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendStartCommandConsumerService>.Instance);
 
-        // Assert: event is now Pending, ready for re-execution.
+            await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+
+            await using (AppDbContext freshVerify = CreateContext())
+            {
+                QueueDispatchOutbox fresh = await freshVerify.QueueDispatchOutbox
+                    .SingleAsync(candidate => candidate.Id == eventId);
+                fresh.Status.Should().Be(QueueOutboxEventStatus.Processing);
+            }
+
+            await using (AppDbContext ageContext = CreateContext())
+            {
+                QueueDispatchOutbox aged = await ageContext.QueueDispatchOutbox
+                    .SingleAsync(candidate => candidate.Id == eventId);
+                aged.LastAttemptedAtUtc = DateTime.UtcNow.AddMinutes(-11);
+                await ageContext.SaveChangesAsync();
+            }
+
+            await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        }
+
         await using AppDbContext verifyCtx = CreateContext();
-        QueueDispatchOutbox? recovered = await verifyCtx.QueueDispatchOutbox.FindAsync(staleEvt.Id);
-        recovered.Should().NotBeNull();
-        recovered!.Status.Should().Be(QueueOutboxEventStatus.Pending,
-            "stale Processing events must be recovered to Pending by crash-recovery logic");
+        QueueDispatchOutbox recovered = await verifyCtx.QueueDispatchOutbox
+            .SingleAsync(candidate => candidate.Id == eventId);
+        recovered.Status.Should().Be(QueueOutboxEventStatus.Pending);
         recovered.LastError.Should().Contain("Recovered from stale lease");
+        recovered.RetryAfterUtc.Should().BeAfter(DateTime.UtcNow);
+        management.Verify(
+            service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // =========================================================================

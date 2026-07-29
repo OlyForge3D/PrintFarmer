@@ -7,6 +7,7 @@ using Farm.Backend.Plugin.OctoPrint;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.OctoPrint;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Services;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -157,12 +158,8 @@ public class OctoPrintClientTests
     [Theory]
     [InlineData("""{"success":true,"count":0}""")]
     [InlineData("""{"success":true,"results":[]}""")]
-    [InlineData("""{"success":true,"count":2,"results":[{"name":"a.gcode","success":true,"timestamp":1700000000}]}""")]
-    [InlineData("""{"success":true,"count":1,"results":[{}]}""")]
-    [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","timestamp":1700000000}]}""")]
-    [InlineData("""{"success":true,"count":1,"results":[{"name":"a.gcode","success":true}]}""")]
     [InlineData("""{"success":true,"count":"one","results":[]}""")]
-    public async Task GetHistoryListAsync_IncompleteOrMalformedEntry_IsUnavailable(
+    public async Task GetHistoryListAsync_IncompleteEnvelope_IsUnavailable(
         string payload)
     {
         (OctoPrintClient client, _, _) = CreateClient(_ =>
@@ -206,26 +203,217 @@ public class OctoPrintClientTests
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_FullRequestedPage_IsPaginationAmbiguous()
+    public async Task GetHistoryListAsync_MalformedEntry_IsExcludedWithoutVoidingAuthority()
     {
         (OctoPrintClient client, _, _) = CreateClient(_ =>
             new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """
-                    {"success":true,"count":1,"results":[{"name":"a.gcode","success":true,"timestamp":1700000000}]}
-                    """,
+                    """{"success":true,"count":2,"results":[{"name":"bad.gcode","success":true},{"name":"good.gcode","success":true,"timestamp":1700000000}]}""",
                     Encoding.UTF8,
                     "application/json"),
             });
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://octo",
-            limit: 1,
+            limit: 2,
             start: 0,
             credential: new PrinterCredential { ApiKey = "key" });
 
         history.Should().NotBeNull();
-        history!.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
+        history!.Jobs.Should().ContainSingle()
+            .Which.JobId.Should().Be("good.gcode");
+        history.ExaminedSourceEntries.Should().Be(2);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_Total250Limit100_ProvesRequestedRange()
+    {
+        var entries = Enumerable.Range(0, 250)
+            .Select(index => new
+            {
+                name = $"job-{index:D3}.gcode",
+                success = true,
+                timestamp = 1700000000 + index,
+            })
+            .ToArray();
+        (OctoPrintClient client, _, List<HttpRequestMessage> recorded) =
+            CreateClient(request =>
+            {
+                int start = ReadQueryInt(request, "start");
+                int limit = ReadQueryInt(request, "limit");
+                return Json(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(Math.Min(limit, 100)),
+                });
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 100,
+            start: 0,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        history.Should().NotBeNull();
+        history!.Count.Should().Be(250);
+        history.Jobs.Should().HaveCount(100);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        recorded.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ProviderCap100_Request10000_ReturnsAll1000()
+    {
+        var entries = Enumerable.Range(0, 1000)
+            .Select(index => new
+            {
+                name = $"seed-{index:D4}.gcode",
+                success = true,
+                timestamp = 1700000000 + index,
+            })
+            .ToArray();
+        (OctoPrintClient client, _, List<HttpRequestMessage> recorded) =
+            CreateClient(request =>
+            {
+                int start = ReadQueryInt(request, "start");
+                int limit = ReadQueryInt(request, "limit");
+                return Json(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(Math.Min(limit, 100)),
+                });
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 10000,
+            start: 0,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().HaveCount(1000);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+        recorded.Should().HaveCount(10);
+    }
+
+    [Fact]
+    public async Task UploadAndStartPrintAsync_PostSendIOException_SendsOnceAndReturnsUnknown()
+    {
+        int requestCount = 0;
+        using var handler = new AsyncMessageHandler(async (request, ct) =>
+        {
+            requestCount++;
+            _ = await request.Content!.ReadAsByteArrayAsync(ct);
+            throw new HttpRequestException(
+                "Connection reset after request body was sent.",
+                new IOException("response lost"));
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        await using var content = new MemoryStream([1, 2, 3, 4]);
+
+        UploadAndPrintResult result = await client.UploadAndStartPrintAsync(
+            "http://octo",
+            "one-shot.gcode",
+            content,
+            new PrinterCredential { ApiKey = "key" });
+
+        result.Outcome.Should().Be(UploadAndPrintOutcome.Unknown);
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UploadFileAsync_TransientRetry_PreservesExactBodyAndContentType()
+    {
+        var requestBodies = new List<byte[]>();
+        var contentTypes = new List<string>();
+        using var handler = new AsyncMessageHandler(async (request, ct) =>
+        {
+            requestBodies.Add(await request.Content!.ReadAsByteArrayAsync(ct));
+            contentTypes.Add(request.Content.Headers.ContentType!.ToString());
+            if (requestBodies.Count == 1)
+            {
+                throw new HttpRequestException(
+                    "Connection reset.",
+                    new IOException("transient transport failure"));
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.Created);
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        byte[] fileBytes = [0, 1, 2, 127, 128, 254, 255];
+
+        bool uploaded = await client.UploadFileAsync(
+            "http://octo",
+            new PrinterCredential { ApiKey = "key" },
+            fileBytes,
+            "retry.gcode",
+            startPrint: false);
+
+        uploaded.Should().BeTrue();
+        requestBodies.Should().HaveCount(2);
+        requestBodies[1].Should().Equal(requestBodies[0]);
+        contentTypes.Should().HaveCount(2);
+        contentTypes[1].Should().Be(contentTypes[0]);
+        contentTypes[0].Should().StartWith("multipart/form-data; boundary=");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task UploadAndStartPrintAsync_Explicit4xx_IsFailedBeforeStart(
+        HttpStatusCode statusCode)
+    {
+        using var handler = new AsyncMessageHandler(
+            (_, _) => Task.FromResult(new HttpResponseMessage(statusCode)));
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        await using var content = new MemoryStream([1, 2, 3]);
+
+        UploadAndPrintResult result = await client.UploadAndStartPrintAsync(
+            "http://octo",
+            "rejected.gcode",
+            content,
+            new PrinterCredential { ApiKey = "key" });
+
+        result.Outcome.Should().Be(UploadAndPrintOutcome.FailedBeforeStart);
+    }
+
+    private static int ReadQueryInt(HttpRequestMessage request, string name)
+    {
+        string value = request.RequestUri!.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .Single(parts => string.Equals(parts[0], name, StringComparison.Ordinal))[1];
+        return int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private sealed class AsyncMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            send(request, cancellationToken);
     }
 }

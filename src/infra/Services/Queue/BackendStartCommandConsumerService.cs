@@ -22,7 +22,7 @@ namespace Farm.Infrastructure.Services.Queue;
 ///         <see cref="QueueOutboxEventStatus.Processing"/>, recovered on restart.</item>
 ///   <item>Applies exponential back-off retries up to <see cref="MaxAttempts"/> before
 ///         dead-lettering.</item>
-///   <item>On startup, resets stale <see cref="QueueOutboxEventStatus.Processing"/> events
+///   <item>On every poll, resets stale <see cref="QueueOutboxEventStatus.Processing"/> events
 ///         older than <see cref="StaleLeaseAge"/> back to
 ///         <see cref="QueueOutboxEventStatus.Pending"/> for re-execution.</item>
 /// </list>
@@ -55,9 +55,6 @@ public sealed class BackendStartCommandConsumerService(
     {
         logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer started");
 
-        // Recover any stale Processing events from a previous crashed process.
-        await RecoverStaleLeasesAsync(stoppingToken);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
@@ -80,11 +77,11 @@ public sealed class BackendStartCommandConsumerService(
     }
 
     /// <summary>
-    /// On startup, reset any <see cref="QueueOutboxEventStatus.Processing"/> events that are
+    /// On every poll, reset any <see cref="QueueOutboxEventStatus.Processing"/> events that are
     /// older than <see cref="StaleLeaseAge"/>. These were claimed by a process that crashed
     /// mid-execution and must be retried.
     /// </summary>
-    private async Task RecoverStaleLeasesAsync(CancellationToken ct)
+    internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
     {
         try
         {
@@ -114,7 +111,7 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     evt.Status = QueueOutboxEventStatus.Pending;
                     evt.LastError = "Recovered from stale lease (previous process crash).";
-                    evt.RetryAfterUtc = DateTime.UtcNow; // Retry immediately on recovery.
+                    evt.RetryAfterUtc = DateTime.UtcNow + PollInterval;
 
                     logger.LogWarning(
                         "[BackendStartConsumer] Stale lease recovered: EventId={EventId} Job={JobId} AttemptCount={Count}",
@@ -128,12 +125,13 @@ public sealed class BackendStartCommandConsumerService(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[BackendStartConsumer] Error recovering stale leases on startup");
+            logger.LogError(ex, "[BackendStartConsumer] Error recovering stale leases");
         }
     }
 
     internal async Task ProcessPendingCommandsAsync(CancellationToken ct)
     {
+        await RecoverStaleLeasesAsync(ct);
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 

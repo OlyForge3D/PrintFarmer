@@ -47,9 +47,19 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         int? limit = null,
         int? start = null,
         DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
         PrinterCredential? credential = null,
         CancellationToken ct = default)
-        => await _apiClient.GetHistoryListAsync(baseUrl, limit, start, since, credential, ct);
+        => await _apiClient.GetHistoryListAsync(
+            baseUrl,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            credential,
+            ct);
 
     public async Task<HistoryJob?> GetHistoryJobAsync(
         string baseUrl,
@@ -408,6 +418,17 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
 
             progress?.Report(UploadAndPrintStage.Completed);
             return UploadAndPrintResult.Ok();
+        }
+        catch (PrusaLinkCommandRejectedException ex)
+        {
+            _logger?.LogWarning(
+                "PrusaLink explicitly rejected upload-and-start for {FileName}: HTTP {StatusCode}",
+                fileName,
+                (int)ex.StatusCode);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.StartingPrint,
+                ex.Message);
         }
         catch (Exception ex)
         {

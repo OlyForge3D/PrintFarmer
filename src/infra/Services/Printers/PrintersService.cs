@@ -235,6 +235,9 @@ public class PrintersService(
                 new InvalidOperationException("Printer history is currently unavailable."),
             _ when probe.FailureCode == "printer_not_found" =>
                 new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ when probe.FailureCode == "history_completeness_unproven" =>
+                new HistoryAuthorityException(
+                    "The printer backend could not prove the requested history range."),
             _ => new InvalidOperationException("Printer history could not be queried."),
         };
     }
@@ -274,6 +277,8 @@ public class PrintersService(
                 limit,
                 start,
                 since,
+                before,
+                order,
                 printer.Credential,
                 ct).ConfigureAwait(false);
             if (response is null)
@@ -285,7 +290,7 @@ public class PrintersService(
                 return HistoryListProbeResult.Unavailable();
             }
 
-            if (response.AuthorityEvidence?.ProvesCompleteSource != true)
+            if (response.AuthorityEvidence?.ProvesRequestedRange != true)
             {
                 _logger.LogWarning(
                     "[History] Backend {Backend} did not prove complete history coverage for printer {PrinterId}",
@@ -526,7 +531,15 @@ public class PrintersService(
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.Credential, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(
+                    printer.BackendUrl,
+                    limit: 10000,
+                    start: 0,
+                    since: null,
+                    before: null,
+                    order: null,
+                    credential: printer.Credential,
+                    ct: ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);

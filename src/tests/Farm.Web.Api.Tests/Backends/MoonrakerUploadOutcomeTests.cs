@@ -137,11 +137,7 @@ public sealed class MoonrakerUploadOutcomeTests
     [Theory]
     [InlineData("""{"result":{}}""")]
     [InlineData("""{"result":{"count":0}}""")]
-    [InlineData("""{"result":{"count":1,"jobs":[]}}""")]
-    [InlineData("""{"result":{"count":1,"jobs":[{"filename":"a.gcode","status":"completed"}]}}""")]
-    [InlineData("""{"result":{"count":1,"jobs":[{"job_id":"uid-1","status":"completed"}]}}""")]
-    [InlineData("""{"result":{"count":1,"jobs":[{"job_id":"uid-1","filename":"a.gcode"}]}}""")]
-    public async Task GetHistoryListAsync_IncompleteSourcePayload_IsUnavailable(
+    public async Task GetHistoryListAsync_IncompleteSourceEnvelope_IsUnavailable(
         string payload)
     {
         using var handler = new InlineHandler(_ =>
@@ -172,7 +168,7 @@ public sealed class MoonrakerUploadOutcomeTests
             {
                 Content = new StringContent(
                     """
-                    {"result":{"count":1,"jobs":[{"job_id":"uid-1","filename":"a.gcode","status":"completed"}]}}
+                    {"result":{"count":1,"jobs":[{"job_id":"uid-1","filename":"a.gcode","status":"completed","start_time":1700000000}]}}
                     """,
                     Encoding.UTF8,
                     "application/json"),
@@ -194,11 +190,43 @@ public sealed class MoonrakerUploadOutcomeTests
     }
 
     [Fact]
+    public async Task GetHistoryListAsync_MalformedEntry_IsExcludedWithoutVoidingAuthority()
+    {
+        using var handler = new InlineHandler(_ =>
+            new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {"result":{"count":2,"jobs":[{"job_id":"bad","filename":"bad.gcode","status":"completed","start_time":"not-a-number"},{"job_id":"good","filename":"good.gcode","status":"completed","start_time":1700000000}]}}
+                    """,
+                    Encoding.UTF8,
+                    "application/json"),
+            });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://moonraker/",
+            limit: 2,
+            start: 0);
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle()
+            .Which.JobId.Should().Be("good");
+        history.ExaminedSourceEntries.Should().Be(2);
+        history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
+        history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task HistoryList_LowercaseAuxiliaryData_MatchesDetailContract()
     {
         const string job =
             """
-            {"job_id":"uid-aux","filename":"aux.gcode","status":"completed","auxiliary_data":[{"provider":"spoolman","name":"spool_id","value":"42","description":"Physical spool","units":"id"}]}
+            {"job_id":"uid-aux","filename":"aux.gcode","status":"completed","start_time":1700000000,"auxiliary_data":[{"provider":"spoolman","name":"spool_id","value":"42","description":"Physical spool","units":"id"}]}
             """;
         string listPayload = "{\"result\":{\"count\":1,\"jobs\":[" + job + "]}}";
         string detailPayload = "{\"result\":" + job + "}";

@@ -13,12 +13,16 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// True when the failure was caused by a caller-supplied revision precondition
 /// (<c>If-Match</c>) that no longer matches — maps to HTTP 412 rather than 409.
 /// </param>
+/// <param name="CurrentJobRowVersion">Current job revision on a precondition failure.</param>
+/// <param name="CurrentDispatchStateRowVersion">Current dispatch-state revision on a precondition failure.</param>
 public sealed record DispatchClaimResult(
     bool Success,
     QueueDispatchAttempt? Attempt,
     string? ErrorCode,
     string? ErrorDetail,
-    bool IsPreconditionFailure = false)
+    bool IsPreconditionFailure = false,
+    byte[]? CurrentJobRowVersion = null,
+    byte[]? CurrentDispatchStateRowVersion = null)
 {
     /// <summary>Creates a successful claim result.</summary>
     /// <param name="attempt">The persisted attempt row.</param>
@@ -36,9 +40,22 @@ public sealed record DispatchClaimResult(
     /// <summary>Creates a failed claim result caused by a stale caller-supplied revision.</summary>
     /// <param name="errorCode">Typed error code.</param>
     /// <param name="errorDetail">Human-readable detail.</param>
+    /// <param name="currentJobRowVersion">Current job revision.</param>
+    /// <param name="currentDispatchStateRowVersion">Current dispatch-state revision.</param>
     /// <returns>A failed result flagged as a precondition failure.</returns>
-    public static DispatchClaimResult PreconditionFailed(string errorCode, string errorDetail) =>
-        new(false, null, errorCode, errorDetail, IsPreconditionFailure: true);
+    public static DispatchClaimResult PreconditionFailed(
+        string errorCode,
+        string errorDetail,
+        byte[]? currentJobRowVersion = null,
+        byte[]? currentDispatchStateRowVersion = null) =>
+        new(
+            false,
+            null,
+            errorCode,
+            errorDetail,
+            IsPreconditionFailure: true,
+            currentJobRowVersion?.ToArray(),
+            currentDispatchStateRowVersion?.ToArray());
 }
 
 /// <summary>

@@ -104,7 +104,9 @@ public sealed class DispatchClaimService(
         {
             return DispatchClaimResult.PreconditionFailed(
                 "job_revision_conflict",
-                "The job has changed since the request was prepared. Re-fetch the job ETag and retry.");
+                "The job has changed since the request was prepared. Re-fetch the job ETag and retry.",
+                job.RowVersion,
+                dispatchState.RowVersion);
         }
 
         if (request.ExpectedDispatchStateRowVersion is { Length: > 0 } &&
@@ -112,7 +114,9 @@ public sealed class DispatchClaimService(
         {
             return DispatchClaimResult.PreconditionFailed(
                 "dispatch_revision_conflict",
-                "The printer dispatch state has changed since the request was prepared. Re-fetch and retry.");
+                "The printer dispatch state has changed since the request was prepared. Re-fetch and retry.",
+                job.RowVersion,
+                dispatchState.RowVersion);
         }
 
         DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId);
@@ -462,9 +466,22 @@ public sealed class DispatchClaimService(
                 "Concurrency conflict acquiring dispatch claim for Job={JobId} Printer={PrinterId}",
                 request.JobId, request.PrinterId);
 
-            return DispatchClaimResult.Fail(
+            _db.ChangeTracker.Clear();
+            byte[]? currentJobRevision = await _db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == request.JobId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(ct);
+            byte[]? currentDispatchRevision = await _db.PrinterDispatchStates
+                .AsNoTracking()
+                .Where(candidate => candidate.PrinterId == request.PrinterId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(ct);
+            return DispatchClaimResult.PreconditionFailed(
                 "concurrency_conflict",
-                "A concurrent operation modified the job or dispatch state. Retry with the latest ETag.");
+                "A concurrent operation modified the job or dispatch state. Retry with the latest ETag.",
+                currentJobRevision,
+                currentDispatchRevision);
         }
 
         _logger.LogInformation(
@@ -695,6 +712,16 @@ public sealed class DispatchClaimService(
             _logger.LogWarning(
                 "Ignoring backend-call start for inactive attempt {AttemptId}.",
                 attemptId);
+            return false;
+        }
+
+        if (activeState.PhysicalControlCommandId.HasValue &&
+            activeState.PhysicalControlCommandId != attempt.Id)
+        {
+            _logger.LogWarning(
+                "Refusing backend-call start for attempt {AttemptId}; physical command {CommandId} owns the printer barrier.",
+                attemptId,
+                activeState.PhysicalControlCommandId);
             return false;
         }
 

@@ -138,10 +138,25 @@ public class JobDispatchService(
 
         if (ifMatchJobRowVersion is not null)
         {
-            QueueRevisionGuard.EnsureIfMatch(
-                ifMatchJobRowVersion,
-                job.RowVersion,
-                "scored job dispatch");
+            try
+            {
+                QueueRevisionGuard.EnsureIfMatch(
+                    ifMatchJobRowVersion,
+                    job.RowVersion,
+                    "scored job dispatch");
+            }
+            catch (QueueRevisionConflictException ex)
+            {
+                byte[]? dispatchStateRowVersion = await db.PrinterDispatchStates
+                    .AsNoTracking()
+                    .Where(state => state.PrinterId == printerId)
+                    .Select(state => state.RowVersion)
+                    .SingleOrDefaultAsync(ct);
+                throw new QueueRevisionConflictException(
+                    ex.Message,
+                    job.RowVersion,
+                    dispatchStateRowVersion);
+            }
         }
 
         if (printerScore is { Eliminated: true })

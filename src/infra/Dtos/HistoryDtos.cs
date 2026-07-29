@@ -18,6 +18,14 @@ public class HistoryListResponse
 
     [JsonIgnore]
     public HistoryListAuthorityEvidence? AuthorityEvidence { get; set; }
+
+    /// <summary>
+    /// Number of raw provider entries represented by this response before malformed rows
+    /// were excluded. Adapters use this to prove pagination without treating bad rows as
+    /// unseen rows.
+    /// </summary>
+    [JsonIgnore]
+    public int ExaminedSourceEntries { get; set; }
 }
 
 /// <summary>
@@ -28,12 +36,17 @@ public class HistoryListResponse
 /// <param name="ExaminedEntryCount">Number of source entries actually examined by the adapter.</param>
 /// <param name="StartsAtBeginning">Whether the examined range starts at the first source entry.</param>
 /// <param name="HasUnambiguousEnd">Whether provider semantics prove no unseen trailing page.</param>
+/// <param name="CoversRequestedRange">
+/// Whether the adapter proved the exact requested page or temporal window, even when the
+/// provider has additional rows outside that request.
+/// </param>
 public sealed record HistoryListAuthorityEvidence(
     string Provider,
     int SourceEntryCount,
     int ExaminedEntryCount,
     bool StartsAtBeginning,
-    bool HasUnambiguousEnd)
+    bool HasUnambiguousEnd,
+    bool CoversRequestedRange = false)
 {
     /// <summary>Whether the evidence proves that the complete source range was examined.</summary>
     [JsonIgnore]
@@ -43,6 +56,14 @@ public sealed record HistoryListAuthorityEvidence(
         SourceEntryCount == ExaminedEntryCount &&
         StartsAtBeginning &&
         HasUnambiguousEnd;
+
+    /// <summary>Whether the evidence proves the caller's requested page or time window.</summary>
+    [JsonIgnore]
+    public bool ProvesRequestedRange =>
+        !string.IsNullOrWhiteSpace(Provider) &&
+        SourceEntryCount >= 0 &&
+        ExaminedEntryCount >= 0 &&
+        (CoversRequestedRange || ProvesCompleteSource);
 }
 
 /// <summary>

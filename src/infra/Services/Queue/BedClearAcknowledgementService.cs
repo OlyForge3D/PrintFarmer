@@ -306,9 +306,12 @@ public sealed class BedClearAcknowledgementService(
                 "Job is missing its G-code artifact.");
         }
 
-        // For calibration jobs, verify blocked-reason is clear.
+        // Mutable filament blocks are a revalidation cache. Immutable provenance and
+        // compatibility blocks remain hard failures until a new job is created.
         if (job.JobKind == JobKind.FilamentCalibration && job.BlockedReasonCode.HasValue &&
-            job.BlockedReasonCode != JobBlockedReasonCode.None)
+            job.BlockedReasonCode is not (
+                JobBlockedReasonCode.None or
+                JobBlockedReasonCode.FilamentCheckFailed))
         {
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.CalibrationJobIncompatible,
@@ -455,6 +458,12 @@ public sealed class BedClearAcknowledgementService(
                     "The exact pinned physical spool is absent, mismatched, or insufficient.",
                     ct);
             }
+        }
+
+        if (job.BlockedReasonCode == JobBlockedReasonCode.FilamentCheckFailed)
+        {
+            job.BlockedReasonCode = null;
+            job.BlockedReasonJson = null;
         }
 
         // =========================================================================
@@ -719,9 +728,21 @@ public sealed class BedClearAcknowledgementService(
                 "[BedClearAck] Concurrency conflict persisting bed-clear acknowledgement for Job={JobId}",
                 request.JobId);
 
+            _db.ChangeTracker.Clear();
+            byte[]? currentJobRevision = await _db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate => candidate.Id == request.JobId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(ct);
+            byte[]? currentDispatchRevision = await _db.PrinterDispatchStates
+                .AsNoTracking()
+                .Where(candidate => candidate.PrinterId == request.PrinterId)
+                .Select(candidate => candidate.RowVersion)
+                .SingleOrDefaultAsync(ct);
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.DispatchRevisionConflict,
-                null, null,
+                currentJobRevision,
+                currentDispatchRevision,
                 "A concurrent operation modified the dispatch state. Re-fetch and retry.");
         }
         catch (DbUpdateException)

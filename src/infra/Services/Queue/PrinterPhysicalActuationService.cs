@@ -367,7 +367,15 @@ public sealed class PrinterPhysicalActuationService(
 
         PrinterDispatchState? state = await _db.PrinterDispatchStates
             .SingleOrDefaultAsync(candidate => candidate.PrinterId == printerId, ct);
-        if (state is null || state.PhysicalControlCommandId.HasValue)
+        bool canQueueBehindStart =
+            state?.PhysicalControlCommandId.HasValue == true &&
+            string.Equals(
+                state.PhysicalControlOperation,
+                "start",
+                StringComparison.Ordinal) &&
+            operation is "cancel" or "abort" or "emergencystop";
+        if (state is null ||
+            (state.PhysicalControlCommandId.HasValue && !canQueueBehindStart))
         {
             PrinterActuationResultCode code = state is null
                 ? PrinterActuationResultCode.PrinterNotFound
@@ -471,6 +479,16 @@ public sealed class PrinterPhysicalActuationService(
             CreatedAtUtc = now,
         };
         _db.QueueDispatchOutbox.Add(command);
+        if (!state.PhysicalControlCommandId.HasValue)
+        {
+            state.PhysicalControlCommandId = commandId;
+            state.PhysicalControlAttemptId = attempt.Id;
+            state.PhysicalControlOperation = operation;
+            state.PhysicalControlActorSubject = actorSubject;
+            state.PhysicalControlStartedAtUtc = null;
+            state.PhysicalControlRequiresReconciliation = false;
+        }
+
         _ = QueueAuditWriter.Add(
             _db,
             actorSubject,

@@ -2,7 +2,9 @@
 // Copyright (c) OlyForge3D. All rights reserved.
 // </copyright>
 
+using System.Globalization;
 using System.Net;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -27,7 +29,12 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Controllers.Requests;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -360,6 +367,243 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.Conflict)]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_RealOctoPrintExplicit4xx_ReleasesAndRearms(
+        HttpStatusCode statusCode)
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-octoprint-rejection-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            DispatchClaimResult claim;
+            Printer printer;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(
+                    seed,
+                    withAck: true,
+                    backend: PrinterBackend.OctoPrint,
+                    credential: new PrinterCredential { ApiKey = "test-key" });
+                printer = await seed.Printers.SingleAsync(
+                    candidate => candidate.Id == fixture.PrinterId);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    file => file.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+                claim = await CreateClaim(
+                        seed,
+                        DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    .AcquireClaimAsync(new DispatchClaimRequest(
+                        fixture.JobId,
+                        fixture.PrinterId,
+                        "operator-1",
+                        "BedClear",
+                        fixture.AckKey,
+                        null,
+                        null));
+                claim.Success.Should().BeTrue(claim.ErrorDetail);
+                await seed.SaveChangesAsync();
+            }
+
+            using var handler = new HistoryAuthorityHandler(
+                _ => new HttpResponseMessage(statusCode));
+            using var http = new HttpClient(handler);
+            var adapter = new OctoPrintClient(
+                http,
+                NullLogger<OctoPrintClient>.Instance,
+                new BackendTimeoutSettings());
+            await using AppDbContext managementContext = CreateContext();
+            PrintersService printers = CreateConcreteUploadPrintersService(
+                managementContext,
+                printer,
+                adapter);
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+            DispatchClaimService claimService = CreateClaim(
+                managementContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            var management = new PrintJobManagementService(
+                new EfPrintJobManagementRepository(managementContext),
+                NullLogger<PrintJobManagementService>.Instance,
+                printers,
+                storage.Object,
+                CreateHubContext(),
+                Mock.Of<IStoredFileOperationsService>(),
+                Mock.Of<IPrinterStatusCacheReader>(),
+                dispatchClaimService: claimService,
+                appDbContext: managementContext,
+                outboxSequenceAllocator: new DbOutboxSequenceAllocator());
+            ServiceProvider provider = new ServiceCollection()
+                .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+                .AddSingleton<IPrintJobManagementService>(management)
+                .BuildServiceProvider();
+            await using (provider)
+            {
+                var consumer = new BackendStartCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendStartCommandConsumerService>.Instance);
+                await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+            }
+
+            await using AppDbContext verify = CreateContext();
+            QueueDispatchAttempt attempt = await verify.QueueDispatchAttempts
+                .SingleAsync(candidate => candidate.Id == claim.Attempt!.Id);
+            PrintJob job = await verify.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+            BedClearCommandRecord firstAcknowledgement =
+                await verify.BedClearCommandRecords.SingleAsync(
+                    candidate => candidate.DispatchAttemptId == attempt.Id);
+            attempt.Outcome.Should().Be(DispatchAttemptOutcome.FailedBeforeStart);
+            attempt.RequiresReconciliation.Should().BeFalse();
+            job.Status.Should().Be(PrintJobStatus.Assigned);
+            state.ActiveDispatchAttemptId.Should().BeNull();
+            firstAcknowledgement.Status.Should().Be(BedClearCommandStatus.Rejected);
+            handler.RequestPaths.Should().ContainSingle("/api/files/local");
+
+            var acknowledgement = new BedClearAcknowledgementService(
+                verify,
+                new DbOutboxSequenceAllocator(),
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId),
+                NullLogger<BedClearAcknowledgementService>.Instance,
+                DispatchTestDoubles.TelemetryFreshnessPolicy(),
+                DispatchTestDoubles.ValidByteIntegrityVerifier());
+            AcknowledgeBedClearResult retry = await acknowledgement.AcknowledgeAsync(
+                new AcknowledgeBedClearRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-2",
+                    $"retry-{(int)statusCode}",
+                    state.RowVersion,
+                    printer.ConfigurationRevision,
+                    job.RowVersion));
+            retry.Outcome.Should().Be(BedClearAckOutcome.Accepted, retry.ErrorDetail);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_RealOctoPrintPostSendLoss_SendsOnceAndRetainsFences()
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-octoprint-response-loss-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            DispatchClaimResult claim;
+            Printer printer;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(
+                    seed,
+                    withAck: true,
+                    backend: PrinterBackend.OctoPrint,
+                    credential: new PrinterCredential { ApiKey = "test-key" });
+                printer = await seed.Printers.SingleAsync(
+                    candidate => candidate.Id == fixture.PrinterId);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    file => file.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+                claim = await CreateClaim(
+                        seed,
+                        DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    .AcquireClaimAsync(new DispatchClaimRequest(
+                        fixture.JobId,
+                        fixture.PrinterId,
+                        "operator-1",
+                        "BedClear",
+                        fixture.AckKey,
+                        null,
+                        null));
+                claim.Success.Should().BeTrue(claim.ErrorDetail);
+                await seed.SaveChangesAsync();
+            }
+
+            int requestCount = 0;
+            using var handler = new AsyncMessageHandler(async (request, ct) =>
+            {
+                requestCount++;
+                _ = await request.Content!.ReadAsByteArrayAsync(ct);
+                throw new HttpRequestException(
+                    "Connection reset after request body was sent.",
+                    new IOException("response lost"));
+            });
+            using var http = new HttpClient(handler);
+            var adapter = new OctoPrintClient(
+                http,
+                NullLogger<OctoPrintClient>.Instance,
+                new BackendTimeoutSettings());
+            await using AppDbContext managementContext = CreateContext();
+            PrintersService printers = CreateConcreteUploadPrintersService(
+                managementContext,
+                printer,
+                adapter);
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+            DispatchClaimService claimService = CreateClaim(
+                managementContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            var management = new PrintJobManagementService(
+                new EfPrintJobManagementRepository(managementContext),
+                NullLogger<PrintJobManagementService>.Instance,
+                printers,
+                storage.Object,
+                CreateHubContext(),
+                Mock.Of<IStoredFileOperationsService>(),
+                Mock.Of<IPrinterStatusCacheReader>(),
+                dispatchClaimService: claimService,
+                appDbContext: managementContext,
+                outboxSequenceAllocator: new DbOutboxSequenceAllocator());
+            ServiceProvider provider = new ServiceCollection()
+                .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+                .AddSingleton<IPrintJobManagementService>(management)
+                .BuildServiceProvider();
+            await using (provider)
+            {
+                var consumer = new BackendStartCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendStartCommandConsumerService>.Instance);
+                await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+            }
+
+            requestCount.Should().Be(1);
+            await AssertIndeterminateFencesAsync(fixture, claim.Attempt!.Id);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
     [Fact]
     [Trait("Category", "DbHeavy")]
     public async Task Cancel_DurableConsumer_BackendAcceptedTransitionsAndReleasesLeaseAtomically()
@@ -454,6 +698,196 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         (await verify.QueueDispatchOutbox.AnyAsync(candidate =>
             candidate.EventType == QueueLifecycleEventWriter.EventTypeJobCancelled))
             .Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Category", "DbHeavy")]
+    public async Task Cancel_DuringStart_BothBarrierOrderings_AreAcceptedAndHonoredExactlyOnce(
+        bool startOwnsBarrierFirst)
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-cancel-start-race-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(seed, withAck: true);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    candidate => candidate.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+                DispatchClaimResult claim = await CreateClaim(
+                        seed,
+                        DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    .AcquireClaimAsync(new DispatchClaimRequest(
+                        fixture.JobId,
+                        fixture.PrinterId,
+                        "operator-1",
+                        "BedClear",
+                        fixture.AckKey,
+                        null,
+                        null));
+                claim.Success.Should().BeTrue(claim.ErrorDetail);
+            }
+
+            var backendEntered = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseBackend = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var printers = new Mock<IPrintersService>();
+            printers.Setup(service => service.UploadAndStartPrintAsync(
+                    fixture.PrinterId,
+                    It.IsAny<string>(),
+                    It.IsAny<Stream>(),
+                    It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    backendEntered.TrySetResult(true);
+                    await releaseBackend.Task;
+                    return UploadAndPrintResult.Ok("cancel-race-start");
+                });
+            printers.Setup(service => service.ExecuteControlAsync(
+                    fixture.PrinterId,
+                    BackendControlOperation.Cancel,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(BackendControlOutcome.Accepted());
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+
+            ServiceProvider provider = new ServiceCollection()
+                .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+                .AddScoped<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>()
+                .AddSingleton(printers.Object)
+                .AddScoped<IPrintJobManagementService>(services =>
+                    CreateManagementService(
+                        services.GetRequiredService<AppDbContext>(),
+                        printers.Object,
+                        storage.Object))
+                .BuildServiceProvider();
+            await using (provider)
+            {
+                var startConsumer = new BackendStartCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendStartCommandConsumerService>.Instance);
+                var controlConsumer = new BackendControlCommandConsumerService(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    NullLogger<BackendControlCommandConsumerService>.Instance);
+
+                async Task<IActionResult> EnqueueCancellationAsync()
+                {
+                    await using AppDbContext cancelContext = CreateContext();
+                    PrintJob current = await cancelContext.PrintJobs.SingleAsync(
+                        candidate => candidate.Id == fixture.JobId);
+                    PrintJobManagementService management = CreateManagementService(
+                        cancelContext,
+                        printers.Object,
+                        storage.Object);
+                    JobQueueController controller = CreateJobQueueController(
+                        management,
+                        Mock.Of<IBedClearAcknowledgementService>(),
+                        cancelContext);
+                    controller.Request.Headers.IfMatch =
+                        $"\"{Convert.ToBase64String(current.RowVersion!)}\"";
+                    return await controller.CancelJobAsync(fixture.JobId);
+                }
+
+                if (startOwnsBarrierFirst)
+                {
+                    Task startPoll = startConsumer.ProcessPendingCommandsAsync(
+                        CancellationToken.None);
+                    await backendEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+                    IActionResult cancel = await EnqueueCancellationAsync();
+                    cancel.Should().BeOfType<AcceptedResult>();
+
+                    await controlConsumer.ProcessPendingAsync(CancellationToken.None);
+                    await using (AppDbContext pendingVerify = CreateContext())
+                    {
+                        QueueDispatchOutbox pending =
+                            await pendingVerify.QueueDispatchOutbox.SingleAsync(
+                                candidate => candidate.EventType ==
+                                    BackendControlCommandConsumerService.EventType);
+                        pending.Status.Should().Be(QueueOutboxEventStatus.Pending);
+                        pending.FailureCode.Should().Be("physical_control_fence_conflict");
+                        pending.RetryAfterUtc.Should().BeAfter(DateTime.UtcNow);
+                    }
+
+                    releaseBackend.TrySetResult(true);
+                    await startPoll;
+                    await using (AppDbContext retryContext = CreateContext())
+                    {
+                        QueueDispatchOutbox retry =
+                            await retryContext.QueueDispatchOutbox.SingleAsync(
+                                candidate => candidate.EventType ==
+                                    BackendControlCommandConsumerService.EventType);
+                        retry.RetryAfterUtc = DateTime.UtcNow.AddSeconds(-1);
+                        await retryContext.SaveChangesAsync();
+                    }
+
+                    await controlConsumer.ProcessPendingAsync(CancellationToken.None);
+                }
+                else
+                {
+                    IActionResult cancel = await EnqueueCancellationAsync();
+                    cancel.Should().BeOfType<AcceptedResult>();
+                    await using (AppDbContext barrierVerify = CreateContext())
+                    {
+                        QueueDispatchOutbox cancellation =
+                            await barrierVerify.QueueDispatchOutbox.SingleAsync(
+                                candidate => candidate.EventType ==
+                                    BackendControlCommandConsumerService.EventType);
+                        PrinterDispatchState state =
+                            await barrierVerify.PrinterDispatchStates.SingleAsync(
+                                candidate => candidate.PrinterId == fixture.PrinterId);
+                        state.PhysicalControlCommandId.Should().Be(cancellation.Id);
+                        state.PhysicalControlOperation.Should().Be("cancel");
+                    }
+
+                    await startConsumer.ProcessPendingCommandsAsync(CancellationToken.None);
+                    await controlConsumer.ProcessPendingAsync(CancellationToken.None);
+                }
+            }
+
+            printers.Verify(service => service.ExecuteControlAsync(
+                fixture.PrinterId,
+                BackendControlOperation.Cancel,
+                It.IsAny<CancellationToken>()), Times.Once);
+            printers.Verify(service => service.UploadAndStartPrintAsync(
+                fixture.PrinterId,
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                It.IsAny<CancellationToken>()), startOwnsBarrierFirst ? Times.Once() : Times.Never());
+
+            await using AppDbContext verify = CreateContext();
+            PrintJob job = await verify.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+                candidate => candidate.EventType ==
+                    BackendControlCommandConsumerService.EventType);
+            job.Status.Should().Be(PrintJobStatus.Cancelled);
+            command.Status.Should().Be(QueueOutboxEventStatus.Published);
+            (await verify.QueueDispatchOutbox.CountAsync(candidate =>
+                candidate.EventType == QueueLifecycleEventWriter.EventTypeJobCancelled))
+                .Should().Be(1);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -828,6 +1262,266 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             attempt.PrintJobId == fixture.JobId)).Should().Be(0);
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task DispatchRoute_TwoMatchingIfMatchRequests_LoserReturns412WithBothEtags()
+    {
+        string storageRoot = Path.Combine(
+            AppContext.BaseDirectory,
+            $"queue-dispatch-etag-race-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            byte[] initialJobRevision;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedStandardJobAsync(seed);
+                PrintJob job = await seed.PrintJobs.SingleAsync(
+                    candidate => candidate.Id == fixture.JobId);
+                initialJobRevision = job.RowVersion!.ToArray();
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    candidate => candidate.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+            }
+
+            var backendEntered = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var releaseBackend = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var printers = new Mock<IPrintersService>();
+            printers.Setup(service => service.UploadAndStartPrintAsync(
+                    fixture.PrinterId,
+                    It.IsAny<string>(),
+                    It.IsAny<Stream>(),
+                    It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    backendEntered.TrySetResult(true);
+                    await releaseBackend.Task;
+                    return UploadAndPrintResult.Ok("dispatch-etag-winner");
+                });
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+
+            await using AppDbContext firstContext = CreateContext();
+            await using AppDbContext secondContext = CreateContext();
+            PrintJobManagementService firstManagement = CreateManagementService(
+                firstContext,
+                printers.Object,
+                storage.Object,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            PrintJobManagementService secondManagement = CreateManagementService(
+                secondContext,
+                printers.Object,
+                storage.Object,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+            JobQueueController firstController = CreateJobQueueController(
+                firstManagement,
+                Mock.Of<IBedClearAcknowledgementService>(),
+                firstContext);
+            JobQueueController secondController = CreateJobQueueController(
+                secondManagement,
+                Mock.Of<IBedClearAcknowledgementService>(),
+                secondContext);
+            string initialEtag = Convert.ToBase64String(initialJobRevision);
+            firstController.Request.Headers.IfMatch = $"\"{initialEtag}\"";
+            secondController.Request.Headers.IfMatch = $"\"{initialEtag}\"";
+
+            Task<IActionResult> winnerTask =
+                firstController.DispatchJobAsync(fixture.JobId);
+            await backendEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            IActionResult loser = await secondController.DispatchJobAsync(fixture.JobId);
+
+            ObjectResult conflict = loser.Should().BeOfType<ObjectResult>().Subject;
+            conflict.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
+            string? jobEtag = ReadResponseProperty(conflict, "jobETag");
+            string? dispatchEtag = ReadResponseProperty(conflict, "dispatchStateETag");
+            jobEtag.Should().NotBeNullOrWhiteSpace();
+            dispatchEtag.Should().NotBeNullOrWhiteSpace();
+            await using (AppDbContext conflictState = CreateContext())
+            {
+                PrintJob currentJob = await conflictState.PrintJobs.SingleAsync(
+                    candidate => candidate.Id == fixture.JobId);
+                PrinterDispatchState currentDispatch =
+                    await conflictState.PrinterDispatchStates.SingleAsync(
+                        candidate => candidate.PrinterId == fixture.PrinterId);
+                jobEtag.Should().Be(Convert.ToBase64String(currentJob.RowVersion!));
+                dispatchEtag.Should().Be(
+                    Convert.ToBase64String(currentDispatch.RowVersion!));
+            }
+
+            releaseBackend.TrySetResult(true);
+            IActionResult winner = await winnerTask;
+            winner.Should().BeAssignableTo<ObjectResult>();
+            printers.Verify(service => service.UploadAndStartPrintAsync(
+                fixture.PrinterId,
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task DispatchToRoute_StaleIfMatch_Returns412WithBothCurrentEtags()
+    {
+        Fixture fixture;
+        byte[] staleJobRevision;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedStandardJobAsync(seed);
+            PrintJob job = await seed.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            staleJobRevision = job.RowVersion!.ToArray();
+            job.Priority = (int)PrintJobPriority.High;
+            job.UpdatedAt = DateTime.UtcNow;
+            await seed.SaveChangesAsync();
+        }
+
+        await using AppDbContext context = CreateContext();
+        PrintJob currentJob = await context.PrintJobs.AsNoTracking().SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState currentDispatch = await context.PrinterDispatchStates
+            .AsNoTracking()
+            .SingleAsync(candidate => candidate.PrinterId == fixture.PrinterId);
+        var scorer = new Mock<IDispatchScorer>();
+        scorer.Setup(service => service.ScorePrintersForJobAsync(
+                fixture.JobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new DispatchScore(
+                    fixture.PrinterId,
+                    "printer",
+                    100,
+                    [],
+                    Eliminated: false,
+                    []),
+            ]);
+        var dispatch = new JobDispatchService(
+            scorer.Object,
+            Mock.Of<IPrintJobManagementService>(),
+            Mock.Of<ISpoolmanService>(),
+            context,
+            NullLogger<JobDispatchService>.Instance);
+        JobQueueController controller = CreateJobQueueController(
+            Mock.Of<IPrintJobManagementService>(),
+            Mock.Of<IBedClearAcknowledgementService>(),
+            context,
+            dispatch);
+        controller.Request.Headers.IfMatch =
+            $"\"{Convert.ToBase64String(staleJobRevision)}\"";
+
+        IActionResult result = await controller.DispatchToAsync(
+            fixture.JobId,
+            new DispatchJobDto { PrinterId = fixture.PrinterId });
+
+        ObjectResult conflict = result.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
+        ReadResponseProperty(conflict, "jobETag").Should().Be(
+            Convert.ToBase64String(currentJob.RowVersion!));
+        ReadResponseProperty(conflict, "dispatchStateETag").Should().Be(
+            Convert.ToBase64String(currentDispatch.RowVersion!));
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task AcknowledgeAndStartRoute_TwoMatchingEtags_LoserReturns412WithBothEtags()
+    {
+        Fixture fixture;
+        byte[] initialJobRevision;
+        byte[] initialDispatchRevision;
+        long printerRevision;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: false);
+            PrintJob job = await seed.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            PrinterDispatchState state = await seed.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+            initialJobRevision = job.RowVersion!.ToArray();
+            initialDispatchRevision = state.RowVersion!.ToArray();
+            printerRevision = printer.ConfigurationRevision;
+        }
+
+        await using AppDbContext winnerContext = CreateContext();
+        await using AppDbContext loserContext = CreateContext();
+        _ = await winnerContext.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        _ = await winnerContext.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        _ = await loserContext.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        _ = await loserContext.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+
+        JobQueueController winnerController = CreateJobQueueController(
+            Mock.Of<IPrintJobManagementService>(),
+            CreateBedClearAcknowledgementService(winnerContext, fixture.PrinterId),
+            winnerContext);
+        JobQueueController loserController = CreateJobQueueController(
+            Mock.Of<IPrintJobManagementService>(),
+            CreateBedClearAcknowledgementService(loserContext, fixture.PrinterId),
+            loserContext);
+        SetAcknowledgementHeaders(
+            winnerController,
+            initialJobRevision,
+            initialDispatchRevision,
+            "ack-etag-winner");
+        SetAcknowledgementHeaders(
+            loserController,
+            initialJobRevision,
+            initialDispatchRevision,
+            "ack-etag-loser");
+        var request = new AcknowledgeBedClearRequestDto
+        {
+            PrinterId = fixture.PrinterId,
+            ExpectedPrinterConfigRevision = printerRevision,
+        };
+
+        IActionResult winner = await winnerController.AcknowledgeBedClearAndStartAsync(
+            fixture.JobId,
+            request,
+            CancellationToken.None);
+        IActionResult loser = await loserController.AcknowledgeBedClearAndStartAsync(
+            fixture.JobId,
+            request,
+            CancellationToken.None);
+
+        winner.Should().BeOfType<ObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status202Accepted);
+        ObjectResult conflict = loser.Should().BeOfType<ObjectResult>().Subject;
+        conflict.StatusCode.Should().Be(StatusCodes.Status412PreconditionFailed);
+        string? jobEtag = ReadResponseProperty(conflict, "jobETag");
+        string? dispatchEtag = ReadResponseProperty(conflict, "dispatchStateETag");
+        jobEtag.Should().NotBeNullOrWhiteSpace();
+        dispatchEtag.Should().NotBeNullOrWhiteSpace();
+        await using AppDbContext verify = CreateContext();
+        PrintJob currentJob = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState currentDispatch =
+            await verify.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
+        jobEtag.Should().Be(Convert.ToBase64String(currentJob.RowVersion!));
+        dispatchEtag.Should().Be(Convert.ToBase64String(currentDispatch.RowVersion!));
+        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+    }
+
     // =========================================================================
     // Hard filament gate
     // =========================================================================
@@ -871,66 +1565,165 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task FilamentGate_AfterSpoolCorrection_ClearsTransientBlockedReasonAtomically()
+    public async Task BedClearAcknowledgement_AfterSpoolCorrection_SucceedsAndClearsMutableBlock()
     {
-        await using AppDbContext seed = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        Fixture fixture;
+        Guid spoolId;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: false);
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            Spool spool = await seed.Spools.SingleAsync(
+                candidate => candidate.AssignedPrinterId == fixture.PrinterId);
+            spoolId = spool.Id;
+            printer.CurrentSpoolId = SpoolId + 1;
+            spool.InUse = false;
+            spool.AssignedPrinterId = null;
+            await seed.SaveChangesAsync();
+        }
 
-        Printer printer = await seed.Printers.SingleAsync(
-            candidate => candidate.Id == fixture.PrinterId);
-        Spool spool = await seed.Spools.SingleAsync(
-            candidate => candidate.AssignedPrinterId == fixture.PrinterId);
-        printer.CurrentSpoolId = SpoolId + 1;
-        spool.InUse = false;
-        spool.AssignedPrinterId = null;
-        await seed.SaveChangesAsync();
+        await using (AppDbContext blockedContext = CreateContext())
+        {
+            PrintJob job = await blockedContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            Printer printer = await blockedContext.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            PrinterDispatchState state =
+                await blockedContext.PrinterDispatchStates.SingleAsync(
+                    candidate => candidate.PrinterId == fixture.PrinterId);
+            BedClearAcknowledgementService acknowledgement =
+                CreateBedClearAcknowledgementService(blockedContext, fixture.PrinterId);
+            JobQueueController controller = CreateJobQueueController(
+                Mock.Of<IPrintJobManagementService>(),
+                acknowledgement,
+                blockedContext);
+            SetAcknowledgementHeaders(
+                controller,
+                job.RowVersion!,
+                state.RowVersion!,
+                "filament-blocked");
 
-        DispatchClaimResult blocked = await CreateClaim(
-                seed,
-                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
-            .AcquireClaimAsync(new DispatchClaimRequest(
+            IActionResult first = await controller.AcknowledgeBedClearAndStartAsync(
                 fixture.JobId,
-                fixture.PrinterId,
-                "operator-1",
-                "Manual",
-                fixture.AckKey,
-                null,
-                null));
-        blocked.ErrorCode.Should().Be("filament_spool_mismatch");
+                new AcknowledgeBedClearRequestDto
+                {
+                    PrinterId = fixture.PrinterId,
+                    ExpectedPrinterConfigRevision = printer.ConfigurationRevision,
+                },
+                CancellationToken.None);
 
-        seed.ChangeTracker.Clear();
-        printer = await seed.Printers.SingleAsync(
-            candidate => candidate.Id == fixture.PrinterId);
-        spool = await seed.Spools.SingleAsync(candidate => candidate.Id == spool.Id);
-        PrintJob job = await seed.PrintJobs.SingleAsync(
-            candidate => candidate.Id == fixture.JobId);
-        PrinterDispatchState state = await seed.PrinterDispatchStates.SingleAsync(
-            candidate => candidate.PrinterId == fixture.PrinterId);
-        printer.CurrentSpoolId = SpoolId;
-        spool.InUse = true;
-        spool.AssignedPrinterId = fixture.PrinterId;
-        state.AcknowledgedJobRowVersion = job.RowVersion;
-        await seed.SaveChangesAsync();
+            ObjectResult response = first.Should().BeAssignableTo<ObjectResult>().Subject;
+            response.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        }
 
-        DispatchClaimResult accepted = await CreateClaim(
-                seed,
-                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
-            .AcquireClaimAsync(new DispatchClaimRequest(
+        await using (AppDbContext blockedVerify = CreateContext())
+        {
+            PrintJob blockedJob = await blockedVerify.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            PrinterDispatchState blockedState =
+                await blockedVerify.PrinterDispatchStates.SingleAsync(
+                    candidate => candidate.PrinterId == fixture.PrinterId);
+            blockedJob.BlockedReasonCode.Should().Be(JobBlockedReasonCode.FilamentCheckFailed);
+            blockedState.AcknowledgedJobId.Should().BeNull();
+            (await blockedVerify.BedClearCommandRecords.CountAsync()).Should().Be(0);
+        }
+
+        await using (AppDbContext correction = CreateContext())
+        {
+            Printer printer = await correction.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            Spool spool = await correction.Spools.SingleAsync(
+                candidate => candidate.Id == spoolId);
+            printer.CurrentSpoolId = SpoolId;
+            spool.InUse = true;
+            spool.AssignedPrinterId = fixture.PrinterId;
+            await correction.SaveChangesAsync();
+        }
+
+        await using (AppDbContext correctedContext = CreateContext())
+        {
+            PrintJob job = await correctedContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            Printer printer = await correctedContext.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            PrinterDispatchState state =
+                await correctedContext.PrinterDispatchStates.SingleAsync(
+                    candidate => candidate.PrinterId == fixture.PrinterId);
+            BedClearAcknowledgementService acknowledgement =
+                CreateBedClearAcknowledgementService(correctedContext, fixture.PrinterId);
+            JobQueueController controller = CreateJobQueueController(
+                Mock.Of<IPrintJobManagementService>(),
+                acknowledgement,
+                correctedContext);
+            SetAcknowledgementHeaders(
+                controller,
+                job.RowVersion!,
+                state.RowVersion!,
+                "filament-corrected");
+
+            IActionResult second = await controller.AcknowledgeBedClearAndStartAsync(
                 fixture.JobId,
-                fixture.PrinterId,
-                "operator-1",
-                "Manual",
-                fixture.AckKey,
-                null,
-                null));
-        accepted.Success.Should().BeTrue(accepted.ErrorDetail);
+                new AcknowledgeBedClearRequestDto
+                {
+                    PrinterId = fixture.PrinterId,
+                    ExpectedPrinterConfigRevision = printer.ConfigurationRevision,
+                },
+                CancellationToken.None);
+
+            ObjectResult response = second.Should().BeAssignableTo<ObjectResult>().Subject;
+            response.StatusCode.Should().Be(StatusCodes.Status202Accepted);
+        }
 
         await using AppDbContext verify = CreateContext();
         PrintJob persisted = await verify.PrintJobs.SingleAsync(
             candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState persistedState =
+            await verify.PrinterDispatchStates.SingleAsync(
+                candidate => candidate.PrinterId == fixture.PrinterId);
         persisted.BlockedReasonCode.Should().BeNull();
         persisted.BlockedReasonJson.Should().BeNull();
-        persisted.Status.Should().Be(PrintJobStatus.Starting);
+        persistedState.AcknowledgedJobId.Should().Be(fixture.JobId);
+        (await verify.BedClearCommandRecords.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BedClearAcknowledgement_ImmutableProvenanceBlock_RemainsHardFailure()
+    {
+        await using AppDbContext context = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
+        PrintJob job = await context.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        Printer printer = await context.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        PrinterDispatchState state = await context.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        job.BlockedReasonCode = JobBlockedReasonCode.ContentHashMismatch;
+        job.BlockedReasonJson = """{"errorCode":"content_hash_mismatch"}""";
+        await context.SaveChangesAsync();
+
+        context.ChangeTracker.Clear();
+        job = await context.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
+        printer = await context.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        state = await context.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        BedClearAcknowledgementService acknowledgement =
+            CreateBedClearAcknowledgementService(context, fixture.PrinterId);
+        AcknowledgeBedClearResult result = await acknowledgement.AcknowledgeAsync(
+            new AcknowledgeBedClearRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator-1",
+                "immutable-block",
+                state.RowVersion,
+                printer.ConfigurationRevision,
+                job.RowVersion));
+
+        result.Outcome.Should().Be(BedClearAckOutcome.CalibrationJobIncompatible);
+        job.BlockedReasonCode.Should().Be(JobBlockedReasonCode.ContentHashMismatch);
+        (await context.BedClearCommandRecords.CountAsync()).Should().Be(0);
     }
 
     // =========================================================================
@@ -1276,6 +2069,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             It.IsAny<int?>(),
             It.IsAny<int?>(),
             It.IsAny<DateTime?>(),
+            It.IsAny<DateTime?>(),
+            It.IsAny<string?>(),
             It.IsAny<PrinterCredential?>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -1302,6 +2097,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 It.IsAny<int?>(),
                 It.IsAny<int?>(),
                 It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync((HistoryListResponse?)null);
@@ -1349,7 +2146,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_OctoPrintPartialListEntry_RetainsEveryFence()
+    public async Task Reconciler_OctoPrintMalformedOnlyPage_ProvesAbsenceAndReleasesLease()
     {
         const string backendJobId = "octoprint-malformed-list";
         (Fixture fixture, Guid attemptId) =
@@ -1376,16 +2173,15 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             serviceDb,
             printer,
             history);
-
         await RunReconciliationAsync(service);
 
-        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        await AssertAuthoritativeAbsenceReleasedAsync(fixture, attemptId);
         handler.RequestPaths.Should().Contain("/api/history");
     }
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_OctoPrintFullPageAmbiguity_RetainsEveryFence()
+    public async Task Reconciler_OctoPrintCompleteFullPage_ProvesAbsenceAndReleasesLease()
     {
         const string backendJobId = "octoprint-full-page";
         (Fixture fixture, Guid attemptId) =
@@ -1425,12 +2221,202 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await RunReconciliationAsync(service);
 
-        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        await AssertAuthoritativeAbsenceReleasedAsync(fixture, attemptId);
     }
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task Reconciler_PrusaLinkMissingStartTime_RetainsEveryFence()
+    public async Task Reconciler_OctoPrint250Rows_FindsTerminalIdentityAndReleasesLease()
+    {
+        const string backendJobId = "octoprint-terminal-match.gcode";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.OctoPrint);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        printer.Credential = new PrinterCredential { ApiKey = "test-api-key" };
+        long firstTimestamp = DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds();
+        var entries = Enumerable.Range(0, 250)
+            .Select(index => new
+            {
+                name = index == 249 ? backendJobId : $"history-{index:D3}.gcode",
+                success = true,
+                timestamp = firstTimestamp + index,
+                completionTime = firstTimestamp + index + 30,
+            })
+            .ToArray();
+        using var handler = new HistoryAuthorityHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains(
+                    backendJobId,
+                    StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return JsonResponse(JsonSerializer.Serialize(new
+            {
+                success = true,
+                count = entries.Length,
+                results = entries.Skip(start).Take(limit),
+            }));
+        });
+        using var http = new HttpClient(handler);
+        var history = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new BackendTimeoutSettings());
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+        await RunReconciliationAsync(service);
+
+        await AssertReconciledTerminalAsync(
+            fixture,
+            attemptId,
+            PrintJobStatus.Completed,
+            DispatchClaimService.EventTypeJobCompleted,
+            expectedFailureCode: null);
+        handler.RequestPaths.Count(path => path == "/api/history").Should().Be(3);
+    }
+
+    [Theory]
+    [InlineData(
+        "error",
+        PrintJobStatus.Failed,
+        "PrintFarmer.Queue.JobFailed.v1",
+        "reconciliation_failed")]
+    [InlineData(
+        "cancelled",
+        PrintJobStatus.Cancelled,
+        "PrintFarmer.Queue.JobCancelled.v1",
+        "reconciliation_cancelled")]
+    [InlineData(
+        "klippy_shutdown",
+        PrintJobStatus.Failed,
+        "PrintFarmer.Queue.JobFailed.v1",
+        "reconciliation_failed")]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_RealMoonrakerTerminalStatus_MapsLifecycleWithoutJobCompleted(
+        string historyStatus,
+        PrintJobStatus expectedStatus,
+        string expectedEventType,
+        string expectedFailureCode)
+    {
+        string backendJobId = $"moonraker-{historyStatus}";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.Moonraker);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        long startTimestamp = DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds();
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath == "/server/history/job"
+                ? JsonResponse(JsonSerializer.Serialize(new
+                {
+                    result = new
+                    {
+                        job_id = backendJobId,
+                        filename = "terminal-status.gcode",
+                        status = historyStatus,
+                        start_time = startTimestamp,
+                        end_time = startTimestamp + 30,
+                    },
+                }))
+                : throw new InvalidOperationException(
+                    "A found authoritative detail must not fall back to the list."));
+        using var http = new HttpClient(handler);
+        var history = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        HistoryJob? directHistory =
+            await ((ISupportsHistory)history).GetHistoryJobAsync(
+                printer.BackendUrl,
+                backendJobId,
+                printer.Credential,
+                CancellationToken.None);
+        directHistory.Should().NotBeNull();
+        directHistory!.JobId.Should().Be(backendJobId);
+        directHistory.Status.Should().Be(historyStatus);
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertReconciledTerminalAsync(
+            fixture,
+            attemptId,
+            expectedStatus,
+            expectedEventType,
+            expectedFailureCode);
+        handler.RequestPaths.Should().Equal(
+            "/server/history/job",
+            "/server/history/job");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_RealMoonrakerPreClaimIdentity_RetainsEveryFence()
+    {
+        const string backendJobId = "moonraker-old-identity";
+        (Fixture fixture, Guid attemptId) =
+            await SeedUnknownReconciliationAttemptAsync(
+                backendJobId,
+                PrinterBackend.Moonraker);
+        await using AppDbContext serviceDb = CreateContext();
+        Printer printer = await serviceDb.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        QueueDispatchAttempt seededAttempt =
+            await serviceDb.QueueDispatchAttempts.SingleAsync(
+                candidate => candidate.Id == attemptId);
+        long oldTimestamp = new DateTimeOffset(
+            DateTime.SpecifyKind(
+                seededAttempt.ClaimedAtUtc.AddHours(-1),
+                DateTimeKind.Utc)).ToUnixTimeSeconds();
+        using var handler = new HistoryAuthorityHandler(request =>
+            request.RequestUri!.AbsolutePath == "/server/history/job"
+                ? JsonResponse(JsonSerializer.Serialize(new
+                {
+                    result = new
+                    {
+                        job_id = backendJobId,
+                        filename = seededAttempt.BackendFileName,
+                        status = "completed",
+                        start_time = oldTimestamp,
+                        end_time = oldTimestamp + 30,
+                    },
+                }))
+                : throw new InvalidOperationException(
+                    "A found authoritative detail must not fall back to the list."));
+        using var http = new HttpClient(handler);
+        var history = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+        PrintersService service = CreateConcreteHistoryPrintersService(
+            serviceDb,
+            printer,
+            history);
+
+        await RunReconciliationAsync(service);
+
+        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        handler.RequestPaths.Should().Equal("/server/history/job");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_PrusaLinkMalformedOnlyPage_ProvesAbsenceAndReleasesLease()
     {
         const string backendJobId = "prusalink-missing-start";
         (Fixture fixture, Guid attemptId) =
@@ -1460,7 +2446,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await RunReconciliationAsync(service);
 
-        await AssertIndeterminateFencesAsync(fixture, attemptId);
+        await AssertAuthoritativeAbsenceReleasedAsync(fixture, attemptId);
     }
 
     [Fact]
@@ -3137,6 +4123,44 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<IStoragePathService>());
     }
 
+    private static PrintersService CreateConcreteUploadPrintersService(
+        AppDbContext db,
+        Printer printer,
+        ISupportsUploadAndPrint uploadClient)
+    {
+        var printersRepository = new Mock<IPrintersRepository>();
+        printersRepository.Setup(repository => repository.FindByIdAsync(
+                printer.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(printersRepository.Object);
+        var capabilityFactory = new Mock<IBackendCapabilityFactory>();
+        ISupportsUploadAndPrint? supported = uploadClient;
+        capabilityFactory.Setup(factory => factory.TryGetUploadAndPrintClientTyped(
+                (PrinterBackend)printer.Backend,
+                out supported))
+            .Returns(true);
+
+        return new PrintersService(
+            unitOfWork.Object,
+            db,
+            Mock.Of<IBackendClientFactory>(),
+            capabilityFactory.Object,
+            Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<PrintersService>.Instance,
+            Mock.Of<IPrinterStatusBroadcaster>(),
+            Mock.Of<IMultiPrinterStatusCoordinator>(),
+            Mock.Of<IPrinterStatusClientFactory>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(),
+            Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
+            Mock.Of<ISpoolmanService>(),
+            Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
+            Mock.Of<IStoragePathService>());
+    }
+
     private static HttpResponseMessage JsonResponse(string payload) =>
         new(HttpStatusCode.OK)
         {
@@ -3145,6 +4169,16 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 Encoding.UTF8,
                 "application/json"),
         };
+
+    private static int ReadQueryInt(HttpRequestMessage request, string name)
+    {
+        string value = request.RequestUri!.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .Single(parts => string.Equals(parts[0], name, StringComparison.Ordinal))[1];
+        return int.Parse(value, CultureInfo.InvariantCulture);
+    }
 
     private sealed class HistoryAuthorityHandler(
         Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
@@ -3158,6 +4192,92 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         {
             RequestPaths.Add(request.RequestUri!.AbsolutePath);
             return Task.FromResult(responseFactory(request));
+        }
+    }
+
+    private sealed class AsyncMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            send(request, cancellationToken);
+    }
+
+    private async Task AssertAuthoritativeAbsenceReleasedAsync(
+        Fixture fixture,
+        Guid attemptId)
+    {
+        await using AppDbContext db = CreateContext();
+        QueueDispatchAttempt attempt = await db.QueueDispatchAttempts.SingleAsync(
+            candidate => candidate.Id == attemptId);
+        PrintJob job = await db.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        BedClearCommandRecord acknowledgement =
+            await db.BedClearCommandRecords.SingleAsync(
+                candidate => candidate.DispatchAttemptId == attemptId);
+        QueueDispatchOutbox startCommand =
+            await db.QueueDispatchOutbox.SingleAsync(
+                candidate =>
+                    candidate.EventType ==
+                        BedClearAcknowledgementService.BackendStartCommandEventType &&
+                    candidate.AttemptId == attemptId);
+
+        attempt.Outcome.Should().Be(DispatchAttemptOutcome.FailedBeforeStart);
+        attempt.ErrorCode.Should().Be("reconciliation_absent");
+        attempt.RequiresReconciliation.Should().BeFalse();
+        attempt.BackendCallPhase.Should().Be(DispatchBackendCallPhase.Terminal);
+        job.Status.Should().Be(PrintJobStatus.Assigned);
+        state.ActiveJobId.Should().BeNull();
+        state.ActiveDispatchAttemptId.Should().BeNull();
+        acknowledgement.Status.Should().Be(BedClearCommandStatus.Rejected);
+        startCommand.Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+        startCommand.FailureCode.Should().Be("reconciliation_absent");
+        (await db.QueueDispatchOutbox.AnyAsync(candidate =>
+            candidate.EventType ==
+                DispatchClaimService.EventTypeReconciliationAbsent &&
+            candidate.AttemptId == attemptId)).Should().BeTrue();
+    }
+
+    private async Task AssertReconciledTerminalAsync(
+        Fixture fixture,
+        Guid attemptId,
+        PrintJobStatus expectedStatus,
+        string expectedEventType,
+        string? expectedFailureCode)
+    {
+        await using AppDbContext db = CreateContext();
+        QueueDispatchAttempt attempt = await db.QueueDispatchAttempts.SingleAsync(
+            candidate => candidate.Id == attemptId);
+        PrintJob job = await db.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync(
+            candidate => candidate.PrinterId == fixture.PrinterId);
+        BedClearCommandRecord acknowledgement =
+            await db.BedClearCommandRecords.SingleAsync(
+                candidate => candidate.DispatchAttemptId == attemptId);
+
+        attempt.Outcome.Should().Be(DispatchAttemptOutcome.Accepted);
+        attempt.RequiresReconciliation.Should().BeFalse();
+        attempt.BackendCallPhase.Should().Be(DispatchBackendCallPhase.Terminal);
+        attempt.ErrorCode.Should().Be(expectedFailureCode);
+        job.Status.Should().Be(expectedStatus);
+        state.ActiveJobId.Should().BeNull();
+        state.ActiveDispatchAttemptId.Should().BeNull();
+        acknowledgement.Status.Should().Be(BedClearCommandStatus.Accepted);
+        QueueDispatchOutbox terminalEvent = await db.QueueDispatchOutbox.SingleAsync(
+            candidate =>
+                candidate.EventType == expectedEventType &&
+                candidate.AttemptId == attemptId);
+        terminalEvent.FailureCode.Should().Be(expectedFailureCode);
+        if (expectedStatus != PrintJobStatus.Completed)
+        {
+            (await db.QueueDispatchOutbox.AnyAsync(candidate =>
+                candidate.EventType == DispatchClaimService.EventTypeJobCompleted &&
+                candidate.AttemptId == attemptId)).Should().BeFalse();
         }
     }
 
@@ -3259,7 +4379,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     private static PrintJobManagementService CreateManagementService(
         AppDbContext db,
         IPrintersService? printers = null,
-        IStoragePathService? storage = null) =>
+        IStoragePathService? storage = null,
+        IPrinterStatusSnapshotReader? statusReader = null) =>
         new(
             new EfPrintJobManagementRepository(db),
             NullLogger<PrintJobManagementService>.Instance,
@@ -3270,7 +4391,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<IPrinterStatusCacheReader>(),
             dispatchClaimService: CreateClaim(
                 db,
-                DispatchTestDoubles.NoTelemetryReader()),
+                statusReader ?? DispatchTestDoubles.NoTelemetryReader()),
             appDbContext: db,
             outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
             queuePositionAllocator: new QueuePositionAllocator(db));
@@ -3291,6 +4412,63 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         hub.SetupGet(value => value.Clients).Returns(clients.Object);
         return hub.Object;
     }
+
+    private static BedClearAcknowledgementService CreateBedClearAcknowledgementService(
+        AppDbContext db,
+        Guid printerId) =>
+        new(
+            db,
+            new DbOutboxSequenceAllocator(),
+            DispatchTestDoubles.OnlineIdleReader(printerId),
+            NullLogger<BedClearAcknowledgementService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
+            DispatchTestDoubles.ValidByteIntegrityVerifier());
+
+    private static JobQueueController CreateJobQueueController(
+        IPrintJobManagementService management,
+        IBedClearAcknowledgementService acknowledgement,
+        AppDbContext db,
+        IJobDispatchService? dispatch = null)
+    {
+        var controller = new JobQueueController(
+            Mock.Of<IJobQueueService>(),
+            management,
+            Mock.Of<IPrintJobCompletionService>(),
+            dispatch ?? Mock.Of<IJobDispatchService>(),
+            Mock.Of<IBatchDispatchService>(),
+            acknowledgement,
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<IPrintFarmerTelemetryService>(),
+            NullLogger<JobQueueController>.Instance,
+            db);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(
+                    new ClaimsIdentity(
+                        [new Claim(ClaimTypes.NameIdentifier, CalibrationOwnerId.ToString())],
+                        "test")),
+            },
+        };
+        return controller;
+    }
+
+    private static void SetAcknowledgementHeaders(
+        JobQueueController controller,
+        byte[] jobRowVersion,
+        byte[] dispatchStateRowVersion,
+        string idempotencyKey)
+    {
+        controller.Request.Headers.IfMatch =
+            $"\"{Convert.ToBase64String(jobRowVersion)}\"";
+        controller.Request.Headers["X-Dispatch-State-If-Match"] =
+            $"\"{Convert.ToBase64String(dispatchStateRowVersion)}\"";
+        controller.Request.Headers["Idempotency-Key"] = idempotencyKey;
+    }
+
+    private static string? ReadResponseProperty(ObjectResult response, string name) =>
+        response.Value?.GetType().GetProperty(name)?.GetValue(response.Value) as string;
 
     private AppDbContext CreateContext()
     {
@@ -3402,7 +4580,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         }
     }
 
-    private async Task<Fixture> SeedCalibrationArtifactOnlyAsync(AppDbContext db)
+    private async Task<Fixture> SeedCalibrationArtifactOnlyAsync(
+        AppDbContext db,
+        PrinterBackend? backend = null,
+        PrinterCredential? credential = null)
     {
         await db.Database.MigrateAsync();
 
@@ -3425,6 +4606,12 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         db.GcodeFiles.Add(gcode);
 
         Printer printer = BuildPrinter(mfr.Id, mdl.Id);
+        if (backend.HasValue)
+        {
+            printer.Backend = (int)backend.Value;
+            printer.Credential = credential;
+        }
+
         var toolhead = new Toolhead
         {
             Id = Guid.NewGuid(),
@@ -3542,9 +4729,47 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         return new Fixture(printer.Id, Guid.Empty, gcode.Id, string.Empty);
     }
 
-    private async Task<Fixture> SeedCalibrationAsync(AppDbContext db, bool withAck)
+    private async Task<Fixture> SeedStandardJobAsync(AppDbContext db)
     {
-        Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(db);
+        Fixture artifact = await SeedCalibrationArtifactOnlyAsync(db);
+        GcodeFile gcode = await db.GcodeFiles.SingleAsync(
+            candidate => candidate.Id == artifact.GcodeId);
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "standard-dispatch",
+            GcodeFileId = gcode.Id,
+            AssignedPrinterId = artifact.PrinterId,
+            CreatorSubject = CalibrationOwnerId.ToString(),
+            Status = PrintJobStatus.Assigned,
+            Priority = (int)PrintJobPriority.Normal,
+            QueuePosition = 1,
+            JobKind = JobKind.Standard,
+            Copies = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+        db.PrintJobs.Add(job);
+        db.QueuePositionStates.Add(new QueuePositionState
+        {
+            ScopeId = artifact.PrinterId,
+            NextPosition = job.QueuePosition,
+        });
+        await db.SaveChangesAsync();
+        return new Fixture(artifact.PrinterId, job.Id, artifact.GcodeId, string.Empty);
+    }
+
+    private async Task<Fixture> SeedCalibrationAsync(
+        AppDbContext db,
+        bool withAck,
+        PrinterBackend? backend = null,
+        PrinterCredential? credential = null)
+    {
+        Fixture baseFixture = await SeedCalibrationArtifactOnlyAsync(
+            db,
+            backend,
+            credential);
 
         GcodeFile gcode = await db.GcodeFiles.SingleAsync(g => g.Id == baseFixture.GcodeId);
         Printer printer = await db.Printers

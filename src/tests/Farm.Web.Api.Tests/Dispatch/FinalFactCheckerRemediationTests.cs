@@ -339,6 +339,10 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                             JobId = "provider-uid-123",
                             Filename = seededAttempt.BackendFileIdentity!,
                             Status = "completed",
+                            StartTime = new DateTimeOffset(
+                                DateTime.SpecifyKind(
+                                    seededAttempt.ClaimedAtUtc.AddSeconds(1),
+                                    DateTimeKind.Utc)).ToUnixTimeSeconds(),
                         },
                     ],
                 }));

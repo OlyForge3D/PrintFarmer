@@ -26,6 +26,8 @@ public sealed class BackendControlCommandConsumerService(
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ManualReviewAge = TimeSpan.FromHours(24);
+    private static readonly TimeSpan FenceConflictRetryDelay = TimeSpan.FromSeconds(5);
+    private const int MaxFenceConflictAttempts = 120;
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -156,11 +158,12 @@ public sealed class BackendControlCommandConsumerService(
             if (dispatchState.PhysicalControlCommandId.HasValue &&
                 dispatchState.PhysicalControlCommandId != command.Id)
             {
-                command.Status = QueueOutboxEventStatus.DeadLettered;
-                command.FailureCode = "physical_control_fence_conflict";
-                command.LastError = "Another physical command owns the printer barrier.";
-                command.CompletedAtUtc = DateTime.UtcNow;
-                await leaseDb.SaveChangesAsync(ct);
+                await DeferFenceConflictAsync(
+                    leaseDb,
+                    leaseScope.ServiceProvider.GetRequiredService<IDbOutboxSequenceAllocator>(),
+                    command,
+                    payload,
+                    ct);
                 return;
             }
 
@@ -234,6 +237,62 @@ public sealed class BackendControlCommandConsumerService(
         {
             await ApplyUnknownAsync(commandId, exception.Message, ct);
         }
+    }
+
+    private static async Task DeferFenceConflictAsync(
+        AppDbContext db,
+        IDbOutboxSequenceAllocator allocator,
+        QueueDispatchOutbox command,
+        BackendControlPayload payload,
+        CancellationToken ct)
+    {
+        DateTime now = DateTime.UtcNow;
+        command.AttemptCount++;
+        command.LastAttemptedAtUtc = now;
+        command.LastError = "Another physical command owns the printer barrier.";
+        if (command.AttemptCount < MaxFenceConflictAttempts &&
+            command.CreatedAtUtc > now - ManualReviewAge)
+        {
+            command.Status = QueueOutboxEventStatus.Pending;
+            command.FailureCode = "physical_control_fence_conflict";
+            command.RetryAfterUtc = now + FenceConflictRetryDelay;
+            await db.SaveChangesAsync(ct);
+            return;
+        }
+
+        command.Status = QueueOutboxEventStatus.DeadLettered;
+        command.FailureCode = "manual_control_reconciliation_required";
+        command.LastError =
+            "The cancellation could not acquire the printer barrier; manual reconciliation is required.";
+        command.CompletedAtUtc = now;
+        command.RetryAfterUtc = null;
+        PrintJob? job = await db.PrintJobs
+            .FirstOrDefaultAsync(candidate => candidate.Id == payload.JobId, ct);
+        if (job is not null)
+        {
+            await QueueLifecycleEventWriter.AddEventAsync(
+                db,
+                allocator,
+                QueueLifecycleEventWriter.EventTypeControlRejected,
+                job.Id,
+                payload.PrinterId,
+                payload.AttemptId,
+                job.RowVersion,
+                command.FailureCode,
+                JsonSerializer.Serialize(new
+                {
+                    jobId = job.Id,
+                    printerId = payload.PrinterId,
+                    attemptId = payload.AttemptId,
+                    operation = payload.Operation,
+                    failureCode = command.FailureCode,
+                }),
+                failureRetryable: false,
+                failureRequiresReconciliation: true,
+                ct: ct);
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task ApplyAcceptedAsync(

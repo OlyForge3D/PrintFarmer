@@ -446,7 +446,17 @@ public class JobQueueController(
 
         QueueRevisionConflictException rev => StatusCode(
             StatusCodes.Status412PreconditionFailed,
-            new { error = "revision_conflict", detail = rev.Message }),
+            new
+            {
+                error = "revision_conflict",
+                detail = rev.Message,
+                jobETag = rev.CurrentJobRowVersion is null
+                    ? null
+                    : Convert.ToBase64String(rev.CurrentJobRowVersion),
+                dispatchStateETag = rev.CurrentDispatchStateRowVersion is null
+                    ? null
+                    : Convert.ToBase64String(rev.CurrentDispatchStateRowVersion),
+            }),
 
         QueueSemanticConflictException sem => Conflict(
             new { error = "semantic_conflict", detail = sem.Message }),
@@ -1051,7 +1061,17 @@ public class JobQueueController(
 
                 BedClearAckOutcome.DispatchRevisionConflict => StatusCode(
                     StatusCodes.Status412PreconditionFailed,
-                    new { error = "dispatch_revision_conflict", detail = result.ErrorDetail }),
+                    new
+                    {
+                        error = "dispatch_revision_conflict",
+                        detail = result.ErrorDetail,
+                        jobETag = result.JobETag is null
+                            ? null
+                            : Convert.ToBase64String(result.JobETag),
+                        dispatchStateETag = result.DispatchStateETag is null
+                            ? null
+                            : Convert.ToBase64String(result.DispatchStateETag),
+                    }),
 
                 BedClearAckOutcome.PreconditionRequired => StatusCode(
                     StatusCodes.Status428PreconditionRequired,

@@ -123,7 +123,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Count.Should().Be(1);
@@ -157,7 +157,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -180,7 +180,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -203,7 +203,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -219,7 +219,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Count.Should().Be(0);
@@ -235,7 +235,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().BeNull();
     }
@@ -254,7 +254,7 @@ public sealed class SdcpClientParsingTests
             start: null,
             since: null,
             credential: null,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         result.Should().BeNull();
     }
@@ -284,37 +284,93 @@ public sealed class SdcpClientParsingTests
             start: null,
             since: null,
             credential: null,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         result.Should().BeNull();
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_PositiveCountWithFailedDetail_IsUnavailable()
+    public async Task GetHistoryListAsync_FailedDetail_IsExcludedAndNextValidEntryFillsRange()
     {
-        const string taskId = "task-incomplete";
-        string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds: [taskId]);
+        const string malformedTaskId = "task-incomplete";
+        const string validTaskId = "task-valid";
+        string idsResponse = BuildHistoryIdsResponse(
+            ack: 0,
+            taskIds: [malformedTaskId, validTaskId]);
         string failedDetail = BuildHistoryDetailResponse(
             ack: 1,
-            taskId,
+            malformedTaskId,
             "ignored.gcode",
             status: 0,
             startTime: 0,
             endTime: 0);
+        string validDetail = BuildHistoryDetailResponse(
+            ack: 0,
+            validTaskId,
+            "valid.gcode",
+            status: 1,
+            startTime: 1700000000,
+            endTime: 1700000100);
         await using var env = await CreateSdcpHistoryServer(
             idsResponse,
-            new Dictionary<string, string> { [taskId] = failedDetail });
+            new Dictionary<string, string>
+            {
+                [malformedTaskId] = failedDetail,
+                [validTaskId] = validDetail,
+            });
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
             env.BaseUrl,
-            limit: null,
-            start: null,
+            limit: 1,
+            start: 0,
             since: null,
             credential: null,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
-        result.Should().BeNull();
+        result.Should().NotBeNull();
+        result!.Count.Should().Be(2);
+        result.Jobs.Should().ContainSingle()
+            .Which.JobId.Should().Be(validTaskId);
+        result.ExaminedSourceEntries.Should().Be(2);
+        result.AuthorityEvidence!.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_Total500Limit100_ProvesRequestedRange()
+    {
+        string[] taskIds = Enumerable.Range(0, 500)
+            .Select(index => $"task-{index:D3}")
+            .ToArray();
+        string idsResponse = BuildHistoryIdsResponse(ack: 0, taskIds);
+        Dictionary<string, string> details = taskIds.ToDictionary(
+            taskId => taskId,
+            taskId => BuildHistoryDetailResponse(
+                ack: 0,
+                taskId,
+                $"{taskId}.gcode",
+                status: 1,
+                startTime: 1700000000 + int.Parse(
+                    taskId.AsSpan("task-".Length),
+                    System.Globalization.CultureInfo.InvariantCulture),
+                endTime: 1700001000));
+        await using var env = await CreateSdcpHistoryServer(idsResponse, details);
+
+        ISupportsHistory historyClient = env.Client;
+        HistoryListResponse? result = await historyClient.GetHistoryListAsync(
+            env.BaseUrl,
+            limit: 100,
+            start: 0,
+            since: null,
+            credential: null,
+            ct: CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Count.Should().Be(500);
+        result.Jobs.Should().HaveCount(100);
+        result.ExaminedSourceEntries.Should().Be(100);
+        result.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
+        result.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
     }
 
     [Fact]
@@ -386,7 +442,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Count.Should().Be(3);
@@ -412,7 +468,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -464,7 +520,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: null, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: null, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -493,7 +549,7 @@ public sealed class SdcpClientParsingTests
 
         ISupportsHistory historyClient = env.Client;
         HistoryListResponse? result = await historyClient.GetHistoryListAsync(
-            env.BaseUrl, limit: null, start: null, since: sinceDate, credential: null, CancellationToken.None);
+            env.BaseUrl, limit: null, start: null, since: sinceDate, credential: null, ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Jobs.Should().HaveCount(1);
@@ -512,7 +568,7 @@ public sealed class SdcpClientParsingTests
             start: null,
             since: null,
             credential: null,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         await action.Should().ThrowAsync<HttpRequestException>();
     }
@@ -529,9 +585,24 @@ public sealed class SdcpClientParsingTests
             start: null,
             since: null,
             credential: null,
-            CancellationToken.None);
+            ct: CancellationToken.None);
 
         await action.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task UploadAndStartPrintAsync_NonzeroStartAck_IsFailedBeforeStart()
+    {
+        await using SdcpTestEnvironment env = await CreateSdcpStartServer(startAck: 1);
+        await using var content = new MemoryStream(Encoding.UTF8.GetBytes("G28\n"));
+
+        UploadAndPrintResult result = await env.Client.UploadAndStartPrintAsync(
+            env.BaseUrl,
+            "calibration.gcode",
+            content);
+
+        result.Success.Should().BeFalse();
+        result.Outcome.Should().Be(UploadAndPrintOutcome.FailedBeforeStart);
     }
 
     // ==================== File Delete Tests (Cmd 259) ====================
@@ -773,6 +844,77 @@ public sealed class SdcpClientParsingTests
         return new SdcpTestEnvironment(app, client, baseUrl);
     }
 
+    private static async Task<SdcpTestEnvironment> CreateSdcpStartServer(int startAck)
+    {
+        int port = GetFreeTcpPort();
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development
+        });
+        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+
+        WebApplication app = builder.Build();
+        app.UseWebSockets();
+
+        app.Map("/websocket", async context =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = 400;
+                return;
+            }
+
+            using WebSocket ws = await context.WebSockets.AcceptWebSocketAsync();
+            byte[] requestBuffer = new byte[8192];
+            WebSocketReceiveResult received = await ws.ReceiveAsync(
+                requestBuffer,
+                context.RequestAborted);
+            using JsonDocument request = JsonDocument.Parse(
+                requestBuffer.AsMemory(0, received.Count));
+            int command = request.RootElement
+                .GetProperty("Data")
+                .GetProperty("Cmd")
+                .GetInt32();
+
+            string responsePayload = command == 0
+                ? BuildStatusResponse(currentStatus: [0])
+                : BuildCommandAckResponse(command, startAck);
+            byte[] responseBytes = Encoding.UTF8.GetBytes(responsePayload);
+            await ws.SendAsync(
+                responseBytes,
+                WebSocketMessageType.Text,
+                true,
+                context.RequestAborted);
+
+            if (command != 0)
+            {
+                WebSocketReceiveResult close = await ws.ReceiveAsync(
+                    requestBuffer,
+                    context.RequestAborted);
+                if (close.MessageType == WebSocketMessageType.Close)
+                {
+                    await ws.CloseOutputAsync(
+                        close.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
+                        close.CloseStatusDescription,
+                        context.RequestAborted);
+                }
+            }
+        });
+
+        await app.StartAsync();
+
+        string baseUrl = $"http://127.0.0.1:{port}";
+        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+        var httpClient = new HttpClient(new SuccessfulHttpHandler());
+        var client = new SdcpClient(
+            httpClient,
+            logger.Object,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+
+        return new SdcpTestEnvironment(app, client, baseUrl, httpClient);
+    }
+
     /// <summary>
     /// Creates a Kestrel-hosted WebSocket server that handles the history flow:
     /// first returns the IDs response, then returns the appropriate detail response
@@ -973,6 +1115,20 @@ public sealed class SdcpClientParsingTests
         });
     }
 
+    private static string BuildStatusResponse(int[] currentStatus)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            Status = new
+            {
+                CurrentStatus = currentStatus
+            },
+            MainboardID = "mb-1",
+            TimeStamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+            Topic = "sdcp/status/mb-1"
+        });
+    }
+
     private static int GetFreeTcpPort()
     {
         // Bind to port 0 to get an OS-assigned ephemeral port. Re-verify availability before
@@ -1003,7 +1159,19 @@ public sealed class SdcpClientParsingTests
     /// <summary>
     /// Wraps the Kestrel app, SdcpClient, and base URL for easy test cleanup.
     /// </summary>
-    private sealed class SdcpTestEnvironment(WebApplication app, SdcpClient client, string baseUrl) : IAsyncDisposable
+    private sealed class SuccessfulHttpHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+    }
+
+    private sealed class SdcpTestEnvironment(
+        WebApplication app,
+        SdcpClient client,
+        string baseUrl,
+        IDisposable? ownedResource = null) : IAsyncDisposable
     {
         public SdcpClient Client { get; } = client;
         public string BaseUrl { get; } = baseUrl;
@@ -1012,6 +1180,7 @@ public sealed class SdcpClientParsingTests
         {
             await app.StopAsync();
             await app.DisposeAsync();
+            ownedResource?.Dispose();
         }
     }
 }

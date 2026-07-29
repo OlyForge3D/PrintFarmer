@@ -390,8 +390,35 @@ public sealed class QueueReconciliationService(
                     attempt.Id);
                 break;
             case BackendReconciliationOutcome.CompletedOnBackend:
+            case BackendReconciliationOutcome.FailedOnBackend:
+            case BackendReconciliationOutcome.CancelledOnBackend:
+                PrintJobStatus terminalStatus = outcome switch
+                {
+                    BackendReconciliationOutcome.FailedOnBackend =>
+                        PrintJobStatus.Failed,
+                    BackendReconciliationOutcome.CancelledOnBackend =>
+                        PrintJobStatus.Cancelled,
+                    _ => PrintJobStatus.Completed,
+                };
+                string reconciliationReason = terminalStatus switch
+                {
+                    PrintJobStatus.Failed => "reconciliation_failed",
+                    PrintJobStatus.Cancelled => "reconciliation_cancelled",
+                    _ => "reconciliation_completed",
+                };
                 attempt.Outcome = DispatchAttemptOutcome.Accepted;
                 attempt.BackendAcceptedAtUtc ??= DateTime.UtcNow;
+                attempt.ErrorCode = terminalStatus == PrintJobStatus.Completed
+                    ? null
+                    : reconciliationReason;
+                attempt.ErrorDetail = terminalStatus switch
+                {
+                    PrintJobStatus.Failed =>
+                        "Backend history proved the accepted print failed.",
+                    PrintJobStatus.Cancelled =>
+                        "Backend history proved the accepted print was cancelled.",
+                    _ => null,
+                };
                 attempt.RequiresReconciliation = false;
                 attempt.UpdatedAtUtc = DateTime.UtcNow;
                 attempt.BackendCallPhase = DispatchBackendCallPhase.Terminal;
@@ -399,18 +426,25 @@ public sealed class QueueReconciliationService(
                 ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null &&
-                    attempt.PrintJob.Status is PrintJobStatus.Starting or PrintJobStatus.Printing)
+                    attempt.PrintJob.Status is
+                        PrintJobStatus.Starting or
+                        PrintJobStatus.Printing or
+                        PrintJobStatus.Paused)
                 {
                     PrintJobStatus fromStatus = attempt.PrintJob.Status;
-                    attempt.PrintJob.Status = PrintJobStatus.Completed;
+                    attempt.PrintJob.Status = terminalStatus;
                     attempt.PrintJob.ActualEndTime ??= DateTime.UtcNow;
+                    attempt.PrintJob.FailureReason =
+                        terminalStatus == PrintJobStatus.Completed
+                            ? null
+                            : attempt.ErrorDetail;
                     attempt.PrintJob.UpdatedAt = DateTime.UtcNow;
                     AddHistory(
                         db,
                         attempt.PrintJob.Id,
                         fromStatus,
-                        PrintJobStatus.Completed,
-                        "Backend history proved completion.");
+                        terminalStatus,
+                        $"Backend history proved {terminalStatus.ToString().ToLowerInvariant()}.");
                 }
 
                 if (activeState.ActiveDispatchAttemptId == attempt.Id)
@@ -426,18 +460,25 @@ public sealed class QueueReconciliationService(
                     BedClearCommandStatus.Accepted,
                     ct);
 
+                string auditOutcome = terminalStatus == PrintJobStatus.Completed
+                    ? QueueAuditOutcomes.Success
+                    : QueueAuditOutcomes.Failed;
                 _ = QueueAuditWriter.Add(
                     db,
                     attempt.ActorSubject,
                     QueueAuditOperations.Reconciliation,
-                    QueueAuditOutcomes.Success,
+                    auditOutcome,
                     attempt.PrintJobId is null ? nameof(Printer) : nameof(PrintJob),
                     resourceId: attempt.PrintJobId ?? (Guid?)attempt.PrinterId,
                     printerId: attempt.PrinterId,
                     printJobId: attempt.PrintJobId,
                     dispatchAttemptId: attempt.Id,
-                    reasonCode: "reconciliation_completed",
-                    detail: new { startPathKind = attempt.StartPathKind });
+                    reasonCode: reconciliationReason,
+                    detail: new
+                    {
+                        startPathKind = attempt.StartPathKind,
+                        terminalStatus = terminalStatus.ToString(),
+                    });
 
                 await FinalizeBackendStartCommandAsync(
                     db,
@@ -449,28 +490,40 @@ public sealed class QueueReconciliationService(
 
                 if (attempt.PrintJobId is not null && sequenceAllocator is not null)
                 {
+                    string eventType = terminalStatus switch
+                    {
+                        PrintJobStatus.Failed =>
+                            DispatchClaimService.EventTypeJobFailed,
+                        PrintJobStatus.Cancelled =>
+                            DispatchClaimService.EventTypeJobCancelled,
+                        _ => DispatchClaimService.EventTypeJobCompleted,
+                    };
+                    string? failureCode = terminalStatus == PrintJobStatus.Completed
+                        ? null
+                        : reconciliationReason;
                     await DispatchClaimService.AddLifecycleOutboxEventAsync(
                         db,
                         sequenceAllocator,
-                        DispatchClaimService.EventTypeJobCompleted,
+                        eventType,
                         aggregateId: attempt.PrintJobId.Value,
                         printerId: attempt.PrinterId,
                         attemptId: attempt.Id,
                         aggregateRowVersion: attempt.PrintJob?.RowVersion,
-                        failureCode: null,
+                        failureCode: failureCode,
                         payloadJson: QueueLifecycleEventWriter.BuildTerminalPayload(
                             attempt.PrintJobId.Value,
                             attempt.PrinterId,
                             attempt.Id,
-                            PrintJobStatus.Completed.ToString(),
+                            terminalStatus.ToString(),
                             attempt.PrintJob?.JobKind?.ToString() ?? nameof(JobKind.Standard),
-                            failureCode: null),
+                            failureCode: failureCode),
                         ct);
                 }
 
                 logger.LogInformation(
-                    "[Reconciliation] Attempt {AttemptId} found in backend history after idle → terminal lease released",
-                    attempt.Id);
+                    "[Reconciliation] Attempt {AttemptId} found in backend history as {TerminalStatus} after idle → terminal lease released",
+                    attempt.Id,
+                    terminalStatus);
                 break;
 
             case BackendReconciliationOutcome.AbsentFromBackend:
@@ -694,7 +747,8 @@ public sealed class QueueReconciliationService(
         List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
             .Where(command =>
                 command.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
-                command.Status == QueueOutboxEventStatus.Processing &&
+                (command.Status == QueueOutboxEventStatus.Pending ||
+                 command.Status == QueueOutboxEventStatus.Processing) &&
                 (command.AttemptId == attempt.Id ||
                  (command.AttemptId == null && command.AggregateId == attempt.PrintJobId.Value)))
             .ToListAsync(ct);
@@ -786,12 +840,23 @@ public sealed class QueueReconciliationService(
                 if (detailProbe?.Status == HistoryDetailProbeStatus.Found &&
                     detailProbe.Job is not null)
                 {
+                    BackendReconciliationOutcome historyOutcome =
+                        ClassifyHistoryOutcome(attempt, detailProbe.Job);
+                    if (historyOutcome == BackendReconciliationOutcome.BackendIndeterminate)
+                    {
+                        logger.LogWarning(
+                            "[Reconciliation] Provider history id '{Identity}' predates attempt {AttemptId} or has an unknown terminal status; retaining every fence",
+                            authoritativeBackendJobId,
+                            attempt.Id);
+                        return BackendReconciliationOutcome.BackendIndeterminate;
+                    }
+
                     attempt.BackendFileIdentity = detailProbe.Job.Filename;
                     logger.LogInformation(
                         "[Reconciliation] Attempt {AttemptId} found by provider history id '{Identity}'",
                         attempt.Id,
                         authoritativeBackendJobId);
-                    return BackendReconciliationOutcome.CompletedOnBackend;
+                    return historyOutcome;
                 }
 
                 if (detailProbe?.Status != HistoryDetailProbeStatus.NotFound)
@@ -835,6 +900,16 @@ public sealed class QueueReconciliationService(
                 candidate => MatchesHistoryIdentity(attempt, candidate));
             if (exactFileMatch is not null)
             {
+                BackendReconciliationOutcome historyOutcome =
+                    ClassifyHistoryOutcome(attempt, exactFileMatch);
+                if (historyOutcome == BackendReconciliationOutcome.BackendIndeterminate)
+                {
+                    logger.LogWarning(
+                        "[Reconciliation] History identity for attempt {AttemptId} predates its claim or has an unknown terminal status; retaining every fence",
+                        attempt.Id);
+                    return BackendReconciliationOutcome.BackendIndeterminate;
+                }
+
                 if (!string.IsNullOrWhiteSpace(exactFileMatch.JobId))
                 {
                     attempt.BackendJobId = exactFileMatch.JobId;
@@ -846,7 +921,7 @@ public sealed class QueueReconciliationService(
                     attempt.Id,
                     exactFileMatch.Filename,
                     exactFileMatch.JobId);
-                return BackendReconciliationOutcome.CompletedOnBackend;
+                return historyOutcome;
             }
 
             if (!hasBackendJobId)
@@ -933,13 +1008,12 @@ public sealed class QueueReconciliationService(
         QueueDispatchAttempt attempt,
         HistoryJob history)
     {
-        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId) &&
-            string.Equals(
+        if (!string.IsNullOrWhiteSpace(attempt.BackendJobId))
+        {
+            return string.Equals(
                 history.JobId,
                 attempt.BackendJobId,
-                StringComparison.Ordinal))
-        {
-            return true;
+                StringComparison.Ordinal);
         }
 
         return EnumerateBackendFileIdentities(attempt).Any(identity =>
@@ -948,6 +1022,42 @@ public sealed class QueueReconciliationService(
                 Path.GetFileName(NormalizeBackendIdentity(identity)),
                 StringComparison.OrdinalIgnoreCase));
     }
+
+    private static BackendReconciliationOutcome ClassifyHistoryOutcome(
+        QueueDispatchAttempt attempt,
+        HistoryJob history)
+    {
+        double claimedAtSeconds =
+            new DateTimeOffset(NormalizeUtc(attempt.ClaimedAtUtc))
+                .ToUnixTimeMilliseconds() / 1000d;
+        if (history.StartTime <= 0 || history.StartTime < claimedAtSeconds)
+        {
+            return BackendReconciliationOutcome.BackendIndeterminate;
+        }
+
+        string status = history.Status.Trim()
+            .Replace("-", "_", StringComparison.Ordinal)
+            .Replace(" ", "_", StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return status switch
+        {
+            "completed" or "complete" or "finished" or "success" or "succeeded" =>
+                BackendReconciliationOutcome.CompletedOnBackend,
+            "cancelled" or "canceled" or "cancel" or "aborted" =>
+                BackendReconciliationOutcome.CancelledOnBackend,
+            "failed" or "error" or "klippy_shutdown" or "shutdown" =>
+                BackendReconciliationOutcome.FailedOnBackend,
+            _ => BackendReconciliationOutcome.BackendIndeterminate,
+        };
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
 
     private static IEnumerable<string> EnumerateBackendFileIdentities(
         QueueDispatchAttempt attempt)
@@ -975,6 +1085,12 @@ public sealed class QueueReconciliationService(
 
         /// <summary>The backend is idle and exact history proves the job ran.</summary>
         CompletedOnBackend,
+
+        /// <summary>The backend is idle and exact history proves the job failed.</summary>
+        FailedOnBackend,
+
+        /// <summary>The backend is idle and exact history proves the job was cancelled.</summary>
+        CancelledOnBackend,
 
         /// <summary>The backend is idle and has no record of the job across all known identities.</summary>
         AbsentFromBackend,
