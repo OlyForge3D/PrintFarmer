@@ -10,17 +10,17 @@ final class AutoDispatchViewModelTests: XCTestCase {
     private var viewModel: AutoDispatchViewModel!
     private let testPrinterId = UUID()
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAutoDispatchService = MockAutoDispatchService()
         viewModel = AutoDispatchViewModel()
         viewModel.configure(autoDispatchService: mockAutoDispatchService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockAutoDispatchService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

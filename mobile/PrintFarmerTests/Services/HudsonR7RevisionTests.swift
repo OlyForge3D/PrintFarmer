@@ -253,24 +253,38 @@ final class HudsonR7RevisionTests: XCTestCase {
 
         // Race N reservations across the two records; every issued token must
         // be unique and strictly greater than the last file-persisted value.
-        var tokens = Set<UInt64>()
+        // Swift 6 can't see through the NSLock guard, so wrap the mutable set
+        // in a Sendable reference type whose insertions are locally serialized;
+        // that satisfies the concurrent-capture check without weakening the
+        // real barrier.
+        final class TokenSink: @unchecked Sendable {
+            private let lock = NSLock()
+            private var storage = Set<UInt64>()
+            func insert(_ token: UInt64) {
+                lock.lock(); defer { lock.unlock() }
+                storage.insert(token)
+            }
+            var snapshot: Set<UInt64> {
+                lock.lock(); defer { lock.unlock() }
+                return storage
+            }
+        }
+        let sink = TokenSink()
         let count = 100
         let group = DispatchGroup()
-        let lock = NSLock()
         DispatchQueue.concurrentPerform(iterations: count) { i in
             let record = (i.isMultiple(of: 2)) ? a : b
             group.enter()
             defer { group.leave() }
             do {
                 let token = try record.reserveNextToken()
-                lock.lock()
-                tokens.insert(token)
-                lock.unlock()
+                sink.insert(token)
             } catch {
                 XCTFail("H2: reservation must not throw during shared-lock race: \(error)")
             }
         }
         group.wait()
+        let tokens = sink.snapshot
         XCTAssertEqual(tokens.count, count, "H2: shared lock MUST guarantee unique reservations across distinct record objects")
         // Reservations should cover 1...count (or higher if any pre-existing).
         XCTAssertEqual(tokens.min(), 1)

@@ -10,19 +10,19 @@ final class PrinterListViewModelTests: XCTestCase {
     private var mockAutoDispatchService: MockAutoDispatchService!
     private var viewModel: PrinterListViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockPrinterService()
         mockAutoDispatchService = MockAutoDispatchService()
         viewModel = PrinterListViewModel()
         viewModel.configure(printerService: mockService, autoPrintService: mockAutoDispatchService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockAutoDispatchService = nil
         mockService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

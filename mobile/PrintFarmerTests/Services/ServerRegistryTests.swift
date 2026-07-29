@@ -8,20 +8,20 @@ final class ServerRegistryTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         userDefaultsSuiteName = "ServerRegistryTests-\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)!
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         mockAPIClient = nil
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         userDefaults = nil
         userDefaultsSuiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testAddPersistsServerAndSetsFirstServerActive() throws {

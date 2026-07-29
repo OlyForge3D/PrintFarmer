@@ -195,7 +195,7 @@ final class FarmSnapshotEnvelopeTests: XCTestCase {
     func testHandAuthoredV1ExplicitNullIsPendingReadyFailsToDecode() throws {
         // An EXPLICIT null (not absence) is not legacy-compatible — only absence defaults
         // to false. Explicit null must fail to decode so the store quarantines it (H6/F).
-        var printer: [String: Any] = [
+        let printer: [String: Any] = [
             "id": UUID().uuidString, "name": "Voron-01", "isOnline": true,
             "isEnabled": true, "inMaintenance": false, "obicoEnabled": false,
             "isPendingReady": NSNull()

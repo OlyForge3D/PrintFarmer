@@ -59,10 +59,10 @@ final class FarmSnapshotStartupFailureRetryTests: XCTestCase {
 
     private var roots: [URL] = []
 
-    override func tearDown() {
+    override func tearDown() async throws {
         roots.forEach { try? FileManager.default.removeItem(at: $0) }
         roots = []
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func newRoot() -> URL {

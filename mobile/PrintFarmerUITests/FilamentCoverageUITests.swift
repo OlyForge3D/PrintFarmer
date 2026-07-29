@@ -36,6 +36,7 @@ import XCTest
 /// retry-until-pass, no elapsed-time gates. Absence assertions gate
 /// on a paired sibling's positive appearance (so "not rendered" is
 /// a real observation, not a race).
+@MainActor
 final class FilamentCoverageUITests: XCTestCase {
 
     // Stable UUIDs shared with UITestBootstrap. UI-test targets
@@ -50,8 +51,8 @@ final class FilamentCoverageUITests: XCTestCase {
 
     private var app: XCUIApplication!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
         app.launchArguments += [
@@ -61,9 +62,9 @@ final class FilamentCoverageUITests: XCTestCase {
         app.launch()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         app = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Entry / scoping helpers

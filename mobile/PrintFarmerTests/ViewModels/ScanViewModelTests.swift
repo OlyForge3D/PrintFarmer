@@ -242,7 +242,7 @@ final class ScanViewModelTests: XCTestCase {
         // still fall through to part resolution, not stop and surface an
         // error, so operators on a server with the feature off can still
         // scan spools/printers via the same unified scan entry point.
-        let (viewModel, partsService, barcodeService, _) = makeSubject()
+        let (viewModel, partsService, _, _) = makeSubject()
         partsService.resolveBinError = NetworkError.featureDisabled(
             APIError(title: "Disabled", status: 404, detail: nil, errors: nil, message: nil, code: "featureDisabled")
         )

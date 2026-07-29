@@ -10,18 +10,18 @@ final class PrinterDetailViewModelTests: XCTestCase {
     private var mockService: MockPrinterService!
     private var viewModel: PrinterDetailViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockPrinterService()
         viewModel = PrinterDetailViewModel(printerId: TestData.testUUID)
         viewModel.configure(printerService: mockService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel?.stopSnapshotPolling()
         mockService = nil
         viewModel = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Load Printer Detail

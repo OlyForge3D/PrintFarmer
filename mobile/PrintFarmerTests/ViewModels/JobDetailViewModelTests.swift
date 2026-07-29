@@ -8,17 +8,17 @@ final class JobDetailViewModelTests: XCTestCase {
     private var viewModel: JobDetailViewModel!
     private let testJobId = UUID(uuidString: "770e8400-e29b-41d4-a716-446655440002")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobService = MockJobService()
         viewModel = JobDetailViewModel(jobId: testJobId)
         viewModel.configure(jobService: mockJobService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

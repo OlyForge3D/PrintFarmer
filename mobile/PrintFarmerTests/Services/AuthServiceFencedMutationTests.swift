@@ -19,8 +19,8 @@ final class AuthServiceFencedMutationTests: XCTestCase {
     private var authService: AuthService!
     private var serverID: UUID!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
         registry = ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
@@ -41,11 +41,11 @@ final class AuthServiceFencedMutationTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         credentialsStore?.clear(serverId: serverID)
         mockAPIClient = nil; apiClient = nil; registry = nil
         owners = nil; credentialsStore = nil; epoch = nil; authService = nil; serverID = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     private func userJSON(id: UUID, username: String = "user") -> String {

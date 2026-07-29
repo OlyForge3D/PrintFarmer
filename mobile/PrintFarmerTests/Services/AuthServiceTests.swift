@@ -17,8 +17,8 @@ final class AuthServiceTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         let suiteName = "AuthServiceTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let testKeychain = KeychainSwift(keyPrefix: "AuthServiceTests_\(UUID().uuidString)_")
@@ -41,7 +41,7 @@ final class AuthServiceTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         keychain.clear()
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         // Clean up any persisted server URL from tests
@@ -53,7 +53,7 @@ final class AuthServiceTests: XCTestCase {
         keychain = nil
         userDefaults = nil
         userDefaultsSuiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Login
