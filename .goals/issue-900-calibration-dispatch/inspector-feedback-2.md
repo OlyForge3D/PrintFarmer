@@ -40,7 +40,7 @@ Builder iteration 2 added partial production wiring but fails critical acceptanc
 - No tests verify events transition from Pending to Published
 - No SignalR publishing shown
 
-### Gap 8: Priority/scheduler - ⚠️ INCOMPLETE  
+### Gap 8: Priority/scheduler - ⚠️ INCOMPLETE
 - No validation of priority values
 - Scheduler not implemented
 
@@ -85,4 +85,3 @@ Builder iteration 2 added partial production wiring but fails critical acceptanc
 - New: QueueReconciliationService.cs
 - New: QueueEventsHub.cs
 - New: CalibrationQueueConcurrencyTests.cs (DbHeavy)
-
