@@ -13,21 +13,10 @@ import Foundation
 protocol OfflineWriteReplayTransport: Sendable {
     /// Re-sends one frozen operation and classifies the result. Never throws —
     /// every terminal/transient condition maps onto an outcome.
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome
-
     func replay(
         _ operation: OfflineWriteOperation,
-        expectedIdentity: OfflineWriteReplayIdentity
+        expectedBinding: OfflineWriteReplayBinding
     ) async -> OfflineWriteReplayOutcome
-}
-
-extension OfflineWriteReplayTransport {
-    func replay(
-        _ operation: OfflineWriteOperation,
-        expectedIdentity: OfflineWriteReplayIdentity
-    ) async -> OfflineWriteReplayOutcome {
-        await replay(operation)
-    }
 }
 
 // MARK: - Classifier
@@ -222,38 +211,60 @@ struct OfflineReplayServices {
 /// resolving lazily means a replay always uses the clients for the
 /// currently-bound identity rather than captured, possibly-stale ones.
 struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
+    let replayAuthority: OfflineWriteReplayAuthority
     let beforeProviderResolution: @Sendable () async -> Void
+    let beforeServiceDispatch: @Sendable () async -> Void
     let provider: @Sendable @MainActor () -> OfflineReplayServices
 
     init(
+        replayAuthority: OfflineWriteReplayAuthority,
         beforeProviderResolution: @escaping @Sendable () async -> Void = {},
+        beforeServiceDispatch: @escaping @Sendable () async -> Void = {},
         provider: @escaping @Sendable @MainActor () -> OfflineReplayServices
     ) {
+        self.replayAuthority = replayAuthority
         self.beforeProviderResolution = beforeProviderResolution
+        self.beforeServiceDispatch = beforeServiceDispatch
         self.provider = provider
-    }
-
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
-        await beforeProviderResolution()
-        let services = await provider()
-        return await OfflineWriteReplayExecutor.execute(operation, using: services)
     }
 
     func replay(
         _ operation: OfflineWriteOperation,
-        expectedIdentity: OfflineWriteReplayIdentity
+        expectedBinding: OfflineWriteReplayBinding
     ) async -> OfflineWriteReplayOutcome {
         await beforeProviderResolution()
         let services = await provider()
-        guard services.identity == expectedIdentity else {
+        guard services.identity == expectedBinding.identity,
+              replayAuthority.isCurrent(expectedBinding) else {
             return .retryable
         }
-        let outcome = await OfflineWriteReplayExecutor.execute(operation, using: services)
+        let dispatchFence = OfflineReplayDispatchFence(
+            authority: replayAuthority,
+            binding: expectedBinding,
+            beforeDispatch: beforeServiceDispatch
+        )
+        let outcome = await OfflineWriteReplayExecutor.execute(
+            operation,
+            using: services,
+            dispatchFence: dispatchFence
+        )
         let servicesAfterReplay = await provider()
-        guard servicesAfterReplay.identity == expectedIdentity else {
+        guard servicesAfterReplay.identity == expectedBinding.identity,
+              replayAuthority.isCurrent(expectedBinding) else {
             return .retryable
         }
         return outcome
+    }
+}
+
+fileprivate struct OfflineReplayDispatchFence: Sendable {
+    let authority: OfflineWriteReplayAuthority
+    let binding: OfflineWriteReplayBinding
+    let beforeDispatch: @Sendable () async -> Void
+
+    func acquirePermit() async -> OfflineWriteReplayDispatchPermit? {
+        await beforeDispatch()
+        return authority.beginDispatch(binding)
     }
 }
 
@@ -267,13 +278,30 @@ enum OfflineWriteReplayExecutor {
         _ operation: OfflineWriteOperation,
         using services: OfflineReplayServices
     ) async -> OfflineWriteReplayOutcome {
+        await execute(operation, using: services, dispatchFence: nil)
+    }
+
+    fileprivate static func execute(
+        _ operation: OfflineWriteOperation,
+        using services: OfflineReplayServices,
+        dispatchFence: OfflineReplayDispatchFence?
+    ) async -> OfflineWriteReplayOutcome {
         switch operation {
         case .partAdjustment, .harvest:
             guard let parts = services.parts else { return .retryable }
-            return await executeParts(operation, using: parts)
+            return await executeParts(
+                operation,
+                using: parts,
+                dispatchFence: dispatchFence
+            )
         case .taskComplete(let taskID, let idempotencyKey):
             guard let tasks = services.tasks else { return .retryable }
-            return await executeTaskComplete(taskID: taskID, idempotencyKey: idempotencyKey, using: tasks)
+            return await executeTaskComplete(
+                taskID: taskID,
+                idempotencyKey: idempotencyKey,
+                using: tasks,
+                dispatchFence: dispatchFence
+            )
         case .toolheadBind(let printerID, let toolheadIndex, let idempotencyKey, let request, let expectedPriorSpoolId):
             guard let printers = services.printers else { return .retryable }
             return await executeToolheadBind(
@@ -282,7 +310,8 @@ enum OfflineWriteReplayExecutor {
                 idempotencyKey: idempotencyKey,
                 request: request,
                 expectedPriorSpoolId: expectedPriorSpoolId,
-                using: printers
+                using: printers,
+                dispatchFence: dispatchFence
             )
         }
     }
@@ -299,13 +328,16 @@ enum OfflineWriteReplayExecutor {
 
     private static func executeParts(
         _ operation: OfflineWriteOperation,
-        using service: any PartsInventoryServiceProtocol
+        using service: any PartsInventoryServiceProtocol,
+        dispatchFence: OfflineReplayDispatchFence? = nil
     ) async -> OfflineWriteReplayOutcome {
         do {
             switch operation {
             case .partAdjustment(let sku, let request):
+                guard await acquirePermit(dispatchFence) else { return .retryable }
                 _ = try await service.adjustPart(sku: sku, request: request)
             case .harvest(let jobId, let request):
+                guard await acquirePermit(dispatchFence) else { return .retryable }
                 _ = try await service.harvestJob(jobId: jobId, request: request)
             case .taskComplete, .toolheadBind:
                 // Not a parts operation — never routed here by the bundle
@@ -328,9 +360,11 @@ enum OfflineWriteReplayExecutor {
     private static func executeTaskComplete(
         taskID: String,
         idempotencyKey: String,
-        using service: any ShiftTaskServiceProtocol
+        using service: any ShiftTaskServiceProtocol,
+        dispatchFence: OfflineReplayDispatchFence?
     ) async -> OfflineWriteReplayOutcome {
         do {
+            guard await acquirePermit(dispatchFence) else { return .retryable }
             let snapshot = try await service.loadSnapshot(shiftPlanEnabled: true)
             let tasks = snapshot.groups.flatMap { $0.tasks }
             guard let task = tasks.first(where: { $0.id == taskID }) else {
@@ -344,6 +378,7 @@ enum OfflineWriteReplayExecutor {
                 // Canonical idempotent success: exactly one completion.
                 return .success
             case .pending, .inProgress:
+                guard await acquirePermit(dispatchFence) else { return .retryable }
                 try await service.complete(taskID: taskID, idempotencyKey: idempotencyKey)
                 return .success
             case .skipped, .dismissed:
@@ -373,9 +408,11 @@ enum OfflineWriteReplayExecutor {
         idempotencyKey: String,
         request: ToolheadSpoolBindRequest,
         expectedPriorSpoolId: Int?,
-        using service: any PrinterServiceProtocol
+        using service: any PrinterServiceProtocol,
+        dispatchFence: OfflineReplayDispatchFence?
     ) async -> OfflineWriteReplayOutcome {
         do {
+            guard await acquirePermit(dispatchFence) else { return .retryable }
             let details = try await service.getDetails(id: printerID)
             guard let toolhead = details.toolheads.first(where: { $0.index == toolheadIndex }) else {
                 return .conflict(OfflineWriteConflict(
@@ -394,6 +431,7 @@ enum OfflineWriteReplayExecutor {
                     message: "This toolhead's spool changed since the bind was queued."
                 ))
             }
+            guard await acquirePermit(dispatchFence) else { return .retryable }
             _ = try await service.bindToolheadSpool(
                 printerId: printerID,
                 toolheadIndex: toolheadIndex,
@@ -404,5 +442,12 @@ enum OfflineWriteReplayExecutor {
         } catch {
             return OfflineWriteReplayClassifier.outcome(for: error)
         }
+    }
+
+    private static func acquirePermit(
+        _ dispatchFence: OfflineReplayDispatchFence?
+    ) async -> Bool {
+        guard let dispatchFence else { return true }
+        return await dispatchFence.acquirePermit() != nil
     }
 }

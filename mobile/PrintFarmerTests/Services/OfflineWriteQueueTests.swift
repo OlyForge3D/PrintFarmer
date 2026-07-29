@@ -36,7 +36,10 @@ actor ScriptedReplayTransport: OfflineWriteReplayTransport {
         holdGate = hold
     }
 
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedBinding _: OfflineWriteReplayBinding
+    ) async -> OfflineWriteReplayOutcome {
         let index = recorded.count
         recorded.append(operation)
         if let startedGate { await startedGate.release(index) }
@@ -482,7 +485,7 @@ final class OfflineWriteQueueTests: XCTestCase {
         let published = OfflineReplayIdentityBox(
             OfflineWriteReplayIdentity(serverID: serverA, userID: userA)
         )
-        let transport = DynamicOfflineReplayTransport {
+        let transport = DynamicOfflineReplayTransport(replayAuthority: authority) {
             OfflineReplayServices(identity: published.value, parts: parts)
         }
         let queue = makeQueue(
@@ -517,9 +520,59 @@ final class OfflineWriteQueueTests: XCTestCase {
         XCTAssertTrue(remainingB.isEmpty)
     }
 
-    func testDynamicTransportSameServerDifferentUserReturnsRetryableWithoutSending() async {
+    func testSameIdentityRebindAfterProviderResolutionPreventsStaleServiceCall() async {
+        let store = InMemoryOfflineWriteQueueStore()
+        let clock = MutableOfflineQueueClock(OfflineQueueFixtures.epoch)
+        let authority = OfflineWriteReplayAuthority()
         let parts = MockPartsInventoryService()
-        let transport = DynamicOfflineReplayTransport {
+        let providerResolved = CallOrderGate()
+        let allowDispatch = CallOrderGate()
+        let transport = DynamicOfflineReplayTransport(
+            replayAuthority: authority,
+            beforeServiceDispatch: {
+                await providerResolved.release(0)
+                await allowDispatch.wait(0)
+            }
+        ) {
+            OfflineReplayServices(identity: authority.currentIdentity, parts: parts)
+        }
+        let queue = makeQueue(
+            store: store,
+            transport: transport,
+            clock: clock,
+            authority: authority
+        )
+        let firstBinding = authority.bind(serverID: serverA, userID: userA)
+        let didBindFirst = await queue.bind(binding: firstBinding)
+        XCTAssertTrue(didBindFirst)
+        _ = await queue.enqueue(
+            OfflineQueueFixtures.adjust(sku: "SKU-A", key: "same-identity-rebind")
+        )
+
+        let replay = Task { await queue.replayPending() }
+        await providerResolved.wait(0)
+
+        authority.invalidate()
+        let replacementBinding = authority.bind(serverID: serverA, userID: userA)
+        let didBindReplacement = await queue.bind(binding: replacementBinding)
+        XCTAssertTrue(didBindReplacement)
+        await allowDispatch.release(0)
+        await replay.value
+
+        XCTAssertTrue(
+            parts.adjustPartCalls.isEmpty,
+            "the parked binding revision must not dispatch through a same-identity replacement"
+        )
+        let retained = await queue.items(forServer: serverA, user: userA)
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertTrue(retained.first?.status.isPending == true)
+    }
+
+    func testDynamicTransportSameServerDifferentUserReturnsRetryableWithoutSending() async {
+        let authority = OfflineWriteReplayAuthority()
+        let expectedBinding = authority.bind(serverID: serverA, userID: userA)
+        let parts = MockPartsInventoryService()
+        let transport = DynamicOfflineReplayTransport(replayAuthority: authority) {
             OfflineReplayServices(
                 identity: OfflineWriteReplayIdentity(serverID: serverA, userID: userB),
                 parts: parts
@@ -528,7 +581,7 @@ final class OfflineWriteQueueTests: XCTestCase {
 
         let outcome = await transport.replay(
             OfflineQueueFixtures.adjust(sku: "SKU-A", key: "a1"),
-            expectedIdentity: OfflineWriteReplayIdentity(serverID: serverA, userID: userA)
+            expectedBinding: expectedBinding
         )
 
         XCTAssertEqual(outcome, .retryable)

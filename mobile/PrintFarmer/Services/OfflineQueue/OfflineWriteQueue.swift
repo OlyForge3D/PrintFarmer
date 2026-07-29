@@ -29,6 +29,10 @@ struct OfflineWriteReplayBinding: Equatable, Sendable {
     fileprivate let revision: UInt64
 }
 
+struct OfflineWriteReplayDispatchPermit: Sendable {
+    fileprivate init() {}
+}
+
 final class OfflineWriteReplayAuthority: @unchecked Sendable {
     private let lock = NSLock()
     private var revision: UInt64 = 0
@@ -103,6 +107,18 @@ final class OfflineWriteReplayAuthority: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return revision == binding.revision && identity == binding.identity
+    }
+
+    /// Linearizes an actual service dispatch against invalidation. Whichever
+    /// acquires the lock first wins: an earlier invalidation denies the dispatch;
+    /// an earlier permit means the request was authorized before invalidation.
+    func beginDispatch(_ binding: OfflineWriteReplayBinding) -> OfflineWriteReplayDispatchPermit? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard revision == binding.revision, identity == binding.identity else {
+            return nil
+        }
+        return OfflineWriteReplayDispatchPermit()
     }
 }
 
@@ -348,7 +364,7 @@ actor OfflineWriteQueue {
             replayingItemID = item.id
             let outcome = await transport.replay(
                 item.operation,
-                expectedIdentity: binding.identity
+                expectedBinding: binding
             )
             replayingItemID = nil
 

@@ -126,6 +126,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// `(serverID, userID)` namespace via `syncOfflineWriteQueue()`.
     @ObservationIgnored private(set) lazy var offlineWriteQueue: OfflineWriteQueue = {
         let transport = DynamicOfflineReplayTransport(
+            replayAuthority: offlineWriteReplayAuthority,
             beforeProviderResolution: offlineReplayProviderResolutionHook
         ) { [weak self] in
             OfflineReplayServices(
