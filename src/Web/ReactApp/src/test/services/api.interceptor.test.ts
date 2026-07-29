@@ -123,6 +123,27 @@ describe('ApiClient — 401 response interceptor', () => {
     expect(window.location.href).toBe('/login');
   });
 
+  it('invalidates the current identity when authenticated SignalR reset fails', async () => {
+    const resetError = new AggregateError(
+      [new Error('printer connection stop failed')],
+      'Authenticated SignalR session reset failed.',
+    );
+    signalRSessionTestState.reset.mockRejectedValueOnce(resetError);
+    localStorage.setItem('auth-token', 'test-token');
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const config: PfRequestConfig = { method: 'GET', url: '/test' };
+    await expect(client.request(config)).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      'Failed to reset authenticated SignalR session after a 401 response.',
+      resetError,
+    );
+    expect(localStorage.getItem('auth-token')).toBeNull();
+    expect(authenticationExpirationTestState.notify).toHaveBeenCalledOnce();
+    expect(window.location.href).toBe('/login');
+  });
+
   it('resets authenticated hubs before clearing a token on an auth page without navigation', async () => {
     localStorage.setItem('auth-token', 'test-token');
     window.location.pathname = '/login';

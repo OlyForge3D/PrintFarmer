@@ -518,7 +518,14 @@ export class ApiClient {
           requestConfig?.authTokenAtRequest === localStorage.getItem("auth-token")
         ) {
           let invalidatedCurrentSession = false;
-          await resetAuthenticatedSignalRSession();
+          try {
+            await resetAuthenticatedSignalRSession();
+          } catch (resetError) {
+            console.error(
+              "Failed to reset authenticated SignalR session after a 401 response.",
+              resetError,
+            );
+          }
           if (requestConfig.authTokenAtRequest === localStorage.getItem("auth-token")) {
             localStorage.removeItem("auth-token");
             notifyAuthenticationExpired();
