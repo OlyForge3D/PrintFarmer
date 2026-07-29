@@ -135,7 +135,9 @@ export class SignalRService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private lifecycleGeneration = 0;
   private signalrSettings: { logLevel: string; consoleLoggingEnabled: boolean } | null = null;
-  private isRefreshingSettings = false;
+  private settingsLoadGeneration = 0;
+  private settingsRefreshPromise: Promise<void> | null = null;
+  private settingsRefreshQueued = false;
   private authListener: (() => void) | null = null;
 
   // Event handlers
@@ -171,35 +173,54 @@ export class SignalRService {
     window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
   }
 
-  private async loadSettings(): Promise<void> {
+  private async loadSettings(): Promise<boolean> {
+    const generation = ++this.settingsLoadGeneration;
+    let nextSettings: { logLevel: string; consoleLoggingEnabled: boolean };
     try {
-      this.signalrSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
+      nextSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
     } catch (error) {
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.warn('Failed to load SignalR settings, using defaults:', error);
       }
-      this.signalrSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
+      nextSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
     }
+
+    if (generation !== this.settingsLoadGeneration) {
+      return false;
+    }
+
+    this.signalrSettings = nextSettings;
+    return true;
   }
 
   /**
    * Re-fetch the SignalR settings section (e.g. after the user authenticates)
    * and, if the effective log level changed, rebuild the connection so the new
    * level takes effect — the level is only applied when the connection is built.
-   * Guarded against overlapping runs so it cannot race with itself, and it emits
-   * no events, so it cannot re-trigger its own auth listener.
+   * Authentication refreshes are queued, and newer loads supersede older ones,
+   * so a late anonymous response cannot overwrite authenticated settings.
    */
-  public async refreshSettings(): Promise<void> {
-    if (this.isRefreshingSettings) {
-      return;
+  public refreshSettings(): Promise<void> {
+    this.settingsRefreshQueued = true;
+    if (!this.settingsRefreshPromise) {
+      this.settingsRefreshPromise = this.runQueuedSettingsRefreshes().finally(() => {
+        this.settingsRefreshPromise = null;
+      });
     }
-    this.isRefreshingSettings = true;
-    try {
+
+    return this.settingsRefreshPromise;
+  }
+
+  private async runQueuedSettingsRefreshes(): Promise<void> {
+    while (this.settingsRefreshQueued) {
+      this.settingsRefreshQueued = false;
       const previousLevel = this.getLogLevel();
-      await this.loadSettings();
+      const settingsApplied = await this.loadSettings();
+      if (!settingsApplied) {
+        continue;
+      }
       if (this.getLogLevel() === previousLevel) {
-        // Nothing changed (or still on defaults) — no reconnect needed.
-        return;
+        continue;
       }
       const wasActive =
         this.connection?.state === HubConnectionState.Connected ||
@@ -212,8 +233,6 @@ export class SignalRService {
       if (wasActive) {
         await this.connect();
       }
-    } finally {
-      this.isRefreshingSettings = false;
     }
   }
 
@@ -791,6 +810,9 @@ export class SignalRService {
 
   // Clean up all resources
   dispose(): void {
+    this.lifecycleGeneration++;
+    this.settingsLoadGeneration++;
+    this.settingsRefreshQueued = false;
     if (this.authListener) {
       window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
       this.authListener = null;

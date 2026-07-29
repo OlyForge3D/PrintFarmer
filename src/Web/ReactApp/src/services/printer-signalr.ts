@@ -64,6 +64,7 @@ export class PrinterSignalRService {
 
   private buildConnection(): void {
     const printersSignalrUrl = getHubUrl("/hubs/printers");
+    const configuredLogLevel = this.getLogLevel();
     // Only emit noisy connection debug when the developer debug flag is enabled
     if (
       (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
@@ -90,6 +91,9 @@ export class PrinterSignalRService {
       })
       .configureLogging({
         log: (logLevel: number, message: string) => {
+          if (logLevel < configuredLogLevel) {
+            return;
+          }
           // Suppress benign SignalR warnings about unregistered client methods
           // This happens during initialization before all handlers are attached
           // or when the server sends messages the client hasn't registered yet
@@ -347,7 +351,9 @@ export class PrinterSignalRService {
     logLevel: string;
     consoleLoggingEnabled: boolean;
   } | null = null;
-  private isRefreshingSettings = false;
+  private settingsLoadGeneration = 0;
+  private settingsRefreshPromise: Promise<void> | null = null;
+  private settingsRefreshQueued = false;
   private authListener: (() => void) | null = null;
 
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
@@ -380,40 +386,62 @@ export class PrinterSignalRService {
     window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
   }
 
-  private async loadSettings(): Promise<void> {
+  private async loadSettings(): Promise<boolean> {
+    const generation = ++this.settingsLoadGeneration;
+    let nextSettings: {
+      logLevel: string;
+      consoleLoggingEnabled: boolean;
+    };
     try {
       // UnifiedSettingsController exposes /api/settings/{keyName}
-      this.signalrSettings = await apiClient.getSettings<{
+      nextSettings = await apiClient.getSettings<{
         logLevel: string;
         consoleLoggingEnabled: boolean;
       }>("SignalR"); // calls /api/settings/SignalR
     } catch (error) {
       console.warn("Failed to load SignalR settings, using defaults:", error);
-      this.signalrSettings = {
+      nextSettings = {
         logLevel: "Information",
         consoleLoggingEnabled: true,
       };
     }
+
+    if (generation !== this.settingsLoadGeneration) {
+      return false;
+    }
+
+    this.signalrSettings = nextSettings;
+    return true;
   }
 
   /**
    * Re-fetch the SignalR settings section (e.g. after the user authenticates)
    * and, if the effective log level changed, rebuild the connection so the new
    * level takes effect — the level is only applied when the connection is built.
-   * Guarded against overlapping runs so it cannot race with itself, and it emits
-   * no events, so it cannot re-trigger its own auth listener.
+   * Authentication refreshes are queued, and newer loads supersede older ones,
+   * so a late anonymous response cannot overwrite authenticated settings.
    */
-  public async refreshSettings(): Promise<void> {
-    if (this.isRefreshingSettings) {
-      return;
+  public refreshSettings(): Promise<void> {
+    this.settingsRefreshQueued = true;
+    if (!this.settingsRefreshPromise) {
+      this.settingsRefreshPromise = this.runQueuedSettingsRefreshes().finally(() => {
+        this.settingsRefreshPromise = null;
+      });
     }
-    this.isRefreshingSettings = true;
-    try {
+
+    return this.settingsRefreshPromise;
+  }
+
+  private async runQueuedSettingsRefreshes(): Promise<void> {
+    while (this.settingsRefreshQueued) {
+      this.settingsRefreshQueued = false;
       const previousLevel = this.getLogLevel();
-      await this.loadSettings();
+      const settingsApplied = await this.loadSettings();
+      if (!settingsApplied) {
+        continue;
+      }
       if (this.getLogLevel() === previousLevel) {
-        // Nothing changed (or still on defaults) — no reconnect needed.
-        return;
+        continue;
       }
       const wasActive =
         this.connection?.state === HubConnectionState.Connected ||
@@ -426,8 +454,6 @@ export class PrinterSignalRService {
       if (wasActive) {
         await this.connect();
       }
-    } finally {
-      this.isRefreshingSettings = false;
     }
   }
 
@@ -774,6 +800,9 @@ export class PrinterSignalRService {
     return this.connection?.connectionId ?? null;
   }
   dispose(): void {
+    this.lifecycleGeneration++;
+    this.settingsLoadGeneration++;
+    this.settingsRefreshQueued = false;
     if (this.authListener) {
       window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
       this.authListener = null;

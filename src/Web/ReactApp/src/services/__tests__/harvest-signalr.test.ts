@@ -47,6 +47,11 @@ vi.mock('@microsoft/signalr', () => ({
     Disconnected: 'Disconnected',
   },
   LogLevel: {
+    Trace: 0,
+    Debug: 1,
+    Warning: 3,
+    Error: 4,
+    Critical: 5,
     None: 6,
     Information: 2,
   },
@@ -83,6 +88,14 @@ describe('SignalRService (harvest) settings reload on authentication', () => {
     for (let i = 0; i < 6; i++) {
       await Promise.resolve();
     }
+  };
+
+  const createDeferredSettings = () => {
+    let resolve!: (value: { logLevel: string; consoleLoggingEnabled: boolean }) => void;
+    const promise = new Promise<{ logLevel: string; consoleLoggingEnabled: boolean }>((resolvePromise) => {
+      resolve = resolvePromise;
+    });
+    return { promise, resolve };
   };
 
   beforeEach(() => {
@@ -134,5 +147,58 @@ describe('SignalRService (harvest) settings reload on authentication', () => {
 
     expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2);
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a late initial settings response overwrite authenticated settings', async () => {
+    const initialSettings = createDeferredSettings();
+    const authenticatedSettings = createDeferredSettings();
+    signalRTestState.getSettings
+      .mockReturnValueOnce(initialSettings.promise)
+      .mockReturnValueOnce(authenticatedSettings.promise)
+      .mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false });
+
+    const { signalRService } = await import('../harvest-signalr');
+    service = signalRService;
+
+    window.dispatchEvent(new Event(AUTH_EVENT));
+    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2));
+
+    authenticatedSettings.resolve({ logLevel: 'Information', consoleLoggingEnabled: false });
+    await flushMicrotasks();
+    initialSettings.resolve({ logLevel: 'Information', consoleLoggingEnabled: true });
+    await flushMicrotasks();
+
+    window.dispatchEvent(new Event(AUTH_EVENT));
+    await flushMicrotasks();
+
+    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(3);
+    expect(signalRTestState.builder.configureLogging).toHaveBeenCalledTimes(1);
+    expect(signalRTestState.builder.configureLogging).toHaveBeenCalledWith(6);
+  });
+
+  it('queues another authenticated refresh when one is already active', async () => {
+    const firstAuthenticatedSettings = createDeferredSettings();
+    const secondAuthenticatedSettings = createDeferredSettings();
+    signalRTestState.getSettings
+      .mockResolvedValueOnce({ logLevel: 'Information', consoleLoggingEnabled: true })
+      .mockReturnValueOnce(firstAuthenticatedSettings.promise)
+      .mockReturnValueOnce(secondAuthenticatedSettings.promise);
+
+    const { signalRService } = await import('../harvest-signalr');
+    service = signalRService;
+    await flushMicrotasks();
+
+    window.dispatchEvent(new Event(AUTH_EVENT));
+    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2));
+    window.dispatchEvent(new Event(AUTH_EVENT));
+
+    firstAuthenticatedSettings.resolve({ logLevel: 'Warning', consoleLoggingEnabled: true });
+    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(3));
+    secondAuthenticatedSettings.resolve({ logLevel: 'Critical', consoleLoggingEnabled: true });
+    await flushMicrotasks();
+
+    expect(signalRTestState.builder.configureLogging).toHaveBeenNthCalledWith(1, 2);
+    expect(signalRTestState.builder.configureLogging).toHaveBeenNthCalledWith(2, 3);
+    expect(signalRTestState.builder.configureLogging).toHaveBeenNthCalledWith(3, 5);
   });
 });
