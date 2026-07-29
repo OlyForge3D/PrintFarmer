@@ -274,6 +274,41 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<GcodePromotionCheckpoint> GcodePromotionCheckpoints =>
         Set<GcodePromotionCheckpoint>();
 
+    // =========================================================================
+    // Issue #900: Calibration queue dispatch durability
+    // =========================================================================
+
+    /// <summary>
+    /// Durable scheduling outbox events written in the same transaction as
+    /// queue state changes so events survive process crashes.
+    /// </summary>
+    public DbSet<QueueDispatchOutbox> QueueDispatchOutbox => Set<QueueDispatchOutbox>();
+
+    /// <summary>
+    /// Per-attempt record for each database-backed dispatch claim.
+    /// One row per start-path invocation; persists even for unknown outcomes
+    /// so reconciliation can identify orphaned Starting jobs.
+    /// </summary>
+    public DbSet<QueueDispatchAttempt> QueueDispatchAttempts => Set<QueueDispatchAttempt>();
+
+    /// <summary>
+    /// Single-row cross-process monotonic sequence counter for the outbox.
+    /// Incremented atomically in the same transaction as each outbox event write.
+    /// </summary>
+    public DbSet<OutboxSequenceState> OutboxSequenceStates => Set<OutboxSequenceState>();
+
+    /// <summary>
+    /// Durable actor/resource/operation/outcome audit rows for safety-sensitive queue and
+    /// dispatch operations. Written in the same transaction as the operation they record.
+    /// </summary>
+    public DbSet<QueueOperationAudit> QueueOperationAudits => Set<QueueOperationAudit>();
+
+    /// <summary>Durable exact-job bed-clear command idempotency records.</summary>
+    public DbSet<BedClearCommandRecord> BedClearCommandRecords => Set<BedClearCommandRecord>();
+
+    /// <summary>Provider-native per-printer queue position counters.</summary>
+    public DbSet<QueuePositionState> QueuePositionStates => Set<QueuePositionState>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         ArgumentNullException.ThrowIfNull(modelBuilder);
@@ -283,6 +318,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
         ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
+        ConfigureQueueDispatchIndexes(modelBuilder);
 
         // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
         // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
@@ -298,6 +334,75 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     v => v.UtcDateTime,
                     v => new DateTimeOffset(v, TimeSpan.Zero));
         }
+
+        // For SQLite and PostgreSQL, row-version columns are application-managed (the DB does not
+        // auto-generate them). Override the IsRowVersion() store-generated setting so
+        // EF Core does not try to round-trip the DB value after each save, allowing
+        // StampRowVersions() to write a non-null GUID token on every Add/Modify.
+        // SQL Server uses a native ROWVERSION column that the DB generates and returns.
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            _ = modelBuilder.Entity<Printer>()
+                .Property(printer => printer.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<PrintJob>()
+                .Property(j => j.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<PrinterDispatchState>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+
+            // Outbox event RowVersion: application-managed on SQLite/PostgreSQL.
+            _ = modelBuilder.Entity<QueueDispatchOutbox>()
+                .Property(o => o.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+
+            // OutboxSequenceState RowVersion: application-managed on SQLite/PostgreSQL.
+            _ = modelBuilder.Entity<OutboxSequenceState>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<QueueDispatchAttempt>()
+                .Property(a => a.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+            _ = modelBuilder.Entity<DispatchSettings>()
+                .Property(s => s.RowVersion)
+                .HasMaxLength(16)
+                .IsConcurrencyToken()
+                .ValueGeneratedNever();
+        }
+        else
+        {
+            // SQL Server: RowVersion is a native database-generated ROWVERSION column.
+            _ = modelBuilder.Entity<QueueDispatchOutbox>()
+                .Property(o => o.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<OutboxSequenceState>()
+                .Property(s => s.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<QueueDispatchAttempt>()
+                .Property(a => a.RowVersion)
+                .IsRowVersion();
+            _ = modelBuilder.Entity<DispatchSettings>()
+                .Property(s => s.RowVersion)
+                .IsRowVersion();
+        }
+
+        // Seed the single OutboxSequenceState row (Id = 1, NextSequence = 0).
+        // This row must exist before any outbox event can be written.
+        _ = modelBuilder.Entity<OutboxSequenceState>()
+            .HasData(new OutboxSequenceState { Id = 1, NextSequence = 0 });
 
         // Seed default password policy if table empty (idempotent for EnsureCreated)
         if (Database.ProviderName != null)
@@ -334,12 +439,105 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasFilter(filter);
     }
 
+    /// <summary>
+    /// Configures provider-specific filtered unique indexes for calibration queue dispatch.
+    /// The idempotency index only covers active (non-terminal) calibration jobs so that a
+    /// terminal job with the same key does not block a new attempt.
+    /// PrintJobStatus values: Queued=0, Assigned=1, Starting=2, Printing=3, Paused=4,
+    /// Completed=5, Failed=6, Cancelled=7 — we exclude 5/6/7 (terminal).
+    /// </summary>
+    private void ConfigureQueueDispatchIndexes(ModelBuilder modelBuilder)
+    {
+        // Filtered unique index on (IdempotencyScope, IdempotencyKey) for active calibration jobs.
+        string idempotencyFilter = Database.ProviderName switch
+        {
+            "Npgsql.EntityFrameworkCore.PostgreSQL" =>
+                "\"IdempotencyScope\" IS NOT NULL AND \"IdempotencyKey\" IS NOT NULL AND \"JobKind\" = 1",
+            "Microsoft.EntityFrameworkCore.SqlServer" =>
+                "[IdempotencyScope] IS NOT NULL AND [IdempotencyKey] IS NOT NULL AND [JobKind] = 1",
+            _ =>
+                "IdempotencyScope IS NOT NULL AND IdempotencyKey IS NOT NULL AND JobKind = 1",
+        };
+
+        _ = modelBuilder.Entity<PrintJob>()
+            .HasIndex(j => new { j.IdempotencyScope, j.IdempotencyKey })
+            .HasFilter(idempotencyFilter)
+            .IsUnique()
+            .HasDatabaseName("IX_PrintJobs_Idempotency_Calibration");
+
+        _ = modelBuilder.Entity<JobSchedule>()
+            .HasIndex(schedule => schedule.RootPrintJobId)
+            .HasDatabaseName("IX_JobSchedules_RootPrintJobId");
+
+        _ = modelBuilder.Entity<JobExecution>()
+            .HasIndex(execution => execution.OccurrencePrintJobId)
+            .HasDatabaseName("IX_JobExecutions_OccurrencePrintJobId");
+
+        // Dispatch-attempt indexes.
+        _ = modelBuilder.Entity<QueueDispatchAttempt>()
+            .HasIndex(a => new { a.PrintJobId, a.AttemptNumber })
+            .HasDatabaseName("IX_QueueDispatchAttempts_Job_Attempt");
+
+        _ = modelBuilder.Entity<QueueDispatchAttempt>()
+            .HasIndex(a => new { a.PrinterId, a.Outcome })
+            .HasDatabaseName("IX_QueueDispatchAttempts_Printer_Outcome");
+
+        // Pending outbox events are polled frequently.
+        _ = modelBuilder.Entity<QueueDispatchOutbox>()
+            .HasIndex(o => new { o.Status, o.RetryAfterUtc })
+            .HasDatabaseName("IX_QueueDispatchOutbox_Status_RetryAfterUtc");
+
+        // Unique monotonic sequence: enforces per-process allocator uniqueness at the DB level.
+        // Catches any collision (e.g., multi-process deployment) as a constraint violation.
+        _ = modelBuilder.Entity<QueueDispatchOutbox>()
+            .HasIndex(o => o.Sequence)
+            .IsUnique()
+            .HasDatabaseName("UX_QueueDispatchOutbox_Sequence");
+
+        // Audit lookup patterns: by resource, by printer, and chronologically.
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => new { a.ResourceType, a.ResourceId })
+            .HasDatabaseName("IX_QueueOperationAudits_Resource");
+
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => new { a.PrinterId, a.OccurredAtUtc })
+            .HasDatabaseName("IX_QueueOperationAudits_Printer_OccurredAt");
+
+        _ = modelBuilder.Entity<QueueOperationAudit>()
+            .HasIndex(a => a.OccurredAtUtc)
+            .HasDatabaseName("IX_QueueOperationAudits_OccurredAt");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.PrinterId, record.IdempotencyKey })
+            .IsUnique()
+            .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.Status, record.ExpiresAtUtc })
+            .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+        _ = modelBuilder.Entity<QueuePositionState>()
+            .HasKey(state => state.ScopeId);
+
+        string queuePositionFilter = Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer"
+            ? "[AssignedPrinterId] IS NOT NULL AND [Status] IN (0, 1)"
+            : "\"AssignedPrinterId\" IS NOT NULL AND \"Status\" IN (0, 1)";
+        _ = modelBuilder.Entity<PrintJob>()
+            .HasIndex(job => new { job.AssignedPrinterId, job.QueuePosition })
+            .IsUnique()
+            .HasFilter(queuePositionFilter)
+            .HasDatabaseName("UX_PrintJobs_Printer_QueuePosition");
+    }
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         EnsureCalibrationHistoryIsImmutable();
+        EnsureCalibrationJobFieldsAreImmutable();
         EnsureCalibrationPrintersTracked();
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        NormalizeActiveExternalPrintKeys();
+        AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -347,9 +545,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         EnsureCalibrationHistoryIsImmutable();
+        EnsureCalibrationJobFieldsAreImmutable();
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
+        NormalizeActiveExternalPrintKeys();
+        AdvanceLogicalQueueRevisions();
         StampRowVersions();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -364,6 +565,104 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         EnsureImmutable<GeneratedProfileRevision>();
         EnsureImmutable<GeneratedProfileRevisionOperation>();
         EnsureImmutable<CalibrationChange>();
+    }
+
+    /// <summary>
+    /// Prevents mutation of immutable calibration/provenance/idempotency/compatibility
+    /// fields on <see cref="PrintJob"/> after creation. These fields are stamped once at
+    /// job creation time and must never change; changing them would invalidate the
+    /// canonical idempotency hash and break replay semantics.
+    ///
+    /// The guard keys off the ORIGINAL (database) <see cref="PrintJob.JobKind"/>, never the
+    /// current value: flipping a calibration job to <c>Standard</c> in the same save must not
+    /// disarm the guard. <see cref="PrintJob.JobKind"/> itself is rejected for any job whose
+    /// original kind was set, so a Standard job can never be laundered into a calibration job
+    /// (or the reverse) after creation.
+    /// </summary>
+    private void EnsureCalibrationJobFieldsAreImmutable()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+        {
+            if (entry.State != EntityState.Modified)
+            {
+                continue;
+            }
+
+            // JobKind itself is immutable for every persisted job whose kind is already set.
+            // Rejecting the mutation outright closes the "flip to Standard in the same save"
+            // bypass. Legacy rows with a NULL kind may still be backfilled exactly once.
+            object? originalKind = entry.OriginalValues[nameof(PrintJob.JobKind)];
+            if (originalKind is not null)
+            {
+                CheckImmutableField(entry, nameof(PrintJob.JobKind));
+            }
+
+            // Only jobs that were ORIGINALLY calibration jobs carry the provenance constraint.
+            if (originalKind is not JobKind.FilamentCalibration)
+            {
+                continue;
+            }
+
+            // The following fields are immutable once a calibration PrintJob is created.
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyScope));
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyKey));
+            CheckImmutableField(entry, nameof(PrintJob.IdempotencyRequestSha256));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationProjectId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationAttemptId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationOrchestrationId));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationConfigSnapshotId));
+            CheckImmutableField(entry, nameof(PrintJob.SourceArtifactId));
+            CheckImmutableField(entry, nameof(PrintJob.SliceJobId));
+            CheckImmutableField(entry, nameof(PrintJob.CreatorSubject));
+            CheckImmutableField(entry, nameof(PrintJob.GcodeFileId));
+            CheckImmutableField(entry, nameof(PrintJob.AssignedPrinterId));
+            CheckImmutableField(entry, nameof(PrintJob.Priority));
+            CheckImmutableField(entry, nameof(PrintJob.Copies));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredNozzleDiameter));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredMaterialType));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredCapabilities));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredFirmwareFamily));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredGcodeDialect));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerEngine));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerDistribution));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerVersion));
+            CheckImmutableField(entry, nameof(PrintJob.RequiredSlicerContainerDigest));
+            CheckImmutableField(entry, nameof(PrintJob.GcodeContentSha256));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.MachineProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.ProcessProfileSha256));
+            CheckImmutableField(entry, nameof(PrintJob.SpecificationSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PrinterConfigSnapshotSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedPrinterConfigRevision));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedGcodeFileSizeBytes));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedPrinterModelId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedToolheadId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedToolheadIndex));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedSpoolId));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedFilamentSku));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedFilamentLotNumber));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentSnapshotSha256));
+            CheckImmutableField(entry, nameof(PrintJob.SourceModelSha256));
+            CheckImmutableField(entry, nameof(PrintJob.CalibrationManifestSha256));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionX));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionY));
+            CheckImmutableField(entry, nameof(PrintJob.PinnedObjectDimensionZ));
+            CheckImmutableField(entry, nameof(PrintJob.EstimatedFilamentUsage));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentName));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentVendor));
+            CheckImmutableField(entry, nameof(PrintJob.FilamentColor));
+        }
+    }
+
+    private static void CheckImmutableField(EntityEntry<PrintJob> entry, string propertyName)
+    {
+        PropertyEntry? prop = entry.Properties.FirstOrDefault(p => p.Metadata.Name == propertyName);
+        if (prop is { IsModified: true })
+        {
+            throw new InvalidOperationException(
+                $"PrintJob.{propertyName} is an immutable calibration provenance field and cannot be modified after creation. " +
+                "Changed immutable input requires a new job and idempotency key.");
+        }
     }
 
     private void EnsureImmutable<TEntity>()
@@ -588,6 +887,161 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             if (entry.State is EntityState.Added or EntityState.Modified)
             {
                 entry.Entity.RowVersion = newVersion;
+            }
+        }
+
+        // Provider-correct non-null application-managed concurrency tokens.
+        // SQL Server uses a native ROWVERSION column (stamped automatically by the database);
+        // SQLite and PostgreSQL do NOT generate non-null tokens from [Timestamp] alone, so we
+        // stamp a fresh GUID-derived byte array on every write so the concurrency check never
+        // compares NULL == NULL (which would allow multiple concurrent winners).
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            foreach (EntityEntry<Printer> entry in ChangeTracker.Entries<Printer>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<PrinterDispatchState> entry in ChangeTracker.Entries<PrinterDispatchState>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            // Outbox events: stamp on every write for atomic lease detection.
+            foreach (EntityEntry<QueueDispatchOutbox> entry in ChangeTracker.Entries<QueueDispatchOutbox>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            // Sequence counter: stamp on every write so the concurrency check fires.
+            foreach (EntityEntry<OutboxSequenceState> entry in ChangeTracker.Entries<OutboxSequenceState>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<QueueDispatchAttempt> entry in ChangeTracker.Entries<QueueDispatchAttempt>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+
+            foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
+            {
+                if (entry.State is EntityState.Added or EntityState.Modified)
+                {
+                    entry.Entity.RowVersion = newVersion;
+                }
+            }
+        }
+    }
+
+    private void NormalizeActiveExternalPrintKeys()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
+                     .Where(candidate => candidate.State is EntityState.Added or EntityState.Modified))
+        {
+            bool activeExternal =
+                entry.Entity.IsExternalPrint &&
+                entry.Entity.AssignedPrinterId.HasValue &&
+                entry.Entity.Status is PrintJobStatus.Starting or
+                    PrintJobStatus.Printing or
+                    PrintJobStatus.Paused;
+            entry.Entity.ActiveExternalPrinterId = activeExternal
+                ? entry.Entity.AssignedPrinterId
+                : null;
+        }
+    }
+
+    private void AdvanceLogicalQueueRevisions()
+    {
+        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(job => job.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(job => job.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<PrinterDispatchState> entry in
+                 ChangeTracker.Entries<PrinterDispatchState>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(state => state.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(state => state.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
+        {
+            if (entry.State == EntityState.Added)
+            {
+                entry.Entity.Revision = 1;
+            }
+            else if (entry.State == EntityState.Modified)
+            {
+                long originalRevision = entry.Property(settings => settings.Revision).OriginalValue;
+                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
+                entry.Property(settings => settings.Revision).IsModified = true;
+            }
+        }
+
+        foreach (EntityEntry<QueueDispatchOutbox> eventEntry in
+                 ChangeTracker.Entries<QueueDispatchOutbox>()
+                     .Where(entry => entry.State == EntityState.Added))
+        {
+            PrintJob? job = ChangeTracker.Entries<PrintJob>()
+                .Select(entry => entry.Entity)
+                .FirstOrDefault(candidate => candidate.Id == eventEntry.Entity.AggregateId);
+            if (job is not null)
+            {
+                eventEntry.Entity.JobRevision = job.Revision;
+            }
+
+            if (eventEntry.Entity.PrinterId.HasValue)
+            {
+                PrinterDispatchState? state =
+                    ChangeTracker.Entries<PrinterDispatchState>()
+                        .Select(entry => entry.Entity)
+                        .FirstOrDefault(candidate =>
+                            candidate.PrinterId == eventEntry.Entity.PrinterId.Value);
+                if (state is not null)
+                {
+                    eventEntry.Entity.DispatchStateRevision = state.Revision;
+                }
             }
         }
     }

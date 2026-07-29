@@ -207,42 +207,159 @@ public class PrintersService(
     /// </remarks>
     public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
     {
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryListProbeResult probe = await ProbeHistoryListAsync(
+            printerId,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            ct);
+        if (probe.Status == HistoryProbeStatus.Authoritative &&
+            probe.History is not null)
+        {
+            return probe.History;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history request timed out."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history transport is unavailable."),
+            HistoryProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ when probe.FailureCode == "history_completeness_unproven" =>
+                new HistoryAuthorityException(
+                    "The printer backend could not prove the requested history range."),
+            _ => new InvalidOperationException("Printer history could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryListProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            _logger.LogWarning(
+                "[History] Printer {PrinterId} backend {PrinterBackend} does not support history",
+                printerId,
+                backend);
+            return HistoryListProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            // Use factory to get strongly-typed history client
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryListResponse? response = await historyClient!.GetHistoryListAsync(
+                printer.BackendUrl,
+                limit,
+                start,
+                since,
+                before,
+                order,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (response is null)
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
-                if (response == null)
-                {
-                    _logger.LogWarning("[History] No response from history API for printer {PrinterId}", printerId);
-                    return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
-                }
-
-                _logger.LogInformation("[History] Got {Count} jobs from {Backend}", response.Count, backend);
-
-                // Set ThumbnailUrl for each job
-                foreach (HistoryJob job in response.Jobs)
-                {
-                    job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-                }
-
-                return response;
+                _logger.LogWarning(
+                    "[History] Backend {Backend} returned no history response for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Unavailable();
             }
-            else
+
+            if (response.AuthorityEvidence?.ProvesRequestedRange != true)
             {
-                _logger.LogWarning("[History] Printer {PrinterId} backend {PrinterBackend} does not support history", printerId, printer.Backend);
-                return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+                _logger.LogWarning(
+                    "[History] Backend {Backend} did not prove complete history coverage for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Error(
+                    "history_completeness_unproven");
             }
+
+            _logger.LogInformation(
+                "[History] Got {Count} authoritative jobs from {Backend}",
+                response.Count,
+                backend);
+            foreach (HistoryJob job in response.Jobs)
+            {
+                job.ThumbnailUrl = ExtractThumbnailUrl(
+                    job.Metadata ?? new Dictionary<string, object>(),
+                    printer.ServerUrl);
+            }
+
+            return HistoryListProbeResult.Authoritative(response);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history transport unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history socket unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve history for printer {PrinterId}: {Message}", printerId, ex.Message);
-            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history failed for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Error();
         }
     }
 
@@ -262,32 +379,126 @@ public class PrintersService(
             throw new ArgumentException("Job ID is required", nameof(jobId));
         }
 
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryJobProbeResult probe = await ProbeHistoryJobAsync(
+            printerId,
+            jobId,
+            ct);
+        if (probe.Status == HistoryDetailProbeStatus.Found &&
+            probe.Job is not null)
+        {
+            return probe.Job;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryDetailProbeStatus.NotFound =>
+                new KeyNotFoundException($"History job {jobId} was not found."),
+            HistoryDetailProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history detail request timed out."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history detail transport is unavailable."),
+            HistoryDetailProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history detail is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ => new InvalidOperationException("Printer history detail could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return HistoryJobProbeResult.Error("history_job_id_required");
+        }
+
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryJobProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            return HistoryJobProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryJob? job = await historyClient!.GetHistoryJobAsync(
+                printer.BackendUrl,
+                jobId,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (job is null)
             {
-                throw new InvalidOperationException("History is only available for backends that support it");
+                _logger.LogWarning(
+                    "[History] Backend detail returned null for printer {PrinterId}, job {JobId}; treating as unavailable",
+                    printerId,
+                    jobId);
+                return HistoryJobProbeResult.Unavailable();
             }
 
-            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            if (string.IsNullOrWhiteSpace(job.JobId))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_missing");
+            }
 
-            // Set ThumbnailUrl
+            if (!string.Equals(job.JobId, jobId, StringComparison.Ordinal))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_mismatch");
+            }
+
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-            return job;
+            return HistoryJobProbeResult.Found(job);
+        }
+        catch (HistoryJobNotFoundException)
+        {
+            return HistoryJobProbeResult.NotFound();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail transport unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail socket unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve job {JobId} for printer {PrinterId}: {Message}", jobId, printerId, ex.Message);
-            if (ex is KeyNotFoundException || ex is InvalidOperationException)
-            {
-                throw;
-            }
-
-            throw new KeyNotFoundException($"History job {jobId} not found", ex);
+            _logger.LogWarning(ex, "[History] Invalid detail for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Error();
         }
     }
 
@@ -320,7 +531,15 @@ public class PrintersService(
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.Credential, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(
+                    printer.BackendUrl,
+                    limit: 10000,
+                    start: 0,
+                    since: null,
+                    before: null,
+                    order: null,
+                    credential: printer.Credential,
+                    ct: ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);
@@ -524,8 +743,14 @@ public class PrintersService(
                         throw; // Entity was deleted — cannot retry
                     }
 
-                    // Accept the database's RowVersion (and any other original values)
-                    // while keeping the caller's in-memory changes ("client wins").
+                    // Preserve explicit caller changes, but merge every untouched property
+                    // from the concurrent database row so retrying does not erase background
+                    // telemetry/configuration updates.
+                    foreach (var property in entry.Properties.Where(property => !property.IsModified))
+                    {
+                        property.CurrentValue = databaseValues[property.Metadata];
+                    }
+
                     entry.OriginalValues.SetValues(databaseValues);
                 }
             }
@@ -593,7 +818,13 @@ public class PrintersService(
             dto = CreateOfflinePrinterDto(p);
         }
 
-        return dto;
+        return dto with
+        {
+            RowVersion = p.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(p.RowVersion)
+                : null,
+            ConfigurationRevision = p.ConfigurationRevision,
+        };
     }
 #pragma warning restore CS8603
 
@@ -680,6 +911,13 @@ public class PrintersService(
                 };
             }
 
+            dto = dto with
+            {
+                RowVersion = p.RowVersion is { Length: > 0 }
+                    ? Convert.ToBase64String(p.RowVersion)
+                    : null,
+                ConfigurationRevision = p.ConfigurationRevision,
+            };
             return ApplyCameraContract(dto);
         }
         catch (Exception ex)
@@ -1370,6 +1608,9 @@ public class PrintersService(
 
     private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
+        string? rowVersion = p.RowVersion is { Length: > 0 }
+            ? Convert.ToBase64String(p.RowVersion)
+            : null;
         return ApplyCameraContract(new PrinterDto(
             Id: p.Id,
             Name: p.Name,
@@ -1405,7 +1646,9 @@ public class PrintersService(
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
             HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
-            UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+            RowVersion: rowVersion,
+            ConfigurationRevision: p.ConfigurationRevision));
     }
 
     private static PrinterDto ApplyCameraContract(PrinterDto dto)
@@ -2427,6 +2670,75 @@ public class PrintersService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return BackendControlOutcome.Rejected(
+                "printer_not_found",
+                "The printer was not found.");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetControlOperationsClientTyped(
+                backend,
+                out ISupportsControlOperations? controlClient))
+        {
+            return BackendControlOutcome.Rejected(
+                "control_unsupported",
+                "The printer backend does not support lifecycle control.");
+        }
+
+        try
+        {
+            bool accepted = operation switch
+            {
+                BackendControlOperation.Pause =>
+                    await controlClient!.PauseAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Resume =>
+                    await controlClient!.ResumeAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Cancel or BackendControlOperation.Abort =>
+                    await controlClient!.CancelAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.EmergencyStop =>
+                    await EmergencyStopAsync(id, ct).ConfigureAwait(false),
+                _ => false,
+            };
+
+            return accepted
+                ? BackendControlOutcome.Accepted()
+                : BackendControlOutcome.Unknown(
+                    "The provider did not prove whether the lifecycle command was accepted.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Lifecycle command {Operation} produced an unknown outcome on printer {PrinterId}",
+                operation,
+                id);
+            return BackendControlOutcome.Unknown(
+                "The provider response was lost; backend reconciliation is required.");
+        }
+    }
+
     /// <summary>
     /// Immediately stops the printer using emergency stop (M112).
     /// </summary>
@@ -2944,6 +3256,8 @@ public class PrintersService(
             toolhead.CurrentMaterial = spool?.Material ?? null;
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -3026,6 +3340,8 @@ public class PrintersService(
             toolhead.CurrentMaterial = null;
             toolhead.CurrentFilamentColor = null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
@@ -3239,19 +3555,16 @@ public class PrintersService(
             return false;
         }
 
-        try
-        {
-            var backend = (PrinterBackend)p.Backend;
-
-            return _capabilityFactory.TryGetFileDeleteClientTyped(backend, out ISupportsFileDelete? deleteClient)
-                ? await deleteClient!.DeleteFileAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
+        var backend = (PrinterBackend)p.Backend;
+        return _capabilityFactory.TryGetFileDeleteClientTyped(
+            backend,
+            out ISupportsFileDelete? deleteClient)
+                ? await deleteClient!.DeleteFileAsync(
+                    p.BackendUrl,
+                    filename,
+                    p.Credential,
+                    ct).ConfigureAwait(false)
                 : false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to delete file {Filename} on printer {PrinterId}", filename, id);
-            return false;
-        }
     }
 
     /// <summary>
@@ -3340,7 +3653,9 @@ public class PrintersService(
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p is null)
         {
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Printer not found");
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.Uploading,
+                "Printer not found");
         }
 
         try
@@ -3348,7 +3663,9 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             if (!_capabilityFactory.TryGetUploadAndPrintClientTyped(backend, out ISupportsUploadAndPrint? client))
             {
-                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Backend does not support upload and print");
+                return UploadAndPrintResult.FailedBeforeStart(
+                    UploadAndPrintStage.Uploading,
+                    "Backend does not support upload and print");
             }
 
             return await client!.UploadAndStartPrintAsync(p.BackendUrl, filename, stream, p.Credential, progress, ct).ConfigureAwait(false);
@@ -3359,7 +3676,7 @@ public class PrintersService(
                 "Failed to upload and start print on printer {Id}; exception type {ExceptionType}",
                 id,
                 ex.GetType().Name);
-            return UploadAndPrintResult.Fail(
+            return UploadAndPrintResult.Unknown(
                 UploadAndPrintStage.Uploading,
                 "The printer could not start the dispatched job.");
         }

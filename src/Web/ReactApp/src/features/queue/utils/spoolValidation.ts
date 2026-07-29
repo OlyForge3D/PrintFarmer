@@ -7,6 +7,7 @@ export interface SpoolValidationContext {
   requiredMaterial?: string;
   printerId: string;
   printerName: string;
+  reviewedPrinterRowVersion: string;
   spoolInfo?: PrinterSpoolInfo;
 }
 
@@ -36,6 +37,9 @@ export async function validateSpoolForDispatch(
 ): Promise<SpoolValidationContext | null> {
   try {
     const fullPrinter = await apiClient.getPrinter(printer.id);
+    if (!fullPrinter.rowVersion) {
+      throw new Error('Printer revision unavailable.');
+    }
     const spoolInfo = fullPrinter.spoolInfo;
     const requiredMaterial = job.requiredMaterialType || undefined;
 
@@ -45,6 +49,7 @@ export async function validateSpoolForDispatch(
       requiredMaterial,
       printerId: printer.id,
       printerName: printer.name,
+      reviewedPrinterRowVersion: fullPrinter.rowVersion,
       spoolInfo: spoolInfo || undefined,
     };
 

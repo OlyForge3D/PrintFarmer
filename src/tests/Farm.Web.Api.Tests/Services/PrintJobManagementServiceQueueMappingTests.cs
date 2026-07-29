@@ -1,5 +1,6 @@
 ﻿using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
@@ -13,6 +14,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -181,7 +183,71 @@ public class PrintJobManagementServiceQueueMappingTests
         Assert.Equal(to, capturedTo);
     }
 
-    private static PrintJobManagementService CreateService(Mock<IPrintJobManagementRepository> repository)
+    [Fact]
+    public async Task GetJobByIdAsync_AfterOtherClientStartsAttemptB_HydratesLatestAttempt()
+    {
+        Guid jobId = Guid.NewGuid();
+        PrintJob job = new()
+        {
+            Id = jobId,
+            Name = "Recovered job",
+            Status = PrintJobStatus.Starting,
+            RowVersion = jobId.ToByteArray(),
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using AppDbContext db = new(options);
+        db.QueueDispatchAttempts.AddRange(
+            new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = jobId,
+                PrinterId = Guid.NewGuid(),
+                AttemptNumber = 1,
+                ActorSubject = "user:a",
+                StartPathKind = "Manual",
+                ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+                Outcome = DispatchAttemptOutcome.Accepted,
+            },
+            new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrintJobId = jobId,
+                PrinterId = Guid.NewGuid(),
+                AttemptNumber = 2,
+                ActorSubject = "user:b",
+                StartPathKind = "Manual",
+                ClaimedAtUtc = DateTime.UtcNow,
+                Outcome = DispatchAttemptOutcome.Unknown,
+                RequiresReconciliation = true,
+            });
+        await db.SaveChangesAsync();
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository
+            .Setup(candidate => candidate.GetByIdWithGcodeFileAsync(
+                jobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        PrintJobManagementService service = CreateService(repository, db);
+
+        Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto? recovered =
+            await service.GetJobByIdAsync(jobId.ToString());
+
+        Assert.NotNull(recovered?.DispatchResult);
+        Assert.Equal(2, recovered.DispatchResult!.AttemptNumber);
+        Assert.Equal(
+            DispatchAttemptOutcome.Unknown,
+            recovered.DispatchResult.Outcome);
+    }
+
+    private static PrintJobManagementService CreateService(
+        Mock<IPrintJobManagementRepository> repository,
+        AppDbContext? appDbContext = null)
     {
         return new PrintJobManagementService(
             repository.Object,
@@ -197,6 +263,7 @@ public class PrintJobManagementServiceQueueMappingTests
             jobCostCalculationService: Mock.Of<IJobCostCalculationService>(),
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
-            settingsService: null);
+            settingsService: null,
+            appDbContext: appDbContext);
     }
 }

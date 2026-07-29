@@ -346,7 +346,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         {
             _logger.LogWarning("FlashForge: UploadAndStartPrint upload failed for {FileName}", fileName);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.Uploading, $"Upload outcome is unknown for {fileName}");
         }
 
         _logger.LogInformation("FlashForge: UploadAndStartPrint upload succeeded for {FileName}, starting print", fileName);
@@ -357,7 +357,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         {
             _logger.LogWarning("FlashForge: UploadAndStartPrint start print failed for {FileName} after successful upload", fileName);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of {fileName} after successful upload");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, $"Start outcome is unknown for {fileName}");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);

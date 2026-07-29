@@ -15,7 +15,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
 
             modelBuilder.Entity("Farm.Slicer.Module.Domain.Artifact", b =>
                 {
@@ -822,11 +822,13 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
 
                     b.HasIndex("UserId", "IdempotencyScopeId", "Checksum")
                         .IsUnique()
-                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum");
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Checksum")
+                        .HasFilter("\"Checksum\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
 
                     b.HasIndex("UserId", "IdempotencyScopeId", "CorrelationId")
                         .IsUnique()
-                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation");
+                        .HasDatabaseName("IX_SliceJobs_Owner_Project_Correlation")
+                        .HasFilter("\"CorrelationId\" IS NOT NULL AND \"IdempotencyScopeId\" <> '00000000-0000-0000-0000-000000000000'");
 
                     b.ToTable("SliceJobs");
                 });

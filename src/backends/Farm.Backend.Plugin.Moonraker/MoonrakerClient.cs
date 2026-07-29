@@ -46,6 +46,8 @@ public class MoonrakerClient(
     ISupportsPerExtruderFilamentUsage
 {
     private const int MaxExcludeObjectNameLength = 256;
+    private static readonly JsonSerializerOptions WebJsonOptions =
+        new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
@@ -2259,78 +2261,295 @@ public class MoonrakerClient(
     {
         try
         {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(_timeouts.CommandTimeout);
-            Uri baseUri = new(baseUrl);
-            string relative = "server/history/list";
-            List<string> queryParams = new();
-
-            if (limit.HasValue)
+            int requestedStart = Math.Max(0, start ?? 0);
+            int? requestedLimit = limit is > 0 ? limit : null;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
+            const int PageSize = 100;
+            int offset = 0;
+            int sourceCount = 0;
+            int examinedCount = 0;
+            bool reachedSourceEnd = false;
+            var jobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
+            while (true)
             {
-                queryParams.Add($"limit={limit.Value}");
+                int pageSize = requestedLimit.HasValue
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - jobs.Count))
+                    : PageSize;
+                HistoryListResponse page = await FetchMoonrakerHistoryPageAsync(
+                    baseUrl,
+                    pageSize,
+                    offset,
+                    since,
+                    before,
+                    order,
+                    ct);
+                int examined = page.ExaminedSourceEntries;
+                if (examined > 0 && page.Count < offset + examined)
+                {
+                    throw new InvalidDataException(
+                        "Moonraker history count did not cover the returned source page.");
+                }
+
+                sourceCount = Math.Max(sourceCount, page.Count);
+                examinedCount += examined;
+                offset += examined;
+                jobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
+                reachedSourceEnd = offset >= sourceCount;
+                bool requestedRangeFilled =
+                    requestedLimit.HasValue &&
+                    jobs.Count >= requestedEnd;
+                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                {
+                    break;
+                }
             }
 
-            if (start.HasValue)
+            HistoryJob[] requestedJobs = jobs
+                .Skip(requestedStart)
+                .Take(requestedLimit ?? int.MaxValue)
+                .ToArray();
+            bool coversRequestedRange =
+                requestedLimit.HasValue
+                    ? requestedJobs.Length >= requestedLimit.Value || reachedSourceEnd
+                    : reachedSourceEnd;
+            var result = new HistoryListResponse
             {
-                queryParams.Add($"start={start.Value}");
-            }
-
-            if (since.HasValue)
-            {
-                queryParams.Add($"since={((DateTimeOffset)since.Value).ToUnixTimeSeconds()}");
-            }
-
-            if (before.HasValue)
-            {
-                queryParams.Add($"before={((DateTimeOffset)before.Value).ToUnixTimeSeconds()}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(order))
-            {
-                queryParams.Add($"order={Uri.EscapeDataString(order)}");
-            }
-
-            if (queryParams.Count > 0)
-            {
-                relative += "?" + string.Join("&", queryParams);
-            }
-
-            Uri uri = new(baseUri, relative);
-            _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
-            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("[Moonraker] History API returned {RespStatusCode} from {Uri}", resp.StatusCode, uri);
-                return null;
-            }
-
-            string content = await resp.Content.ReadAsStringAsync(cts.Token);
-            _logger.LogDebug("[Moonraker] History response: {Value0}...", content.Substring(0, Math.Min(200, content.Length)));
-            MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
-            if (response?.Result == null)
-            {
-                _logger.LogWarning($"[Moonraker] History response deserialization returned null");
-                return null;
-            }
-
-            _logger.LogInformation("[Moonraker] Successfully fetched {Count} history items", response.Result.Count);
-            return response.Result;
+                Count = sourceCount,
+                Jobs = requestedJobs,
+                ExaminedSourceEntries = examinedCount,
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                "moonraker",
+                Math.Max(sourceCount, examinedCount),
+                examinedCount,
+                StartsAtBeginning: true,
+                HasUnambiguousEnd: reachedSourceEnd,
+                CoversRequestedRange: coversRequestedRange,
+                ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
+            };
+            _logger.LogInformation(
+                "[Moonraker] Successfully fetched {ReturnedCount} of {SourceCount} history items",
+                requestedJobs.Length,
+                sourceCount);
+            return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.LogDebug("History request cancelled by user");
             throw;
         }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        catch (OperationCanceledException ex)
         {
             _logger.LogWarning(ex, "[Moonraker] History request timed out for {BaseUrl}", baseUrl);
-            return null;
+            throw new TimeoutException("Moonraker history request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[Moonraker] History transport failed for {BaseUrl}", baseUrl);
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Moonraker] Failed to get history list from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
+    }
+
+    private async Task<HistoryListResponse> FetchMoonrakerHistoryPageAsync(
+        string baseUrl,
+        int limit,
+        int start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct)
+    {
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(_timeouts.CommandTimeout);
+        Uri baseUri = new(baseUrl);
+        var queryParams = new List<string>
+        {
+            $"limit={limit}",
+            $"start={start}",
+        };
+        if (since.HasValue)
+        {
+            queryParams.Add(
+                $"since={new DateTimeOffset(NormalizeUtc(since.Value)).ToUnixTimeSeconds()}");
+        }
+
+        if (before.HasValue)
+        {
+            queryParams.Add(
+                $"before={new DateTimeOffset(NormalizeUtc(before.Value)).ToUnixTimeSeconds()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(order))
+        {
+            queryParams.Add($"order={Uri.EscapeDataString(order)}");
+        }
+
+        Uri uri = new(
+            baseUri,
+            $"server/history/list?{string.Join("&", queryParams)}");
+        _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
+        using HttpResponseMessage response = await _http.GetAsync(uri, cts.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"Moonraker history API returned {(int)response.StatusCode}.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        string content = await response.Content.ReadAsStringAsync(cts.Token);
+        _logger.LogDebug(
+            "[Moonraker] History response: {Value0}...",
+            content[..Math.Min(200, content.Length)]);
+        if (!IsAuthoritativeHistoryListPayload(content))
+        {
+            throw new InvalidDataException(
+                "Moonraker history response was structurally incomplete.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(content);
+        JsonElement resultElement = document.RootElement.GetProperty("result");
+        JsonElement jobsElement = resultElement.GetProperty("jobs");
+        var jobs = new List<HistoryJob>(jobsElement.GetArrayLength());
+        var excludedEntries =
+            new List<HistoryExcludedEntryEvidence>(jobsElement.GetArrayLength());
+        int sourceIndex = 0;
+        foreach (JsonElement jobElement in jobsElement.EnumerateArray())
+        {
+            bool included = false;
+            if (jobElement.ValueKind == JsonValueKind.Object)
+            {
+                try
+                {
+                    HistoryJob? job = jobElement.Deserialize<HistoryJob>(WebJsonOptions);
+                    if (job is not null &&
+                        !string.IsNullOrWhiteSpace(job.JobId) &&
+                        !string.IsNullOrWhiteSpace(job.Filename) &&
+                        !string.IsNullOrWhiteSpace(job.Status) &&
+                        job.StartTime > 0)
+                    {
+                        jobs.Add(job);
+                        included = true;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogDebug(
+                        ex,
+                        "[Moonraker] Excluding malformed history entry at source offset {SourceOffset}",
+                        start + sourceIndex);
+                }
+            }
+
+            if (!included)
+            {
+                try
+                {
+                    excludedEntries.Add(
+                        CreateExcludedHistoryEvidence(jobElement));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "[Moonraker] History evidence extraction failed at source offset {SourceOffset}",
+                        start + sourceIndex);
+                    excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                        BackendJobId: null,
+                        Filename: null,
+                        StartTime: null,
+                        Reason: "malformed_history_entry"));
+                }
+            }
+
+            sourceIndex++;
+        }
+
+        return new HistoryListResponse
+        {
+            Count = resultElement.GetProperty("count").GetInt32(),
+            Jobs = jobs.ToArray(),
+            ExaminedSourceEntries = jobsElement.GetArrayLength(),
+            ExcludedEntries = excludedEntries.ToArray(),
+        };
+    }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
+        string? filename = TryReadHistoryString(entry, "filename");
+        double? startTime =
+            entry.TryGetProperty("start_time", out JsonElement start) &&
+            start.ValueKind == JsonValueKind.Number &&
+            start.TryGetDouble(out double value)
+                ? value
+                : null;
+        return new HistoryExcludedEntryEvidence(
+            TryReadHistoryString(entry, "job_id"),
+            filename,
+            startTime,
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadHistoryString(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private static bool IsAuthoritativeHistoryListPayload(string content)
+    {
+        using JsonDocument document = JsonDocument.Parse(content);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("result", out JsonElement result) ||
+            result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("count", out JsonElement countElement) ||
+            !countElement.TryGetInt32(out int count) ||
+            count < 0 ||
+            !result.TryGetProperty("jobs", out JsonElement jobsElement) ||
+            jobsElement.ValueKind != JsonValueKind.Array ||
+            count < jobsElement.GetArrayLength())
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -2349,18 +2568,25 @@ public class MoonrakerClient(
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return null;
+                throw new HistoryJobNotFoundException(
+                    $"Moonraker history job {jobId} was not found.");
             }
 
+            resp.EnsureSuccessStatusCode();
             MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
-            return response?.Result;
+            return response?.Result ?? throw new InvalidDataException(
+                $"Moonraker returned an empty history detail payload for {jobId}.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
-            return null;
+            throw;
         }
     }
 
@@ -2973,18 +3199,88 @@ public class MoonrakerClient(
     {
         progress?.Report(UploadAndPrintStage.Uploading);
 
-        // Single HTTP call: upload with print=true so Moonraker starts printing immediately
-        bool success = await UploadGcodeAsync(baseUrl, fileName, fileContent, print: true, ct);
-        if (!success)
+        try
         {
-            _logger.LogWarning("[Moonraker] UploadAndStartPrint: upload+print failed for {FileName}", fileName);
+            Uri uri = new(new Uri(baseUrl), "server/files/upload");
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(fileContent);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", fileName);
+            formContent.Add(new StringContent("gcodes"), "root");
+            formContent.Add(new StringContent("true"), "print");
+
+            // This is one start-capable request. Once PostAsync begins, a transport timeout
+            // cannot prove that Moonraker did not accept the upload and start the print.
+            using HttpResponseMessage response = await _http.PostAsync(uri, formContent, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "[Moonraker] UploadAndStartPrint explicitly rejected {FileName} with {StatusCode}: {Body}",
+                    fileName,
+                    response.StatusCode,
+                    body);
+                progress?.Report(UploadAndPrintStage.Failed);
+                string error =
+                    $"Moonraker rejected upload and start with HTTP {(int)response.StatusCode}.";
+                return (int)response.StatusCode is >= 400 and < 500
+                    ? UploadAndPrintResult.FailedBeforeStart(
+                        UploadAndPrintStage.Uploading,
+                        error)
+                    : UploadAndPrintResult.Unknown(
+                        UploadAndPrintStage.Uploading,
+                        error);
+            }
+
+            string? providerFileIdentity = await ReadMoonrakerUploadIdentityAsync(response, fileName, ct);
+            _logger.LogInformation(
+                "[Moonraker] UploadAndStartPrint accepted {FileName} as {ProviderIdentity}",
+                fileName,
+                providerFileIdentity);
+            progress?.Report(UploadAndPrintStage.Completed);
+            return UploadAndPrintResult.Ok(backendFileIdentity: providerFileIdentity);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[Moonraker] UploadAndStartPrint outcome unknown for {FileName}; reconciliation required",
+                fileName);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload and start print of {fileName}");
+            return UploadAndPrintResult.Unknown(
+                UploadAndPrintStage.StartingPrint,
+                "Moonraker may have accepted the print before the response was lost.");
+        }
+    }
+
+    private static async Task<string> ReadMoonrakerUploadIdentityAsync(
+        HttpResponseMessage response,
+        string fallbackFileName,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using Stream body = await response.Content.ReadAsStreamAsync(ct);
+            using JsonDocument document = await JsonDocument.ParseAsync(body, cancellationToken: ct);
+            if (document.RootElement.TryGetProperty("result", out JsonElement result) &&
+                result.TryGetProperty("item", out JsonElement item) &&
+                item.TryGetProperty("path", out JsonElement path) &&
+                path.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(path.GetString()))
+            {
+                return path.GetString()!;
+            }
+        }
+        catch (JsonException)
+        {
+            // A successful response without the optional path still proves acceptance.
         }
 
-        _logger.LogInformation("[Moonraker] UploadAndStartPrint: upload+print succeeded for {FileName} in single call", fileName);
-        progress?.Report(UploadAndPrintStage.Completed);
-        return UploadAndPrintResult.Ok();
+        return fallbackFileName;
     }
 
     /// <summary>
@@ -3114,10 +3410,27 @@ public class MoonrakerClient(
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="start">Index to start from for pagination.</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp.</param>
+    /// <param name="before">Filter to only return jobs started before this UTC timestamp.</param>
+    /// <param name="order">Requested timestamp ordering.</param>
     /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, limit, start, since: since, ct: ct);
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(
+        string baseUrl,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        PrinterCredential? credential,
+        CancellationToken ct)
+        => await GetHistoryListAsync(
+            baseUrl,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            ct);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetHistoryJobAsync(baseUrl, jobId, ct);

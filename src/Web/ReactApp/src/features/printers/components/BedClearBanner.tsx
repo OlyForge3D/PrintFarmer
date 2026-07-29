@@ -10,6 +10,7 @@ import { SpoolValidationModal } from '@/features/queue/components/SpoolValidatio
 import { apiClient } from '@/services/api';
 import type { SpoolValidationContext } from '@/features/queue/utils/spoolValidation';
 import type { AutoDispatchStatus, AutoDispatchReadyResult, Printer } from '@/types/api';
+import { mutationErrorStatus } from '@/common/utils/mutationError';
 
 interface BedClearBannerProps {
   printerId: string;
@@ -26,9 +27,34 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
 
   const handleMismatchProceed = useCallback(async (jobId: string) => {
     try {
-      await apiClient.dispatchJobToPrinter(jobId, printerId);
+      if (!autoDispatchStatus.nextJobETag) {
+        throw new Error('The reviewed job revision is unavailable.');
+      }
+      const dispatch = await apiClient.dispatchJobToPrinter(
+        jobId,
+        printerId,
+        autoDispatchStatus.nextJobETag
+      );
+      if (dispatch.kind === 'stale') {
+        throw Object.assign(
+          new Error(
+            'The reviewed job changed. Refresh and confirm the override again.'
+          ),
+          { statusCode: 412 }
+        );
+      }
+      if (dispatch.kind === 'conflict' || dispatch.kind === 'unavailable') {
+        throw new Error(
+          dispatch.detail ??
+            `${dispatch.errorCode}: Dispatch was not accepted.`
+        );
+      }
       const jobName = mismatchContext?.jobName ?? 'Job';
-      toast.success(`Dispatching "${jobName}" to ${printerName} (material override)`);
+      toast.success(
+        dispatch.kind === 'reconciliation'
+          ? `Dispatching "${jobName}" to ${printerName}; reconciliation is in progress`
+          : `Dispatching "${jobName}" to ${printerName} (material override)`
+      );
       setMismatchContext(null);
 
       // Optimistic UI update
@@ -42,9 +68,18 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
         old ? optimisticUpdate(old) : undefined,
       );
     } catch (err) {
+      const status = mutationErrorStatus(err);
+      if (status === 412 || status === 428) {
+        setMismatchContext(null);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+          queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
+          queryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),
+        ]);
+      }
       toast.error(`Failed to dispatch: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  }, [printerId, printerName, mismatchContext, queryClient]);
+  }, [printerId, printerName, mismatchContext, queryClient, autoDispatchStatus.nextJobETag]);
 
   if (!requiresBedClearConfirmation(autoDispatchStatus)) return null;
 
@@ -65,7 +100,19 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
 
   const handleConfirm = async () => {
     try {
-      const result = await confirmBedClear.mutateAsync(printerId);
+      const confirmation = await confirmBedClear.mutateAsync(autoDispatchStatus);
+      if (confirmation.kind === 'calibration') {
+        const result = confirmation.result;
+        const jobName = autoDispatchStatus.nextJobName ?? 'Calibration job';
+        toast.success(
+          result.kind === 'accepted'
+            ? `Dispatching "${jobName}" to ${printerName}`
+            : `Calibration dispatch for "${jobName}" was already accepted`
+        );
+        return;
+      }
+
+      const result = confirmation.result;
 
       if (!result.nextJob) {
         toast.success(`Bed clear confirmed for ${printerName} — no jobs queued`);
@@ -73,12 +120,21 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
       }
 
       if (result.filamentCheck?.materialMismatch) {
+        const reviewedPrinterRowVersion =
+          result.status.printerETag ?? autoDispatchStatus.printerETag;
+        if (!reviewedPrinterRowVersion) {
+          toast.error(
+            'Printer revision unavailable. Refresh before selecting a spool.'
+          );
+          return;
+        }
         setMismatchContext({
           jobId: result.nextJob.id,
           jobName: result.nextJob.name,
           requiredMaterial: result.filamentCheck.requiredMaterial ?? result.nextJob.requiredMaterialType,
           printerId,
           printerName,
+          reviewedPrinterRowVersion,
           spoolInfo: {
             hasActiveSpool: true,
             material: result.filamentCheck.loadedMaterial,
@@ -104,7 +160,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
 
   const handleSkip = async () => {
     try {
-      await skipNextJob.mutateAsync(printerId);
+      await skipNextJob.mutateAsync(autoDispatchStatus);
       toast.info('Skipped next queued job');
     } catch {
       toast.error('Failed to skip job');
@@ -113,7 +169,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
 
   const handleCancel = async () => {
     try {
-      await cancelAutoDispatch.mutateAsync(printerId);
+      await cancelAutoDispatch.mutateAsync(autoDispatchStatus);
       toast.info('Auto-dispatch cancelled');
     } catch {
       toast.error('Failed to cancel auto-dispatch');

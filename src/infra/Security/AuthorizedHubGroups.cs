@@ -8,6 +8,7 @@ public static class AuthorizedHubGroups
     public const string Farm = "Farm-default";
     public const string Administrators = "FarmAdministrators";
     public const string SlicingMonitors = "SlicingMonitors";
+    public const string QueueReaders = "QueueReaders";
 
     public static string User(Guid userId) => $"User-{userId}";
 

@@ -263,7 +263,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await _hub.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(_printerId))
                 .SendAsync("printerupdated", signalRUpdate, ct);
         }
         catch (Exception ex)

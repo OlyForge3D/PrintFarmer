@@ -6,6 +6,8 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var queuedJobResponsesToReturn: [QueuedPrintJobResponse] = []
     var jobToReturn: PrintJob?
     var errorToThrow: Error?
+    var actionErrorToThrow: Error?
+    var dispatchResultToReturn: JobDispatchResult?
 
     // Call tracking
     var listJobsCalled = false
@@ -46,41 +48,85 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         return job
     }
 
-    func update(id: UUID, _ request: UpdatePrintJobRequest) async throws -> PrintJob {
+    func update(
+        id: UUID,
+        _ request: UpdatePrintJobRequest,
+        reviewedRowVersion: String
+    ) async throws -> PrintJob {
         updateCalledWith = (id, request)
         if let error = errorToThrow { throw error }
         guard let job = jobToReturn else { throw NetworkError.notFound }
         return job
     }
 
-    func delete(id: UUID) async throws {
+    func delete(id: UUID, reviewedRowVersion: String) async throws {
         deleteCalledWith = id
-        if let error = errorToThrow { throw error }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
-    func cancel(id: UUID) async throws {
+    func cancel(id: UUID, reviewedRowVersion: String) async throws {
         cancelCalledWith = id
-        if let error = errorToThrow { throw error }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
-    func dispatch(id: UUID) async throws {
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult {
         dispatchCalledWith = id
-        if let error = errorToThrow { throw error }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
+        if let dispatchResultToReturn {
+            return dispatchResultToReturn
+        }
+        return .accepted(
+            DispatchJobResponse(
+                id: id.uuidString,
+                rowVersion: reviewedRowVersion,
+                status: PrintJobStatus.printing.rawValue,
+                dispatchResult: DispatchAttemptResult(
+                    attemptId: UUID(),
+                    attemptNumber: 1,
+                    outcome: .accepted,
+                    errorCode: nil,
+                    errorDetail: nil,
+                    isRetryable: false,
+                    requiresReconciliation: false,
+                    jobRevision: reviewedRowVersion,
+                    dispatchStateRevision: nil
+                )
+            )
+        )
     }
 
-    func abort(id: UUID) async throws {
+    func abort(id: UUID, reviewedRowVersion: String) async throws {
         abortCalledWith = id
-        if let error = errorToThrow { throw error }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
-    func pause(id: UUID) async throws {
+    func pause(id: UUID, reviewedRowVersion: String) async throws {
         pauseCalledWith = id
-        if let error = errorToThrow { throw error }
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
     }
 
-    func resume(id: UUID) async throws {
+    func resume(id: UUID, reviewedRowVersion: String) async throws {
         resumeCalledWith = id
+        if let error = actionErrorToThrow ?? errorToThrow { throw error }
+    }
+
+    func acknowledgeBedClearAndStart(
+        job: PrintJob,
+        printerId: UUID,
+        dispatchStateETag: String,
+        idempotencyKey: String
+    ) async throws -> AcknowledgeBedClearResponse {
         if let error = errorToThrow { throw error }
+        return AcknowledgeBedClearResponse(
+            message: "accepted",
+            jobETag: job.rowVersion,
+            dispatchStateETag: dispatchStateETag,
+            error: nil,
+            detail: nil
+        )
     }
 
     func reset() {
@@ -88,6 +134,8 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         queuedJobResponsesToReturn = []
         jobToReturn = nil
         errorToThrow = nil
+        actionErrorToThrow = nil
+        dispatchResultToReturn = nil
         listJobsCalled = false
         listAllJobsCalled = false
         getJobCalledWith = nil

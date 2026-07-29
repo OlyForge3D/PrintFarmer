@@ -1,0 +1,35 @@
+{
+  "goal_id": "issue-900-calibration-dispatch",
+  "status": "building",
+  "iteration": 9,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "ee453fd301240fc35a9b86c13e2888d5b30c32b3",
+  "created_at": "2026-07-26T05:57:51.508-07:00",
+  "history": [
+    {
+      "iteration": 1,
+      "verdict": "FAIL",
+      "summary": "Coordinator acceptance review found 12 blocking production-path gaps; inspector PASS overridden.",
+      "timestamp": "2026-07-26T06:48:01.27-07:00"
+    },
+    {
+      "timestamp": "2026-07-26T15:17:13.7345040Z",
+      "iteration": 2,
+      "verdict": "FAIL",
+      "summary": "Provider fencing untested; incomplete start paths; SQLite row versions NULL; outbox inert; reconciliation absent; race tests missing; 10 gaps require fixes"
+    },
+    {
+      "timestamp": "2026-07-26T09:35:00.0000000Z",
+      "iteration": 3,
+      "verdict": "FAIL",
+      "summary": "Coordinator and read-only audit found critical ack, dispatch, fencing, outbox, reconciliation, auth/audit, ETag and test gaps; Inspector PASS overridden."
+    },
+    {
+      "iteration": 4,
+      "verdict": "FAIL",
+      "summary": "Outbox BackendStartCommand fires background task fire-and-forget before completion, losing durable guarantees on crash. UTC.Ticks sequence not collision-free. Tests SQLite-only, not PostgreSQL/SQL Server. Reconciliation, auth immutability guard, authorization audit missing. 6 production-safety gaps require fixes.",
+      "timestamp": "2026-07-26T10:56:01.798-07:00"
+    }
+  ]
+}

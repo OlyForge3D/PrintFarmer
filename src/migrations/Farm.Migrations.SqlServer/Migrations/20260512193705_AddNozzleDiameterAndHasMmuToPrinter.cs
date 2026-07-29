@@ -55,7 +55,7 @@ public partial class AddNozzleDiameterAndHasMmuToPrinter : Migration
                     column: x => x.PrinterId,
                     principalTable: "Printers",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.Cascade);
+                    onDelete: ReferentialAction.Restrict);
             });
 
         migrationBuilder.CreateIndex(

@@ -223,11 +223,19 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func cancel(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func stop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func emergencyStop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
-    func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
+    func setMaintenanceMode(
+        id: UUID,
+        inMaintenance: Bool,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
         throw NetworkError.notFound
     }
     func getQueueOverview(model: String?, nozzle: Double?, material: String?) async throws -> [QueueOverview] { [] }
-    func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult {
+    func setActiveSpool(
+        printerId: UUID,
+        spoolId: Int?,
+        reviewedRowVersion: String
+    ) async throws -> CommandResult {
         CommandResult(success: true, message: nil)
     }
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { [] }

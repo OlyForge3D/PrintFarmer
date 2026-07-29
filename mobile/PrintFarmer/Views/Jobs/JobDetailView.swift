@@ -54,6 +54,16 @@ struct JobDetailView: View {
                 Text(error)
             }
         }
+        .alert(
+            "Dispatch Reconciliation",
+            isPresented: .constant(viewModel.actionNotice != nil)
+        ) {
+            Button("OK") { viewModel.actionNotice = nil }
+        } message: {
+            if let notice = viewModel.actionNotice {
+                Text(notice)
+            }
+        }
         .task {
             viewModel.isViewActive = true
             viewModel.configure(jobService: services.jobService)

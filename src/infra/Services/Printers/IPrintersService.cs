@@ -254,6 +254,27 @@ public interface IPrintersService
     Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
 
     /// <summary>
+    /// Probes backend history without collapsing unsupported, unavailable, and
+    /// failed queries into an authoritative empty history.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="start">Starting pagination index.</param>
+    /// <param name="since">Inclusive lower timestamp bound.</param>
+    /// <param name="before">Exclusive upper timestamp bound.</param>
+    /// <param name="order">Sort order.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed result whose authoritative value may validly contain zero jobs.</returns>
+    Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct);
+
+    /// <summary>
     /// Retrieves details for a specific print job from printer history.
     /// </summary>
     /// <param name="printerId">The printer ID</param>
@@ -261,6 +282,19 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Complete job details including print time, filament used, and outcome</returns>
     Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
+
+    /// <summary>
+    /// Probes one exact backend history ID without treating malformed, unavailable,
+    /// or unsupported responses as authoritative absence.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="jobId">Backend-specific history identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed exact-detail authority result.</returns>
+    Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct);
 
     /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
@@ -378,6 +412,15 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if cancel succeeded, false if backend unavailable or unsupported</returns>
     Task<bool> CancelPrintAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Executes a lifecycle command with a typed result suitable for durable queue control.
+    /// A false provider response is unknown unless the command was rejected before I/O.
+    /// </summary>
+    Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct);
 
     /// <summary>
     /// Immediately stops and cancels the currently running print job using emergency stop (M112).

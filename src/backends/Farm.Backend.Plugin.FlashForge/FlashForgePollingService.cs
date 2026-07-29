@@ -207,6 +207,7 @@ public sealed class FlashForgePollingService(
 
                     // Track state transitions for job completion detection
                     string? previousState = state.LastKnownState;
+                    string? previousJobName = state.LastKnownJobName;
                     bool stateChanged = status.State != previousState;
 
                     // Update state tracking
@@ -220,7 +221,12 @@ public sealed class FlashForgePollingService(
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null)
                     {
-                        await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State!, ct);
+                        await CheckAndSyncJobCompletionAsync(
+                            printerId,
+                            previousState,
+                            status.State!,
+                            previousJobName,
+                            ct);
                     }
 
                     // External print detection: when printer transitions TO "printing" from a
@@ -284,7 +290,8 @@ public sealed class FlashForgePollingService(
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                    await _hub.Clients.Group(
+                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                         .SendAsync("printerupdated", signalRUpdate, ct);
 
                     state.LastPollTime = DateTime.UtcNow;
@@ -340,7 +347,8 @@ public sealed class FlashForgePollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                             .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
@@ -384,7 +392,12 @@ public sealed class FlashForgePollingService(
     /// <summary>
     /// Checks for print completion/failure state transitions and synchronizes job status in database.
     /// </summary>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -400,7 +413,11 @@ public sealed class FlashForgePollingService(
 
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[FlashForgePollingService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -408,7 +425,11 @@ public sealed class FlashForgePollingService(
             }
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[FlashForgePollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);

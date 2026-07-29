@@ -4,6 +4,10 @@ import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
 import type { Printer, TempTargets, MoveRequest, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
@@ -123,7 +127,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
-      await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      if (!autoDispatchStatus?.dispatchStateETag || !autoDispatchStatus.printerETag) {
+        throw new Error('Refresh the printer before changing auto-dispatch.');
+      }
+      await setAutoDispatchEnabled.mutateAsync({
+        printerId: printer.id,
+        enabled: newEnabled,
+        dispatchStateETag: autoDispatchStatus.dispatchStateETag,
+        printerETag: autoDispatchStatus.printerETag,
+      });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
       toast.error('Failed to toggle auto-dispatch');
@@ -411,8 +423,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     try {
       const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
       const feedrate = extrudeSpeed * 60; // mm/s to mm/min
-      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
-      const result = await apiClient.sendGcode(printer.id, gcode);
+      const result = await apiClient.extrudeFilament(
+        printer.id,
+        distance,
+        feedrate
+      );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
       }
@@ -719,7 +734,12 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         return (
           <div className="mb-2">
             <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
-            <AmsSlotVisualization toolheads={toolheads} compact printerId={printer.id} />
+            <AmsSlotVisualization
+              toolheads={toolheads}
+              compact
+              printerId={printer.id}
+              reviewedRowVersion={printer.rowVersion}
+            />
           </div>
         );
       })()}
@@ -765,15 +785,34 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                       onClick={async () => {
                         setSpoolActionPending(true);
                         try {
-                          await apiClient.clearActiveSpool(printer.id);
+                          if (!printer.rowVersion) {
+                            toast.error('Printer revision unavailable. Refresh and review again.');
+                            return;
+                          }
+                          const nextRowVersion = await apiClient.clearActiveSpool(
+                            printer.id,
+                            printer.rowVersion
+                          );
                           queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                             old?.map(p => p.id === printer.id
-                              ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                              ? {
+                                  ...p,
+                                  rowVersion: nextRowVersion,
+                                  spoolInfo: { hasActiveSpool: false },
+                                }
                               : p
                             )
                           );
                         } catch (err) {
                           console.error('Failed to eject spool:', err);
+                          if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                            await queryClient.invalidateQueries({
+                              queryKey: ['printers'],
+                            });
+                          }
+                          toast.error(
+                            mutationErrorMessage(err, 'Failed to eject spool')
+                          );
                         } finally {
                           setSpoolActionPending(false);
                         }
@@ -791,6 +830,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               <ToolheadSpoolPicker
                 printerId={printer.id}
                 toolheads={effectiveToolheads}
+                reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}
@@ -823,12 +863,21 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            await apiClient.setActiveSpool(printer.id, spoolId);
+            if (!printer.rowVersion) {
+              toast.error('Printer revision unavailable. Refresh and review again.');
+              return;
+            }
+            const nextRowVersion = await apiClient.setActiveSpool(
+              printer.id,
+              spoolId,
+              printer.rowVersion
+            );
             setShowSpoolPicker(false);
             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
               old?.map(p => p.id === printer.id
                 ? {
                     ...p,
+                    rowVersion: nextRowVersion,
                     currentSpoolId: spool.id,
                     spoolInfo: {
                       hasActiveSpool: true,
@@ -847,6 +896,12 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             );
           } catch (err) {
             console.error('Failed to set active spool:', err);
+            if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+              await queryClient.invalidateQueries({ queryKey: ['printers'] });
+            }
+            toast.error(
+              mutationErrorMessage(err, 'Failed to set active spool')
+            );
           } finally {
             setSpoolActionPending(false);
           }

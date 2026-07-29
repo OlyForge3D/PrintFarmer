@@ -5,9 +5,12 @@ import Foundation
 protocol AutoDispatchServiceProtocol: Sendable {
     func getAllStatus() async throws -> AutoDispatchGlobalStatus
     func getStatus(printerId: UUID) async throws -> AutoDispatchStatus
-    func markReady(printerId: UUID) async throws -> AutoDispatchReadyResult
-    func skip(printerId: UUID) async throws -> AutoDispatchStatus
-    func cancel(printerId: UUID) async throws -> AutoDispatchStatus
-    func preClear(printerId: UUID) async throws -> AutoDispatchStatus
-    func setEnabled(printerId: UUID, request: SetAutoDispatchEnabledRequest) async throws -> AutoDispatchStatus
+    func markReady(status: AutoDispatchStatus) async throws -> AutoDispatchReadyResult
+    func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus
+    func cancel(status: AutoDispatchStatus) async throws -> AutoDispatchStatus
+    func preClear(status: AutoDispatchStatus) async throws -> AutoDispatchStatus
+    func setEnabled(
+        status: AutoDispatchStatus,
+        request: SetAutoDispatchEnabledRequest
+    ) async throws -> AutoDispatchStatus
 }

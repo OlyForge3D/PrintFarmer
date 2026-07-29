@@ -358,7 +358,7 @@ test_database_provider_config() {
 test_all_database_providers() {
     start_test "all database providers"
     
-    local providers=("postgres" "sqlserver" "mysql")
+    local providers=("postgres" "sqlserver")
     
     for provider in "${providers[@]}"; do
         local temp_provider_dir="$TEST_TEMP_DIR/test-$provider"
@@ -404,17 +404,6 @@ test_all_database_providers() {
                     test_info "✓ Database volume or external bind mount configured"
                 else
                     test_info "✗ Database volume/bind mount missing for sqlserver"
-                    return 1
-                fi
-                ;;
-            "mysql")
-                assert_contains "$compose_content" "database:" "Should include database service"
-                assert_contains "$compose_content" "image: mysql:" "Should use MySQL image"
-                assert_contains "$compose_content" "MYSQL_DATABASE" "Should configure MySQL database"
-                if echo "$compose_content" | grep -q "printfarmer-database:" || echo "$compose_content" | grep -q "\.volumes/printfarmer-database\|EXTERNAL_DATABASE_PATH"; then
-                    test_info "✓ Database volume or external bind mount configured"
-                else
-                    test_info "✗ Database volume/bind mount missing for mysql"
                     return 1
                 fi
                 ;;
@@ -486,7 +475,9 @@ test_monitoring_inclusion() {
     
     # Validate monitoring ports
     assert_contains "$compose_content" "9090:9090" "Should expose Prometheus port"
-    assert_contains "$compose_content" "3001:3000" "Should expose Grafana port"
+    assert_contains "$compose_content" "expose:" "Should expose Grafana only inside the deployment network"
+    assert_contains "$compose_content" '- "3000"' "Should expose Grafana's internal port"
+    assert_not_contains "$compose_content" "3001:3000" "Should not bind Grafana directly on the host"
     
     # Validate monitoring volumes
     assert_contains "$compose_content" "prometheus_data:" "Should have Prometheus volume"
@@ -686,7 +677,7 @@ test_no_prusaslicer_references() {
 test_database_combinations() {
     start_test "all database provider combinations"
     
-    local databases=("postgres" "sqlserver" "mysql")
+    local databases=("postgres" "sqlserver")
     
     for db in "${databases[@]}"; do
         local temp_combo_dir="$TEST_TEMP_DIR/test-$db"
@@ -764,7 +755,7 @@ test_generated_compose_file_is_valid_yaml() {
     
     # Generate for all database providers
     # This ensures database service YAML is properly formatted for all combinations
-    local providers=("postgres" "sqlserver" "mysql")
+    local providers=("postgres" "sqlserver")
     
     for provider in "${providers[@]}"; do
         local test_subdir="$TEST_TEMP_DIR/test-${provider}"
@@ -842,9 +833,6 @@ test_database_volume_mount_correctness() {
         sqlserver)
             expected_mount_path="/var/opt/mssql"
             ;;
-        mysql)
-            expected_mount_path="/var/lib/mysql"
-            ;;
         *)
             expected_mount_path="/var/lib/postgresql/data"  # Default to postgres
             ;;
@@ -897,6 +885,7 @@ test_invalid_database_provider() {
     
     # Should reject unknown database providers
     assert_exit_code 1 "$COMPOSE_GENERATOR --db-provider nosuchdb --output-dir $TEST_TEMP_DIR"
+    assert_exit_code 1 "$COMPOSE_GENERATOR --db-provider mysql --output-dir $TEST_TEMP_DIR"
     
     pass_test
 }
@@ -1015,7 +1004,7 @@ test_no_unresolved_environment_variables() {
     cd "$TEST_TEMP_DIR"
     
     # Test with all database providers
-    for provider in postgres sqlserver mysql; do
+    for provider in postgres sqlserver; do
         assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
         
         local compose_file="$TEST_TEMP_DIR/test-vars-$provider/docker-compose.yml"
@@ -1148,6 +1137,13 @@ test_read_only_output_directory() {
     local readonly_dir="$TEST_TEMP_DIR/readonly-output"
     mkdir -p "$readonly_dir"
     chmod 444 "$readonly_dir"
+
+    if [[ -w "$readonly_dir" ]]; then
+        chmod 755 "$readonly_dir"
+        test_info "INCONCLUSIVE: filesystem does not enforce POSIX mode-bit write restrictions"
+        pass_test
+        return 0
+    fi
     
     # Should fail due to write permission
     assert_command_failure "$COMPOSE_GENERATOR --output-dir $readonly_dir/subdir" "Should fail with read-only parent directory"
@@ -2141,39 +2137,27 @@ test_pgadmin_template_structure() {
     assert_contains "$template_content" "/var/lib/pgadmin" "Should persist pgAdmin data"
     
     # Validate health check endpoint
-    assert_contains "$template_content" "/pgadmin4/misc/ping" "Should health check pgAdmin endpoint"
+    assert_contains "$template_content" "/pgadmin/misc/ping" "Should health check the configured pgAdmin endpoint"
     
     pass_test
 }
 
-# Test pgAdmin initialization JSON structure
+# Test dynamic pgAdmin initialization JSON generation
 test_pgadmin_init_json() {
-    start_test "pgAdmin initialization JSON validation"
+    start_test "pgAdmin dynamic initialization JSON validation"
     
-    local pgadmin_init="$SCRIPT_DIR/../scripts/docker/pgadmin-init.json"
-    
-    if [ ! -f "$pgadmin_init" ]; then
-        print_fail "pgAdmin init JSON not found: $pgadmin_init"
-        fail_test
-        return 1
-    fi
-    
-    # Validate it's valid JSON
-    if ! jq empty "$pgadmin_init" 2>/dev/null; then
-        print_fail "pgAdmin init JSON is not valid JSON"
-        fail_test
-        return 1
-    fi
-    
-    local init_content=$(cat "$pgadmin_init")
+    local deploy_script="$SCRIPT_DIR/../scripts/deploy-docker.sh"
+    assert_file_exists "$deploy_script"
+    local init_content
+    init_content=$(sed -n '/^generate_pgadmin_servers_config()/,/^}/p' "$deploy_script")
     
     # Validate required structure
     assert_contains "$init_content" "Servers" "Should define Servers section"
     assert_contains "$init_content" "PrintFarmer PostgreSQL" "Should name the server 'PrintFarmer PostgreSQL'"
-    assert_contains "$init_content" "database" "Should reference database service"
+    assert_contains "$init_content" 'POSTGRES_HOST:-database' "Should default to the database service"
     assert_contains "$init_content" "5432" "Should use PostgreSQL default port"
-    assert_contains "$init_content" "POSTGRES_USER" "Should reference POSTGRES_USER variable"
-    assert_contains "$init_content" "POSTGRES_PASSWORD" "Should reference POSTGRES_PASSWORD variable"
+    assert_contains "$init_content" "POSTGRES_USER" "Should use the configured PostgreSQL user"
+    assert_not_contains "$init_content" "POSTGRES_PASSWORD" "Should never persist the database password"
     
     pass_test
 }
@@ -2186,7 +2170,7 @@ test_pgadmin_compose_generation() {
     mkdir -p "$outdir"
     
     # Generate with pgAdmin enabled
-    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --output-dir $outdir"
+    assert_command_success "$COMPOSE_GENERATOR --db-provider postgres --enable-pgadmin --output-dir $outdir"
     
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"

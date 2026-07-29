@@ -3,6 +3,7 @@
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Text;
@@ -238,7 +239,7 @@ public class SdcpHistoryIdsAckData
 
 public class SdcpHistoryIdsResult
 {
-    public int Ack { get; set; }
+    public int? Ack { get; set; }
 
     /// <summary>Ordered list of task IDs (UUIDs). Spec field name: HistoryData.</summary>
     public List<string>? HistoryData { get; set; }
@@ -274,7 +275,7 @@ public class SdcpHistoryDetailAckData
 /// </summary>
 public class SdcpHistoryDetailResult
 {
-    public int Ack { get; set; }
+    public int? Ack { get; set; }
 
     /// <summary>Array of history detail records. Spec field: HistoryDetailList.</summary>
     public List<SdcpHistoryDetail>? HistoryDetailList { get; set; }
@@ -379,6 +380,8 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     private readonly BackendTimeoutSettings _timeouts = timeouts ?? throw new ArgumentNullException(nameof(timeouts));
 
     private const int SdcpWebSocketPort = 3030;
+    private const string WebSocketConnectionFailureMessage =
+        "SDCP WS connection failed for all candidates.";
 
     /// <summary>
     /// Maximum chunk size for SDCP file uploads (1 MB), matching OrcaSlicer ElegooLink implementation.
@@ -782,7 +785,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             }
         }
 
-        throw new InvalidOperationException("SDCP WS connection failed for all candidates.", lastException);
+        throw new InvalidOperationException(
+            WebSocketConnectionFailureMessage,
+            lastException);
     }
 
     public async Task<bool> TestConnectionAsync(string baseUrl, CancellationToken ct = default)
@@ -1154,6 +1159,18 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     // Print control methods (ISupportsStartPrint + ISupportsControlOperations)
     public async Task<bool> StartPrintAsync(string baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
     {
+        SdcpCommandResult result = await StartPrintWithOutcomeAsync(
+            baseUrl,
+            fileName,
+            ct);
+        return result.Disposition == SdcpCommandDisposition.Accepted;
+    }
+
+    private async Task<SdcpCommandResult> StartPrintWithOutcomeAsync(
+        string baseUrl,
+        string fileName,
+        CancellationToken ct)
+    {
         // SDCP protocol requires the full storage path — files uploaded via /uploadFile/upload
         // are stored under /local/ on the printer.
         string sdcpPath = fileName.StartsWith("/local/", StringComparison.OrdinalIgnoreCase)
@@ -1162,12 +1179,14 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
         LogSdcp(LogLevel.Information, $"SDCP starting print: {sdcpPath}");
 
-        bool started = await SendCommandAsync(baseUrl, SdcpCommandIds.StartPrint,
+        SdcpCommandResult result = await SendCommandWithOutcomeAsync(
+            baseUrl,
+            SdcpCommandIds.StartPrint,
             new { Filename = sdcpPath, StartLayer = 0, Calibration_switch = 0, PrintPlatformType = 0, Tlp_Switch = 0 },
             timeout: _timeouts.PrintControlTimeout,
             ct: ct);
 
-        if (!started)
+        if (result.Disposition == SdcpCommandDisposition.Rejected)
         {
             // Secondary defense (#317): SDCP Ack codes don't distinguish "printer is printing" from
             // other errors (Ack=1 is a generic error). Query CurrentStatus to determine whether the
@@ -1194,7 +1213,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             }
         }
 
-        return started;
+        return result;
     }
 
     public Task<bool> StartPrintAsync(Uri baseUrl, string fileName, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1458,7 +1477,25 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         return GetFileListAsync(baseUrl.ToString(), ct);
     }
 
-    private async Task<bool> SendCommandAsync<T>(string baseUrl, int cmd, T data, TimeSpan? timeout = null, CancellationToken ct = default)
+    private async Task<bool> SendCommandAsync<T>(
+        string baseUrl,
+        int cmd,
+        T data,
+        TimeSpan? timeout = null,
+        CancellationToken ct = default) =>
+        (await SendCommandWithOutcomeAsync(
+            baseUrl,
+            cmd,
+            data,
+            timeout,
+            ct)).Disposition == SdcpCommandDisposition.Accepted;
+
+    private async Task<SdcpCommandResult> SendCommandWithOutcomeAsync<T>(
+        string baseUrl,
+        int cmd,
+        T data,
+        TimeSpan? timeout = null,
+        CancellationToken ct = default)
     {
         try
         {
@@ -1497,13 +1534,26 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                     // ACK code 0 = success, 1 = error, 2 = file not found
                     int? ack = ackResponse?.Data?.Data?.Ack;
                     LogSdcp(ack == 0 ? LogLevel.Debug : LogLevel.Warning, ack == 0 ? "SDCP WS command ack received" : $"SDCP WS command rejected (Ack={ack})");
-                    return ack == 0;
+                    return ack switch
+                    {
+                        0 => new SdcpCommandResult(
+                            SdcpCommandDisposition.Accepted,
+                            ack),
+                        not null => new SdcpCommandResult(
+                            SdcpCommandDisposition.Rejected,
+                            ack),
+                        _ => new SdcpCommandResult(
+                            SdcpCommandDisposition.Unknown,
+                            null),
+                    };
                 }
 
                 LogSdcp(LogLevel.Debug, "SDCP WS command returned empty response");
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
-                return false;
+                return new SdcpCommandResult(
+                    SdcpCommandDisposition.Unknown,
+                    null);
             }
         }
         catch (OperationCanceledException ex) when (ct.IsCancellationRequested)
@@ -1514,14 +1564,29 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         catch (OperationCanceledException ex)
         {
             LogSdcp(LogLevel.Warning, $"SDCP command {cmd} timed out after {(timeout ?? _timeouts.CommandTimeout).TotalSeconds}s: {ex.Message}");
-            return false;
+            return new SdcpCommandResult(
+                SdcpCommandDisposition.Unknown,
+                null);
         }
         catch (Exception ex)
         {
             LogSdcp(LogLevel.Warning, $"SDCP command {cmd} failed: {ex.Message}", ex);
-            return false;
+            return new SdcpCommandResult(
+                SdcpCommandDisposition.Unknown,
+                null);
         }
     }
+
+    private enum SdcpCommandDisposition
+    {
+        Accepted,
+        Rejected,
+        Unknown,
+    }
+
+    private readonly record struct SdcpCommandResult(
+        SdcpCommandDisposition Disposition,
+        int? Ack);
 
     // File upload and management methods
     public async Task<bool> UploadGcodeAsync(string baseUrl, string fileName, Stream fileContent, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -1699,7 +1764,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: upload failed for {fileName}");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload {fileName} to printer");
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.Uploading, $"Upload outcome is unknown for {fileName}");
         }
 
         LogSdcp(LogLevel.Information, $"UploadAndStartPrint: upload succeeded for {fileName}, waiting for printer to finish file checking");
@@ -1715,7 +1780,9 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: printer still in file-checking state after {FileCheckingMaxWait.TotalSeconds}s");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Processing, $"Printer was still checking file after {FileCheckingMaxWait.TotalSeconds}s");
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.Processing,
+                $"Printer was still checking file after {FileCheckingMaxWait.TotalSeconds}s");
         }
 
         // Wait 1 second before sending print command (matches OrcaSlicer behavior).
@@ -1726,12 +1793,33 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
         // Use "/local/" + filename directly — same as OrcaSlicer.
         string bareFileName = Path.GetFileName(fileName);
-        bool started = await StartPrintAsync(baseUrl, $"/local/{bareFileName}", credential, ct);
-        if (!started)
+        SdcpCommandResult startResult;
+        try
+        {
+            startResult = await StartPrintWithOutcomeAsync(
+                baseUrl,
+                $"/local/{bareFileName}",
+                ct);
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException ex)
+        {
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.StartingPrint,
+                ex.Message);
+        }
+
+        if (startResult.Disposition != SdcpCommandDisposition.Accepted)
         {
             LogSdcp(LogLevel.Warning, $"UploadAndStartPrint: start print failed for /local/{bareFileName} after successful upload");
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.StartingPrint, $"Failed to start print of /local/{bareFileName} after successful upload");
+            return startResult.Disposition == SdcpCommandDisposition.Rejected
+                ? UploadAndPrintResult.FailedBeforeStart(
+                    UploadAndPrintStage.StartingPrint,
+                    $"SDCP explicitly rejected StartPrint with Ack={startResult.Ack}.")
+                : UploadAndPrintResult.Unknown(
+                    UploadAndPrintStage.StartingPrint,
+                    $"Start outcome is unknown for /local/{bareFileName}");
         }
 
         progress?.Report(UploadAndPrintStage.Completed);
@@ -1883,8 +1971,14 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
     /// Maps SDCP-specific fields into the shared HistoryJob DTO.
     /// </summary>
     async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(
-        string baseUrl, int? limit, int? start, DateTime? since,
-        PrinterCredential? credential, CancellationToken ct)
+        string baseUrl,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        PrinterCredential? credential,
+        CancellationToken ct)
     {
         try
         {
@@ -1913,45 +2007,173 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 string? idsResponseJson = await ReceiveTextMessageAsync(ws, "GetHistoryIds", requestId, cts.Token);
                 if (string.IsNullOrWhiteSpace(idsResponseJson))
                 {
-                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                    return null;
                 }
 
                 var idsResponse = JsonSerializer.Deserialize<SdcpHistoryIdsAckResponse>(idsResponseJson, JsonOptions);
                 var idsResult = idsResponse?.Data?.Data;
 
-                if (idsResult is null || idsResult.Ack != 0 || idsResult.HistoryData is null or { Count: 0 })
+                if (idsResult is null ||
+                    idsResult.Ack is not 0 ||
+                    idsResult.HistoryData is null)
                 {
-                    return new HistoryListResponse { Count = 0, Jobs = [] };
+                    return null;
+                }
+
+                if (idsResult.HistoryData.Count == 0)
+                {
+                    return new HistoryListResponse
+                    {
+                        Count = 0,
+                        Jobs = [],
+                        AuthorityEvidence = new HistoryListAuthorityEvidence(
+                            "sdcp",
+                            0,
+                            0,
+                            !start.HasValue || start.Value <= 0,
+                            true,
+                            CoversRequestedRange: true),
+                    };
                 }
 
                 List<string> taskIds = idsResult.HistoryData;
 
-                // Apply since filter client-side (SDCP has no server-side date filter)
-                // Apply start/limit pagination client-side
-                int skipCount = start ?? 0;
-                int takeCount = limit ?? taskIds.Count;
-                List<string> pageIds = taskIds.Skip(skipCount).Take(takeCount).ToList();
+                bool requiresFullScan =
+                    since.HasValue ||
+                    before.HasValue ||
+                    !string.IsNullOrWhiteSpace(order) ||
+                    limit is not > 0;
+                int skipCount = Math.Max(0, start ?? 0);
+                int takeCount = limit is > 0 ? limit.Value : taskIds.Count;
+                long requestedEnd = (long)skipCount + takeCount;
 
                 // Step 2: Request details for each task ID (Cmd 321)
                 List<HistoryJob> jobs = [];
-                foreach (string taskId in pageIds)
+                List<HistoryExcludedEntryEvidence> excludedEntries = [];
+                int examinedCount = 0;
+                foreach (string taskId in taskIds)
                 {
-                    HistoryJob? job = await RequestHistoryDetailAsync(ws, baseUrl, taskId, requestId, since, cts.Token);
-                    if (job is not null)
+                    if (!requiresFullScan && jobs.Count >= requestedEnd)
                     {
-                        jobs.Add(job);
+                        break;
+                    }
+
+                    examinedCount++;
+                    try
+                    {
+                        HistoryJob? job = await RequestHistoryDetailAsync(
+                            ws,
+                            baseUrl,
+                            taskId,
+                            requestId,
+                            since: null,
+                            ct: cts.Token);
+                        if (job is not null)
+                        {
+                            jobs.Add(job);
+                        }
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            taskId,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_detail"));
+                        LogSdcp(
+                            LogLevel.Debug,
+                            $"Excluding malformed SDCP history detail for '{taskId}'",
+                            ex);
                     }
                 }
 
                 await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, cts.Token);
 
-                LogSdcp(LogLevel.Debug, $"SDCP history: {jobs.Count} jobs from {taskIds.Count} total");
-                return new HistoryListResponse { Count = taskIds.Count, Jobs = jobs.ToArray() };
+                IEnumerable<HistoryJob> filtered = jobs;
+                if (since.HasValue)
+                {
+                    double sinceSeconds =
+                        new DateTimeOffset(NormalizeUtc(since.Value))
+                            .ToUnixTimeMilliseconds() / 1000d;
+                    filtered = filtered.Where(job => job.StartTime > sinceSeconds);
+                }
+
+                if (before.HasValue)
+                {
+                    double beforeSeconds =
+                        new DateTimeOffset(NormalizeUtc(before.Value))
+                            .ToUnixTimeMilliseconds() / 1000d;
+                    filtered = filtered.Where(job => job.StartTime < beforeSeconds);
+                }
+
+                filtered = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
+                    ? filtered.OrderBy(job => job.StartTime)
+                    : string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase)
+                        ? filtered.OrderByDescending(job => job.StartTime)
+                        : filtered;
+                HistoryJob[] filteredJobs = filtered.ToArray();
+                HistoryJob[] requestedJobs = filteredJobs
+                    .Skip(skipCount)
+                    .Take(takeCount)
+                    .ToArray();
+                LogSdcp(
+                    LogLevel.Debug,
+                    $"SDCP history: {requestedJobs.Length} jobs from {taskIds.Count} total");
+                bool hasUnambiguousEnd =
+                    requiresFullScan ||
+                    examinedCount >= taskIds.Count;
+                bool coversRequestedRange =
+                    requiresFullScan ||
+                    requestedJobs.Length >= takeCount ||
+                    hasUnambiguousEnd;
+                return new HistoryListResponse
+                {
+                    Count = requiresFullScan ? filteredJobs.Length : taskIds.Count,
+                    Jobs = requestedJobs,
+                    ExaminedSourceEntries = examinedCount,
+                    AuthorityEvidence = new HistoryListAuthorityEvidence(
+                        "sdcp",
+                        taskIds.Count,
+                        examinedCount,
+                        true,
+                        hasUnambiguousEnd,
+                        CoversRequestedRange: coversRequestedRange,
+                        ExcludedEntryCount: excludedEntries.Count),
+                    ExcludedEntries = excludedEntries.ToArray(),
+                };
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogSdcp(LogLevel.Debug, "SDCP history list timed out", ex);
+            throw new TimeoutException("SDCP history list request timed out.", ex);
+        }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message == WebSocketConnectionFailureMessage)
+        {
+            throw new HttpRequestException(
+                "SDCP history WebSocket connection failed.",
+                ex);
+        }
+        catch (WebSocketException ex)
+        {
+            throw new HttpRequestException(
+                "SDCP history WebSocket transport failed.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                "SDCP history socket transport failed.",
+                ex);
         }
         catch (Exception ex)
         {
@@ -1959,6 +2181,14 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             return null;
         }
     }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
 
     /// <summary>
     /// Requests details for a single history job via Cmd 321.
@@ -1985,25 +2215,39 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         string? detailJson = await ReceiveTextMessageAsync(ws, "GetHistoryDetail", correlationId, ct);
         if (string.IsNullOrWhiteSpace(detailJson))
         {
-            return null;
+            throw new InvalidDataException(
+                $"SDCP returned a blank history detail response for {taskId}.");
         }
 
         try
         {
             var detailResponse = JsonSerializer.Deserialize<SdcpHistoryDetailAckResponse>(detailJson, JsonOptions);
             var detailResult = detailResponse?.Data?.Data;
-            if (detailResult is null || detailResult.Ack != 0 ||
+            if (detailResult is null || detailResult.Ack is not 0 ||
                 detailResult.HistoryDetailList is null or { Count: 0 })
             {
-                return null;
+                throw new InvalidDataException(
+                    $"SDCP returned an incomplete history detail response for {taskId}.");
             }
 
             var detail = detailResult.HistoryDetailList[0];
+            if (string.IsNullOrWhiteSpace(detail.TaskId) ||
+                !string.Equals(detail.TaskId, taskId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"SDCP returned mismatched history detail for {taskId}.");
+            }
+
+            if (string.IsNullOrWhiteSpace(detail.TaskName) || detail.BeginTime <= 0)
+            {
+                throw new InvalidDataException(
+                    $"SDCP returned an incomplete history detail for {taskId}.");
+            }
 
             // Apply client-side since filter
             if (since.HasValue && detail.BeginTime > 0)
             {
-                double sinceUnix = new DateTimeOffset(since.Value.ToUniversalTime()).ToUnixTimeSeconds();
+                double sinceUnix = new DateTimeOffset(NormalizeUtc(since.Value)).ToUnixTimeSeconds();
                 if (detail.BeginTime < sinceUnix)
                 {
                     return null;
@@ -2014,9 +2258,10 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         }
         catch (JsonException ex)
         {
-            // Tolerate unknown fields per acceptance criteria
             LogSdcp(LogLevel.Debug, $"Failed to parse history detail for {taskId}", ex);
-            return null;
+            throw new InvalidDataException(
+                $"SDCP returned malformed history detail for {taskId}.",
+                ex);
         }
     }
 
@@ -2075,10 +2320,43 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             throw;
         }
+        catch (OperationCanceledException ex)
+        {
+            LogSdcp(
+                LogLevel.Debug,
+                $"SDCP history job detail timed out for {jobId}",
+                ex);
+            throw new TimeoutException(
+                $"SDCP history job detail timed out for {jobId}.",
+                ex);
+        }
+        catch (HttpRequestException)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+            when (ex.Message == WebSocketConnectionFailureMessage)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job WebSocket connection failed for {jobId}.",
+                ex);
+        }
+        catch (WebSocketException ex)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job WebSocket transport failed for {jobId}.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                $"SDCP history job socket transport failed for {jobId}.",
+                ex);
+        }
         catch (Exception ex)
         {
             LogSdcp(LogLevel.Debug, $"SDCP history job detail failed for {jobId}", ex);
-            return null;
+            throw;
         }
     }
 

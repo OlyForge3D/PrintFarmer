@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Web.Api.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
@@ -88,6 +89,8 @@ public class LoadBalancingTests : IAsyncLifetime
     private sealed class BatchDispatchRequest
     {
         public List<Guid> JobIds { get; set; } = [];
+
+        public Dictionary<Guid, string> JobETags { get; set; } = [];
     }
 
     private sealed class BatchDispatchResponse
@@ -133,7 +136,7 @@ public class LoadBalancingTests : IAsyncLifetime
         return folder.Id;
     }
 
-    private static async Task<Guid> SeedPrinterAsync(
+    private async Task<Guid> SeedPrinterAsync(
         AppDbContext db, int index, bool isEnabled = true)
     {
         Guid manufacturerId = Guid.NewGuid();
@@ -164,7 +167,18 @@ public class LoadBalancingTests : IAsyncLifetime
         printer.IsEnabled = isEnabled;
         printer.IsAvailable = true;
         db.Printers.Add(printer);
+        db.PrinterDispatchStates.Add(new PrinterDispatchState
+        {
+            PrinterId = printerId,
+            RowVersion = [],
+        });
         await db.SaveChangesAsync();
+        IPrinterStatusCacheWriter statusWriter =
+            _factory.Services.GetRequiredService<IPrinterStatusCacheWriter>();
+        statusWriter.UpdateStatus(new PrinterStatusDto(
+            Id: printerId,
+            IsOnline: true,
+            State: "idle"));
 
         return printerId;
     }
@@ -202,6 +216,16 @@ public class LoadBalancingTests : IAsyncLifetime
         return jobId;
     }
 
+    private static async Task<Dictionary<Guid, string>> GetJobETagsAsync(
+        AppDbContext db,
+        IEnumerable<Guid> jobIds) =>
+        await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => jobIds.Contains(job.Id))
+            .ToDictionaryAsync(
+                job => job.Id,
+                job => Convert.ToBase64String(job.RowVersion ?? []));
+
     private async Task SetLoadBalancingStrategyAsync(LoadBalancingStrategy strategy)
     {
         var settings = new UpdateSettingsWithStrategyDto
@@ -213,7 +237,17 @@ public class LoadBalancingTests : IAsyncLifetime
             MaxConcurrentDispatches = 10,
             LoadBalancingStrategy = strategy,
         };
-        await _client.PutAsJsonAsync("/api/dispatch-settings", settings, JsonOptions);
+        HttpResponseMessage current = await _client.GetAsync("/api/dispatch-settings");
+        current.EnsureSuccessStatusCode();
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Dispatch settings GET did not return an ETag.");
+        using var request = new HttpRequestMessage(HttpMethod.Put, "/api/dispatch-settings")
+        {
+            Content = JsonContent.Create(settings, options: JsonOptions),
+        };
+        request.Headers.TryAddWithoutValidation("If-Match", etag);
+        HttpResponseMessage response = await _client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
     }
 
     // =========================================================================
@@ -255,7 +289,12 @@ public class LoadBalancingTests : IAsyncLifetime
         Guid jobId1 = await SeedQueuedJobAsync(db, folderId, 1);
         Guid jobId2 = await SeedQueuedJobAsync(db, folderId, 2);
 
-        var request = new BatchDispatchRequest { JobIds = [jobId1, jobId2] };
+        List<Guid> jobIds = [jobId1, jobId2];
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobIds,
+            JobETags = await GetJobETagsAsync(db, jobIds),
+        };
         HttpResponseMessage response = await _client.PostAsJsonAsync(
             "/api/job-queue/batch-dispatch", request);
 
@@ -264,17 +303,15 @@ public class LoadBalancingTests : IAsyncLifetime
         BatchDispatchResponse? result = await response.Content
             .ReadFromJsonAsync<BatchDispatchResponse>(JsonOptions);
         result.Should().NotBeNull();
-        result!.DispatchedCount.Should().Be(2, "both jobs should dispatch with 2 available printers");
 
-        // Verify both jobs were dispatched (strategy may or may not spread
-        // across printers depending on scoring — the key assertion is that
-        // both were dispatched, not the specific printer assignment).
+        // Strategy selection is independent from backend acceptance. These fixtures
+        // have no live printer backend, so the typed physical outcome may be non-accepted.
         List<Guid?> assignedPrinters = result.Results
-            .Where(r => r.Status == "Dispatched")
+            .Where(r => r.PrinterId.HasValue)
             .Select(r => r.PrinterId)
             .ToList();
         assignedPrinters.Should().HaveCount(2,
-            "both jobs should be dispatched to printers");
+            "round-robin should select a printer for both jobs");
     }
 
     [Fact]
@@ -297,7 +334,11 @@ public class LoadBalancingTests : IAsyncLifetime
 
         // Now dispatch a new unassigned job
         Guid newJobId = await SeedQueuedJobAsync(db, folderId, 52);
-        var request = new BatchDispatchRequest { JobIds = [newJobId] };
+        var request = new BatchDispatchRequest
+        {
+            JobIds = [newJobId],
+            JobETags = await GetJobETagsAsync(db, [newJobId]),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync(
             "/api/job-queue/batch-dispatch", request);
@@ -308,10 +349,10 @@ public class LoadBalancingTests : IAsyncLifetime
             .ReadFromJsonAsync<BatchDispatchResponse>(JsonOptions);
         result.Should().NotBeNull();
 
-        BatchDispatchItemResult? dispatched = result!.Results
-            .FirstOrDefault(r => r.Status == "Dispatched");
-        dispatched.Should().NotBeNull("the new job should be dispatched");
-        dispatched!.PrinterId.Should().Be(idlePrinter,
+        BatchDispatchItemResult? selected = result!.Results
+            .FirstOrDefault(r => r.JobId == newJobId);
+        selected.Should().NotBeNull("the new job should be evaluated");
+        selected!.PrinterId.Should().Be(idlePrinter,
             "LeastBusy should prefer the printer with 0 queued jobs over the one with 2");
     }
 

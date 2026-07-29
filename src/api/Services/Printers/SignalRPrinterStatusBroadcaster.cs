@@ -33,7 +33,8 @@ public class SignalRPrinterStatusBroadcaster(
         PrinterStatusDto updated = _statusCacheWriter.UpdateSpoolInfo(printerId, spoolInfo);
 
         // Push the updated status to all connected clients
-        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+        await _hubContext.Clients.Group(
+                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
             .SendAsync("printerupdated", updated, cancellationToken);
     }
 }

@@ -28,17 +28,14 @@ public class DispatchSettingsController(
     public async Task<IActionResult> GetSettingsAsync(CancellationToken ct)
     {
         DispatchSettings settings = await db.DispatchSettings.FirstAsync(ct);
-
-        return Ok(new DispatchSettingsDto
+        if (settings.RowVersion is not { Length: > 0 })
         {
-            AutoDispatchEnabled = settings.AutoDispatchEnabled,
-            AutoDispatchMode = settings.AutoDispatchMode,
-            IdleThresholdSeconds = settings.IdleThresholdSeconds,
-            MinimumScoreThreshold = settings.MinimumScoreThreshold,
-            MaxConcurrentDispatches = settings.MaxConcurrentDispatches,
-            LoadBalancingStrategy = settings.LoadBalancingStrategy,
-            UpdatedAt = settings.UpdatedAt,
-        });
+            settings.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+
+        WriteEtag(settings.RowVersion);
+        return Ok(ToDto(settings));
     }
 
     /// <summary>
@@ -50,6 +47,11 @@ public class DispatchSettingsController(
     public async Task<IActionResult> UpdateSettingsAsync(
         [FromBody] UpdateDispatchSettingsDto request, CancellationToken ct)
     {
+        if (!TryReadRequiredEtag(out byte[]? expected, out IActionResult? error))
+        {
+            return error!;
+        }
+
         // Validate constraints
         if (request.IdleThresholdSeconds < 0)
         {
@@ -67,6 +69,7 @@ public class DispatchSettingsController(
         }
 
         DispatchSettings settings = await db.DispatchSettings.FirstAsync(ct);
+        db.Entry(settings).Property(candidate => candidate.RowVersion).OriginalValue = expected;
 
         settings.AutoDispatchEnabled = request.AutoDispatchEnabled;
         settings.AutoDispatchMode = request.AutoDispatchMode;
@@ -76,7 +79,16 @@ public class DispatchSettingsController(
         settings.LoadBalancingStrategy = request.LoadBalancingStrategy;
         settings.UpdatedAt = DateTime.UtcNow;
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return StatusCode(
+                StatusCodes.Status412PreconditionFailed,
+                new { error = "dispatch_settings_revision_conflict" });
+        }
 
         logger.LogInformation(
             "[DispatchSettings] Updated: enabled={Enabled}, mode={Mode}, threshold={Threshold}s, minScore={MinScore}, maxConcurrent={Max}, strategy={Strategy}",
@@ -87,8 +99,17 @@ public class DispatchSettingsController(
             settings.MaxConcurrentDispatches,
             settings.LoadBalancingStrategy);
 
-        return Ok(new DispatchSettingsDto
+        WriteEtag(settings.RowVersion);
+        return Ok(ToDto(settings));
+    }
+
+    private static DispatchSettingsDto ToDto(DispatchSettings settings) =>
+        new()
         {
+            ETag = settings.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(settings.RowVersion)
+                : null,
+            Revision = settings.Revision,
             AutoDispatchEnabled = settings.AutoDispatchEnabled,
             AutoDispatchMode = settings.AutoDispatchMode,
             IdleThresholdSeconds = settings.IdleThresholdSeconds,
@@ -96,6 +117,42 @@ public class DispatchSettingsController(
             MaxConcurrentDispatches = settings.MaxConcurrentDispatches,
             LoadBalancingStrategy = settings.LoadBalancingStrategy,
             UpdatedAt = settings.UpdatedAt,
-        });
+        };
+
+    private bool TryReadRequiredEtag(
+        out byte[]? expected,
+        out IActionResult? error)
+    {
+        string? supplied = Request.Headers.IfMatch.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            expected = null;
+            error = StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = "If-Match is required." });
+            return false;
+        }
+
+        try
+        {
+            expected = Convert.FromBase64String(
+                supplied.Trim().TrimStart('W', '/').Trim('"'));
+            error = null;
+            return true;
+        }
+        catch (FormatException)
+        {
+            expected = null;
+            error = BadRequest(new { error = "If-Match must be a base-64 encoded ETag." });
+            return false;
+        }
+    }
+
+    private void WriteEtag(byte[]? rowVersion)
+    {
+        if (rowVersion is { Length: > 0 })
+        {
+            Response.Headers.ETag = $"\"{Convert.ToBase64String(rowVersion)}\"";
+        }
     }
 }

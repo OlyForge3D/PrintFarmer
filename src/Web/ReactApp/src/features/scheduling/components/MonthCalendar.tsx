@@ -2,6 +2,10 @@ import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { Badge, Button } from '@/common/components/ui';
 import type { ScheduledJob } from '@/types/api';
+import {
+  scheduleWallClock,
+  scheduleWallDateKey,
+} from '@/features/scheduling/utils/scheduleWallTime';
 
 interface MonthCalendarProps {
   scheduledJobs: ScheduledJob[];
@@ -27,8 +31,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
   const jobsByDate = useMemo(() => {
     const map = new Map<string, ScheduledJob[]>();
     scheduledJobs.forEach((job) => {
-      const date = new Date(job.scheduledTime);
-      const dateKey = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const dateKey = scheduleWallDateKey(job.scheduledLocalTime);
       if (!map.has(dateKey)) {
         map.set(dateKey, []);
       }
@@ -156,20 +159,24 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
               {hasJobs && (
                 <div className="flex flex-col gap-1 w-full">
                   {jobsOnDate.slice(0, 2).map((job) => (
-                    <Badge
-                      key={job.id}
-                      variant={
-                        job.status === 'active'
-                          ? 'success'
-                          : job.status === 'paused'
-                            ? 'warning'
-                            : 'default'
-                      }
-                      size="sm"
-                      className="truncate text-xs"
-                    >
-                      {job.jobName}
-                    </Badge>
+                    <div key={job.id} className="min-w-0">
+                      <Badge
+                        variant={
+                          job.status === 'active'
+                            ? 'success'
+                            : job.status === 'paused'
+                              ? 'warning'
+                              : 'default'
+                        }
+                        size="sm"
+                        className="w-full truncate text-xs"
+                      >
+                        {job.jobName}
+                      </Badge>
+                      <span className="block truncate text-[10px] text-pf-text-secondary">
+                        {scheduleWallClock(job.scheduledLocalTime)} {job.timeZone}
+                      </span>
+                    </div>
                   ))}
                   {jobsOnDate.length > 2 && (
                     <span className="text-xs text-pf-text-tertiary">

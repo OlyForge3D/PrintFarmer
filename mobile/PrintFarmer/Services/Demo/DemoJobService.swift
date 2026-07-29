@@ -165,14 +165,55 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
         throw ServiceError.notImplemented("create job — read-only in demo mode")
     }
 
-    func update(id: UUID, _ request: UpdatePrintJobRequest) async throws -> PrintJob {
+    func update(
+        id: UUID,
+        _ request: UpdatePrintJobRequest,
+        reviewedRowVersion: String
+    ) async throws -> PrintJob {
         throw ServiceError.notImplemented("update job — read-only in demo mode")
     }
 
-    func delete(id: UUID) async throws {}
-    func dispatch(id: UUID) async throws {}
-    func cancel(id: UUID) async throws {}
-    func abort(id: UUID) async throws {}
-    func pause(id: UUID) async throws {}
-    func resume(id: UUID) async throws {}
+    func delete(id: UUID, reviewedRowVersion: String) async throws {}
+    func dispatch(
+        id: UUID,
+        reviewedRowVersion: String
+    ) async throws -> JobDispatchResult {
+        .accepted(
+            DispatchJobResponse(
+                id: id.uuidString,
+                rowVersion: reviewedRowVersion,
+                status: PrintJobStatus.printing.rawValue,
+                dispatchResult: DispatchAttemptResult(
+                    attemptId: UUID(),
+                    attemptNumber: 1,
+                    outcome: .accepted,
+                    errorCode: nil,
+                    errorDetail: nil,
+                    isRetryable: false,
+                    requiresReconciliation: false,
+                    jobRevision: reviewedRowVersion,
+                    dispatchStateRevision: nil
+                )
+            )
+        )
+    }
+    func cancel(id: UUID, reviewedRowVersion: String) async throws {}
+    func abort(id: UUID, reviewedRowVersion: String) async throws {}
+    func pause(id: UUID, reviewedRowVersion: String) async throws {}
+    func resume(id: UUID, reviewedRowVersion: String) async throws {}
+
+    func acknowledgeBedClearAndStart(
+        job: PrintJob,
+        printerId: UUID,
+        dispatchStateETag: String,
+        idempotencyKey: String
+    ) async throws -> AcknowledgeBedClearResponse {
+        AcknowledgeBedClearResponse(
+            message: "accepted",
+            jobETag: job.rowVersion,
+            dispatchStateETag: dispatchStateETag,
+            error: nil,
+            detail: nil
+        )
+    }
 }

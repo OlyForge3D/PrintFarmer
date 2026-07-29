@@ -72,7 +72,12 @@ public sealed class QueueAuthorizationTests : IAsyncLifetime
         string route,
         string requiredPermission)
     {
-        using HttpClient client = CreateOperatorClient(requiredPermission);
+        string[] permissions = route.Contains(
+            "/api/auto-dispatch/",
+            StringComparison.Ordinal)
+            ? [requiredPermission, PrintFarmerPermissions.Queue.Start]
+            : [requiredPermission];
+        using HttpClient client = CreateOperatorClient(permissions);
         using HttpRequestMessage request = CreateRequest(method, route);
 
         HttpResponseMessage response = await client.SendAsync(request);

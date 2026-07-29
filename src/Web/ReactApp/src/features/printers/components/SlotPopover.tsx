@@ -4,6 +4,7 @@ import clsx from 'clsx';
 import { toast } from 'sonner';
 import { Button } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
+import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { queryKeys } from '@/common/hooks/useApi';
 import type { ToolheadDto, SpoolmanSpool } from '@/types/api';
 import { SpoolPicker } from './SpoolPicker';
@@ -11,11 +12,18 @@ import { SpoolPicker } from './SpoolPicker';
 export interface SlotPopoverProps {
   toolhead: ToolheadDto;
   printerId: string;
+  reviewedRowVersion: string;
   onClose: () => void;
   align?: 'center' | 'start' | 'end';
 }
 
-export function SlotPopover({ toolhead, printerId, onClose, align = 'center' }: SlotPopoverProps) {
+export function SlotPopover({
+  toolhead,
+  printerId,
+  reviewedRowVersion,
+  onClose,
+  align = 'center',
+}: SlotPopoverProps) {
   const [showPicker, setShowPicker] = useState(false);
   const queryClient = useQueryClient();
 
@@ -28,24 +36,35 @@ export function SlotPopover({ toolhead, printerId, onClose, align = 'center' }: 
 
   const assignMutation = useMutation({
     mutationFn: (spoolId: number) =>
-      apiClient.setToolheadSpool(printerId, toolhead.index, spoolId),
+      apiClient.setToolheadSpool(
+        printerId,
+        toolhead.index,
+        spoolId,
+        reviewedRowVersion
+      ),
     onSuccess: () => {
       invalidateQueries();
       toast.success('Spool assigned');
       onClose();
     },
-    onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
+    onError: (err: unknown) =>
+      toast.error(mutationErrorMessage(err, 'Failed to assign spool')),
   });
 
   const unassignMutation = useMutation({
     mutationFn: () =>
-      apiClient.clearToolheadSpool(printerId, toolhead.index),
+      apiClient.clearToolheadSpool(
+        printerId,
+        toolhead.index,
+        reviewedRowVersion
+      ),
     onSuccess: () => {
       invalidateQueries();
       toast.success('Spool unassigned');
       onClose();
     },
-    onError: (err: Error) => toast.error(`Failed to unassign spool: ${err.message}`),
+    onError: (err: unknown) =>
+      toast.error(mutationErrorMessage(err, 'Failed to unassign spool')),
   });
 
   const isPending = assignMutation.isPending || unassignMutation.isPending;

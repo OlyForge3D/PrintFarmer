@@ -17,6 +17,7 @@ import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
+import { QueueRealtimeBridge } from '@/common/components/QueueRealtimeBridge';
 
 // Services
 import { assetService } from '@/services/assetService';
@@ -258,7 +259,9 @@ function AuthenticatedAppRoutes() {
     return <Navigate to="/dashboard" replace />;
   }
   return (
-    <Routes>
+    <>
+      {isAuthenticated && user?.isActive !== false && <QueueRealtimeBridge />}
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -334,7 +337,8 @@ function AuthenticatedAppRoutes() {
         <Route path="profiles/import" element={lazyRoute(<LazyProfileImportWizardPage />)} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }
 
@@ -360,10 +364,7 @@ function App() {
   useEffect(() => {
     // Connect both SignalR services in the background
     // These will establish connections and start receiving updates immediately
-    Promise.all([
-      printerSignalRService.connect(),
-      harvestSignalRService.connect()
-    ]).catch(err => {
+    harvestSignalRService.connect().catch(err => {
       logger.warn('Failed to establish SignalR connections', {
         error: err instanceof Error ? err.message : String(err)
       });

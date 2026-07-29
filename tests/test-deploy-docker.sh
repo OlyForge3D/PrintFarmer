@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy-docker.sh"
+COMPOSE_GENERATOR="$REPO_ROOT/scripts/docker/compose-generator.sh"
 
 # Source test framework
 source "$SCRIPT_DIR/test-framework.sh"
@@ -15,41 +16,62 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
+REPO_BACKUP_DIR=""
+TEARDOWN_COMPLETE=false
 
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
+    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
     test_info "Using temp directory: $TEST_TEMP_DIR"
-    
-    # Backup any existing deploy config so tests can restore it later
-    if [ -f "$REPO_ROOT/.deploy-config" ]; then
-        cp "$REPO_ROOT/.deploy-config" "$TEST_TEMP_DIR/.deploy-config.backup"
-    fi
+    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    trap teardown EXIT
 
     # Create a mock .deploy-config in the repo root to avoid interactive prompts
     cat > "$REPO_ROOT/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
 NETWORK_MODE=bridge
+ENABLE_DISCOVERY=no
+ALLOW_LOCAL_NETWORK=yes
+NETWORK_RANGES=192.168.0.0/16
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
 API_PORT=5245
 WEB_PORT=3000
-DISCOVERY_RANGES=192.168.0.0/16
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+INCLUDE_DISCOVERY=false
 ENABLE_DISTRIBUTED_SLICING=true
 ORCA_WORKER_COUNT=1
 ENABLE_ORCA_WORKER=yes
 ENABLE_SPOOLMAN=no
 ORCASLICER_VERSION=2.4.0
+USE_EXTERNAL_STORAGE=no
 EOF
 }
 
 teardown() {
-    cd "$ORIGINAL_PWD" 2>/dev/null || true
-    if [ -f "$TEST_TEMP_DIR/.deploy-config.backup" ]; then
-        mv "$TEST_TEMP_DIR/.deploy-config.backup" "$REPO_ROOT/.deploy-config"
-    else
-        rm -f "$REPO_ROOT/.deploy-config"
+    if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
+        return
     fi
+
+    cd "$ORIGINAL_PWD" 2>/dev/null || true
+    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
+    TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
 }
@@ -72,9 +94,19 @@ test_help_output() {
 test_basic_execution() {
     start_test "basic deploy script execution"
     
+    local original_dir
+    original_dir=$(pwd)
+    cd "$REPO_ROOT"
+
     # Deploy script should run successfully in dry-run mode
     capture_output "$DEPLOY_SCRIPT --dry-run --batch --output-dir $TEST_TEMP_DIR 2>&1 || true"
     local output=$(get_output)
+
+    cd "$original_dir"
+    if [[ "$output" != *"Setup completed successfully"* ]]; then
+        test_info "Dry-run output: $output"
+    fi
+
     assert_contains "$output" "Setup completed successfully" "Deploy script should complete in dry-run mode"
     
     pass_test
@@ -376,45 +408,13 @@ test_generated_sqlserver_password_propagation() {
     pass_test
 }
 
-# Test MySQL password propagation
-test_generated_mysql_password_propagation() {
-    start_test "generated MySQL password propagation"
-
-    cd "$TEST_TEMP_DIR"
-
-    # Run deploy script in dry-run batch mode selecting mysql
-    capture_output "$(get_deploy_script_command --dry-run --batch --env DB_PROVIDER=mysql)"
-    local output=$(get_output)
-
-    local env_file="$TEST_TEMP_DIR/.env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
-
-    assert_file_exists "$env_file" "Expected generated env file $env_file"
-
-    local my_pw
-    my_pw=$(grep -E '^MYSQL_ROOT_PASSWORD=' "$env_file" | tail -1 | cut -d= -f2- || true)
-    local conn
-    conn=$(grep -E '^ConnectionStrings__Default=' "$env_file" | tail -1 | cut -d= -f2- || true)
-
-    assert_not_equals "" "$my_pw" "MYSQL_ROOT_PASSWORD should be generated and present"
-    assert_not_equals "" "$conn" "ConnectionStrings__Default should be present"
-
-    if [[ "$conn" != *"$my_pw"* ]]; then
-        fail_test "Connection string does not contain generated MYSQL_ROOT_PASSWORD"
-    else
-        pass_test
-    fi
-}
-
 # Test all database providers
 test_all_database_combinations() {
     start_test "all database provider combinations"
     
     cd "$TEST_TEMP_DIR"
     
-    local databases=("postgres" "sqlserver" "mysql")
+    local databases=("postgres" "sqlserver")
     
     for db in "${databases[@]}"; do
         # Create config file for this combination
@@ -621,9 +621,9 @@ EOF
     pass_test
 }
 
-# End-to-end: mysql provider-only env generation and masked summary
-test_env_provider_only_end_to_end_mysql() {
-    start_test "deploy script generates provider-only .env for mysql"
+# End-to-end: unsupported providers fail before writing deployment secrets
+test_unsupported_mysql_provider() {
+    start_test "deploy script rejects unsupported mysql provider"
 
     cd "$TEST_TEMP_DIR"
 
@@ -632,23 +632,18 @@ ARCHITECTURE=microservices
 DB_PROVIDER=mysql
 EOF
 
+    rm -f .env
     capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
     local output=$(get_output)
 
-    assert_file_exists ".env" "Should have created .env for mysql"
-    local env_content
-    env_content=$(cat .env)
+    assert_contains "$output" "Unsupported database provider 'mysql'" "Should reject MySQL before generation"
+    if [[ -f .env ]]; then
+        test_info "Unsupported-provider output: $output"
+    fi
 
-    assert_contains "$env_content" "MYSQL_PASSWORD" "Env file should include MYSQL_PASSWORD"
-    assert_not_contains "$env_content" "MSSQL_SA_PASSWORD" "Env file should not include MSSQL_SA_PASSWORD when mysql selected"
-    assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env file should not include POSTGRES_PASSWORD when mysql selected"
-    assert_contains "$env_content" "ConnectionStrings__Default" "Env file should include ConnectionStrings__Default"
+    assert_file_not_exists ".env" "Should not write deployment secrets for an unsupported provider"
 
-    # Masked summary in output
-    assert_contains "$output" "MySQL credentials included (masked):" "Deploy output should include masked MySQL credentials header"
-    assert_contains "$output" "MYSQL_PASSWORD" "Deploy output should print masked MYSQL_PASSWORD"
-
-    rm -f .deploy-config .env .env || true
+    rm -f .deploy-config .env || true
 
     pass_test
 }
@@ -659,7 +654,7 @@ test_env_provider_standard_providers() {
 
     cd "$TEST_TEMP_DIR"
 
-    local providers=("postgres" "sqlserver" "mysql")
+    local providers=("postgres" "sqlserver")
     for provider in "${providers[@]}"; do
         cat > .deploy-config << EOF
 ARCHITECTURE=microservices
@@ -685,11 +680,6 @@ EOF
                 assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for sqlserver"
                 assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
                 ;;
-            mysql)
-                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for mysql"
-                assert_not_contains "$env_content" "POSTGRES_PASSWORD" "Env should not include POSTGRES_PASSWORD for mysql"
-                assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
-                ;;
         esac
 
         rm -f .deploy-config .env .env || true
@@ -704,7 +694,7 @@ test_env_provider_microservices_providers() {
 
     cd "$TEST_TEMP_DIR"
 
-    local providers=("postgres" "sqlserver" "mysql")
+    local providers=("postgres" "sqlserver")
     for provider in "${providers[@]}"; do
         cat > .deploy-config << EOF
 ARCHITECTURE=microservices
@@ -727,10 +717,6 @@ EOF
             sqlserver)
                 assert_contains "$env_content" "MSSQL_SA_PASSWORD" "Env should include MSSQL_SA_PASSWORD for microservices+sqlserver"
                 assert_contains "$output" "SQL Server credentials included (masked):" "Output should include masked SQL Server header"
-                ;;
-            mysql)
-                assert_contains "$env_content" "MYSQL_PASSWORD" "Env should include MYSQL_PASSWORD for microservices+mysql"
-                assert_contains "$output" "MySQL credentials included (masked):" "Output should include masked MySQL header"
                 ;;
         esac
 
@@ -902,9 +888,6 @@ EOF
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Should create env file with discovery config"
     
@@ -1091,10 +1074,35 @@ test_pfarm_variables_complete_set() {
     # Create full config with both Spoolman and Discovery
     cat > .deploy-config << 'EOF'
 ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
+NETWORK_MODE=bridge
+ALLOW_LOCAL_NETWORK=true
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+ENABLE_DISTRIBUTED_SLICING=false
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+USE_EXTERNAL_STORAGE=no
 ENABLE_SPOOLMAN=yes
+SPOOLMAN_OPTION=2
 SPOOLMAN_BASE_URL=http://spoolman.local:7912
-ENABLE_DISCOVERY=yes
+ENABLE_DISCOVERY=true
+INCLUDE_DISCOVERY=true
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
@@ -1135,10 +1143,35 @@ test_pfarm_variables_sourcing() {
     # Create config
     cat > .deploy-config << 'EOF'
 ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
+NETWORK_MODE=bridge
+ALLOW_LOCAL_NETWORK=true
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+ENABLE_DISTRIBUTED_SLICING=false
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+USE_EXTERNAL_STORAGE=no
 ENABLE_SPOOLMAN=yes
+SPOOLMAN_OPTION=2
 SPOOLMAN_BASE_URL=http://spoolman.local:7912
-ENABLE_DISCOVERY=yes
+ENABLE_DISCOVERY=true
+INCLUDE_DISCOVERY=true
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
@@ -1146,9 +1179,6 @@ EOF
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     # Create a test script to source the .env file
     cat > "$TEST_TEMP_DIR/test_pfarm_source.sh" << 'EOFTEST'
@@ -1173,6 +1203,10 @@ EOFTEST
     assert_not_contains "$output" "syntax error" "PFARM variables should not cause bash syntax errors"
 
     # Verify the variables were sourced correctly
+    if [[ "$output" != *"PFARM__Spoolman__BaseUrl=http://spoolman.local:7912"* ]]; then
+        test_info "PFARM source output: $output"
+    fi
+
     assert_contains "$output" "SOURCE_SUCCESS=true" "Source operation should succeed"
     assert_contains "$output" "PFARM__Spoolman__BaseUrl=http://spoolman.local:7912" "PFARM__Spoolman__BaseUrl should be sourced correctly"
     assert_contains "$output" "PFARM__NetworkDiscovery__EnableDiscovery=" "PFARM__NetworkDiscovery__EnableDiscovery should be sourced"
@@ -1192,7 +1226,30 @@ test_slicer_worker_api_key_generation() {
     # Create config with OrcaSlicer workers enabled
     cat > .deploy-config << 'EOF'
 ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
+NETWORK_MODE=bridge
+ENABLE_DISCOVERY=false
+ALLOW_LOCAL_NETWORK=false
+NETWORK_RANGES=
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+INCLUDE_DISCOVERY=false
+USE_EXTERNAL_STORAGE=no
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=2
 ENABLE_DISTRIBUTED_SLICING=true
@@ -1202,9 +1259,6 @@ EOF
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Should create env file with API key configuration"
     
@@ -1252,7 +1306,30 @@ test_slicer_worker_api_key_single_worker() {
     # Create config with single OrcaSlicer worker
     cat > .deploy-config << 'EOF'
 ARCHITECTURE=microservices
+COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
+CONNECTION_STRING=
+INCLUDE_POSTGRES=yes
+INCLUDE_SQLSERVER=no
+NETWORK_MODE=bridge
+ENABLE_DISCOVERY=false
+ALLOW_LOCAL_NETWORK=false
+NETWORK_RANGES=
+HTTP_PORT=8080
+HTTPS_PORT=0
+SERVER_HOST=localhost
+API_PORT=5245
+ENVIRONMENT=Development
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_PGADMIN=false
+DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+INCLUDE_DISCOVERY=false
+USE_EXTERNAL_STORAGE=no
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=1
 ENABLE_DISTRIBUTED_SLICING=true
@@ -1262,9 +1339,6 @@ EOF
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Should create env file with API key configuration"
     
@@ -1368,7 +1442,7 @@ run_all_tests() {
     test_multistage_build_integration
     test_env_provider_only_end_to_end
     test_env_provider_only_end_to_end_postgres
-    test_env_provider_only_end_to_end_mysql
+    test_unsupported_mysql_provider
     test_env_provider_standard_providers
     test_env_file_sourcing_with_connection_strings
     test_connection_string_sync_resolves_stale_export

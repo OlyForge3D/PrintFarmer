@@ -16,9 +16,9 @@ public sealed class TestEmulatorSeeder(
     IServiceScopeFactory scopeFactory,
     IOptions<TestEmulatorSettings> options,
     TestEmulatorStateManager stateManager,
-    ILogger<TestEmulatorSeeder> logger) : IHostedService
+    ILogger<TestEmulatorSeeder> logger) : BackgroundService
 {
-    public async Task StartAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         TestEmulatorSettings settings = options.Value;
         if (!settings.Enabled || settings.Printers.Count == 0)
@@ -26,21 +26,46 @@ public sealed class TestEmulatorSeeder(
             return;
         }
 
-        logger.LogInformation("TestEmulatorSeeder: seeding {Count} test printers", settings.Printers.Count);
+        logger.LogInformation(
+            "TestEmulatorSeeder: waiting to seed {Count} test printers",
+            settings.Printers.Count);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (await TrySeedAsync(settings, stoppingToken))
+                {
+                    return;
+                }
+            }
+            catch (Exception exception) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogDebug(
+                    exception,
+                    "TestEmulatorSeeder: database is not ready; retrying");
+            }
 
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+        }
+    }
+
+    private async Task<bool> TrySeedAsync(
+        TestEmulatorSettings settings,
+        CancellationToken cancellationToken)
+    {
         using IServiceScope scope = scopeFactory.CreateScope();
         IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         ICatalogRepository catalog = scope.ServiceProvider.GetRequiredService<ICatalogRepository>();
-
-        // Resolve default "Unknown" manufacturer and model (seeded by DatabaseInitializer)
         Guid? unknownMfgId = await catalog.GetUnknownManufacturerIdAsync(cancellationToken);
         Guid? unknownModelId = await catalog.GetUnknownModelIdAsync(cancellationToken);
-
         if (!unknownMfgId.HasValue || !unknownModelId.HasValue)
         {
-            logger.LogError("TestEmulatorSeeder: Unknown manufacturer/model not found — database may not be seeded yet");
-            return;
+            return false;
         }
+
+        logger.LogInformation(
+            "TestEmulatorSeeder: seeding {Count} test printers",
+            settings.Printers.Count);
 
         // Load all printers once outside the loop to avoid N×GetAllAsync calls
         List<Printer> allPrinters = await unitOfWork.Printers.GetAllAsync(cancellationToken);
@@ -99,9 +124,8 @@ public sealed class TestEmulatorSeeder(
 
         await unitOfWork.SaveChangesAsync(cancellationToken);
         logger.LogInformation("TestEmulatorSeeder: seeding complete");
+        return true;
     }
-
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     // Backend int value for TestEmulator — matches the 100 in BackendPluginAttribute
     private const int BackendTypeId = 100;

@@ -13,9 +13,8 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
 /// <summary>
 /// Background service that reacts to printer-idle events and orchestrates
-/// automatic job dispatch. Event-driven via <see cref="IAutoDispatchTrigger"/>
-/// (no polling). Thread-safe: a SemaphoreSlim serializes dispatch decisions
-/// so two printers going idle simultaneously cannot grab the same job.
+/// automatic job dispatch. In-memory events are wake-up hints; a periodic database scan
+/// is the durable source of eligible work after dropped events or process restarts.
 /// </summary>
 public sealed class AutoDispatchBackgroundService(
     AutoDispatchTrigger trigger,
@@ -23,15 +22,8 @@ public sealed class AutoDispatchBackgroundService(
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger) : BackgroundService
 {
-    private readonly SemaphoreSlim _dispatchLock = new(1, 1);
+    private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
     private int _inFlightCount;
-
-    /// <inheritdoc />
-    public override void Dispose()
-    {
-        _dispatchLock.Dispose();
-        base.Dispose();
-    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -42,18 +34,42 @@ public sealed class AutoDispatchBackgroundService(
         while (!stoppingToken.IsCancellationRequested)
         {
             DispatchTriggerEvent triggerEvent;
-            try
+            using (CancellationTokenSource readCts =
+                CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
             {
-                triggerEvent = await trigger.ReadAsync(stoppingToken);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
+                Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+                Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
+                Task completed = await Task.WhenAny(readTask, scanDelay);
+
+                if (completed == scanDelay)
+                {
+                    await readCts.CancelAsync();
+                    try
+                    {
+                        _ = await readTask;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Expected: the periodic durable scan won this wait.
+                    }
+
+                    await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                    continue;
+                }
+
+                try
+                {
+                    triggerEvent = await readTask;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
             }
 
             // Fire-and-forget the dispatch cycle for this printer. Each cycle
-            // runs on its own Task so multiple idle printers are handled concurrently
-            // (the dispatch lock serializes only the critical DB-read+assign window).
+            // runs on its own Task so multiple idle printers are handled concurrently.
+            // The cross-process database claim, not this lossy wake channel, prevents duplicates.
             _ = Task.Run(() => ProcessPrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, stoppingToken), stoppingToken);
         }
 
@@ -83,7 +99,9 @@ public sealed class AutoDispatchBackgroundService(
                 && (p.DispatchState.AutoDispatchState == AutoDispatchState.Ready || p.DispatchState.BedPreConfirmed)
                 && !db.PrintJobs.Any(j =>
                     j.AssignedPrinterId == p.Id
-                    && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                    && (j.Status == PrintJobStatus.Starting ||
+                        j.Status == PrintJobStatus.Printing ||
+                        j.Status == PrintJobStatus.Paused))
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
                     && j.QueuedAt <= startupAt
@@ -161,19 +179,15 @@ public sealed class AutoDispatchBackgroundService(
                 return;
             }
 
-            // Acquire dispatch lock so two printers cannot grab the same job
-            await _dispatchLock.WaitAsync(serviceCt);
+            Interlocked.Increment(ref _inFlightCount);
             try
             {
-                Interlocked.Increment(ref _inFlightCount);
-
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
                 await ExecuteDispatchCycleAsync(scope.ServiceProvider, printerId, settings, serviceCt);
             }
             finally
             {
                 Interlocked.Decrement(ref _inFlightCount);
-                _dispatchLock.Release();
             }
         }
         catch (OperationCanceledException)
@@ -203,7 +217,9 @@ public sealed class AutoDispatchBackgroundService(
         // Check no job is currently active on this printer
         bool hasActiveJob = await db.PrintJobs.AnyAsync(
             j => j.AssignedPrinterId == printerId
-                 && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                 && (j.Status == PrintJobStatus.Starting ||
+                     j.Status == PrintJobStatus.Printing ||
+                     j.Status == PrintJobStatus.Paused),
             ct);
 
         if (hasActiveJob)
@@ -232,14 +248,13 @@ public sealed class AutoDispatchBackgroundService(
             return;
         }
 
-        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer
+        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
+        // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(j => j.Status == PrintJobStatus.Queued
                         && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId))
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt)
+            .OrderByPriorityDescending()
             .Take(20) // reasonable batch to score
             .ToListAsync(ct);
 
@@ -280,7 +295,7 @@ public sealed class AutoDispatchBackgroundService(
                 "[AutoDispatch] No compatible jobs above threshold ({Threshold}) for printer {PrinterId}",
                 settings.MinimumScoreThreshold, printerId);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchfailed", new DispatchFailedEvent
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchfailed", new DispatchFailedEvent
             {
                 PrinterId = printerId,
                 PrinterName = printer.Name ?? printerId.ToString(),
@@ -311,14 +326,23 @@ public sealed class AutoDispatchBackgroundService(
             });
             await db.SaveChangesAsync(ct);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
-            {
-                JobId = bestJob.Id,
-                JobName = bestJob.Name ?? "Unknown",
-                PrinterId = printerId,
-                PrinterName = printer.Name ?? printerId.ToString(),
-                Score = bestMatch.TotalScore,
-            }, ct);
+            await Task.WhenAll(
+                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
+                {
+                    JobId = bestJob.Id,
+                    JobName = bestJob.Name ?? "Unknown",
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Score = bestMatch.TotalScore,
+                }, ct),
+                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
+                {
+                    JobId = bestJob.Id,
+                    JobName = bestJob.Name ?? "Unknown",
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Score = bestMatch.TotalScore,
+                }, ct));
 
             return;
         }
@@ -327,7 +351,19 @@ public sealed class AutoDispatchBackgroundService(
         try
         {
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
-            await dispatchService.DispatchJobAsync(bestJob.Id, printerId, "system:auto-dispatch", bestMatch, ct);
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+                await dispatchService.DispatchJobAsync(
+                    bestJob.Id,
+                    printerId,
+                    QueueActorIdentity.AutoDispatch,
+                    bestMatch,
+                    ct);
+            if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
+            {
+                string outcome = dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
+                throw new InvalidOperationException(
+                    $"Auto-dispatch backend outcome was {outcome}; success was not confirmed.");
+            }
 
             // Batch the post-dispatch updates into a single save
             PrintJob? jobToUpdate = await db.PrintJobs.FindAsync([bestJob.Id], ct);
@@ -358,15 +394,25 @@ public sealed class AutoDispatchBackgroundService(
                 "[AutoDispatch] Dispatched job {JobId} ({JobName}) → printer {PrinterName} (score: {Score:F1})",
                 bestJob.Id, bestJob.Name, printer.Name, bestMatch.TotalScore);
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
-            {
-                JobId = bestJob.Id,
-                JobName = bestJob.Name ?? "Unknown",
-                PrinterId = printerId,
-                PrinterName = printer.Name ?? printerId.ToString(),
-                Score = bestMatch.TotalScore,
-                Mode = AutoDispatchMode.Auto,
-            }, ct);
+            await Task.WhenAll(
+                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
+                {
+                    JobId = bestJob.Id,
+                    JobName = bestJob.Name ?? "Unknown",
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Score = bestMatch.TotalScore,
+                    Mode = AutoDispatchMode.Auto,
+                }, ct),
+                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
+                {
+                    JobId = bestJob.Id,
+                    JobName = bestJob.Name ?? "Unknown",
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Score = bestMatch.TotalScore,
+                    Mode = AutoDispatchMode.Auto,
+                }, ct));
         }
         catch (Exception ex)
         {
@@ -396,13 +442,21 @@ public sealed class AutoDispatchBackgroundService(
                 logger.LogWarning(saveEx, "[AutoDispatch] Failed to save dispatch failure log");
             }
 
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("dispatchfailed", new DispatchFailedEvent
-            {
-                JobId = bestJob.Id,
-                PrinterId = printerId,
-                PrinterName = printer.Name ?? printerId.ToString(),
-                Reason = ex.Message,
-            }, ct);
+            await Task.WhenAll(
+                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchfailed", new DispatchFailedEvent
+                {
+                    JobId = bestJob.Id,
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Reason = ex.Message,
+                }, ct),
+                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("dispatchfailed", new DispatchFailedEvent
+                {
+                    JobId = bestJob.Id,
+                    PrinterId = printerId,
+                    PrinterName = printer.Name ?? printerId.ToString(),
+                    Reason = ex.Message,
+                }, ct));
         }
     }
 }

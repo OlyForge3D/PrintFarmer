@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { jobSchedulingService, ScheduleJobRequest, RescheduleJobRequest } from '../jobSchedulingService';
 import { apiClient } from '../api';
+import type { ScheduledJob } from '@/types/api';
 
 vi.mock('../api', () => ({
   apiClient: {
     scheduleJob: vi.fn(),
     rescheduleJob: vi.fn(),
-    cancelScheduling: vi.fn(),
-    pauseScheduling: vi.fn(),
-    resumeScheduling: vi.fn(),
+    cancelSchedule: vi.fn(),
+    pauseSchedule: vi.fn(),
+    resumeSchedule: vi.fn(),
     getScheduledJob: vi.fn(),
     getScheduledJobs: vi.fn(),
-    getExecutionHistory: vi.fn(),
-    getAvailableTimeZones: vi.fn(),
+    getJobExecutions: vi.fn(),
+    getTimezones: vi.fn(),
   },
 }));
 
@@ -25,21 +26,27 @@ describe('jobSchedulingService', () => {
     it('should schedule a job with all parameters', async () => {
       const jobId = 'job-123';
       const request: ScheduleJobRequest = {
-        scheduledStartTime: new Date('2024-01-01T10:00:00Z'),
+        scheduledLocalTime: '2024-01-01T10:00:00',
         timeZone: 'America/New_York',
-        recurrencePattern: 'daily',
-        recurrenceEndDate: new Date('2024-12-31T23:59:59Z'),
+        recurrencePattern: 'Daily',
+        recurrenceInterval: 1,
+        recurrenceEndLocalTime: '2024-12-31T23:59:59',
       };
       const mockResponse = {
+        id: 'schedule-123',
         jobId: 'job-123',
         jobName: 'Test Job',
         printerName: 'Printer 1',
-        scheduledStartTime: '2024-01-01T10:00:00Z',
-        scheduledStartTimeInTimeZone: '2024-01-01T05:00:00-05:00',
+        printerId: 'printer-1',
+        scheduledStartTimeUtc: '2024-01-01T15:00:00Z',
+        scheduledLocalTime: '2024-01-01T10:00:00',
         timeZone: 'America/New_York',
-        recurrencePattern: 'daily',
+        recurrencePattern: 'Daily' as const,
+        recurrenceInterval: 1,
         isActive: true,
         isPaused: false,
+        requiresOperatorReauthorization: false,
+        status: 'active' as const,
       };
 
       vi.mocked(apiClient.scheduleJob).mockResolvedValue(mockResponse);
@@ -53,7 +60,9 @@ describe('jobSchedulingService', () => {
     it('should schedule a one-time job without recurrence', async () => {
       const jobId = 'job-456';
       const request: ScheduleJobRequest = {
-        scheduledStartTime: new Date('2024-02-01T14:00:00Z'),
+        scheduledLocalTime: '2024-02-01T14:00:00',
+        timeZone: 'UTC',
+        recurrenceInterval: 1,
       };
 
       await jobSchedulingService.scheduleJob(jobId, request);
@@ -66,18 +75,24 @@ describe('jobSchedulingService', () => {
     it('should reschedule a job', async () => {
       const jobId = 'job-789';
       const request: RescheduleJobRequest = {
-        newScheduledTime: new Date('2024-03-01T12:00:00Z'),
+        scheduledLocalTime: '2024-03-01T12:00:00',
         timeZone: 'UTC',
+        recurrenceInterval: 1,
       };
       const mockResponse = {
+        id: 'schedule-789',
         jobId: 'job-789',
         jobName: 'Rescheduled Job',
         printerName: 'Printer 2',
-        scheduledStartTime: '2024-03-01T12:00:00Z',
-        scheduledStartTimeInTimeZone: '2024-03-01T12:00:00Z',
+        printerId: 'printer-2',
+        scheduledStartTimeUtc: '2024-03-01T12:00:00Z',
+        scheduledLocalTime: '2024-03-01T12:00:00',
         timeZone: 'UTC',
+        recurrenceInterval: 1,
         isActive: true,
         isPaused: false,
+        requiresOperatorReauthorization: false,
+        status: 'active' as const,
       };
 
       vi.mocked(apiClient.rescheduleJob).mockResolvedValue(mockResponse);
@@ -95,7 +110,7 @@ describe('jobSchedulingService', () => {
 
       await jobSchedulingService.cancelScheduling(jobId);
 
-      expect(apiClient.cancelScheduling).toHaveBeenCalledWith(jobId);
+      expect(apiClient.cancelSchedule).toHaveBeenCalledWith(jobId);
     });
   });
 
@@ -105,7 +120,7 @@ describe('jobSchedulingService', () => {
 
       await jobSchedulingService.pauseScheduling(jobId);
 
-      expect(apiClient.pauseScheduling).toHaveBeenCalledWith(jobId);
+      expect(apiClient.pauseSchedule).toHaveBeenCalledWith(jobId);
     });
   });
 
@@ -115,22 +130,27 @@ describe('jobSchedulingService', () => {
 
       await jobSchedulingService.resumeScheduling(jobId);
 
-      expect(apiClient.resumeScheduling).toHaveBeenCalledWith(jobId);
+      expect(apiClient.resumeSchedule).toHaveBeenCalledWith(jobId);
     });
   });
 
   describe('getScheduledJob', () => {
     it('should get a scheduled job by ID', async () => {
       const jobId = 'job-get';
-      const mockJob = {
+      const mockJob: ScheduledJob = {
+        id: 'schedule-get',
         jobId: 'job-get',
         jobName: 'Get Job',
         printerName: 'Printer 3',
-        scheduledStartTime: '2024-04-01T08:00:00Z',
-        scheduledStartTimeInTimeZone: '2024-04-01T08:00:00Z',
+        printerId: 'printer-3',
+        scheduledStartTimeUtc: '2024-04-01T08:00:00Z',
+        scheduledLocalTime: '2024-04-01T08:00:00',
         timeZone: 'UTC',
+        recurrenceInterval: 1,
         isActive: true,
         isPaused: false,
+        requiresOperatorReauthorization: false,
+        status: 'active',
       };
 
       vi.mocked(apiClient.getScheduledJob).mockResolvedValue(mockJob);
@@ -141,39 +161,49 @@ describe('jobSchedulingService', () => {
       expect(result).toEqual(mockJob);
     });
 
-    it('should return null for non-existent job', async () => {
+    it('should propagate a not-found response for a non-existent job', async () => {
       const jobId = 'non-existent';
+      const notFound = new Error('Scheduled job not found');
 
-      vi.mocked(apiClient.getScheduledJob).mockResolvedValue(null);
+      vi.mocked(apiClient.getScheduledJob).mockRejectedValue(notFound);
 
-      const result = await jobSchedulingService.getScheduledJob(jobId);
-
-      expect(result).toBeNull();
+      await expect(jobSchedulingService.getScheduledJob(jobId))
+        .rejects.toThrow('Scheduled job not found');
     });
   });
 
   describe('getScheduledJobs', () => {
     it('should get all scheduled jobs without date filters', async () => {
-      const mockJobs = [
+      const mockJobs: ScheduledJob[] = [
         {
+          id: 'schedule-1',
           jobId: 'job-1',
           jobName: 'Job 1',
           printerName: 'Printer 1',
-          scheduledStartTime: '2024-05-01T10:00:00Z',
-          scheduledStartTimeInTimeZone: '2024-05-01T10:00:00Z',
+          printerId: 'printer-1',
+          scheduledStartTimeUtc: '2024-05-01T10:00:00Z',
+          scheduledLocalTime: '2024-05-01T10:00:00',
           timeZone: 'UTC',
+          recurrenceInterval: 1,
           isActive: true,
           isPaused: false,
+          requiresOperatorReauthorization: false,
+          status: 'active',
         },
         {
+          id: 'schedule-2',
           jobId: 'job-2',
           jobName: 'Job 2',
           printerName: 'Printer 2',
-          scheduledStartTime: '2024-05-02T14:00:00Z',
-          scheduledStartTimeInTimeZone: '2024-05-02T14:00:00Z',
+          printerId: 'printer-2',
+          scheduledStartTimeUtc: '2024-05-02T14:00:00Z',
+          scheduledLocalTime: '2024-05-02T14:00:00',
           timeZone: 'UTC',
+          recurrenceInterval: 1,
           isActive: true,
           isPaused: true,
+          requiresOperatorReauthorization: false,
+          status: 'paused',
         },
       ];
 
@@ -216,11 +246,11 @@ describe('jobSchedulingService', () => {
         },
       ];
 
-      vi.mocked(apiClient.getExecutionHistory).mockResolvedValue(mockHistory);
+      vi.mocked(apiClient.getJobExecutions).mockResolvedValue(mockHistory);
 
       const result = await jobSchedulingService.getExecutionHistory(jobId);
 
-      expect(apiClient.getExecutionHistory).toHaveBeenCalledWith(jobId);
+      expect(apiClient.getJobExecutions).toHaveBeenCalledWith(jobId);
       expect(result).toEqual(mockHistory);
     });
   });
@@ -233,11 +263,11 @@ describe('jobSchedulingService', () => {
         { id: 'America/Los_Angeles', displayName: 'Pacific Time', offset: '-08:00' },
       ];
 
-      vi.mocked(apiClient.getAvailableTimeZones).mockResolvedValue(mockTimeZones);
+      vi.mocked(apiClient.getTimezones).mockResolvedValue(mockTimeZones);
 
       const result = await jobSchedulingService.getAvailableTimeZones();
 
-      expect(apiClient.getAvailableTimeZones).toHaveBeenCalled();
+      expect(apiClient.getTimezones).toHaveBeenCalled();
       expect(result).toEqual(mockTimeZones);
       expect(result).toHaveLength(3);
     });

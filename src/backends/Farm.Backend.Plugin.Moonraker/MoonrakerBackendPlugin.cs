@@ -50,6 +50,9 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// </summary>
     public Type? StatusClientInterfaceType => typeof(IPrinterStatusClient);
 
+    public BackendTelemetryCadence TelemetryCadence =>
+        new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+
     /// <summary>
     /// Gets the version of this plugin.
     /// </summary>

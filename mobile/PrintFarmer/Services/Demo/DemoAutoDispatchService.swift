@@ -52,8 +52,8 @@ final class DemoAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
         return status
     }
 
-    func markReady(printerId: UUID) async throws -> AutoDispatchReadyResult {
-        let status = AutoDispatchStatus(printerId: printerId, printerName: "Demo Printer",
+    func markReady(status reviewedStatus: AutoDispatchStatus) async throws -> AutoDispatchReadyResult {
+        let status = AutoDispatchStatus(printerId: reviewedStatus.printerId, printerName: "Demo Printer",
                                         enabled: true, isReady: true, currentJobName: nil, queueDepth: 1,
                                         readyGateChecks: [], lastActivity: nil,
                                         state: AutoDispatchState.ready.rawValue,
@@ -68,32 +68,35 @@ final class DemoAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
         return AutoDispatchReadyResult(status: status, nextJob: nextJob, filamentCheck: filamentCheck)
     }
 
-    func skip(printerId: UUID) async throws -> AutoDispatchStatus {
-        AutoDispatchStatus(printerId: printerId, printerName: "Demo Printer",
+    func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        AutoDispatchStatus(printerId: status.printerId, printerName: "Demo Printer",
                            enabled: true, isReady: false, currentJobName: nil, queueDepth: 0,
                            readyGateChecks: [], lastActivity: nil,
                            state: AutoDispatchState.none.rawValue,
                            bedPreConfirmed: false, attentionMessage: nil)
     }
 
-    func cancel(printerId: UUID) async throws -> AutoDispatchStatus {
-        AutoDispatchStatus(printerId: printerId, printerName: "Demo Printer",
+    func cancel(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        AutoDispatchStatus(printerId: status.printerId, printerName: "Demo Printer",
                            enabled: true, isReady: false, currentJobName: nil, queueDepth: 0,
                            readyGateChecks: [], lastActivity: nil,
                            state: AutoDispatchState.none.rawValue,
                            bedPreConfirmed: false, attentionMessage: nil)
     }
 
-    func preClear(printerId: UUID) async throws -> AutoDispatchStatus {
-        AutoDispatchStatus(printerId: printerId, printerName: "Demo Printer",
+    func preClear(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {
+        AutoDispatchStatus(printerId: status.printerId, printerName: "Demo Printer",
                            enabled: true, isReady: false, currentJobName: nil, queueDepth: 0,
                            readyGateChecks: [], lastActivity: nil,
                            state: AutoDispatchState.none.rawValue,
                            bedPreConfirmed: true, attentionMessage: nil)
     }
 
-    func setEnabled(printerId: UUID, request: SetAutoDispatchEnabledRequest) async throws -> AutoDispatchStatus {
-        AutoDispatchStatus(printerId: printerId, printerName: "Demo Printer",
+    func setEnabled(
+        status: AutoDispatchStatus,
+        request: SetAutoDispatchEnabledRequest
+    ) async throws -> AutoDispatchStatus {
+        AutoDispatchStatus(printerId: status.printerId, printerName: "Demo Printer",
                            enabled: request.enabled, isReady: false, currentJobName: nil, queueDepth: 0,
                            readyGateChecks: [], lastActivity: nil,
                            state: AutoDispatchState.none.rawValue,

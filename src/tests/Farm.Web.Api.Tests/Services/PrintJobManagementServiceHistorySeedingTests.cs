@@ -1,10 +1,16 @@
-﻿using System.Reflection;
+﻿using System.Net;
+using System.Reflection;
+using System.Text;
+using System.Text.Json;
 using Farm.Api.Services.PrintQueue;
+using Farm.Backend.Plugin.OctoPrint;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
@@ -2061,21 +2067,148 @@ public class PrintJobManagementServiceHistorySeedingTests
         return addedJob;
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task SeedHistoryFromPrintersAsync_RealOctoPrint1000Rows_AdvancesWatermark()
+    {
+        Guid printerId = Guid.NewGuid();
+        const long FirstTimestamp = 1700000000;
+        var entries = Enumerable.Range(0, 1000)
+            .Select(index => new
+            {
+                name = $"seed-{index:D4}.gcode",
+                success = true,
+                timestamp = FirstTimestamp + index,
+                completionTime = FirstTimestamp + index + 60,
+            })
+            .ToArray();
+        int adapterRequestCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            adapterRequestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new
+                    {
+                        success = true,
+                        count = entries.Length,
+                        results = entries.Skip(start).Take(Math.Min(limit, 100)),
+                    }),
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+        });
+        using var adapterHttp = new HttpClient(handler);
+        var adapter = new OctoPrintClient(
+            adapterHttp,
+            NullLogger<OctoPrintClient>.Instance,
+            new BackendTimeoutSettings());
+        Printer printer = new()
+        {
+            Id = printerId,
+            Name = "OctoPrint 1000-row seed",
+            ServerUrl = "http://octoprint.local",
+            BackendPort = 80,
+            Backend = (int)PrinterBackend.OctoPrint,
+            IsEnabled = true,
+            ServiceState = null,
+            Credential = new PrinterCredential { ApiKey = "test-key" },
+        };
+        await using AppDbContext db = new(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase($"OctoPrintSeed_{Guid.NewGuid():N}")
+                .Options);
+        PrintersService printersService = CreateConcreteHistoryService(
+            db,
+            printer,
+            adapter);
+        var repository = new Mock<IPrintJobManagementRepository>();
+        repository.Setup(r => r.GetEnabledPrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        repository.Setup(r => r.GetExternalJobIdsForPrinterAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetActualStartTimesForPrinterAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetByExternalIdAsync(
+                printerId,
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+        repository.Setup(r => r.FindExistingJobForHistoryMatchAsync(
+                printerId,
+                It.IsAny<string>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJob?)null);
+        repository.Setup(r => r.FindGcodeFileByFilenameAsync(
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GcodeFile?)null);
+        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        DateTime? persistedWatermark = null;
+        repository.Setup(r => r.UpdatePrinterLastHistorySeedAsync(
+                printerId,
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<Guid, DateTime, CancellationToken>(
+                (_, watermark, _) => persistedWatermark = watermark)
+            .Returns(Task.CompletedTask);
+        int addedCount = 0;
+        repository.Setup(r => r.Add(It.IsAny<PrintJob>()))
+            .Callback(() => addedCount++);
+        var logger = new Mock<
+            Microsoft.Extensions.Logging.ILogger<PrintJobManagementService>>();
+        PrintJobManagementService service = CreateService(
+            repository.Object,
+            printersService,
+            logger.Object);
+
+        await service.SeedHistoryFromPrintersAsync();
+
+        addedCount.Should().Be(1000);
+        adapterRequestCount.Should().Be(10);
+        persistedWatermark.Should().Be(
+            DateTimeOffset.FromUnixTimeSeconds(FirstTimestamp + 999).UtcDateTime);
+        logger.Invocations
+            .Where(invocation =>
+                invocation.Arguments.Count > 0 &&
+                invocation.Arguments[0] is Microsoft.Extensions.Logging.LogLevel level &&
+                level >= Microsoft.Extensions.Logging.LogLevel.Warning)
+            .Should().BeEmpty();
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         Mock<IPrintersService> printersService)
     {
-        return CreateService(repository.Object, printersService);
+        return CreateService(repository.Object, printersService.Object);
     }
 
     private static PrintJobManagementService CreateService(
         IPrintJobManagementRepository repository,
         Mock<IPrintersService> printersService)
     {
+        return CreateService(repository, printersService.Object);
+    }
+
+    private static PrintJobManagementService CreateService(
+        IPrintJobManagementRepository repository,
+        IPrintersService printersService,
+        Microsoft.Extensions.Logging.ILogger<PrintJobManagementService>? logger = null)
+    {
         return new PrintJobManagementService(
             repository,
-            NullLogger<PrintJobManagementService>.Instance,
-            printersService.Object,
+            logger ?? NullLogger<PrintJobManagementService>.Instance,
+            printersService,
             Mock.Of<IStoragePathService>(),
             Mock.Of<IHubContext<PrinterHub>>(),
             Mock.Of<IStoredFileOperationsService>(),
@@ -2087,6 +2220,67 @@ public class PrintJobManagementServiceHistorySeedingTests
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
             settingsService: Mock.Of<ISettingsService>());
+    }
+
+    private static PrintersService CreateConcreteHistoryService(
+        AppDbContext db,
+        Printer printer,
+        ISupportsHistory historyClient)
+    {
+        var printersRepository = new Mock<IPrintersRepository>();
+        printersRepository
+            .Setup(repository => repository.FindByIdAsync(
+                printer.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers)
+            .Returns(printersRepository.Object);
+        var capabilityFactory = new Mock<IBackendCapabilityFactory>();
+        ISupportsHistory? supported = historyClient;
+        capabilityFactory
+            .Setup(factory => factory.TryGetHistoryClientTyped(
+                PrinterBackend.OctoPrint,
+                out supported))
+            .Returns(true);
+
+        return new PrintersService(
+            unitOfWork.Object,
+            db,
+            Mock.Of<IBackendClientFactory>(),
+            capabilityFactory.Object,
+            Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<PrintersService>.Instance,
+            Mock.Of<IPrinterStatusBroadcaster>(),
+            Mock.Of<IMultiPrinterStatusCoordinator>(),
+            Mock.Of<IPrinterStatusClientFactory>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(),
+            Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
+            Mock.Of<ISpoolmanService>(),
+            Mock.Of<IGo2RtcService>(),
+            Mock.Of<IStoragePathService>());
+    }
+
+    private static int ReadQueryInt(HttpRequestMessage request, string name)
+    {
+        string value = request.RequestUri!.Query
+            .TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => part.Split('=', 2))
+            .Single(parts => string.Equals(parts[0], name, StringComparison.Ordinal))[1];
+        return int.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private sealed class InlineHandler(
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(responseFactory(request));
     }
 
     private static Mock<IPrintersService> CreateHistoryListMock(Guid printerId, HistoryListResponse historyResponse)

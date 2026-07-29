@@ -269,7 +269,8 @@ pgAdmin is **only supported with PostgreSQL**. Other database providers will ski
 ### New Files
 
 - `scripts/docker/compose-templates/docker-compose.pgadmin.yml` - pgAdmin service configuration
-- `scripts/docker/pgadmin-init.json` - Auto-configuration for database connection
+- `generate_pgadmin_servers_config` in `scripts/deploy-docker.sh` - Generates the
+  password-free database connection configuration during deployment
 
 ### Modified Files
 

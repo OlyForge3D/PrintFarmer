@@ -98,7 +98,7 @@ run_test_suite() {
     
     if [[ ! -f "$test_script" ]]; then
         log_warn "Test script not found: $test_script"
-        ((TESTS_SKIPPED++))
+        ((++TESTS_SKIPPED))
         return 0
     fi
     
@@ -107,27 +107,27 @@ run_test_suite() {
     if [[ "$VERBOSE" == "true" ]]; then
         if bash "$test_script"; then
             log_success "$suite_name passed"
-            ((TESTS_PASSED++))
-            ((TESTS_RUN++))
+            ((++TESTS_PASSED))
+            ((++TESTS_RUN))
             return 0
         else
             log_error "$suite_name failed"
             FAILED_TESTS+=("$suite_name")
-            ((TESTS_FAILED++))
-            ((TESTS_RUN++))
+            ((++TESTS_FAILED))
+            ((++TESTS_RUN))
             return 1
         fi
     else
         if bash "$test_script" >/dev/null 2>&1; then
             log_success "$suite_name passed"
-            ((TESTS_PASSED++))
-            ((TESTS_RUN++))
+            ((++TESTS_PASSED))
+            ((++TESTS_RUN))
             return 0
         else
             log_error "$suite_name failed (run with --verbose for details)"
             FAILED_TESTS+=("$suite_name")
-            ((TESTS_FAILED++))
-            ((TESTS_RUN++))
+            ((++TESTS_FAILED))
+            ((++TESTS_RUN))
             return 1
         fi
     fi
@@ -187,34 +187,34 @@ run_quick_tests() {
     # Test 1: Help output
     if bash "$REPO_ROOT/scripts/docker/compose-generator.sh" --help >/dev/null 2>&1; then
         log_success "Compose generator help works"
-        ((TESTS_PASSED++))
+        ((++TESTS_PASSED))
     else
         log_error "Compose generator help failed"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
     fi
-    ((TESTS_RUN++))
+    ((++TESTS_RUN))
     
     # Test 2: Standard generation
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         --output-dir "$test_temp_dir/test1" >/dev/null 2>&1; then
         log_success "Standard compose generation works"
-        ((TESTS_PASSED++))
+        ((++TESTS_PASSED))
     else
         log_error "Monolithic compose generation failed"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
     fi
-    ((TESTS_RUN++))
+    ((++TESTS_RUN))
     
     # Test 3: Generation with explicit options
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         --output-dir "$test_temp_dir/test2" >/dev/null 2>&1; then
         log_success "Compose generation with options works"
-        ((TESTS_PASSED++))
+        ((++TESTS_PASSED))
     else
         log_error "Microservices compose generation failed"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
     fi
-    ((TESTS_RUN++))
+    ((++TESTS_RUN))
     
     # Test 4: No duplicate volumes in generated files
     log_subsection "YAML Validation (No Duplicate Volumes)"
@@ -224,16 +224,16 @@ run_quick_tests() {
         local volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
         if [[ "$volumes_count" -eq 1 ]]; then
             log_success "No duplicate volumes in monolithic compose"
-            ((TESTS_PASSED++))
+            ((++TESTS_PASSED))
         else
             log_error "Found $volumes_count 'volumes:' sections (expected 1)"
-            ((TESTS_FAILED++))
+            ((++TESTS_FAILED))
         fi
     else
         log_error "Compose file not generated"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
     fi
-    ((TESTS_RUN++))
+    ((++TESTS_RUN))
     
     # Test 5: No duplicate volumes in generated files
     log_subsection "YAML Validation (No Duplicate Volumes)"
@@ -243,16 +243,16 @@ run_quick_tests() {
         volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
         if [[ "$volumes_count" -eq 1 ]]; then
             log_success "No duplicate volumes in microservices compose"
-            ((TESTS_PASSED++))
+            ((++TESTS_PASSED))
         else
             log_error "Found $volumes_count 'volumes:' sections (expected 1)"
-            ((TESTS_FAILED++))
+            ((++TESTS_FAILED))
         fi
     else
         log_error "Microservices compose file not generated"
-        ((TESTS_FAILED++))
+        ((++TESTS_FAILED))
     fi
-    ((TESTS_RUN++))
+    ((++TESTS_RUN))
 }
 
 ################################################################################

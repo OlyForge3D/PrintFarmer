@@ -357,6 +357,11 @@ final class ActiveServerGeneration: @unchecked Sendable {
 
 // MARK: - API Client
 
+struct HTTPDecodedResponse<Value: Sendable>: Sendable {
+    let statusCode: Int
+    let value: Value
+}
+
 actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -539,6 +544,77 @@ actor APIClient {
         return try await execute(request)
     }
 
+    func post<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String]
+    ) async throws -> T {
+        var request = try buildRequest(path: path, method: "POST")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
+        return try await execute(request)
+    }
+
+    func post<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String],
+        accepting statusCodes: Set<Int>
+    ) async throws -> HTTPDecodedResponse<T> {
+        var request = try buildRequest(path: path, method: "POST")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
+        try await checkTokenExpiry()
+        let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if !statusCodes.contains(http.statusCode) {
+            try validateResponse(response, data: data)
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data)
+            )
+        } catch {
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String],
+        accepting statusCodes: Set<Int>
+    ) async throws -> HTTPDecodedResponse<T> {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
+        try await checkTokenExpiry()
+        let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if !statusCodes.contains(http.statusCode) {
+            try validateResponse(response, data: data)
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data)
+            )
+        } catch {
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
     func getData(_ path: String) async throws -> Data {
         try await checkTokenExpiry()
         let request = try buildRequest(path: path, method: "GET")
@@ -571,13 +647,18 @@ actor APIClient {
         }
     }
 
-    func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
-        let request = try buildRequest(path: path, method: "POST")
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String] = [:]
+    ) async throws -> T {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
         return try await execute(request)
     }
 
-    func postVoid(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "POST")
+    func postVoid(_ path: String, headers: [String: String] = [:]) async throws {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
         try await executeVoid(request)
     }
 
@@ -600,10 +681,15 @@ actor APIClient {
         try await executeVoid(request)
     }
 
-    func put<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
+    func put<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String] = [:]
+    ) async throws -> T {
         var request = try buildRequest(path: path, method: "PUT")
         request.httpBody = try encoder.encode(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
         return try await execute(request)
     }
 
@@ -614,8 +700,9 @@ actor APIClient {
         return try await execute(request)
     }
 
-    func delete(_ path: String) async throws {
-        let request = try buildRequest(path: path, method: "DELETE")
+    func delete(_ path: String, headers: [String: String] = [:]) async throws {
+        var request = try buildRequest(path: path, method: "DELETE")
+        apply(headers: headers, to: &request)
         try await executeVoid(request)
     }
 
@@ -637,6 +724,12 @@ actor APIClient {
         }
 
         return request
+    }
+
+    private func apply(headers: [String: String], to request: inout URLRequest) {
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
     }
 
     private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
@@ -746,6 +839,12 @@ actor APIClient {
             throw NetworkError.methodNotAllowed
         case 409:
             throw NetworkError.conflict
+        case 412:
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            throw NetworkError.preconditionFailed(apiError)
+        case 428:
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            throw NetworkError.preconditionRequired(apiError)
         case 400...499:
             let apiError = try? decoder.decode(APIError.self, from: data)
             throw NetworkError.clientError(http.statusCode, apiError)
@@ -824,6 +923,8 @@ enum NetworkError: LocalizedError, Sendable {
     case notFound
     case methodNotAllowed
     case conflict
+    case preconditionFailed(APIError?)
+    case preconditionRequired(APIError?)
     case noConnection
     case timeout
     case serverUnreachable
@@ -845,6 +946,12 @@ enum NetworkError: LocalizedError, Sendable {
         case .methodNotAllowed:
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
+        case .preconditionFailed(let apiError):
+            return apiError?.detail
+                ?? "This item changed after you reviewed it. Refresh and confirm again."
+        case .preconditionRequired(let apiError):
+            return apiError?.detail
+                ?? "A reviewed revision is required. Refresh and confirm again."
         case .noConnection: return "No internet connection"
         case .timeout: return "Request timed out"
         case .serverUnreachable: return "Server is unreachable"

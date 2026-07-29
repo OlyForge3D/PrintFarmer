@@ -346,8 +346,18 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         Guid printerId,
         string payload)
     {
-        using var content = new StringContent(payload, Encoding.UTF8, "application/json");
-        return await client.PutAsync($"/api/printers/{printerId}", content);
+        HttpResponseMessage current = await client.GetAsync($"/api/printers/{printerId}");
+        current.EnsureSuccessStatusCode();
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Printer GET did not return an ETag.");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Put,
+            $"/api/printers/{printerId}")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.TryAddWithoutValidation("If-Match", etag);
+        return await client.SendAsync(request);
     }
 
     private async Task<string?> GetPrintablePolygonJsonAsync(Guid printerId)

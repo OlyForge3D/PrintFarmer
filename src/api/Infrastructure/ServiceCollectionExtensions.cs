@@ -183,6 +183,19 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Issue #900: Durable dispatch claim and bed-clear acknowledgement services.
+        // IDispatchClaimService is the single shared atomic claim path used by every start path.
+        // IDbOutboxSequenceAllocator is a scoped DB-backed cross-process monotonic allocator:
+        // it increments the OutboxSequenceState counter row in the same transaction as each
+        // outbox event write, ensuring no two API instances can produce the same sequence value.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IDbOutboxSequenceAllocator, Farm.Infrastructure.Services.Queue.DbOutboxSequenceAllocator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueuePositionAllocator, Farm.Infrastructure.Services.Queue.QueuePositionAllocator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IStoredGcodeIntegrityVerifier, Farm.Infrastructure.Services.Queue.StoredGcodeIntegrityVerifier>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService, Farm.Infrastructure.Services.Queue.QueueResourceAuthorizationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
+
         // Material equivalence clusters
         _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
 
@@ -749,6 +762,21 @@ public static class ServiceCollectionExtensions
 
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
+
+            // Durable queue outbox publisher for calibration queue-dispatch events (SignalR hints only).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();
+
+            // Dedicated durable consumer for BackendStartCommand.v1 outbox events.
+            // Drives atomic claim, awaited backend execution, crash recovery, and retry.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
+
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
+
+            // Durable attempt-fenced cancel/abort hardware command consumer.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();
+
+            // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();
 
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();

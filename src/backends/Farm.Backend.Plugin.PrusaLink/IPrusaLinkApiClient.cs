@@ -7,6 +7,44 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Backend.Plugin.PrusaLink;
 
+/// <summary>Raised when PrusaLink explicitly rejects a command.</summary>
+public sealed class PrusaLinkCommandRejectedException : Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="PrusaLinkCommandRejectedException"/> class.</summary>
+    public PrusaLinkCommandRejectedException()
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="PrusaLinkCommandRejectedException"/> class.</summary>
+    /// <param name="message">The rejection detail.</param>
+    public PrusaLinkCommandRejectedException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="PrusaLinkCommandRejectedException"/> class.</summary>
+    /// <param name="message">The rejection detail.</param>
+    /// <param name="innerException">The exception that caused the rejection.</param>
+    public PrusaLinkCommandRejectedException(
+        string message,
+        Exception innerException)
+        : base(message, innerException)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="PrusaLinkCommandRejectedException"/> class.</summary>
+    /// <param name="statusCode">The rejection status code.</param>
+    public PrusaLinkCommandRejectedException(
+        System.Net.HttpStatusCode statusCode)
+        : base($"PrusaLink explicitly rejected the command with HTTP {(int)statusCode}.")
+    {
+        StatusCode = statusCode;
+    }
+
+    /// <summary>Gets the HTTP status returned by PrusaLink.</summary>
+    public System.Net.HttpStatusCode StatusCode { get; }
+}
+
 /// <summary>
 /// Internal abstraction for PrusaLinkApiClient to enable testability.
 /// This interface encapsulates HTTP communication with PrusaLink API,
@@ -82,7 +120,15 @@ public interface IPrusaLinkApiClient
         bool force = false, CancellationToken ct = default);
 
     /// <summary>Gets a list of print history jobs from OctoPrint-compatible history endpoint.</summary>
-    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credentials = null, CancellationToken ct = default);
+    Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default);
 
     /// <summary>Gets details for a specific history job from OctoPrint-compatible history endpoint.</summary>
     Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default);

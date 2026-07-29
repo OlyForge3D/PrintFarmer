@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { AutoDispatchStatus } from '@/types/api';
+import type { AutoDispatchReadyResult, AutoDispatchStatus } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -92,18 +92,43 @@ const baseStatus: AutoDispatchStatus = {
   enabled: true,
   state: 'PendingReady',
   queueDepth: 2,
+  dispatchStateETag: 'dispatch-v1',
+  printerETag: 'printer-v1',
+  nextJobId: 'job-1',
+  nextJobETag: 'job-v1',
+  nextJobKind: 'Standard',
 };
 
-const readyResultWithJob = {
-  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
-  nextJob: { id: 'job-1', name: 'benchy.gcode', estimatedFilamentUsageG: 10 },
+const readyResultWithJob: AutoDispatchReadyResult = {
+  status: {
+    printerId: 'printer-1',
+    enabled: true,
+    state: 'Ready',
+    queueDepth: 1,
+    dispatchStateETag: 'dispatch-v2',
+    printerETag: 'printer-v1',
+  },
+  nextJob: {
+    id: 'job-1',
+    name: 'benchy.gcode',
+    jobKind: 'Standard',
+    jobETag: 'job-v1',
+    estimatedFilamentUsageG: 10,
+  },
   filamentCheck: { sufficient: true, materialMismatch: false },
 };
 
-const readyResultNoJob = {
-  status: { printerId: 'printer-1', enabled: true, state: 'None', queueDepth: 0 },
-  nextJob: null,
-  filamentCheck: null,
+const readyResultNoJob: AutoDispatchReadyResult = {
+  status: {
+    printerId: 'printer-1',
+    enabled: true,
+    state: 'None',
+    queueDepth: 0,
+    dispatchStateETag: 'dispatch-v2',
+    printerETag: 'printer-v1',
+  },
+  nextJob: undefined,
+  filamentCheck: undefined,
 };
 
 const noneStateWithFailedGate: AutoDispatchStatus = {
@@ -122,9 +147,21 @@ const noneStateWithFailedGate: AutoDispatchStatus = {
   attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
 };
 
-const readyResultMaterialMismatch = {
-  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
-  nextJob: { id: 'job-2', name: 'part.gcode' },
+const readyResultMaterialMismatch: AutoDispatchReadyResult = {
+  status: {
+    printerId: 'printer-1',
+    enabled: true,
+    state: 'Ready',
+    queueDepth: 1,
+    dispatchStateETag: 'dispatch-v2',
+    printerETag: 'printer-v1',
+  },
+  nextJob: {
+    id: 'job-2',
+    name: 'part.gcode',
+    jobKind: 'Standard',
+    jobETag: 'job-v1',
+  },
   filamentCheck: {
     sufficient: true,
     materialMismatch: true,
@@ -133,9 +170,21 @@ const readyResultMaterialMismatch = {
   },
 };
 
-const readyResultInsufficientFilament = {
-  status: { printerId: 'printer-1', enabled: true, state: 'Ready', queueDepth: 1 },
-  nextJob: { id: 'job-3', name: 'big-part.gcode' },
+const readyResultInsufficientFilament: AutoDispatchReadyResult = {
+  status: {
+    printerId: 'printer-1',
+    enabled: true,
+    state: 'Ready',
+    queueDepth: 1,
+    dispatchStateETag: 'dispatch-v2',
+    printerETag: 'printer-v1',
+  },
+  nextJob: {
+    id: 'job-3',
+    name: 'big-part.gcode',
+    jobKind: 'Standard',
+    jobETag: 'job-v1',
+  },
   filamentCheck: {
     sufficient: false,
     materialMismatch: false,
@@ -249,7 +298,10 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(apiClient.confirmAutoDispatchReady).toHaveBeenCalledWith('printer-1');
+      expect(apiClient.confirmAutoDispatchReady).toHaveBeenCalledWith(
+        'printer-1',
+        'dispatch-v1',
+      );
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Dispatching "benchy.gcode" to MK4');
@@ -376,7 +428,11 @@ describe('BedClearBanner', () => {
     });
     fireEvent.click(screen.getByTestId('print-anyway-btn'));
     await waitFor(() => {
-      expect(apiClient.dispatchJobToPrinter).toHaveBeenCalledWith('job-2', 'printer-1');
+      expect(apiClient.dispatchJobToPrinter).toHaveBeenCalledWith(
+        'job-2',
+        'printer-1',
+        'job-v1',
+      );
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(
@@ -424,7 +480,11 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Skip next queued job'));
     await waitFor(() => {
-      expect(apiClient.skipAutoDispatchJob).toHaveBeenCalledWith('printer-1');
+      expect(apiClient.skipAutoDispatchJob).toHaveBeenCalledWith(
+        'printer-1',
+        'dispatch-v1',
+        'job-v1',
+      );
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Skipped next queued job');
@@ -439,7 +499,10 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Cancel auto-dispatch'));
     await waitFor(() => {
-      expect(apiClient.cancelAutoDispatch).toHaveBeenCalledWith('printer-1');
+      expect(apiClient.cancelAutoDispatch).toHaveBeenCalledWith(
+        'printer-1',
+        'dispatch-v1',
+      );
     });
     await waitFor(() => {
       expect(toast.info).toHaveBeenCalledWith('Auto-dispatch cancelled');
