@@ -4205,6 +4205,7 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("InstallationId")
                         .IsUnique()
+                        .HasFilter("[IsActive] = 1")
                         .HasDatabaseName("IX_DeviceTokens_InstallationId");
 
                     b.HasIndex("Token")

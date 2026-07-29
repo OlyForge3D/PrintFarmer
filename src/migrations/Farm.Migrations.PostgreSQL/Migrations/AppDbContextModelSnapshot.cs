@@ -4194,6 +4194,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("InstallationId")
                         .IsUnique()
+                        .HasFilter("\"IsActive\"")
                         .HasDatabaseName("IX_DeviceTokens_InstallationId");
 
                     b.HasIndex("Token")

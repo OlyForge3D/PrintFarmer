@@ -479,5 +479,13 @@ actor OfflineWriteQueue {
         return OfflineWriteReplayIdentity(serverID: activeServerID, userID: activeUserID)
     }
 
+    /// Actor binding state independent of the synchronous authority fence.
+    /// Transition tests use this to distinguish immediate authority invalidation
+    /// from the completed actor unbind that advances the replay generation.
+    var boundIdentity: OfflineWriteReplayIdentity? {
+        guard let activeServerID, let activeUserID else { return nil }
+        return OfflineWriteReplayIdentity(serverID: activeServerID, userID: activeUserID)
+    }
+
     var isReplayEnabled: Bool { replayEnabled }
 }

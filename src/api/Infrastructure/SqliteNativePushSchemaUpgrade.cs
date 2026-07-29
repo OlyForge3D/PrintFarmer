@@ -87,7 +87,12 @@ internal static class SqliteNativePushSchemaUpgrade
             await ExecuteAsync(
                 connection,
                 transaction,
-                CreateUniqueInstallationIndexSql,
+                RepairActiveInstallationOwnersSql,
+                cancellationToken);
+            await ExecuteAsync(
+                connection,
+                transaction,
+                ReplaceInstallationIndexesSql,
                 cancellationToken);
 
             if (await TableExistsAsync(
@@ -206,9 +211,41 @@ internal static class SqliteNativePushSchemaUpgrade
         _ = await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private const string CreateUniqueInstallationIndexSql =
-        "CREATE UNIQUE INDEX IF NOT EXISTS \"IX_DeviceTokens_UserId_InstallationId\" "
-        + "ON \"DeviceTokens\" (\"UserId\", \"InstallationId\");";
+    private const string RepairActiveInstallationOwnersSql =
+        """
+        WITH "RankedOwners" AS (
+            SELECT
+                "Id",
+                ROW_NUMBER() OVER (
+                    PARTITION BY "InstallationId"
+                    ORDER BY
+                        "RegistrationVersion" DESC,
+                        COALESCE("LastUsedAt", "CreatedAt") DESC,
+                        "CreatedAt" DESC,
+                        "Id" DESC
+                ) AS "OwnerRank"
+            FROM "DeviceTokens"
+            WHERE "IsActive" = 1
+        )
+        UPDATE "DeviceTokens"
+        SET "IsActive" = 0
+        WHERE "Id" IN (
+            SELECT "Id"
+            FROM "RankedOwners"
+            WHERE "OwnerRank" > 1
+        );
+        """;
+
+    private const string ReplaceInstallationIndexesSql =
+        """
+        DROP INDEX IF EXISTS "IX_DeviceTokens_UserId_InstallationId";
+        DROP INDEX IF EXISTS "IX_DeviceTokens_InstallationId";
+        CREATE UNIQUE INDEX "IX_DeviceTokens_InstallationId"
+            ON "DeviceTokens" ("InstallationId")
+            WHERE "IsActive" = 1;
+        CREATE INDEX IF NOT EXISTS "IX_DeviceTokens_UserId"
+            ON "DeviceTokens" ("UserId");
+        """;
 
     private const string CreateDeviceTokensTableSql =
         "CREATE TABLE IF NOT EXISTS \"DeviceTokens\" ("

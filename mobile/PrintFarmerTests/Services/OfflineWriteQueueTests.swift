@@ -517,6 +517,24 @@ final class OfflineWriteQueueTests: XCTestCase {
         XCTAssertTrue(remainingB.isEmpty)
     }
 
+    func testDynamicTransportSameServerDifferentUserReturnsRetryableWithoutSending() async {
+        let parts = MockPartsInventoryService()
+        let transport = DynamicOfflineReplayTransport {
+            OfflineReplayServices(
+                identity: OfflineWriteReplayIdentity(serverID: serverA, userID: userB),
+                parts: parts
+            )
+        }
+
+        let outcome = await transport.replay(
+            OfflineQueueFixtures.adjust(sku: "SKU-A", key: "a1"),
+            expectedIdentity: OfflineWriteReplayIdentity(serverID: serverA, userID: userA)
+        )
+
+        XCTAssertEqual(outcome, .retryable)
+        XCTAssertTrue(parts.adjustPartCalls.isEmpty)
+    }
+
     // MARK: Gate disable / pause / re-enable
 
     func testDisableReplayPausesRetainsAndRefusesNewEnqueue() async {

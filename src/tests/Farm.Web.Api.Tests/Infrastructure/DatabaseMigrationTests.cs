@@ -120,10 +120,19 @@ public sealed class DatabaseMigrationTests
         string[] history = [.. await context.Database.GetAppliedMigrationsAsync()];
         history.Should().Contain(shippedMigration);
         history.Should().NotContain(rejectedRenamedMigration);
-        DeviceToken retained = await context.DeviceTokens.AsNoTracking().SingleAsync(
-            token => token.InstallationId == installationId);
-        retained.UserId.Should().Be(userB);
-        retained.RegistrationVersion.Should().Be(2);
+        DeviceToken[] retained = await context.DeviceTokens
+            .AsNoTracking()
+            .Where(token => token.InstallationId == installationId)
+            .ToArrayAsync();
+        retained.Should().HaveCount(2, "inactive registration history must survive ownership repair");
+        retained.Should().ContainSingle(token =>
+            token.UserId == userA
+            && token.RegistrationVersion == 1
+            && !token.IsActive);
+        retained.Should().ContainSingle(token =>
+            token.UserId == userB
+            && token.RegistrationVersion == 2
+            && token.IsActive);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

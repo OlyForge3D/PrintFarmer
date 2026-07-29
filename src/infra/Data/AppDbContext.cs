@@ -351,6 +351,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
         ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
+        ConfigureDeviceTokenProviderSpecificIndexes(modelBuilder);
         ConfigureQueueDispatchIndexes(modelBuilder);
 
         // Fix E/I (issue #713): the shift-plan compiler dedupe index. A UNIQUE
@@ -618,6 +619,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 draft.DeviceLineageId,
             })
             .HasFilter(filter);
+    }
+
+    private void ConfigureDeviceTokenProviderSpecificIndexes(ModelBuilder modelBuilder)
+    {
+        string? filter = Database.ProviderName switch
+        {
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "\"IsActive\"",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "[IsActive] = 1",
+            "Microsoft.EntityFrameworkCore.Sqlite" => "\"IsActive\" = 1",
+            _ => null,
+        };
+        if (filter is null)
+        {
+            return;
+        }
+
+        _ = modelBuilder.Entity<DeviceToken>()
+            .HasIndex(token => token.InstallationId)
+            .IsUnique()
+            .HasFilter(filter)
+            .HasDatabaseName("IX_DeviceTokens_InstallationId");
     }
 
     /// <summary>

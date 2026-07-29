@@ -53,10 +53,9 @@ public sealed class DeviceTokenConfiguration : IEntityTypeConfiguration<DeviceTo
             .HasForeignKey(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Installation ownership is global: one physical app installation can
-        // belong to exactly one authenticated user at a time.
+        // Provider-specific active-only uniqueness is applied by AppDbContext.
+        // Inactive rows are durable registration history and remain unconstrained.
         _ = builder.HasIndex(t => t.InstallationId)
-            .IsUnique()
             .HasDatabaseName("IX_DeviceTokens_InstallationId");
 
         // Non-unique provider-token lookup for diagnostics; invalidation uses the row Id.

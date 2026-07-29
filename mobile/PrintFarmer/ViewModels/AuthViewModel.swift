@@ -72,6 +72,9 @@ final class AuthViewModel {
         guard services.isActiveGeneration(generation),
               services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         services.invalidateOfflineWriteReplayAuthority()
+        await services.unbindOfflineWriteQueue()
+        guard services.isActiveGeneration(generation),
+              services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         await services.revokeFarmSnapshot()
         await services.authService.logout(operation: AuthOperationToken(value: authSessionToken))
         guard services.authOperationEpoch.isCurrent(authSessionToken) else { return }
@@ -281,7 +284,10 @@ final class AuthViewModel {
         // (including the loading flag) are skipped and never clobber the newer op.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
         services.invalidateOfflineWriteReplayAuthority()
+        await services.unbindOfflineWriteQueue()
+        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.revokeFarmSnapshot()
+        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false
@@ -302,10 +308,10 @@ final class AuthViewModel {
 
     // MARK: - Demo Mode
 
-    func loginAsDemo() {
+    func loginAsDemo() async {
         services.invalidateOfflineWriteReplayAuthority()
+        await services.switchToDemo()
         DemoMode.shared.activate()
-        services.switchToDemo()
         currentUser = DemoData.demoUser
         isAuthenticated = true
     }

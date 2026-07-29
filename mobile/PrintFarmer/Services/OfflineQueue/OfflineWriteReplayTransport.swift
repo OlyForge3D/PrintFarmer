@@ -235,12 +235,12 @@ struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
     ) async -> OfflineWriteReplayOutcome {
         let services = await provider()
         guard services.identity == expectedIdentity else {
-            return .identityChanged
+            return .retryable
         }
         let outcome = await OfflineWriteReplayExecutor.execute(operation, using: services)
         let servicesAfterReplay = await provider()
         guard servicesAfterReplay.identity == expectedIdentity else {
-            return .identityChanged
+            return .retryable
         }
         return outcome
     }

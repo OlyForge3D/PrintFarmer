@@ -41,7 +41,9 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         for (int attempt = 0; attempt < UpsertMaxAttempts; attempt++)
         {
             DeviceToken? existing = await _dbContext.DeviceTokens
-                .FirstOrDefaultAsync(t => t.InstallationId == installationId, cancellationToken);
+                .FirstOrDefaultAsync(
+                    t => t.InstallationId == installationId && t.IsActive,
+                    cancellationToken);
 
             if (existing is null)
             {
@@ -154,7 +156,11 @@ public sealed class EfDeviceTokenRepository(AppDbContext dbContext) : IDeviceTok
         }
 
         DeviceToken? existing = await _dbContext.DeviceTokens
-            .FirstOrDefaultAsync(t => t.UserId == userId && t.InstallationId == installationId, cancellationToken);
+            .FirstOrDefaultAsync(
+                t => t.UserId == userId
+                    && t.InstallationId == installationId
+                    && t.IsActive,
+                cancellationToken);
         if (existing is null)
         {
             return false;

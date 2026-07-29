@@ -87,19 +87,87 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_ReactivatesRow_AndResetsFailures()
+    public async Task Upsert_AfterFailureDeactivation_CreatesNewActiveIncarnation()
     {
         Guid userId = Guid.NewGuid();
         DeviceToken row = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
         long failedVersion = row.RegistrationVersion;
         await _repo.RecordFailureAsync(row.Id, failedVersion, DateTime.UtcNow, failureThreshold: 1);
 
-        DeviceToken reactivated = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
+        DeviceToken active = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
 
-        reactivated.RegistrationVersion.Should().Be(failedVersion + 1);
-        reactivated.IsActive.Should().BeTrue();
-        reactivated.ConsecutiveFailureCount.Should().Be(0);
-        reactivated.LastFailureAt.Should().BeNull();
+        active.Id.Should().NotBe(row.Id);
+        active.RegistrationVersion.Should().Be(1);
+        active.IsActive.Should().BeTrue();
+        active.ConsecutiveFailureCount.Should().Be(0);
+        active.LastFailureAt.Should().BeNull();
+        DeviceToken history = await _db.DeviceTokens.AsNoTracking().SingleAsync(token => token.Id == row.Id);
+        history.RegistrationVersion.Should().Be(failedVersion);
+        history.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Upsert_InactiveHistoryExists_CreatesNewActiveOwnerWithoutMutatingHistory()
+    {
+        _ = await _db.Database.ExecuteSqlRawAsync(
+            "DROP INDEX \"IX_DeviceTokens_InstallationId\";");
+        _ = await _db.Database.ExecuteSqlRawAsync(
+            "CREATE UNIQUE INDEX \"IX_DeviceTokens_InstallationId\" "
+                + "ON \"DeviceTokens\" (\"InstallationId\") WHERE \"IsActive\" = 1;");
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        Guid historyA = Guid.NewGuid();
+        Guid historyB = Guid.NewGuid();
+        const string installationId = "installation-with-history";
+        _db.DeviceTokens.AddRange(
+            new DeviceToken
+            {
+                Id = historyA,
+                UserId = userA,
+                RegistrationVersion = 7,
+                InstallationId = installationId,
+                Token = new string('a', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                IsActive = false,
+            },
+            new DeviceToken
+            {
+                Id = historyB,
+                UserId = userB,
+                RegistrationVersion = 9,
+                InstallationId = installationId,
+                Token = new string('b', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = DateTime.UtcNow.AddDays(-1),
+                IsActive = false,
+            });
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        DeviceToken active = await _repo.UpsertAsync(
+            userB,
+            installationId,
+            new string('c', 64),
+            "ios",
+            "production",
+            "com.example.app");
+
+        DeviceToken[] rows = await _db.DeviceTokens
+            .AsNoTracking()
+            .Where(token => token.InstallationId == installationId)
+            .ToArrayAsync();
+        rows.Should().HaveCount(3);
+        rows.Where(token => !token.IsActive)
+            .Select(token => token.Id)
+            .Should().BeEquivalentTo([historyA, historyB]);
+        rows.Should().ContainSingle(token =>
+            token.Id == active.Id
+            && token.UserId == userB
+            && token.IsActive
+            && token.RegistrationVersion == 1);
     }
 
     [Fact]
@@ -407,7 +475,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_ConcurrentCrossUserFirstClaim_ConvergesToOneInstallationOwner()
+    public async Task Upsert_ConcurrentCrossUserFirstClaim_NoIncumbent_ConvergesToOneActiveOwner()
     {
         string databasePath = Path.Combine(
             Path.GetTempPath(),
@@ -474,7 +542,9 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
             interceptor.Failures.Should().ContainSingle(
                 "the database owner index must serialize concurrent first claims");
             await using AppDbContext verify = new(plainOptions);
-            DeviceToken persisted = await verify.DeviceTokens.AsNoTracking().SingleAsync();
+            DeviceToken[] rows = await verify.DeviceTokens.AsNoTracking().ToArrayAsync();
+            DeviceToken persisted = rows.Should().ContainSingle(token => token.IsActive).Subject;
+            rows.Should().ContainSingle();
             persisted.InstallationId.Should().Be("installation-owner-race");
             new[] { userA, userB }.Should().Contain(persisted.UserId);
             persisted.IsActive.Should().BeTrue();
