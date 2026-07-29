@@ -28,10 +28,10 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - name: Checkout exact candidate 814851fd
+      - name: Checkout exact candidate 3a1d70cd
         uses: actions/checkout@v7
         with:
-          ref: 814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5
+          ref: 3a1d70cdd49c062cf8bea73a1f322cb5ed739581
           fetch-depth: 1
           persist-credentials: false
 
@@ -43,8 +43,8 @@ jobs:
           actual_tree="$(git rev-parse 'HEAD^{tree}')"
           printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
             | tee qualification-artifacts/checkout-identity.txt
-          test "$actual_sha" = "814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5"
-          test "$actual_tree" = "24aecea04206d478439391f05e1cdc2e7aaee34c"
+          test "$actual_sha" = "3a1d70cdd49c062cf8bea73a1f322cb5ed739581"
+          test "$actual_tree" = "bfb2813cfcc89eba006ca488025ada083d46ea8b"
 
       - name: Select Xcode
         run: |
@@ -108,10 +108,10 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - name: Checkout exact candidate 814851fd
+      - name: Checkout exact candidate 3a1d70cd
         uses: actions/checkout@v7
         with:
-          ref: 814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5
+          ref: 3a1d70cdd49c062cf8bea73a1f322cb5ed739581
           fetch-depth: 1
           persist-credentials: false
 
@@ -123,8 +123,8 @@ jobs:
           actual_tree="$(git rev-parse 'HEAD^{tree}')"
           printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
             | tee qualification-artifacts/checkout-identity.txt
-          test "$actual_sha" = "814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5"
-          test "$actual_tree" = "24aecea04206d478439391f05e1cdc2e7aaee34c"
+          test "$actual_sha" = "3a1d70cdd49c062cf8bea73a1f322cb5ed739581"
+          test "$actual_tree" = "bfb2813cfcc89eba006ca488025ada083d46ea8b"
 
       - name: Select Xcode
         run: |
@@ -221,10 +221,10 @@ jobs:
       run:
         working-directory: mobile
     steps:
-      - name: Checkout exact candidate 814851fd
+      - name: Checkout exact candidate 3a1d70cd
         uses: actions/checkout@v7
         with:
-          ref: 814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5
+          ref: 3a1d70cdd49c062cf8bea73a1f322cb5ed739581
           fetch-depth: 1
           persist-credentials: false
 
@@ -236,8 +236,8 @@ jobs:
           actual_tree="$(git rev-parse 'HEAD^{tree}')"
           printf 'sha=%s\ntree=%s\n' "$actual_sha" "$actual_tree" \
             | tee qualification-artifacts/checkout-identity.txt
-          test "$actual_sha" = "814851fd3a7bd773297b6b5e01ccf42ccd1ef6e5"
-          test "$actual_tree" = "24aecea04206d478439391f05e1cdc2e7aaee34c"
+          test "$actual_sha" = "3a1d70cdd49c062cf8bea73a1f322cb5ed739581"
+          test "$actual_tree" = "bfb2813cfcc89eba006ca488025ada083d46ea8b"
 
       - name: Select Xcode
         run: |
