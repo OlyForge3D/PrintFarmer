@@ -120,6 +120,25 @@ private final class BlockingLogoutAuthService: AuthServiceProtocol, @unchecked S
     }
 }
 
+private actor ArmedReplayProviderGate {
+    nonisolated let barrier = AsyncBarrier()
+    private var isArmed = false
+
+    func arm() {
+        isArmed = true
+    }
+
+    func waitIfArmed() async {
+        guard isArmed else { return }
+        isArmed = false
+        await barrier.arriveAndWait()
+    }
+
+    nonisolated func close() {
+        barrier.close()
+    }
+}
+
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
 @MainActor
@@ -392,6 +411,68 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         )
         XCTAssertEqual(retained.count, 1)
         XCTAssertNil(parked.container.currentOfflineWriteReplayIdentity)
+    }
+
+    func testAuthorityInvalidationBeforeProviderResolutionPreventsServiceCall() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let server = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let user = UUID()
+        owners.setOwner(userID: user, serverID: server.id)
+        try reg.setActive(id: server.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: server.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let gate = ArmedReplayProviderGate()
+        defer { gate.close() }
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: FarmSnapshotStore(authority: authority, rootURL: newRoot()),
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            offlineWriteQueueStore: InMemoryOfflineWriteQueueStore(),
+            offlineReplayProviderResolutionHook: {
+                await gate.waitIfArmed()
+            }
+        )
+        container.capabilitiesService = StubSystemCapabilitiesService()
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+
+        let parts = MockPartsInventoryService()
+        container.partsInventoryService = parts
+        _ = await container.offlineWriteQueue.enqueue(
+            OfflineQueueFixtures.adjust(sku: "SKU-A", key: "owner-a-adjustment")
+        )
+        await gate.arm()
+        let replay = Task {
+            await container.offlineWriteQueue.replayPending()
+        }
+        await gate.barrier.waitUntilArrived()
+
+        container.invalidateOfflineWriteReplayAuthority()
+        gate.barrier.release()
+        await replay.value
+
+        XCTAssertTrue(parts.adjustPartCalls.isEmpty)
+        let retained = await container.offlineWriteQueue.items(
+            forServer: server.id,
+            user: user
+        )
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertTrue(retained.first?.status.isPending == true)
     }
 
     func testStaleCapabilitiesRefreshCannotGateOrReplayNewIdentity() async throws {

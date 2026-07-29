@@ -222,9 +222,19 @@ struct OfflineReplayServices {
 /// resolving lazily means a replay always uses the clients for the
 /// currently-bound identity rather than captured, possibly-stale ones.
 struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
+    let beforeProviderResolution: @Sendable () async -> Void
     let provider: @Sendable @MainActor () -> OfflineReplayServices
 
+    init(
+        beforeProviderResolution: @escaping @Sendable () async -> Void = {},
+        provider: @escaping @Sendable @MainActor () -> OfflineReplayServices
+    ) {
+        self.beforeProviderResolution = beforeProviderResolution
+        self.provider = provider
+    }
+
     func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
+        await beforeProviderResolution()
         let services = await provider()
         return await OfflineWriteReplayExecutor.execute(operation, using: services)
     }
@@ -233,6 +243,7 @@ struct DynamicOfflineReplayTransport: OfflineWriteReplayTransport {
         _ operation: OfflineWriteOperation,
         expectedIdentity: OfflineWriteReplayIdentity
     ) async -> OfflineWriteReplayOutcome {
+        await beforeProviderResolution()
         let services = await provider()
         guard services.identity == expectedIdentity else {
             return .retryable

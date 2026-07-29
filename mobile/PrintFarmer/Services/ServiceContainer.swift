@@ -45,6 +45,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let userDefaultsBox: AuthServiceUserDefaultsBox
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
+    @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
@@ -124,7 +125,9 @@ final class ServiceContainer: @unchecked Sendable {
     /// server switch never replays through a stale client. Bound to the active
     /// `(serverID, userID)` namespace via `syncOfflineWriteQueue()`.
     @ObservationIgnored private(set) lazy var offlineWriteQueue: OfflineWriteQueue = {
-        let transport = DynamicOfflineReplayTransport { [weak self] in
+        let transport = DynamicOfflineReplayTransport(
+            beforeProviderResolution: offlineReplayProviderResolutionHook
+        ) { [weak self] in
             OfflineReplayServices(
                 identity: self?.currentOfflineReplayIdentity(),
                 parts: self?.partsInventoryService,
@@ -145,7 +148,14 @@ final class ServiceContainer: @unchecked Sendable {
               let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: activeServerID) else {
             return nil
         }
-        return OfflineWriteReplayIdentity(serverID: activeServerID, userID: ownerID)
+        let derivedIdentity = OfflineWriteReplayIdentity(
+            serverID: activeServerID,
+            userID: ownerID
+        )
+        guard offlineWriteReplayAuthority.currentIdentity == derivedIdentity else {
+            return nil
+        }
+        return derivedIdentity
     }
 
     private static func offlineWriteQueueDirectory() -> URL {
@@ -271,6 +281,7 @@ final class ServiceContainer: @unchecked Sendable {
         farmSnapshotRootURL: URL? = nil,
         synchronizeOfflineQueueOnStartup: Bool = true,
         offlineWriteQueueStore: (any OfflineWriteQueueStoring)? = nil,
+        offlineReplayProviderResolutionHook: @escaping @Sendable () async -> Void = {},
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
             let identity = accessToken.flatMap { token in
                 serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
@@ -291,6 +302,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.userDefaultsBox = userDefaultsBox
         self.apiClientFactory = apiClientFactory
         self.signalRServiceFactory = signalRServiceFactory
+        self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
         self.offlineWriteQueueStore = offlineWriteQueueStore
