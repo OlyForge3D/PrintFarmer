@@ -285,6 +285,12 @@ public sealed class AdminOverviewService : IAdminOverviewService
             && !entry.Description.Contains("not configured", StringComparison.OrdinalIgnoreCase);
     }
 
+    // Stable ids from ADMIN_DESTINATIONS (src/Web/ReactApp/src/features/admin/registry/adminDestinations.ts).
+    // The client resolves these to canonical paths so route renames stay a frontend concern.
+    // If either id is renamed or removed, the corresponding attention item link will fail to render —
+    // this is intentional and caught by the frontend registry tests.
+    private const string OpsStatusDestinationId = "ops-status";
+
     private static List<AttentionItemDto> BuildAttention(HealthReport? report, string? probeError)
     {
         List<AttentionItemDto> items = new();
@@ -298,7 +304,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
                 Title = "System health probes are not reporting",
                 Detail = probeError,
                 ActionLabel = "Open System logs",
-                ActionRoute = "/admin/system",
+                ActionDestinationId = OpsStatusDestinationId,
             });
         }
 
@@ -341,7 +347,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
                     ? "Health check reported " + entry.Status.ToString().ToLowerInvariant() + " status."
                     : entry.Description,
                 ActionLabel = "Open System logs",
-                ActionRoute = "/admin/system",
+                ActionDestinationId = OpsStatusDestinationId,
             });
         }
     }
@@ -379,7 +385,7 @@ public sealed class AdminOverviewService : IAdminOverviewService
             Title = "Database is not healthy",
             Detail = detail,
             ActionLabel = "Open System info",
-            ActionRoute = "/admin/system",
+            ActionDestinationId = OpsStatusDestinationId,
         });
     }
 

@@ -7,6 +7,7 @@ import { queryClient } from '@/services/queryClient';
 import { clearSensitiveUserQueries } from '@/common/auth/sensitiveQueryCache';
 import { resetAuthenticatedSignalRSession } from '@/common/auth/authenticatedSignalRSession';
 import { subscribeToAuthenticationExpiration } from '@/common/auth/authenticationExpiration';
+import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
 import type { AuthContextType } from './AuthContextValue';
 
 // AuthContextType now in separate file (AuthContextValue.ts) for faster refresh friendliness
@@ -152,6 +153,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         setUser(result.user);
+        window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
         return true;
       } else {
         setError(result.error || 'Login failed');
@@ -201,6 +203,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         setUser(result.user);
+        window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
         return true;
       } else {
         setError(result.error || 'Passkey login failed');
@@ -244,6 +247,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
 
         setUser(result.user);
+        window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
         return true;
       } else {
         setError(result.error || 'Registration failed');

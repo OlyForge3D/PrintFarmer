@@ -127,6 +127,9 @@ public class AdminOverviewServiceTests
         printerItem.Severity.Should().Be(AttentionSeverity.Warning);
         printerItem.Title.Should().Contain("printer-02");
         printerItem.Detail.Should().Contain("Connection refused");
+        // /printers has no ADMIN_DESTINATIONS registry entry (it's a top-level operational page),
+        // so this attention item routes via ActionRoute directly rather than a destination id.
+        printerItem.ActionDestinationId.Should().BeNull();
         printerItem.ActionRoute.Should().Be("/printers");
     }
 
@@ -153,7 +156,12 @@ public class AdminOverviewServiceTests
         db.Status.Should().Be(SubsystemStatus.Unhealthy);
         db.Detail.Should().Contain("not initialized");
 
-        overview.Attention.Should().Contain(a => a.Key == "database-unhealthy" && a.Severity == AttentionSeverity.Error);
+        AttentionItemDto dbItem = overview.Attention.Single(a => a.Key == "database-unhealthy");
+        dbItem.Severity.Should().Be(AttentionSeverity.Error);
+        // Backend emits a stable destination id from ADMIN_DESTINATIONS; the frontend
+        // resolves it to the current canonical path.
+        dbItem.ActionDestinationId.Should().Be("ops-status");
+        dbItem.ActionRoute.Should().BeNull();
     }
 
     // ─── Failing probe (graceful degradation) ─────────────────────────────────
@@ -173,7 +181,9 @@ public class AdminOverviewServiceTests
 
         overview.Attention.Should().Contain(a => a.Key == "admin-overview-probe-failed"
             && a.Severity == AttentionSeverity.Error
-            && a.Detail.Contains("simulated probe failure", StringComparison.Ordinal));
+            && a.Detail.Contains("simulated probe failure", StringComparison.Ordinal)
+            && a.ActionDestinationId == "ops-status"
+            && a.ActionRoute == null);
     }
 
     [Fact]
@@ -278,6 +288,15 @@ public class AdminOverviewServiceTests
                     ActionLabel = "Open Printers",
                     ActionRoute = "/printers",
                 },
+                new AttentionItemDto
+                {
+                    Key = "database-unhealthy",
+                    Severity = AttentionSeverity.Error,
+                    Title = "Database is not healthy",
+                    Detail = "not initialized",
+                    ActionLabel = "Open System info",
+                    ActionDestinationId = "ops-status",
+                },
             },
         };
 
@@ -289,6 +308,7 @@ public class AdminOverviewServiceTests
         json.Should().NotContain("\"status\":0").And.NotContain("\"severity\":1");
         json.Should().Contain("\"checkedAt\":");
         json.Should().Contain("\"actionRoute\":\"/printers\"");
+        json.Should().Contain("\"actionDestinationId\":\"ops-status\"");
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
