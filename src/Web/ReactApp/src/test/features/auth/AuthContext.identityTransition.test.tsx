@@ -20,6 +20,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/services/queryClient';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { notifyAuthenticationExpired } from '@/common/auth/authenticationExpiration';
+import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useNotificationPreferences } from '@/features/notifications/hooks/useNotificationPreferences';
 import { useUserSettings, useUpdateUserSettings } from '@/features/settings/hooks/useUserSettings';
@@ -342,6 +343,28 @@ describe('Identity transition cache isolation (#762)', () => {
     await waitFor(() => expect(screen.queryByTestId('current-user')).toBeNull());
     await waitFor(() => expect(signalRSessionTestState.reset).toHaveBeenCalledTimes(2));
     expect(queryClient.getQueryData(['notifications', 'preferences'])).toBeUndefined();
+  });
+
+  it('refreshes authenticated services when another tab establishes the session', async () => {
+    renderHarness();
+    await waitFor(() => expect(screen.queryByTestId('auth-loading')).toBeNull());
+
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValueOnce(USER_B);
+    const sessionEstablished = vi.fn();
+    window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, sessionEstablished);
+
+    await act(async () => {
+      localStorage.setItem('auth-token', 'token-b');
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'auth-token',
+        oldValue: null,
+        newValue: 'token-b',
+      }));
+    });
+
+    await waitFor(() => expect(screen.getByTestId('current-user')).toHaveTextContent('user-b'));
+    expect(sessionEstablished).toHaveBeenCalledOnce();
+    window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, sessionEstablished);
   });
 
   it('does not let initial token validation overwrite a newer cross-tab identity', async () => {

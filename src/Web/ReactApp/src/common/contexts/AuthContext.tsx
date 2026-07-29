@@ -93,6 +93,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const userData = await apiClient.getCurrentUser();
           if (isCurrentTransition()) {
             setUser(userData);
+            window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
           }
         } catch (err) {
           console.error('Failed to synchronize authentication state:', err);
