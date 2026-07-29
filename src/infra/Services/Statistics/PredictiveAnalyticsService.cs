@@ -174,9 +174,11 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
         }
 
         var printers = await printerQuery.Select(p => new { p.Id, p.Name }).ToListAsync(ct);
+        var trends = await GetRecentPrinterTrendsAsync(printers.Select(p => p.Id).ToArray(), ct);
+
         foreach (var printer in printers)
         {
-            double trend = await GetRecentPrinterTrendAsync(printer.Id, ct);
+            double trend = trends.GetValueOrDefault(printer.Id, 1.0);
             if (trend < DecliningPerformanceThreshold)
             {
                 alerts.Add(new PredictiveAlertDto
@@ -240,47 +242,69 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
 
     private async Task<double> GetRecentPrinterTrendAsync(Guid printerId, CancellationToken ct)
     {
+        var trends = await GetRecentPrinterTrendsAsync([printerId], ct);
+        return trends.GetValueOrDefault(printerId, 1.0);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, double>> GetRecentPrinterTrendsAsync(
+        Guid[] printerIds,
+        CancellationToken ct)
+    {
+        if (printerIds.Length == 0)
+        {
+            return new Dictionary<Guid, double>();
+        }
+
         var last7Days = DateTime.UtcNow.AddDays(-7);
         var previous7Days = DateTime.UtcNow.AddDays(-14);
 
-        int recentTotal = await _db.Set<PrintJob>()
-            .Where(j => j.AssignedPrinterId == printerId)
-            .Where(j => j.QueuedAt >= last7Days)
+        var counts = await _db.Set<PrintJob>()
+            .Where(j => j.AssignedPrinterId.HasValue)
+            .Where(j => printerIds.Contains(j.AssignedPrinterId!.Value))
+            .Where(j => j.QueuedAt >= previous7Days)
             .Where(j => j.Status == PrintJobStatus.Completed || j.Status == PrintJobStatus.Failed)
-            .CountAsync(ct);
+            .GroupBy(j => j.AssignedPrinterId!.Value)
+            .Select(group => new
+            {
+                PrinterId = group.Key,
+                RecentTotal = group.Count(j => j.QueuedAt >= last7Days),
+                RecentCompleted = group.Count(j =>
+                    j.QueuedAt >= last7Days &&
+                    j.Status == PrintJobStatus.Completed),
+                PreviousTotal = group.Count(j => j.QueuedAt < last7Days),
+                PreviousCompleted = group.Count(j =>
+                    j.QueuedAt < last7Days &&
+                    j.Status == PrintJobStatus.Completed),
+            })
+            .ToListAsync(ct);
 
+        return counts.ToDictionary(
+            count => count.PrinterId,
+            count => CalculateRecentPrinterTrend(
+                count.RecentTotal,
+                count.RecentCompleted,
+                count.PreviousTotal,
+                count.PreviousCompleted));
+    }
+
+    private static double CalculateRecentPrinterTrend(
+        int recentTotal,
+        int recentCompleted,
+        int previousTotal,
+        int previousCompleted)
+    {
         if (recentTotal == 0)
         {
             return 1.0; // No recent data — assume neutral
         }
 
-        int recentCompleted = await _db.Set<PrintJob>()
-            .Where(j => j.AssignedPrinterId == printerId)
-            .Where(j => j.QueuedAt >= last7Days)
-            .Where(j => j.Status == PrintJobStatus.Completed)
-            .CountAsync(ct);
-
-        int previousTotal = await _db.Set<PrintJob>()
-            .Where(j => j.AssignedPrinterId == printerId)
-            .Where(j => j.QueuedAt >= previous7Days && j.QueuedAt < last7Days)
-            .Where(j => j.Status == PrintJobStatus.Completed || j.Status == PrintJobStatus.Failed)
-            .CountAsync(ct);
-
         double recentRate = (double)recentCompleted / recentTotal;
-
         if (previousTotal == 0)
         {
             return recentRate;
         }
 
-        int previousCompleted = await _db.Set<PrintJob>()
-            .Where(j => j.AssignedPrinterId == printerId)
-            .Where(j => j.QueuedAt >= previous7Days && j.QueuedAt < last7Days)
-            .Where(j => j.Status == PrintJobStatus.Completed)
-            .CountAsync(ct);
-
         double previousRate = (double)previousCompleted / previousTotal;
-
         if (previousRate < 0.001)
         {
             return recentRate > 0 ? 1.5 : 1.0;
