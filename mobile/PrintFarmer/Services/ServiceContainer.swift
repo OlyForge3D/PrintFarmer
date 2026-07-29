@@ -1068,6 +1068,7 @@ final class ServiceContainer: @unchecked Sendable {
                 await client.currentAccessToken()
             }
         }
+        self.offlineReplayProviderResolutionHook = {}
         self.activeGeneration = ActiveServerGeneration()
         self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
             directory: Self.offlineWriteQueueDirectory()
