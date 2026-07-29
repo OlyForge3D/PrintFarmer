@@ -12,6 +12,7 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
@@ -251,6 +252,8 @@ public class PrintJobManagementServiceQueueMappingTests
             It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
         repository.Setup(value => value.UpdateAsync(job, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
+        repository.Setup(value => value.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
         PrintJobManagementService service = CreateService(repository, snapshots.Object);
 
         _ = await service.UpdateJobAsync(
@@ -287,6 +290,15 @@ public class PrintJobManagementServiceQueueMappingTests
         var repository = new Mock<IPrintJobManagementRepository>(MockBehavior.Strict);
         var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
         var storage = new Mock<IStoragePathService>(MockBehavior.Strict);
+        var dispatchClaim = new Mock<IDispatchClaimService>(MockBehavior.Strict);
+        QueueDispatchAttempt attempt = new()
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            BackendFileName = "missing.gcode",
+            AttemptNumber = 1,
+        };
         repository.Setup(value => value.GetByIdWithRelationsAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
         snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
@@ -295,14 +307,25 @@ public class PrintJobManagementServiceQueueMappingTests
             .ReturnsAsync(true);
         repository.Setup(value => value.AddDispatchLog(
             It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
-        repository.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        dispatchClaim.Setup(value => value.AcquireClaimAsync(
+                It.IsAny<DispatchClaimRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DispatchClaimResult.Ok(attempt));
+        // ReleaseClaimOnKnownFailureAsync returns true → BuildDispatchResultAsync path
+        // (persistence is now fully owned by IDispatchClaimService, not _repository)
+        dispatchClaim.Setup(value => value.ReleaseClaimOnKnownFailureAsync(
+                attempt.Id,
+                "backend_rejected",
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         storage.Setup(value => value.GetGcodeStorageDirectory())
             .Returns("/home/jpapiez/s/pf-wt/714/nonexistent-test-storage");
         PrintJobManagementService service = CreateService(
             repository,
             snapshots.Object,
-            storage.Object);
+            storage.Object,
+            dispatchClaimService: dispatchClaim.Object);
 
         Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto result =
             await service.DispatchJobAsync(job.Id.ToString(), "operator");
@@ -311,9 +334,14 @@ public class PrintJobManagementServiceQueueMappingTests
         Assert.NotNull(job.DispatchedAt);
         Assert.Equal("The G-code artifact is unavailable for dispatch.", job.FailureReason);
         snapshots.VerifyAll();
-        repository.Verify(
-            value => value.SaveChangesAsync(It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+        dispatchClaim.Verify(
+            value => value.AcquireClaimAsync(
+                It.IsAny<DispatchClaimRequest>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        dispatchClaim.Verify(
+            value => value.ReleaseClaimOnKnownFailureAsync(
+                attempt.Id, "backend_rejected", It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     // #714: harvestedAt must be projected onto QueuedPrintJobDto so mobile
@@ -463,7 +491,8 @@ public class PrintJobManagementServiceQueueMappingTests
         Mock<IPrintJobManagementRepository> repository,
         IPartOutputSnapshotService? snapshots = null,
         IStoragePathService? storage = null,
-        AppDbContext? appDbContext = null)
+        AppDbContext? appDbContext = null,
+        IDispatchClaimService? dispatchClaimService = null)
     {
         return new PrintJobManagementService(
             repository.Object,
@@ -481,6 +510,7 @@ public class PrintJobManagementServiceQueueMappingTests
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
             settingsService: null,
             partOutputSnapshotService: snapshots,
-            appDbContext: appDbContext);
+            appDbContext: appDbContext,
+            dispatchClaimService: dispatchClaimService);
     }
 }

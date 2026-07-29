@@ -113,9 +113,9 @@ public sealed class EfPrintersRepositoryRemoveAsyncCascadeTests
             (await assert.PrinterMaintenanceSchedules.CountAsync(s => s.Id == scheduleId)).Should().Be(0,
                 "the schedule must be explicitly deleted BEFORE the printer to avoid the Restrict FK aborting the removal");
             (await assert.MaintenanceAlerts.CountAsync(a => a.Id == alertId)).Should().Be(0,
-                "the alert must cascade-delete via MaintenanceAlert.PrinterId → Printers Cascade");
+                "the alert must be explicitly deleted by RemoveAsync before the printer is removed");
             (await assert.MaintenanceLogs.CountAsync(l => l.Id == logId)).Should().Be(0,
-                "the log must cascade-delete via MaintenanceLog.PrinterId → Printers Cascade");
+                "the log must be explicitly deleted by RemoveAsync before the printer is removed");
         }
     }
 

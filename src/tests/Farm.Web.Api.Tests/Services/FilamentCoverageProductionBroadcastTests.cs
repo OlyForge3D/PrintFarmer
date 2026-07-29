@@ -9,6 +9,7 @@ using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -124,6 +125,7 @@ public class FilamentCoverageProductionBroadcastTests
         Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
         repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
         repository.Setup(r => r.UpdateAsync(job, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        repository.Setup(r => r.GetMaxQueuePositionAsync(It.IsAny<CancellationToken>())).ReturnsAsync(0);
         Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
         broadcaster
             .Setup(b => b.BroadcastPrinterChangedAsync(
@@ -212,28 +214,51 @@ public class FilamentCoverageProductionBroadcastTests
     }
 
     [Fact]
-    public async Task AbortPrintAsync_AssignedActiveJob_BroadcastsQueueChangedAfterPersistence()
+    public async Task AbortPrintAsync_AssignedActiveJob_EnqueuesDurableCommandWithoutBroadcast()
     {
-        PrintJob job = Job(Guid.NewGuid());
+        string databaseName = Guid.NewGuid().ToString();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = Job(printerId);
         job.Status = PrintJobStatus.Printing;
+        await using (AppDbContext seed = new(options))
+        {
+            seed.Printers.Add(new Printer
+            {
+                Id = printerId,
+                Name = "abort-printer",
+                ServerUrl = "http://abort.local",
+                Backend = (int)PrinterBackend.OctoPrint,
+            });
+            await seed.SaveChangesAsync();
+        }
         Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
         repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
         repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-        Mock<IPrintersService> printers = new(MockBehavior.Strict);
-        printers.Setup(p => p.CancelPrintAsync(job.AssignedPrinterId!.Value, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
         Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
-        broadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
-                job.AssignedPrinterId!.Value,
-                FilamentCoverageChangeReasons.QueueChanged,
-                It.IsAny<CancellationToken>()))
-            .Callback(() => job.Status.Should().Be(PrintJobStatus.Queued))
-            .Returns(Task.CompletedTask);
-        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object, printers.Object);
+        Mock<IDbOutboxSequenceAllocator> sequenceAllocator = new();
+        sequenceAllocator.Setup(a => a.AllocateAsync(It.IsAny<AppDbContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1L);
+        await using AppDbContext db = new(options);
+        PrintJobManagementService service = new(
+            repository.Object,
+            NullLogger<PrintJobManagementService>.Instance,
+            Mock.Of<IPrintersService>(),
+            Mock.Of<IStoragePathService>(),
+            Hub(),
+            Mock.Of<IStoredFileOperationsService>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            coverageBroadcaster: broadcaster.Object,
+            appDbContext: db,
+            outboxSequenceAllocator: sequenceAllocator.Object);
 
         await service.AbortPrintAsync(job.Id.ToString(), "user");
 
-        broadcaster.VerifyAll();
+        // Assigned active job abort goes through the durable command path — no immediate broadcast.
+        broadcaster.VerifyNoOtherCalls();
+        repository.VerifyAll();
     }
 
     [Fact]
@@ -290,12 +315,20 @@ public class FilamentCoverageProductionBroadcastTests
     [Fact]
     public async Task BulkReorderJobsAsync_ReorderOnly_DoesNotBroadcast()
     {
+        string databaseName = Guid.NewGuid().ToString();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(databaseName)
+            .Options;
         PrintJob job = Job(Guid.NewGuid());
+        await using (AppDbContext seed = new(options))
+        {
+            seed.PrintJobs.Add(job);
+            await seed.SaveChangesAsync();
+        }
         Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
-        repository.Setup(r => r.GetByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
-        repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
-        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
+        await using AppDbContext db = new(options);
+        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object, appDbContext: db);
 
         QueueBulkOperationResultDto result = await service.BulkReorderJobsAsync(
             [new QueueJobReorderMove { JobId = job.Id.ToString(), NewPosition = 9 }],
@@ -314,6 +347,7 @@ public class FilamentCoverageProductionBroadcastTests
             .Options;
         Guid printerId = Guid.NewGuid();
         Guid jobId = Guid.NewGuid();
+        Guid attemptId = Guid.NewGuid();
         await using (AppDbContext seed = new(options))
         {
             Printer printer = new()
@@ -336,6 +370,23 @@ public class FilamentCoverageProductionBroadcastTests
                 EstimatedFilamentUsage = 10,
                 ActualStartTime = DateTime.UtcNow.AddMinutes(-5),
                 QueuedAt = DateTime.UtcNow.AddMinutes(-10),
+            });
+            seed.PrinterDispatchStates.Add(new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                ActiveJobId = jobId,
+                ActiveDispatchAttemptId = attemptId,
+            });
+            seed.QueueDispatchAttempts.Add(new QueueDispatchAttempt
+            {
+                Id = attemptId,
+                PrintJobId = jobId,
+                PrinterId = printerId,
+                BackendFileName = "job",
+                Outcome = DispatchAttemptOutcome.InProgress,
+                AttemptNumber = 1,
+                ClaimedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
             });
             _ = await seed.SaveChangesAsync();
         }
@@ -370,7 +421,7 @@ public class FilamentCoverageProductionBroadcastTests
         bool completed = await service.MarkCurrentJobAsCompletedAsync(
             printerId,
             "complete",
-            new PrinterTerminalObservation(null),
+            new PrinterTerminalObservation("job", attemptId),
             CancellationToken.None);
 
         completed.Should().BeTrue();
@@ -397,6 +448,7 @@ public class FilamentCoverageProductionBroadcastTests
             .Options;
         Guid printerId = Guid.NewGuid();
         Guid jobId = Guid.NewGuid();
+        Guid attemptId = Guid.NewGuid();
         await using (AppDbContext seed = new(options))
         {
             Printer printer = new()
@@ -419,6 +471,23 @@ public class FilamentCoverageProductionBroadcastTests
                 EstimatedFilamentUsage = 10,
                 ActualStartTime = DateTime.UtcNow.AddMinutes(-5),
                 QueuedAt = DateTime.UtcNow.AddMinutes(-10),
+            });
+            seed.PrinterDispatchStates.Add(new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                ActiveJobId = jobId,
+                ActiveDispatchAttemptId = attemptId,
+            });
+            seed.QueueDispatchAttempts.Add(new QueueDispatchAttempt
+            {
+                Id = attemptId,
+                PrintJobId = jobId,
+                PrinterId = printerId,
+                BackendFileName = "job",
+                Outcome = DispatchAttemptOutcome.InProgress,
+                AttemptNumber = 1,
+                ClaimedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
             });
             _ = await seed.SaveChangesAsync();
         }
@@ -453,7 +522,7 @@ public class FilamentCoverageProductionBroadcastTests
         bool failed = await service.MarkCurrentJobAsFailedAsync(
             printerId,
             "printer error",
-            new PrinterTerminalObservation(null),
+            new PrinterTerminalObservation("job", attemptId),
             CancellationToken.None);
 
         failed.Should().BeTrue();
@@ -487,7 +556,8 @@ public class FilamentCoverageProductionBroadcastTests
     private static PrintJobManagementService QueueService(
         IPrintJobManagementRepository repository,
         IFilamentCoverageBroadcaster broadcaster,
-        IPrintersService? printersService = null)
+        IPrintersService? printersService = null,
+        AppDbContext? appDbContext = null)
         => new(
             repository,
             NullLogger<PrintJobManagementService>.Instance,
@@ -496,7 +566,8 @@ public class FilamentCoverageProductionBroadcastTests
             Hub(),
             Mock.Of<IStoredFileOperationsService>(),
             Mock.Of<IPrinterStatusCacheReader>(),
-            coverageBroadcaster: broadcaster);
+            coverageBroadcaster: broadcaster,
+            appDbContext: appDbContext);
 
     private static IHubContext<PrinterHub> Hub()
     {

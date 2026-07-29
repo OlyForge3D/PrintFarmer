@@ -1714,7 +1714,11 @@ public class JobQueueServiceTests
 
         JobQueuePrintJobDto? result = await service.UpdateJobAsync(
             job.Id,
-            new UpdatePrintJobStatusDto { AssignedPrinterId = printerId },
+            new UpdatePrintJobStatusDto
+            {
+                AssignedPrinterId = printerId,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
             CancellationToken.None);
 
         Assert.NotNull(result);
@@ -1789,7 +1793,8 @@ public class JobQueueServiceTests
             new UpdatePrintJobStatusDto
             {
                 AssignedPrinterId = newPrinterId,
-                Status = PrintJobStatus.Printing,
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
             },
             CancellationToken.None);
 
@@ -1822,7 +1827,11 @@ public class JobQueueServiceTests
 
         _ = await service.UpdateJobAsync(
             job.Id,
-            new UpdatePrintJobStatusDto { Status = PrintJobStatus.Printing },
+            new UpdatePrintJobStatusDto
+            {
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
             CancellationToken.None);
 
         broadcaster.VerifyAll();
@@ -1840,7 +1849,11 @@ public class JobQueueServiceTests
 
         _ = await service.UpdateJobAsync(
             job.Id,
-            new UpdatePrintJobStatusDto { Priority = PrintJobPriority.High },
+            new UpdatePrintJobStatusDto
+            {
+                Priority = PrintJobPriority.High,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
             CancellationToken.None);
 
         broadcaster.VerifyNoOtherCalls();
@@ -1859,7 +1872,11 @@ public class JobQueueServiceTests
 
         Func<Task> act = () => service.UpdateJobAsync(
             job.Id,
-            new UpdatePrintJobStatusDto { Status = PrintJobStatus.Printing },
+            new UpdatePrintJobStatusDto
+            {
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
             CancellationToken.None);
 
         await act.Should().ThrowAsync<DbUpdateException>();

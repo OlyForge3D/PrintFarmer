@@ -39,7 +39,16 @@ public sealed class DatabaseMigrationTests
             "20260725184947_AddOwnerScopedPromotionOperationKey",
             "20260725203646_AddCalibrationPersistenceSync",
             "20260725204532_AddCalibrationGenerationOrchestration",
-            "20260726090013_ReconcileEpic705AppSchema");
+            "20260726090013_ReconcileEpic705AppSchema",
+            "20260726131553_AddCalibrationQueueDispatch",
+            "20260726190525_AddOutboxDbSequenceAndRowVersion",
+            "20260726215806_AddQueueAuditAndBackendIdentity",
+            "20260727052250_HardenCalibrationDispatchFencing",
+            "20260727103118_AlignMaintenanceHistoryDeleteBehavior",
+            "20260727170353_CompleteCalibrationDispatchFencing",
+            "20260727215428_RequireScheduleOperatorReauthorization",
+            "20260728023427_AddScheduledOccurrenceIdentity",
+            "20260728063711_AddCalibrationAttemptToQueueEvents");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();

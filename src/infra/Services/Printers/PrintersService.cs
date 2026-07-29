@@ -3542,6 +3542,31 @@ public class PrintersService(
                 spool?.Material);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
         }
+        catch (DbUpdateConcurrencyException ex) when (stagedGates.Count > 0)
+        {
+            // A concurrent request already won the race to create the same gate and advanced
+            // the printer's RowVersion. Treat this as a topology conflict identical to a
+            // unique-constraint violation: the losing request must retry.
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict (concurrency) for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
+        }
         catch (DbUpdateException ex) when (
             stagedGates.Count > 0
             && IsToolheadPrinterIndexUniqueViolation(ex))

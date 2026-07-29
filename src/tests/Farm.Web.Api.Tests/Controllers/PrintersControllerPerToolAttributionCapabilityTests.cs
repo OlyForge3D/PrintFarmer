@@ -31,11 +31,20 @@ public sealed class PrintersControllerPerToolAttributionCapabilityTests : IAsync
     public async Task UpdatePrinter_BackendChangesAwayFromMoonraker_ClearsCapability()
     {
         Guid printerId = await SeedEligibleMoonrakerPrinterAsync();
-        var update = new UpdatePrinterDto(Backend: PrinterBackend.PrusaLink);
 
-        HttpResponseMessage response = await _client!.PutAsJsonAsync(
-            $"/api/printers/{printerId}",
-            update);
+        // #900: UpdateAsync is If-Match protected. Fetch the current ETag from the GET
+        // endpoint and include it in the PUT request, otherwise the server returns 428.
+        HttpResponseMessage getResponse = await _client!.GetAsync($"/api/printers/{printerId}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        string? etag = getResponse.Headers.ETag?.Tag;
+        etag.Should().NotBeNullOrEmpty("GET /api/printers/{id} must expose an ETag for the revision guard to work");
+
+        var putRequest = new HttpRequestMessage(HttpMethod.Put, $"/api/printers/{printerId}")
+        {
+            Content = JsonContent.Create(new UpdatePrinterDto(Backend: PrinterBackend.PrusaLink))
+        };
+        putRequest.Headers.IfMatch.ParseAdd(etag!);
+        HttpResponseMessage response = await _client!.SendAsync(putRequest);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();

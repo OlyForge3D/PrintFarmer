@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -18,6 +19,7 @@ using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -46,6 +48,11 @@ public class PrintersControllerSwapFlowTests
         printersService ??= new Mock<IPrintersService>();
         statusCache ??= new Mock<IPrinterStatusCacheReader>();
 
+        var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase($"swap-{Guid.NewGuid():N}")
+                .Options);
+
         return new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
@@ -60,7 +67,8 @@ public class PrintersControllerSwapFlowTests
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
-            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>());
+            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
+            appDbContext: db);
     }
 
     /// <summary>
@@ -74,6 +82,25 @@ public class PrintersControllerSwapFlowTests
         gate.Setup(g => g.IsEnabledAsync(OperatorFeature.GuidedSwap, It.IsAny<CancellationToken>())).ReturnsAsync(guidedSwapEnabled);
         gate.Setup(g => g.GetFlagName(OperatorFeature.GuidedSwap)).Returns("guidedSwapEnabled");
         return gate.Object;
+    }
+
+    /// <summary>
+    /// Satisfies the <c>BindPrinterIfMatch</c> gate for <c>SetToolheadSpoolAsync</c>.
+    /// Sets up <c>FindByIdAsync</c> on the mock service to return a printer with a fresh
+    /// RowVersion and writes the corresponding <c>If-Match</c> header on the controller.
+    /// Must be called <b>after</b> <c>controller.ControllerContext</c> is set so that
+    /// <c>controller.Request</c> is available.
+    /// </summary>
+    private static void ArrangeSwapPrecheck(
+        Guid printerId,
+        Mock<IPrintersService> printers,
+        PrintersController controller)
+    {
+        byte[] rowVersion = Guid.NewGuid().ToByteArray();
+        printers
+            .Setup(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Printer { Id = printerId, Name = "T", RowVersion = rowVersion });
+        controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String(rowVersion)}\"";
     }
 
     /// <summary>Envelope carrying a concrete three-state validation body.</summary>
@@ -396,6 +423,7 @@ public class PrintersControllerSwapFlowTests
                 }, "test")),
             },
         };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         var request = new SetActiveSpoolRequest
         {
@@ -446,6 +474,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
@@ -478,6 +507,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
@@ -489,6 +519,7 @@ public class PrintersControllerSwapFlowTests
         Assert.Equal("PETG", body.Scanned);
 
         // Server-enforced hard stop: no bind, no telemetry at all.
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
@@ -508,6 +539,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         var request = new SetActiveSpoolRequest
         {
@@ -521,6 +553,7 @@ public class PrintersControllerSwapFlowTests
 
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal(SwapValidationStatus.Unknown, Assert.IsType<SwapValidationResultDto>(conflict.Value).Status);
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
         telemetry.Verify(t => t.RecordPrinterOperation(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }
@@ -543,6 +576,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         var request = new SetActiveSpoolRequest
         {
@@ -585,6 +619,7 @@ public class PrintersControllerSwapFlowTests
             printersService,
             statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId,
@@ -619,11 +654,13 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out _, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId, 0, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
     }
 
@@ -640,11 +677,13 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out _, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId, 4, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<NotFoundObjectResult>(result.Result);
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
     }
 
@@ -661,11 +700,13 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out _, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         ActionResult<CommandResult> result = await controller.SetToolheadSpoolAsync(
             printerId, 99, new SetActiveSpoolRequest { SpoolId = 42 }, validator.Object, Gate(), CancellationToken.None);
 
         Assert.IsType<BadRequestObjectResult>(result.Result);
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
     }
 
@@ -743,6 +784,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         var request = new SetActiveSpoolRequest
         {
@@ -784,6 +826,7 @@ public class PrintersControllerSwapFlowTests
 
         PrintersController controller = CreateController(out Mock<IPrintFarmerTelemetryService> telemetry, printersService, statusCache: null);
         controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
+        ArrangeSwapPrecheck(printerId, printersService, controller);
 
         var request = new SetActiveSpoolRequest
         {
@@ -797,6 +840,7 @@ public class PrintersControllerSwapFlowTests
 
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal(SwapValidationStatus.Mismatch, Assert.IsType<SwapValidationResultDto>(conflict.Value).Status);
+        printersService.Verify(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
         telemetry.Verify(t => t.RecordPrinterOperation("set_toolhead_spool_override", It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
     }

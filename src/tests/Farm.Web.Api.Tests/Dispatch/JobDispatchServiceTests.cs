@@ -5,6 +5,7 @@ using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -47,8 +48,8 @@ public sealed class JobDispatchServiceTests : IDisposable
         bool broadcastObserved = false;
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
-            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<CancellationToken>()))
-            .Returns(async (string _, string _, CancellationToken ct) =>
+            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (string _, string _, string? _, CancellationToken ct) =>
             {
                 broadcastObserved.Should().BeTrue();
                 PrintJob job = await _db.PrintJobs.SingleAsync(x => x.Id == _jobId, ct);
@@ -104,7 +105,9 @@ public sealed class JobDispatchServiceTests : IDisposable
             _db,
             NullLogger<JobDispatchService>.Instance,
             broadcaster.Object,
-            CreateRealSnapshotService());
+            CreateRealSnapshotService(),
+            resourceAuthorization: null,
+            positionAllocator: CreateAllocatorMock().Object);
         _saveInterceptor.FailNextSave = true;
 
         Func<Task> act = () => service.DispatchJobAsync(
@@ -131,7 +134,7 @@ public sealed class JobDispatchServiceTests : IDisposable
     {
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
-            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new QueuedPrintJobDto
             {
                 Id = _jobId.ToString(),
@@ -147,7 +150,9 @@ public sealed class JobDispatchServiceTests : IDisposable
             _db,
             NullLogger<JobDispatchService>.Instance,
             broadcaster.Object,
-            snapshots);
+            snapshots,
+            resourceAuthorization: null,
+            positionAllocator: CreateAllocatorMock().Object);
 
         _ = await service.DispatchJobAsync(
             _jobId,
@@ -174,6 +179,7 @@ public sealed class JobDispatchServiceTests : IDisposable
             value => value.DispatchJobAsync(
                 _jobId.ToString(),
                 "operator",
+                It.IsAny<string>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
@@ -220,7 +226,7 @@ public sealed class JobDispatchServiceTests : IDisposable
             .Returns(Task.CompletedTask);
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
-            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<CancellationToken>()))
+            .Setup(x => x.DispatchJobAsync(_jobId.ToString(), "operator", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Returns(() =>
             {
                 downstreamEntered.TrySetResult();
@@ -282,7 +288,18 @@ public sealed class JobDispatchServiceTests : IDisposable
             _db,
             NullLogger<JobDispatchService>.Instance,
             broadcaster.Object,
-            snapshots.Object);
+            snapshots.Object,
+            resourceAuthorization: null,
+            positionAllocator: CreateAllocatorMock().Object);
+    }
+
+    private static Mock<IQueuePositionAllocator> CreateAllocatorMock()
+    {
+        var allocator = new Mock<IQueuePositionAllocator>();
+        allocator
+            .Setup(value => value.AllocateAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(2);
+        return allocator;
     }
 
     private Mock<IFilamentCoverageBroadcaster> Broadcaster(Action? onBroadcast = null)

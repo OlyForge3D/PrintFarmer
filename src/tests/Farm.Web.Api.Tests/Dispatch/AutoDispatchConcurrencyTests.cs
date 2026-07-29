@@ -567,7 +567,13 @@ public class AutoDispatchConcurrencyTests : IDisposable
                                     "Unexpected extra dispatch attempt.");
                         }
 
-                        return new QueuedPrintJobDto();
+                        return new QueuedPrintJobDto
+                        {
+                            DispatchResult = new DispatchAttemptResultDto
+                            {
+                                Outcome = DispatchAttemptOutcome.Accepted,
+                            },
+                        };
                     }
                     finally
                     {
@@ -760,7 +766,26 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 {
                     dispatchEntered.TrySetResult();
                     await releaseDispatch.Task.WaitAsync(cancellationToken);
-                    return new QueuedPrintJobDto();
+                    // Simulate the real DispatchJobService transitioning status so the
+                    // coalesced rerun's SelectDispatchPlanAsync sees an active job and returns NoWork.
+                    await using AppDbContext updateCtx = new(
+                        new DbContextOptionsBuilder<AppDbContext>()
+                            .UseSqlite(_connectionString)
+                            .Options);
+                    PrintJob? dispatched = await updateCtx.PrintJobs.FindAsync(jobId);
+                    if (dispatched is not null)
+                    {
+                        dispatched.Status = PrintJobStatus.Starting;
+                        await updateCtx.SaveChangesAsync(CancellationToken.None);
+                    }
+
+                    return new QueuedPrintJobDto
+                    {
+                        DispatchResult = new DispatchAttemptResultDto
+                        {
+                            Outcome = DispatchAttemptOutcome.Accepted,
+                        },
+                    };
                 });
         var secondEvaluationEntered = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);

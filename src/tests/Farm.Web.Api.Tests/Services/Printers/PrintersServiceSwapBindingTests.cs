@@ -786,7 +786,6 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
                     audit,
                     SpoolBindPolicy.Guided,
                     CancellationToken.None);
-                await db.SaveChangesAsync();
                 return result;
             }
 

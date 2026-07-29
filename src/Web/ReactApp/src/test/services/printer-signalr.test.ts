@@ -93,6 +93,7 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/common/utils/apiUrlHelpers", () => ({
   getHubUrl: vi.fn(() => "/hubs/printers"),
+  getSignalRAccessToken: vi.fn(() => localStorage.getItem("auth-token") ?? ""),
 }));
 
 import { PrinterSignalRService } from "@/services/printer-signalr";
