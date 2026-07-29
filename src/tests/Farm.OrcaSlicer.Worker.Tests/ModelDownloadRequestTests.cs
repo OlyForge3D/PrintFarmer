@@ -50,6 +50,36 @@ public sealed class ModelDownloadRequestTests : IDisposable
         request.Headers.GetValues(WorkerLeaseHeaders.LeaseFence).Should().ContainSingle().Which.Should().Be("7");
     }
 
+    [Theory]
+    [InlineData("http://models.example.test/api/models/1")]
+    [InlineData("https://models.example.test/api/models/1")]
+    public void CreateModelDownloadRequest_AbsoluteHttpRoute_PreservesRoute(string modelUrl)
+    {
+        var state = new WorkerStateService();
+        state.SetRegisteredService(Guid.NewGuid(), "worker-secret");
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SlicerApi:BaseUrl"] = "https://slicer.example.test:5246",
+                ["Worker:WorkingDirectory"] = _workingDirectory,
+            })
+            .Build();
+        var service = new OrcaSlicingPipelineService(
+            new HttpClient(),
+            new NullProgressReporter(),
+            NullLogger<OrcaSlicingPipelineService>.Instance,
+            configuration,
+            state);
+
+        using HttpRequestMessage request = service.CreateModelDownloadRequest(
+            modelUrl,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            leaseFence: 7);
+
+        request.RequestUri.Should().Be(new Uri(modelUrl));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workingDirectory))
