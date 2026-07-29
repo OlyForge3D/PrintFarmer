@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace Farm.Web.Api.Controllers.Requests;
 
 /// <summary>
-/// Request to send a raw G-code command to a printer.
-/// Used for Klipper macros (LOAD_FILAMENT, UNLOAD_FILAMENT) and standard G-code (M600).
+/// Legacy request body retained so the retired raw G-code route can return a typed
+/// <c>410 Gone</c> response. New callers must use bounded printer-control endpoints.
 /// </summary>
 public sealed class GcodeCommandRequest
 {

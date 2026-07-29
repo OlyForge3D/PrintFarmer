@@ -2,6 +2,7 @@
 
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -44,6 +45,9 @@ public static class BackendPluginExtensions
         // Discover and load plugins dynamically
         string? pluginsPath = configuration?["BackendPlugins:PluginsPath"];
         DiscoverAndLoadPlugins(registry, services, pluginsPath, pluginAssemblies);
+        services.AddSingleton<
+            IPrinterTelemetryFreshnessPolicy,
+            PrinterTelemetryFreshnessPolicy>();
 
         return services;
     }

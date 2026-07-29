@@ -123,6 +123,14 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Updates priority after enforcing a caller-supplied job ETag.</summary>
+    Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
+        string jobId,
+        int newPriority,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Pause a printing job
     /// </summary>
@@ -134,6 +142,13 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Queues a durable pause command after enforcing the public job ETag.</summary>
+    Task<QueuedPrintJobDto> PauseJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Resume a paused job
     /// </summary>
@@ -143,6 +158,13 @@ public interface IPrintJobManagementService
     Task<QueuedPrintJobDto> ResumeJobAsync(
         string jobId,
         string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Queues a durable resume command after enforcing the public job ETag.</summary>
+    Task<QueuedPrintJobDto> ResumeJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -158,6 +180,20 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Dispatch a queued/assigned job, enforcing a caller-supplied <c>If-Match</c> revision.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="ifMatchJobRowVersion">Base-64 job ETag; <see langword="null"/> for trusted internal callers.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    /// <returns>Updated job with Starting/Printing status.</returns>
+    Task<QueuedPrintJobDto> DispatchJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Cancel a job (remove from queue or stop printing)
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>
@@ -169,11 +205,40 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Cancel a job, enforcing a caller-supplied <c>If-Match</c> revision.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="ifMatchJobRowVersion">Base-64 job ETag; <see langword="null"/> for trusted internal callers.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task CancelJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Abort the current print attempt but keep the job in the queue.
     /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task AbortPrintAsync(
         string jobId,
         string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Abort the current print attempt, enforcing a caller-supplied <c>If-Match</c> revision.
+    /// </summary>
+    /// <param name="jobId">The unique identifier of the print job.</param>
+    /// <param name="userId">The unique identifier of the user.</param>
+    /// <param name="ifMatchJobRowVersion">Base-64 job ETag; <see langword="null"/> for trusted internal callers.</param>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task AbortPrintAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -185,6 +250,13 @@ public interface IPrintJobManagementService
     Task<QueueBulkOperationResultDto> BulkCancelJobsAsync(
         List<string> jobIds,
         string userId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Cancels multiple jobs after enforcing each supplied job ETag.</summary>
+    Task<QueueBulkOperationResultDto> BulkCancelJobsAsync(
+        List<string> jobIds,
+        string userId,
+        IReadOnlyDictionary<string, string>? jobEtags,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -209,6 +281,13 @@ public interface IPrintJobManagementService
         string userId,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Reruns a terminal job after enforcing its public ETag.</summary>
+    Task<QueuedPrintJobDto> RerunJobAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     // ============= JOB DETAILS OPERATIONS (Phase 3) =============
 
     /// <summary>
@@ -231,6 +310,14 @@ public interface IPrintJobManagementService
         UpdateJobDetailsRequest updates,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Updates job details after resource authorization and an exact public ETag check.</summary>
+    Task<QueuedPrintJobDto?> UpdateJobDetailsAsync(
+        string jobId,
+        UpdateJobDetailsRequest updates,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Update job notes
     /// </summary>
@@ -240,6 +327,14 @@ public interface IPrintJobManagementService
     Task<bool> UpdateJobNotesAsync(
         string jobId,
         string? notes,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Updates job notes after resource authorization and an exact public ETag check.</summary>
+    Task<bool> UpdateJobNotesAsync(
+        string jobId,
+        string? notes,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);
 
     // ============= TIMELINE & ANALYTICS OPERATIONS (Phase 3C) =============
@@ -307,6 +402,17 @@ public interface IPrintJobManagementService
         decimal? laborCost,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Updates job cost after resource authorization and an exact public ETag check.</summary>
+    Task<JobCostBreakdownDto?> UpdateJobCostAsync(
+        Guid jobId,
+        decimal? materialCost,
+        decimal? energyCost,
+        decimal? machineTimeCost,
+        decimal? laborCost,
+        string actorSubject,
+        string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
     // ============= HISTORY OPERATIONS (Phase 2) =============
 
     /// <summary>
@@ -344,5 +450,31 @@ public interface IPrintJobManagementService
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task SyncActiveExternalJobsFromPrintersAsync(
         List<string>? printerIds = null,
+        CancellationToken cancellationToken = default);
+
+    // ============= CALIBRATION DISPATCH =============
+
+    /// <summary>
+    /// Dispatches a job to its assigned printer using an explicit bed-clear acknowledgement key.
+    /// This is the entry point for the durable bed-clear start path: the outbox publisher calls
+    /// this method when it processes a <c>BackendStartCommand.v1</c> event. The method acquires
+    /// the shared dispatch claim (validating the persisted ack against <paramref name="ackKey"/>)
+    /// and drives the backend upload/start. Standard jobs may also call this path when an
+    /// acknowledgement key is available.
+    /// </summary>
+    /// <param name="jobId">The print job identifier.</param>
+    /// <param name="actorSubject">The actor subject (user or system identity) that initiated dispatch.</param>
+    /// <param name="ackKey">The bed-clear acknowledgement idempotency key to validate against the persisted ack.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// A typed outcome. The durable command consumer marks the outbox row
+    /// <c>Published</c> only for <see cref="BackendStartStatus.Accepted"/> or
+    /// <see cref="BackendStartStatus.AlreadyStarted"/>; every other status keeps the
+    /// command leased or schedules a bounded retry.
+    /// </returns>
+    Task<BackendStartOutcome> DispatchJobWithAckAsync(
+        string jobId,
+        string actorSubject,
+        string ackKey,
         CancellationToken cancellationToken = default);
 }

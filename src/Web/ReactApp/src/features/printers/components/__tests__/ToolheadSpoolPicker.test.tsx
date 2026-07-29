@@ -48,7 +48,7 @@ const toolheads: ToolheadDto[] = [
 
 describe('ToolheadSpoolPicker', () => {
   beforeEach(() => {
-    mocks.setSpoolMutateAsync.mockResolvedValue(undefined);
+    mocks.setSpoolMutateAsync.mockResolvedValue('printer-v2');
     mocks.setSpoolMutateAsync.mockClear();
     mocks.clearSpoolMutate.mockClear();
   });
@@ -57,6 +57,7 @@ describe('ToolheadSpoolPicker', () => {
     render(
       <ToolheadSpoolPicker
         printerId="printer-1"
+        reviewedRowVersion="printer-v1"
         toolheads={toolheads}
         targetFilamentColorHex={['#0000FF', '#FF0000']}
         targetFilamentType={['PETG', 'ABS']}
@@ -74,6 +75,7 @@ describe('ToolheadSpoolPicker', () => {
     render(
       <ToolheadSpoolPicker
         printerId="printer-1"
+        reviewedRowVersion="printer-v1"
         toolheads={toolheads}
         targetFilamentColorHex={['#0000FF', '#FF0000']}
         targetFilamentType={['PLA', 'PLA']}
@@ -86,6 +88,7 @@ describe('ToolheadSpoolPicker', () => {
       printerId: 'printer-1',
       toolheadIndex: 0,
       spoolId: 1,
+      reviewedRowVersion: 'printer-v1',
     }));
     await waitFor(() => expect(screen.queryByText('Suggested spool #1')).not.toBeInTheDocument());
     expect(screen.getByText('Suggested spool #2')).toBeInTheDocument();

@@ -1,9 +1,15 @@
 import { useState, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button } from '@/common/components/ui/Button';
 import { Spinner } from '@/common/components/ui/Spinner';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { apiClient } from '@/services/api';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
+import { queryKeys } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 import type { SpoolmanSpool } from '@/types/api';
 import { AlertCircleIcon, FilamentLoadIcon } from '@/common/components/icons/MdiIcons';
@@ -31,6 +37,7 @@ export function SpoolValidationModal({
   onProceed,
   context,
 }: SpoolValidationModalProps) {
+  const queryClient = useQueryClient();
   const [showSpoolPicker, setShowSpoolPicker] = useState(false);
   const [settingSpool, setSettingSpool] = useState(false);
 
@@ -42,18 +49,33 @@ export function SpoolValidationModal({
 
       setSettingSpool(true);
       try {
-        await apiClient.setActiveSpool(context.printerId, spoolId);
+        await apiClient.setActiveSpool(
+          context.printerId,
+          spoolId,
+          context.reviewedPrinterRowVersion
+        );
         toast.success(`Spool "${spool.filamentName || spool.name || `#${spoolId}`}" set on ${context.printerName}`);
         setShowSpoolPicker(false);
         // Spool is now set — proceed with dispatch
         onProceed(context.jobId);
       } catch (err) {
-        toast.error(`Failed to set spool: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        const status = mutationErrorStatus(err);
+        if (status === 412 || status === 428) {
+          setShowSpoolPicker(false);
+          onClose();
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+            queryClient.invalidateQueries({
+              queryKey: queryKeys.printer(context.printerId),
+            }),
+          ]);
+        }
+        toast.error(mutationErrorMessage(err, 'Failed to set spool'));
       } finally {
         setSettingSpool(false);
       }
     },
-    [context, onProceed],
+    [context, onClose, onProceed, queryClient],
   );
 
   const handleProceedAnyway = useCallback(() => {

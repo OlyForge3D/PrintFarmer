@@ -71,18 +71,12 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
     }
 
     /// <summary>
-    /// SQL Server treats <see langword="null"/> as a duplicate inside a unique index, so the
-    /// owner/project-scoped slice-job idempotency indexes must exclude rows without a
-    /// correlation/checksum. PostgreSQL and SQLite already treat nulls as distinct, which keeps
-    /// every pre-existing non-calibration job valid without a filter.
+    /// Slice-job idempotency is calibration/project scoped. Standard jobs use
+    /// <see cref="Guid.Empty"/> and must remain repeatable even when their content checksum
+    /// matches an earlier standard slice.
     /// </summary>
     private void ApplyProviderSpecificIdempotencyFilters(ModelBuilder modelBuilder)
     {
-        if (!Database.IsSqlServer())
-        {
-            return;
-        }
-
         IMutableEntityType? sliceJob = modelBuilder.Model.FindEntityType(typeof(SliceJob));
         if (sliceJob is null)
         {
@@ -91,13 +85,24 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
 
         foreach (IMutableIndex index in sliceJob.GetIndexes())
         {
+            string scopeColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.IdempotencyScopeId)}]"
+                : $"\"{nameof(SliceJob.IdempotencyScopeId)}\"";
+            string correlationColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.CorrelationId)}]"
+                : $"\"{nameof(SliceJob.CorrelationId)}\"";
+            string checksumColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.Checksum)}]"
+                : $"\"{nameof(SliceJob.Checksum)}\"";
+            string nonEmptyScope =
+                $"{scopeColumn} <> '00000000-0000-0000-0000-000000000000'";
             switch (index.GetDatabaseName())
             {
                 case SliceJobConfiguration.CorrelationUniqueIndexName:
-                    index.SetFilter($"[{nameof(SliceJob.CorrelationId)}] IS NOT NULL");
+                    index.SetFilter($"{correlationColumn} IS NOT NULL AND {nonEmptyScope}");
                     break;
                 case SliceJobConfiguration.ChecksumUniqueIndexName:
-                    index.SetFilter($"[{nameof(SliceJob.Checksum)}] IS NOT NULL");
+                    index.SetFilter($"{checksumColumn} IS NOT NULL AND {nonEmptyScope}");
                     break;
                 default:
                     break;

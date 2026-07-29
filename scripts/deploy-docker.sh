@@ -3059,6 +3059,16 @@ find_next_free_port() {
 validate_configuration() {
     print_header "🧪 Validating Configuration"
 
+    case "${DB_PROVIDER:-}" in
+        postgres|sqlserver)
+            ;;
+        *)
+            print_error "Unsupported database provider '${DB_PROVIDER:-unset}'."
+            print_info "Docker deployments support PostgreSQL and SQL Server."
+            return 1
+            ;;
+    esac
+
     # Validate numeric worker counts
     for var in ORCA_WORKER_COUNT; do
         val=${!var:-0}
@@ -3136,6 +3146,16 @@ validate_configuration() {
 configure_database() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
+        case "$DB_PROVIDER" in
+            postgres|sqlserver)
+                ;;
+            *)
+                print_error "Unsupported database provider '$DB_PROVIDER'."
+                print_info "Docker deployments support PostgreSQL and SQL Server."
+                return 1
+                ;;
+        esac
+
         print_info "Using configured database: $DB_PROVIDER"
         # Derive downstream variables that save_deployment_config references so
         # a stale .deploy-config (missing CONNECTION_STRING / INCLUDE_* flags)
@@ -3527,6 +3547,29 @@ configure_additional() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
         print_info "Using configured environment: $ENVIRONMENT"
+        if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ]; then
+            INCLUDE_MONITORING=true
+            print_info "Monitoring stack enabled via CLI flag"
+        fi
+        if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "true" ]; then
+            INCLUDE_TELEMETRY=true
+            print_info "Telemetry/observability enabled via CLI flag"
+        fi
+        if [ "${CLI_INCLUDE_SECURITY:-false}" = "true" ]; then
+            INCLUDE_SECURITY=true
+            print_info "Security configurations enabled via CLI flag"
+        fi
+        if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ]; then
+            INCLUDE_REGISTRY=true
+            print_info "Local Docker registry enabled via CLI flag"
+        fi
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
+            INCLUDE_DISCOVERY=true
+            ENABLE_DISCOVERY=true
+            ALLOW_LOCAL_NETWORK=true
+            print_info "Network printer discovery enabled via CLI flag"
+        fi
+
         return 0
     fi
     
@@ -3866,7 +3909,11 @@ generate_slicer_worker_api_keys() {
         local api_key
         # Try to load existing API key from config first (preserve across deployments)
         local config_var_name="SLICER_WORKER_API_KEY_${i}"
-        api_key="${!config_var_name:-}"
+        if [ "$i" -eq 1 ] && [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
+            api_key="$WORKER_SHARED_API_KEY"
+        else
+            api_key="${!config_var_name:-}"
+        fi
         
         if [ -z "$api_key" ]; then
             if [ "$i" -eq 1 ] && [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
@@ -6701,13 +6748,21 @@ main() {
     # Execute setup steps
     detect_environment
     choose_architecture
-    configure_database
+    if ! configure_database; then
+        print_error "Deployment configuration is invalid."
+        exit 1
+    fi
+
     configure_networking
     adjust_connection_strings_for_network_mode
     configure_slicing
     configure_external_storage
     configure_additional
-    validate_configuration
+    if ! validate_configuration; then
+        print_error "Deployment configuration is invalid."
+        exit 1
+    fi
+
     save_deployment_config
     generate_env_file
     generate_react_env_production

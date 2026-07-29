@@ -14,8 +14,10 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// <summary>
 /// Background service that reacts to printer-idle events and orchestrates
 /// automatic job dispatch. Event-driven via <see cref="IAutoDispatchTrigger"/>
-/// (no polling). Selection and in-memory job claims are serialized while
-/// independent printer dispatches run under the configured async capacity limit.
+/// in-memory events act as wake-up hints; a periodic database scan is the durable
+/// source of eligible work after dropped events or process restarts. Selection and
+/// in-memory job claims are serialized while independent printer dispatches run under
+/// the configured async capacity limit.
 /// </summary>
 public sealed class AutoDispatchBackgroundService(
     AutoDispatchTrigger trigger,
@@ -29,6 +31,7 @@ public sealed class AutoDispatchBackgroundService(
     private readonly object _claimSync = new();
     private readonly HashSet<Task> _workers = [];
     private readonly HashSet<Guid> _claimedJobs = [];
+    private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
 
     /// <inheritdoc />
     public override void Dispose()
@@ -48,7 +51,45 @@ public sealed class AutoDispatchBackgroundService(
 
             while (!stoppingToken.IsCancellationRequested)
             {
-                DispatchTriggerEvent triggerEvent = await trigger.ReadAsync(stoppingToken);
+                // In-memory events are wake-up hints; a periodic database scan is the durable
+                // source of eligible work after dropped events or process restarts (#900).
+                DispatchTriggerEvent triggerEvent;
+                using (CancellationTokenSource readCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                {
+                    Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+                    Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
+                    Task completed = await Task.WhenAny(readTask, scanDelay);
+
+                    if (completed == scanDelay)
+                    {
+                        await readCts.CancelAsync();
+                        try
+                        {
+                            _ = await readTask;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Expected: the periodic durable scan won this wait.
+                        }
+
+                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                        continue;
+                    }
+
+                    try
+                    {
+                        triggerEvent = await readTask;
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                }
+
+                // Dispatch via a tracked worker so idle printers run concurrently under the
+                // configured capacity limit, with rerun coalescing and graceful drain on
+                // shutdown. The cross-process database claim prevents duplicates.
                 StartTrackedWorker(triggerEvent, stoppingToken);
             }
         }
@@ -180,7 +221,9 @@ public sealed class AutoDispatchBackgroundService(
                 && (p.DispatchState.AutoDispatchState == AutoDispatchState.Ready || p.DispatchState.BedPreConfirmed)
                 && !db.PrintJobs.Any(j =>
                     j.AssignedPrinterId == p.Id
-                    && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                    && (j.Status == PrintJobStatus.Starting ||
+                        j.Status == PrintJobStatus.Printing ||
+                        j.Status == PrintJobStatus.Paused))
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
                     && j.QueuedAt <= startupAt
@@ -346,7 +389,9 @@ public sealed class AutoDispatchBackgroundService(
 
         bool hasActiveJob = await db.PrintJobs.AnyAsync(
             job => job.AssignedPrinterId == printerId
-                && (job.Status == PrintJobStatus.Starting || job.Status == PrintJobStatus.Printing),
+                && (job.Status == PrintJobStatus.Starting ||
+                    job.Status == PrintJobStatus.Printing ||
+                    job.Status == PrintJobStatus.Paused),
             ct);
         if (hasActiveJob)
         {
@@ -374,14 +419,14 @@ public sealed class AutoDispatchBackgroundService(
             return DispatchPlan.NoWork;
         }
 
+        // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
+        // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
             .Where(job => job.Status == PrintJobStatus.Queued
                 && (job.AssignedPrinterId == null || job.AssignedPrinterId == printerId))
-            .OrderBy(job => job.Priority)
-            .ThenBy(job => job.QueuePosition)
-            .ThenBy(job => job.QueuedAt)
-            .Take(20)
+            .OrderByPriorityDescending()
+            .Take(20) // reasonable batch to score
             .ToListAsync(ct);
         if (candidateJobs.Count == 0)
         {
@@ -525,12 +570,19 @@ public sealed class AutoDispatchBackgroundService(
             IServiceProvider sp = scope.ServiceProvider;
             AppDbContext db = sp.GetRequiredService<AppDbContext>();
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
-            _ = await dispatchService.DispatchJobAsync(
-                plan.JobId,
-                plan.PrinterId,
-                "system:auto-dispatch",
-                score,
-                ct);
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+                await dispatchService.DispatchJobAsync(
+                    plan.JobId,
+                    plan.PrinterId,
+                    QueueActorIdentity.AutoDispatch,
+                    score,
+                    ct);
+            if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
+            {
+                string outcome = dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
+                throw new InvalidOperationException(
+                    $"Auto-dispatch backend outcome was {outcome}; success was not confirmed.");
+            }
 
             PrintJob? jobToUpdate = await db.PrintJobs.FindAsync([plan.JobId], ct);
             if (jobToUpdate is not null)

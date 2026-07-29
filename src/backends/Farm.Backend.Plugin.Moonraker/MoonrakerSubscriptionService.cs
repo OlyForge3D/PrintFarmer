@@ -234,7 +234,8 @@ public sealed class MoonrakerSubscriptionService(
                 spoolInfo,
                 FileName: PrinterStatusDto.ExtractFileName(compositeStatus.JobName));
 
-            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await hub!.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                 .SendAsync("printerupdated", statusUpdate, ct);
             _lastHttpPollTimes[printerId] = DateTime.UtcNow;
 
@@ -2601,6 +2602,7 @@ public sealed class MoonrakerSubscriptionService(
 
         // Detect state transitions for job completion synchronization
         string? previousState = state.PreviousState;
+        string? previousJobName = state.JobName;
         bool stateChanged = stateValue != null && stateValue != previousState;
 #pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
         bool progressChanged = state.Progress is null || progress is null
@@ -2634,7 +2636,12 @@ public sealed class MoonrakerSubscriptionService(
         // Check for print completion/failure transitions and sync job status
         if (stateChanged && previousState != null)
         {
-            await CheckAndSyncJobCompletionAsync(printerId, previousState, stateValue!, ct);
+            await CheckAndSyncJobCompletionAsync(
+                printerId,
+                previousState,
+                stateValue!,
+                previousJobName,
+                ct);
         }
 
         await _coverageBroadcaster
@@ -2716,7 +2723,8 @@ public sealed class MoonrakerSubscriptionService(
             _statusCacheWriter.UpdateStatus(cacheUpdate, state.OriginWatermark);
 
             _logger.LogDebug("[MoonrakerSubscriptionService] Broadcasting printerupdated for {PrinterId} via SignalR", printerId);
-            await hub!.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await hub!.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                 .SendAsync("printerupdated", update, ct);
         }
         catch (OperationCanceledException)
@@ -2776,7 +2784,8 @@ public sealed class MoonrakerSubscriptionService(
             _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (offline) for {PrinterId} via SignalR", printerId);
-            await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await hub.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                 .SendAsync("printerupdated", offlineUpdate, ct);
             _logger.LogDebug("Sent offline status for printer {PrinterId}", printerId);
         }
@@ -2836,7 +2845,8 @@ public sealed class MoonrakerSubscriptionService(
             _statusCacheWriter.UpdateStatus(shutdownCacheUpdate, originWatermark: null);
 
             _logger.LogInformation("[MoonrakerSubscriptionService] Broadcasting printerupdated (shutdown) for {PrinterId} via SignalR", printerId);
-            await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await hub.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                 .SendAsync("printerupdated", shutdownUpdate, ct);
             _logger.LogDebug("Sent shutdown status for printer {PrinterId}", printerId);
         }
@@ -2858,8 +2868,14 @@ public sealed class MoonrakerSubscriptionService(
     /// <param name="printerId">The ID of the printer.</param>
     /// <param name="previousState">The previous printer state.</param>
     /// <param name="newState">The new printer state.</param>
+    /// <param name="previousJobName">Backend identity captured before the transition.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -2878,7 +2894,11 @@ public sealed class MoonrakerSubscriptionService(
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
                 // Print completed successfully
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[MoonrakerSubscriptionService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -2887,7 +2907,11 @@ public sealed class MoonrakerSubscriptionService(
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
                 // Print failed
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[MoonrakerSubscriptionService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
@@ -3219,7 +3243,8 @@ public sealed class MoonrakerSubscriptionService(
                     _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
                     _klippyReadyState[printer.Id] = compositeStatus.IsOnline;
 
-                    await hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                    await hub.Clients.Group(
+                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printer.Id))
                         .SendAsync("printerupdated", statusUpdate, ct);
 
                     // Update last poll time and reset parse error count since HTTP polling succeeded

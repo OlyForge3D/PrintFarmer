@@ -12,6 +12,8 @@ import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
 import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
 import { useSlicer } from '@/hooks/useSlicer';
+import { apiClient } from '@/services/api';
+import { mutationErrorMessage } from '@/common/utils/mutationError';
 
 interface EditPrinterModalProps {
   printerId: string | null;
@@ -399,7 +401,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         ...formData,
         toolheads: toolheads.length > 0 ? toolheads : undefined,
       };
-      const result = await updateMutation.mutateAsync({ id: printerId, printer: updateData });
+      if (!printerDetails?.rowVersion) {
+        throw new Error('Printer revision is unavailable. Refresh and review the printer again.');
+      }
+      const result = await updateMutation.mutateAsync({
+        id: printerId,
+        printer: updateData,
+        reviewedRowVersion: printerDetails.rowVersion,
+      });
       toast.success(`Printer "${result.name}" updated`);
       onSuccess?.();
       // Show clone profiles modal only if slicing is enabled
@@ -410,7 +419,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
         onClose();
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update printer';
+      const message = mutationErrorMessage(err, 'Failed to update printer');
       toast.error(message);
       setError(message);
     }

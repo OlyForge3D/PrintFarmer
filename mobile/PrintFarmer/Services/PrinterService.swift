@@ -25,16 +25,32 @@ actor PrinterService: PrinterServiceProtocol {
         try await apiClient.get("/api/printers/\(id)/details")
     }
 
-    func update(id: UUID, _ request: UpdatePrinterRequest) async throws -> Printer {
-        try await apiClient.put("/api/printers/\(id)", body: request)
+    func update(
+        id: UUID,
+        _ request: UpdatePrinterRequest,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
+        try await apiClient.put(
+            "/api/printers/\(id)",
+            body: request,
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
     }
 
     func delete(id: UUID) async throws {
         try await apiClient.delete("/api/printers/\(id)")
     }
 
-    func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
-        try await apiClient.put("/api/printers/\(id)/maintenance", body: inMaintenance)
+    func setMaintenanceMode(
+        id: UUID,
+        inMaintenance: Bool,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
+        try await apiClient.put(
+            "/api/printers/\(id)/maintenance",
+            body: inMaintenance,
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
     }
 
     // MARK: - Printer Commands
@@ -99,9 +115,17 @@ actor PrinterService: PrinterServiceProtocol {
 
     // MARK: - Filament / Spool
 
-    func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult {
+    func setActiveSpool(
+        printerId: UUID,
+        spoolId: Int?,
+        reviewedRowVersion: String
+    ) async throws -> CommandResult {
         let body = SetActiveSpoolRequest(spoolId: spoolId)
-        return try await apiClient.post("/api/printers/\(printerId)/active-spool", body: body)
+        return try await apiClient.post(
+            "/api/printers/\(printerId)/active-spool",
+            body: body,
+            headers: preconditionHeaders(reviewedRowVersion)
+        )
     }
 
     /// Final server bookkeeping bind of a spool to a specific toolhead index
@@ -300,6 +324,10 @@ actor PrinterService: PrinterServiceProtocol {
                     }
                 }
             }
+    }
+
+    private func preconditionHeaders(_ rowVersion: String) -> [String: String] {
+        ["If-Match": "\"\(rowVersion)\""]
     }
 }
 

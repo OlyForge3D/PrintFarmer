@@ -370,6 +370,7 @@ public class FilamentCoverageProductionBroadcastTests
         bool completed = await service.MarkCurrentJobAsCompletedAsync(
             printerId,
             "complete",
+            new PrinterTerminalObservation(null),
             CancellationToken.None);
 
         completed.Should().BeTrue();
@@ -452,6 +453,7 @@ public class FilamentCoverageProductionBroadcastTests
         bool failed = await service.MarkCurrentJobAsFailedAsync(
             printerId,
             "printer error",
+            new PrinterTerminalObservation(null),
             CancellationToken.None);
 
         failed.Should().BeTrue();

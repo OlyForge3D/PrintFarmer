@@ -154,7 +154,15 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
-      await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      if (!autoDispatchStatus?.dispatchStateETag || !autoDispatchStatus.printerETag) {
+        throw new Error('Refresh the printer before changing auto-dispatch.');
+      }
+      await setAutoDispatchEnabled.mutateAsync({
+        printerId: printer.id,
+        enabled: newEnabled,
+        dispatchStateETag: autoDispatchStatus.dispatchStateETag,
+        printerETag: autoDispatchStatus.printerETag,
+      });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
       toast.error('Failed to toggle auto-dispatch');

@@ -60,8 +60,7 @@ public class PrintersControllerSwapFlowTests
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
-            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
-            printerStatusCache: statusCache.Object);
+            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>());
     }
 
     /// <summary>

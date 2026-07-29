@@ -24,7 +24,11 @@ vi.mock('@/services/assetService', () => ({
 vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
     connect: vi.fn().mockResolvedValue(undefined),
+    disconnect: vi.fn().mockResolvedValue(undefined),
     onFailureDetected: vi.fn(() => vi.fn()),
+    onQueueEvent: vi.fn(() => vi.fn()),
+    onConnectionStateChange: vi.fn(() => vi.fn()),
+    replaceQueueResourceSubscriptions: vi.fn().mockResolvedValue(undefined),
   },
 }));
 

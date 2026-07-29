@@ -20,6 +20,9 @@ public class PrintJob
     [Timestamp]
     public byte[]? RowVersion { get; set; }
 
+    /// <summary>Provider-independent logical revision incremented on every mutation.</summary>
+    public long Revision { get; set; } = 1;
+
     public string Name { get; set; } = string.Empty; // Display name for the job
 
     /// <summary>
@@ -364,4 +367,196 @@ public class PrintJob
     /// authoritative per-adjustment bins live on <see cref="PartInventoryAdjustment"/>.
     /// </summary>
     public Guid? HarvestedIntoBinId { get; set; }
+
+    // =========================================================================
+    // Calibration dispatch fields (issue #900)
+    // All fields below are additive and nullable so existing Standard jobs are
+    // fully backward-compatible. Calibration fields are immutable after creation.
+    // =========================================================================
+
+    /// <summary>
+    /// Classifies the job as Standard or FilamentCalibration.
+    /// Null for rows created before issue #900 (backfill as Standard).
+    /// </summary>
+    public JobKind? JobKind { get; set; }
+
+    // --- Calibration origin links (soft references — no FK constraint) ---
+
+    /// <summary>Calibration project that owns this job.</summary>
+    public Guid? CalibrationProjectId { get; set; }
+
+    /// <summary>Calibration attempt that produced the G-code for this job.</summary>
+    public Guid? CalibrationAttemptId { get; set; }
+
+    /// <summary>Immutable printer-configuration snapshot used when the job was created.</summary>
+    public Guid? CalibrationConfigSnapshotId { get; set; }
+
+    /// <summary>Calibration orchestration that requested this job.</summary>
+    public Guid? CalibrationOrchestrationId { get; set; }
+
+    // --- Provenance ---
+
+    /// <summary>Artifact (slicer output) whose bytes were promoted into <see cref="GcodeFile"/>.</summary>
+    public Guid? SourceArtifactId { get; set; }
+
+    /// <summary>
+    /// Slice job that produced the promoted artifact for this print job.
+    /// Part of the immutable provenance chain and a canonical idempotency-hash input:
+    /// re-slicing produces a new slice job, therefore a new canonical hash.
+    /// </summary>
+    public Guid? SliceJobId { get; set; }
+
+    /// <summary>SHA-256 (hex) of the promoted G-code content as verified at promotion time.</summary>
+    [MaxLength(64)]
+    public string? GcodeContentSha256 { get; set; }
+
+    /// <summary>Exact promoted G-code byte count pinned when the job was created.</summary>
+    public long? PinnedGcodeFileSizeBytes { get; set; }
+
+    /// <summary>Subject (user or system) that created this job.</summary>
+    [MaxLength(256)]
+    public string? CreatorSubject { get; set; }
+
+    // --- Idempotency ---
+
+    /// <summary>
+    /// Caller-supplied scope that qualifies <see cref="IdempotencyKey"/> uniqueness
+    /// (typically the calibration project ID or user subject for cross-project isolation).
+    /// </summary>
+    [MaxLength(256)]
+    public string? IdempotencyScope { get; set; }
+
+    /// <summary>
+    /// Caller-supplied stable key. Combined with <see cref="IdempotencyScope"/>, a filtered
+    /// unique index prevents duplicate active jobs on concurrent identical requests.
+    /// </summary>
+    [MaxLength(512)]
+    public string? IdempotencyKey { get; set; }
+
+    /// <summary>
+    /// SHA-256 (hex) of the canonical serialized request payload. A second call with the
+    /// same key but a different hash is a 409 idempotency_payload_mismatch.
+    /// </summary>
+    [MaxLength(64)]
+    public string? IdempotencyRequestSha256 { get; set; }
+
+    // --- Explicit firmware/dialect/slicer compatibility tuple (immutable) ---
+
+    /// <summary>Required firmware family (e.g., <c>Klipper</c>). Null for Standard jobs.</summary>
+    public PrinterFirmwareFamily? RequiredFirmwareFamily { get; set; }
+
+    /// <summary>Required G-code dialect (e.g., <c>Klipper</c>). Null for Standard jobs.</summary>
+    public PrinterGcodeDialect? RequiredGcodeDialect { get; set; }
+
+    /// <summary>Required slicer engine name (e.g., <c>OrcaSlicer</c>). Null for Standard jobs.</summary>
+    [MaxLength(128)]
+    public string? RequiredSlicerEngine { get; set; }
+
+    /// <summary>Required slicer distribution (e.g., <c>upstream</c>). Null for Standard jobs.</summary>
+    [MaxLength(128)]
+    public string? RequiredSlicerDistribution { get; set; }
+
+    /// <summary>Pinned slicer version required by this job.</summary>
+    [MaxLength(64)]
+    public string? RequiredSlicerVersion { get; set; }
+
+    /// <summary>Pinned slicer container OCI digest required by this job.</summary>
+    [MaxLength(128)]
+    public string? RequiredSlicerContainerDigest { get; set; }
+
+    // --- Content hashes (immutable) ---
+
+    /// <summary>SHA-256 of the canonical calibration specification.</summary>
+    [MaxLength(64)]
+    public string? SpecificationSha256 { get; set; }
+
+    /// <summary>SHA-256 of the effective machine (printer) slicer profile.</summary>
+    [MaxLength(64)]
+    public string? MachineProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 of the effective process (print-settings) slicer profile.</summary>
+    [MaxLength(64)]
+    public string? ProcessProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 of the effective filament slicer profile.</summary>
+    [MaxLength(64)]
+    public string? FilamentProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 of the full printer-configuration snapshot used at job creation.</summary>
+    [MaxLength(64)]
+    public string? PrinterConfigSnapshotSha256 { get; set; }
+
+    /// <summary>
+    /// Printer configuration revision current at job-creation time.
+    /// Dispatch rejects the job if this value no longer matches the printer's revision.
+    /// </summary>
+    public long? PinnedPrinterConfigRevision { get; set; }
+
+    /// <summary>Exact printer model pinned from the assigned printer.</summary>
+    public Guid? PinnedPrinterModelId { get; set; }
+
+    /// <summary>Exact physical toolhead selected by the calibration project.</summary>
+    public Guid? PinnedToolheadId { get; set; }
+
+    /// <summary>Zero-based physical toolhead index pinned with <see cref="PinnedToolheadId"/>.</summary>
+    public int? PinnedToolheadIndex { get; set; }
+
+    /// <summary>Exact local physical spool pinned by the calibration project.</summary>
+    public Guid? PinnedSpoolId { get; set; }
+
+    /// <summary>Filament SKU pinned from the persisted calibration project.</summary>
+    [MaxLength(256)]
+    public string? PinnedFilamentSku { get; set; }
+
+    /// <summary>Physical production lot pinned from the selected spool at creation.</summary>
+    [MaxLength(256)]
+    public string? PinnedFilamentLotNumber { get; set; }
+
+    /// <summary>
+    /// Unique nullable key used only while an externally observed print is active.
+    /// Setting this to the printer ID provides provider-independent unique protection
+    /// against concurrent observers creating duplicate active external jobs.
+    /// </summary>
+    public Guid? ActiveExternalPrinterId { get; set; }
+
+    /// <summary>SHA-256 of the persisted filament snapshot used for this job.</summary>
+    [MaxLength(64)]
+    public string? FilamentSnapshotSha256 { get; set; }
+
+    /// <summary>SHA-256 of the immutable source model consumed by the slicer.</summary>
+    [MaxLength(64)]
+    public string? SourceModelSha256 { get; set; }
+
+    /// <summary>SHA-256 of the promoted calibration manifest.</summary>
+    [MaxLength(64)]
+    public string? CalibrationManifestSha256 { get; set; }
+
+    /// <summary>Object X extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionX { get; set; }
+
+    /// <summary>Object Y extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionY { get; set; }
+
+    /// <summary>Object Z extent pinned from G-code metadata at queue creation.</summary>
+    public double? PinnedObjectDimensionZ { get; set; }
+
+    // --- Blocked-dispatch state ---
+
+    /// <summary>
+    /// Typed code explaining why the job cannot currently be dispatched without
+    /// consuming its bed-clear acknowledgement (e.g., firmware mismatch).
+    /// Null means the job is dispatchable.
+    /// </summary>
+    public JobBlockedReasonCode? BlockedReasonCode { get; set; }
+
+    /// <summary>
+    /// Structured JSON with additional detail for <see cref="BlockedReasonCode"/>.
+    /// Contains no credentials or private paths.
+    /// </summary>
+    public string? BlockedReasonJson { get; set; }
+
+    // --- Dispatch attempt history ---
+
+    /// <summary>Dispatch attempts recorded against this job.</summary>
+    public ICollection<QueueDispatchAttempt> DispatchAttempts { get; set; } = new List<QueueDispatchAttempt>();
 }

@@ -234,6 +234,49 @@ cleanup_test_temp_dir() {
     fi
 }
 
+repository_deployment_artifact_paths() {
+    printf '%s\n' \
+        ".deploy-config" \
+        ".env" \
+        "src/Web/ReactApp/.env.production" \
+        "docker-compose.yml" \
+        "Dockerfile.multistage" \
+        "dockerfiles" \
+        "docker-entrypoint-config.sh" \
+        "otel-collector-config.yaml" \
+        "monitoring" \
+        "security-config.json"
+}
+
+backup_repository_deployment_artifacts() {
+    local repository_root="$1"
+    local backup_root="$2"
+    local relative_path
+    while IFS= read -r relative_path; do
+        local source_path="$repository_root/$relative_path"
+        if [[ -e "$source_path" || -L "$source_path" ]]; then
+            mkdir -p "$backup_root/files/$(dirname "$relative_path")"
+            cp -a "$source_path" "$backup_root/files/$relative_path"
+            mkdir -p "$backup_root/present/$(dirname "$relative_path")"
+            : > "$backup_root/present/$relative_path"
+        fi
+    done < <(repository_deployment_artifact_paths)
+}
+
+restore_repository_deployment_artifacts() {
+    local repository_root="$1"
+    local backup_root="$2"
+    local relative_path
+    while IFS= read -r relative_path; do
+        local destination_path="$repository_root/$relative_path"
+        rm -rf "$destination_path"
+        if [[ -e "$backup_root/present/$relative_path" ]]; then
+            mkdir -p "$(dirname "$destination_path")"
+            cp -a "$backup_root/files/$relative_path" "$destination_path"
+        fi
+    done < <(repository_deployment_artifact_paths)
+}
+
 # Helper function to get deploy script command with correct paths
 get_deploy_script_command() {
     local args=("$@")

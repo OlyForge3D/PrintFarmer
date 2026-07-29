@@ -495,11 +495,21 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func cancel(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func stop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func emergencyStop(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
-    func setMaintenanceMode(id: UUID, inMaintenance: Bool) async throws -> Printer {
+    func setMaintenanceMode(
+        id: UUID,
+        inMaintenance: Bool,
+        reviewedRowVersion: String
+    ) async throws -> Printer {
         Printer.previewFallbackPrinter(state: "ready", isOnline: true)
     }
     func getQueueOverview(model: String?, nozzle: Double?, material: String?) async throws -> [QueueOverview] { [] }
-    func setActiveSpool(printerId: UUID, spoolId: Int?) async throws -> CommandResult { CommandResult(success: true, message: nil) }
+    func setActiveSpool(
+        printerId: UUID,
+        spoolId: Int?,
+        reviewedRowVersion: String
+    ) async throws -> CommandResult {
+        CommandResult(success: true, message: nil)
+    }
     func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { [] }
     func loadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }

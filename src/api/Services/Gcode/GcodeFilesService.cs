@@ -491,9 +491,15 @@ public class GcodeFilesService(
             throw new InvalidOperationException("Unsafe target path");
         }
 
-        await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-        await file.CopyToAsync(fs, ct);
-        await fs.FlushAsync(ct);  // Ensure all bytes are written before reading
+        await using (FileStream fs = new(
+            fullTarget,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read))
+        {
+            await file.CopyToAsync(fs, ct);
+            await fs.FlushAsync(ct);
+        }
 
         System.IO.FileInfo info = new(fullTarget);
 

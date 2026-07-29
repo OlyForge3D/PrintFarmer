@@ -64,6 +64,7 @@ describe('EditPrinterModal', () => {
 
     mockUsePrinterDetails.mockReturnValue({
       data: {
+        rowVersion: 'printer-v1',
         name: 'qp4-1',
         serverUrl: 'http://qp4-1.local',
         originalServerUrl: 'http://qp4-1.local',
@@ -130,6 +131,7 @@ describe('EditPrinterModal', () => {
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
         id: 'printer-1',
+        reviewedRowVersion: 'printer-v1',
         printer: expect.objectContaining({
           backend: PrinterBackend.Moonraker,
           obicoEnabled: true,

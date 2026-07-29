@@ -125,6 +125,42 @@ public sealed class SlicePrintBridgeAddToQueueTests
         result.Should().BeOfType<ForbidResult>();
     }
 
+    [Fact]
+    [Trait("Category", "AddToQueue")]
+    public async Task AddToQueue_CalibrationSlice_Returns422WithoutImportOrQueueWrite()
+    {
+        Guid jobId = Guid.NewGuid();
+        SliceJob calibrationJob = CreateJob(jobId, SliceJobStatus.Completed);
+        calibrationJob.CalibrationProjectId = Guid.NewGuid();
+        calibrationJob.CalibrationAttemptId = Guid.NewGuid();
+        calibrationJob.CalibrationOrchestrationId = Guid.NewGuid();
+
+        _jobRepoMock
+            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(calibrationJob);
+
+        IActionResult result = await BuildController()
+            .AddToQueueAsync(jobId, new AddSliceToQueueRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<UnprocessableEntityObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _artifactsMock.Verify(
+            a => a.ListByJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _importMock.Verify(
+            i => i.ImportAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _queueMock.Verify(
+            q => q.AddJobToQueueAsync(
+                It.IsAny<QueuePrintJobDto>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     // =========================================================================
     // Job not completed → 400
     // =========================================================================

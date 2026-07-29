@@ -280,7 +280,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-            await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            await _hub.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(_printerId))
                 .SendAsync("printerupdated", signalRUpdate, ct);
 #pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
             bool progressChanged = _lastBroadcastProgress is null || status.Progress is null

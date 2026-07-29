@@ -26,6 +26,9 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
 
     public Type? StatusClientInterfaceType => null;
 
+    public BackendTelemetryCadence TelemetryCadence =>
+        new(TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10));
+
     public Version Version => new(1, 0, 0);
 
     public void RegisterServices(IServiceCollection services)

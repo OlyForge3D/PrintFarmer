@@ -91,22 +91,65 @@ public enum UploadAndPrintStage
 }
 
 /// <summary>
+/// Typed physical outcome of an upload-and-start operation.
+/// </summary>
+public enum UploadAndPrintOutcome
+{
+    /// <summary>The backend confirmed that it accepted the print.</summary>
+    Accepted,
+
+    /// <summary>The backend explicitly rejected the request.</summary>
+    Rejected,
+
+    /// <summary>No request capable of starting a print was sent.</summary>
+    FailedBeforeStart,
+
+    /// <summary>The request may have reached the backend and must be reconciled.</summary>
+    Unknown,
+}
+
+/// <summary>
 /// Result of a combined upload-and-start-print operation.
 /// </summary>
 /// <param name="Success">Whether both upload and start-print succeeded.</param>
 /// <param name="FailedStage">The stage at which the operation failed, or <see cref="UploadAndPrintStage.Completed"/> on success.</param>
 /// <param name="ErrorMessage">Human-readable error message when <paramref name="Success"/> is false.</param>
+/// <param name="Outcome">Typed physical outcome used to decide whether retry is safe.</param>
+/// <param name="BackendJobId">Real provider identity returned by the backend, when available.</param>
+/// <param name="BackendFileIdentity">Provider file/path identity, distinct from a history UID.</param>
 public sealed record UploadAndPrintResult(
     bool Success,
     UploadAndPrintStage FailedStage = UploadAndPrintStage.Completed,
-    string? ErrorMessage = null)
+    string? ErrorMessage = null,
+    UploadAndPrintOutcome Outcome = UploadAndPrintOutcome.Accepted,
+    string? BackendJobId = null,
+    string? BackendFileIdentity = null)
 {
     /// <summary>Creates a successful result.</summary>
-    public static UploadAndPrintResult Ok() => new(true);
+    public static UploadAndPrintResult Ok(
+        string? backendJobId = null,
+        string? backendFileIdentity = null) =>
+        new(
+            true,
+            Outcome: UploadAndPrintOutcome.Accepted,
+            BackendJobId: backendJobId,
+            BackendFileIdentity: backendFileIdentity);
 
-    /// <summary>Creates a failure result indicating which stage failed.</summary>
+    /// <summary>Creates an explicit backend rejection.</summary>
     public static UploadAndPrintResult Fail(UploadAndPrintStage stage, string? message = null)
-        => new(false, stage, message);
+        => new(false, stage, message, UploadAndPrintOutcome.Rejected);
+
+    /// <summary>Creates a known failure before a start-capable request was sent.</summary>
+    public static UploadAndPrintResult FailedBeforeStart(
+        UploadAndPrintStage stage,
+        string? message = null) =>
+        new(false, stage, message, UploadAndPrintOutcome.FailedBeforeStart);
+
+    /// <summary>Creates an outcome that may have started a physical print.</summary>
+    public static UploadAndPrintResult Unknown(
+        UploadAndPrintStage stage,
+        string? message = null) =>
+        new(false, stage, message, UploadAndPrintOutcome.Unknown);
 }
 
 /// <summary>
@@ -391,6 +434,8 @@ public interface ISupportsHistory
     /// <param name="limit">Maximum number of history entries to return, or null for default limit</param>
     /// <param name="start">Starting index for pagination, or null to start from beginning</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp (for incremental seeding)</param>
+    /// <param name="before">Filter to only return jobs started before this UTC timestamp.</param>
+    /// <param name="order">Requested timestamp order, <c>asc</c> or <c>desc</c>.</param>
     /// <param name="credential">Optional credential for authentication if required by the backend</param>
     /// <param name="ct">Cancellation token to cancel the operation</param>
     /// <returns>HistoryListResponse containing paginated history entries, or null if history cannot be retrieved</returns>
@@ -398,7 +443,15 @@ public interface ISupportsHistory
     /// The 'since' parameter enables incremental history seeding. Backends that support server-side
     /// filtering (Moonraker) will use it directly. Backends that don't (OctoPrint) will filter client-side.
     /// </remarks>
-    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default);
+    Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Retrieves detailed information about a specific historical print job.

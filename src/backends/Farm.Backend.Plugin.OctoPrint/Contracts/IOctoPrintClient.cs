@@ -94,9 +94,19 @@ public interface IOctoPrintClient : IBackendClient, ISupportsFileDownload, ISupp
     /// <param name="limit">Maximum number of history entries to return</param>
     /// <param name="start">Offset index for pagination</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp</param>
+    /// <param name="before">Filter to only return jobs started before this UTC timestamp</param>
+    /// <param name="order">Requested timestamp ordering.</param>
     /// <param name="credential">Printer credential for authentication</param>
     /// <param name="ct">Cancellation token</param>
-    Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default);
+    Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Gets details for a specific print job from OctoPrint history.

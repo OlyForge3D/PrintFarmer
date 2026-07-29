@@ -476,6 +476,7 @@ test_monitoring_inclusion() {
     # Prometheus remains directly exposed; Grafana is routed through nginx at /grafana/.
     assert_contains "$compose_content" "9090:9090" "Should expose Prometheus port"
     assert_contains "$compose_content" 'GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"' "Should route Grafana through the nginx subpath"
+    assert_contains "$compose_content" "expose:" "Should expose Grafana only inside the deployment network"
     assert_contains "$compose_content" '- "3000"' "Should expose Grafana port only to the compose network"
     assert_not_contains "$compose_content" "3001:3000" "Should not publish Grafana directly on the host"
     
@@ -1145,6 +1146,13 @@ test_read_only_output_directory() {
     local readonly_dir="$TEST_TEMP_DIR/readonly-output"
     mkdir -p "$readonly_dir"
     chmod 444 "$readonly_dir"
+
+    if [[ -w "$readonly_dir" ]]; then
+        chmod 755 "$readonly_dir"
+        test_info "INCONCLUSIVE: filesystem does not enforce POSIX mode-bit write restrictions"
+        pass_test
+        return 0
+    fi
     
     # Capability probe: some environments (notably Windows Git Bash / MSYS, and
     # any run as root) accept chmod 444 on a directory but do not actually
@@ -1806,6 +1814,7 @@ run_all_tests() {
     test_complete_user_scenario
     test_addon_templates_yaml_syntax
     test_pgadmin_template_structure
+    test_pgadmin_init_json
     test_pgadmin_compose_generation
     test_pgadmin_postgres_only
     
@@ -2162,10 +2171,25 @@ test_pgadmin_template_structure() {
     pass_test
 }
 
-# pgAdmin initialization JSON structure test removed: scripts/docker/pgadmin-init.json
-# was intentionally deleted in commit 297612f05e ("Delete obsolete pgadmin-init.json —
-# replaced by dynamic generation"). The dynamic generation surface is exercised by
-# test_pgadmin_compose_generation below and by deploy-docker tests.
+# Test dynamic pgAdmin initialization JSON generation
+test_pgadmin_init_json() {
+    start_test "pgAdmin dynamic initialization JSON validation"
+
+    local deploy_script="$SCRIPT_DIR/../scripts/deploy-docker.sh"
+    assert_file_exists "$deploy_script"
+    local init_content
+    init_content=$(sed -n '/^generate_pgadmin_servers_config()/,/^}/p' "$deploy_script")
+
+    # Validate required structure
+    assert_contains "$init_content" "Servers" "Should define Servers section"
+    assert_contains "$init_content" "PrintFarmer PostgreSQL" "Should name the server 'PrintFarmer PostgreSQL'"
+    assert_contains "$init_content" 'POSTGRES_HOST:-database' "Should default to the database service"
+    assert_contains "$init_content" "5432" "Should use PostgreSQL default port"
+    assert_contains "$init_content" "POSTGRES_USER" "Should use the configured PostgreSQL user"
+    assert_not_contains "$init_content" "POSTGRES_PASSWORD" "Should never persist the database password"
+
+    pass_test
+}
 
 # Test pgAdmin integration with compose-generator
 test_pgadmin_compose_generation() {

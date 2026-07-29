@@ -1,16 +1,33 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { CalendarIcon, PlusIcon, PauseIcon, PlayIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Card, Badge, Spinner, DataTable } from '@/common/components/ui';
+import { Modal } from '@/common/components/modals/Modal';
 import { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } from '@/common/hooks/useApi';
 import { MonthCalendar } from '../components/MonthCalendar';
 import { ScheduleModal } from '../components/ScheduleModal';
-import type { ScheduledJob } from '@/types/api';
+import { apiClient } from '@/services/api';
+import type { JobExecution, ScheduledJob } from '@/types/api';
+import {
+  formatInstantInScheduleZone,
+  formatScheduleWallTime,
+} from '@/features/scheduling/utils/scheduleWallTime';
 
 export function SchedulingPage() {
   const { data: scheduledJobs = [], isLoading, error } = useScheduledJobs();
   const [isScheduleModalOpen, setIsScheduleModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [historySchedule, setHistorySchedule] = useState<ScheduledJob | null>(
+    null
+  );
+  const { data: executionHistory = [], isLoading: historyLoading } = useQuery({
+    queryKey: historySchedule
+      ? ['scheduled-jobs', historySchedule.jobId, 'executions']
+      : ['scheduled-jobs', 'history-closed'],
+    queryFn: () => apiClient.getJobExecutions(historySchedule!.jobId),
+    enabled: historySchedule !== null,
+  });
 
   const pauseMutation = usePauseSchedule();
   const resumeMutation = useResumeSchedule();
@@ -44,6 +61,8 @@ export function SchedulingPage() {
         return 'error';
       case 'completed':
         return 'default';
+      case 'reauthorizationRequired':
+        return 'error';
       default:
         return 'default';
     }
@@ -63,16 +82,20 @@ export function SchedulingPage() {
       render: (job: ScheduledJob) => job.printerName,
     },
     {
-      key: 'scheduledTime',
+      key: 'scheduledStartTimeUtc',
       header: 'Scheduled Time',
       sortable: true,
-      render: (job: ScheduledJob) => new Date(job.scheduledTime).toLocaleString(),
+      render: (job: ScheduledJob) =>
+        formatScheduleWallTime(job.scheduledLocalTime, job.timeZone),
     },
     {
-      key: 'recurrence',
+      key: 'recurrencePattern',
       header: 'Recurrence',
       sortable: true,
-      render: (job: ScheduledJob) => job.recurrence || 'Once',
+      render: (job: ScheduledJob) =>
+        job.recurrencePattern
+          ? `${job.recurrencePattern} × ${job.recurrenceInterval}`
+          : 'Once',
     },
     {
       key: 'status',
@@ -89,6 +112,13 @@ export function SchedulingPage() {
       header: 'Actions',
       render: (job: ScheduledJob) => (
         <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="subtle"
+            onClick={() => setHistorySchedule(job)}
+          >
+            History
+          </Button>
           {job.status === 'active' && (
             <Button
               size="sm"
@@ -207,6 +237,51 @@ export function SchedulingPage() {
         onClose={() => setIsScheduleModalOpen(false)}
         initialDate={selectedDate || undefined}
       />
+      <Modal
+        isOpen={historySchedule !== null}
+        onClose={() => setHistorySchedule(null)}
+        title={`Execution history — ${historySchedule?.jobName ?? ''}`}
+        size="lg"
+      >
+        {historyLoading ? (
+          <div className="flex justify-center py-8">
+            <Spinner size="lg" />
+          </div>
+        ) : executionHistory.length === 0 ? (
+          <p className="py-6 text-center text-pf-text-secondary">
+            No execution history is available.
+          </p>
+        ) : (
+          <ul className="space-y-3" aria-label="Scheduled execution history">
+            {executionHistory.map((execution: JobExecution) => (
+              <li
+                key={execution.id}
+                className="rounded-md border border-pf-border bg-pf-bg-1 p-3"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-pf-text-primary">
+                    {execution.status}
+                  </span>
+                  <time
+                    dateTime={execution.scheduledExecutionTime}
+                    className="text-sm text-pf-text-secondary"
+                  >
+                    {formatInstantInScheduleZone(
+                      execution.scheduledExecutionTime,
+                      historySchedule!.timeZone
+                    )}
+                  </time>
+                </div>
+                {execution.message && (
+                  <p className="mt-2 text-sm text-pf-text-secondary">
+                    {execution.message}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
     </PageTemplate>
   );
 }

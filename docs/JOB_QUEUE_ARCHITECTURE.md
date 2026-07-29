@@ -76,6 +76,104 @@ The job queue system manages the lifecycle of print jobs in PrintFarmer:
 - **Analytics:** Historical data, duration trends, queue statistics
 - **Scheduling:** Deferred execution with recurrence patterns
 
+### Calibration dispatch safety contract
+
+Generated calibration G-code has one execution path: immutable artifact
+promotion followed by `POST /api/job-queue`. Direct slice send/import and the
+analytics enqueue endpoint reject calibration output. The server derives the
+job kind, project/attempt/snapshot/orchestration lineage, exact
+printer/model/toolhead/spool, physical spool SKU and lot, capabilities, slicer
+tuple, hashes, and byte count from persisted resources. Client replacements and
+same-material spool substitutions are rejected.
+
+Every physical start uses the database dispatch claim. Fresh explicit-idle
+telemetry, database busy state, exact stored-byte SHA-256, compatibility,
+filament sufficiency, current revisions, and exact urgent-first bed-clear
+acknowledgement are fail-closed gates. Unknown backend outcomes retain the
+exclusive lease until reconciliation. Every physical control, raw G-code, MMU,
+upload, and cancel route has an explicit queue permission and printer-resource
+check before backend I/O. Idle controls acquire a database physical-I/O barrier;
+active lifecycle controls carry the exact job and attempt. No later dispatch may
+claim the printer until a known outcome releases that barrier.
+
+Dispatch attempts persist `PreCall`, `BackendCall`, `AwaitingReconciliation`,
+`Accepted`, `PostAccept`, and `Terminal` phases. Pre-call exceptions re-arm the
+job as `FailedBeforeStart`; backend-call exceptions require reconciliation.
+Acceptance is monotonic: notification, analytics, or other post-accept failures
+cannot turn an accepted physical print into `Unknown`. Persisted and client
+failure details are typed and redacted.
+
+The generic `/api/printers/{id}/gcode` surface is retired and always returns
+`410 Gone`. Macros, multiline scripts, case variants, and firmware-specific
+aliases cannot be proven non-starting. Operators and clients must use typed
+home, move, temperature, filament, MMU, lifecycle, or queue-dispatch routes.
+
+Public job mutations require the current job `ETag` in `If-Match`. Bed-clear
+also requires `X-Dispatch-State-If-Match`. Missing and stale preconditions
+return `428` and `412`, respectively. Auto-dispatch mutations use the dispatch
+state `If-Match`; skip also uses `X-Job-If-Match`, and enablement uses
+`X-Printer-If-Match`. Printer mutations and dispatch-settings updates also
+require their current `ETag`. These tokens are bound to EF's update predicate,
+not checked only by a prior read. Event envelopes retain compatibility ETags
+and include provider-independent job/dispatch revisions, attempt number and
+outcome, bed-clear command/expiry/state, and typed failure retry/reconciliation
+flags. SignalR queue events require explicit authorized printer/project/job
+subscriptions. Clients proactively drain the change feed on initial connection
+and reconnect, detect later sequence gaps, and refetch
+`GET /api/job-queue/changes?afterSequence={n}` as REST authority.
+`GET /api/job-queue/subscription-resources` returns the complete, unpaginated
+authorized current job/printer/project snapshot used to restore groups. Queue
+events invalidate both the production `queue-jobs` list and `queue-stats`.
+Upload progress is fenced by attempt ID, attempt number, sequence, and resource
+revision; authoritative REST hydration prevents a delayed attempt from
+overwriting a newer attempt.
+
+Pause, resume, cancel, and abort are durable, single-flight hardware commands.
+Database state changes only after backend acceptance. A response-lost command is
+never resent blindly: it retains the active attempt lease while exact current
+state and history are reconciled. Inconclusive commands become manual-review
+dead letters after 24 hours without releasing ownership. Active pre-upgrade jobs
+without a lease receive persistent synthetic ownership before control is sent.
+Provider history UIDs and provider file identities are stored separately; file
+paths are matched through current state or history lists and are never sent to
+UID-only history endpoints.
+
+Outbox sequence allocation and event insertion share one database transaction,
+so the change-feed cursor cannot advance past a sequence whose event has not
+committed. Printer subscribers receive only a redacted state-change hint; full
+job, attempt, project, revision, and failure details are delivered only to
+authorized job or project subscriptions. Service-boundary authorization checks
+both source G-code and destination printer groups.
+
+Timed schedules authorize the initiating actor against the job, printer, and
+calibration project when created and again when executed. Due schedules use the
+same deterministic `Urgent > High > Normal > Low`, scheduled time, queue
+position, queued time, and ID ordering as the queue. Concurrent external-print
+observers use a nullable unique active-printer key, so only one transaction can
+create the active external job.
+
+Schedule requests use an offset-free `scheduledLocalTime` paired with
+`timeZone`. Recurrence preserves wall time across daylight-saving changes;
+invalid or ambiguous initial times are rejected. Legacy schedules are never
+assigned a trusted system actor. Missing or revoked provenance disables the
+schedule for operator reauthorization before dispatch, and list/detail/history
+reads are scoped by job, printer, and calibration-project access.
+
+Only an `Accepted` dispatch consumes a scheduled occurrence. `Rejected` and
+`FailedBeforeStart` remain due and retryable, while `Unknown` stores the exact
+dispatch attempt and blocks duplicate starts until reconciliation. Accepted
+recurring standard schedules create a fresh dispatchable `PrintJob`; recurring
+calibration schedules fail closed because reviewed calibration provenance is
+immutable. The scheduling table and calendar render `scheduledLocalTime` in the
+reviewed schedule zone, and expose occurrence/attempt execution history.
+
+Printer file list/download require queue-read plus printer-view access. Delete
+requires queue-write plus printer-submit access and a durable physical barrier;
+known rejection releases the barrier, while cancellation or an indeterminate
+backend response retains it for reconciliation. Delete audit events use the
+typed `printer.file_delete` operation and never persist or return backend
+exception text.
+
 ---
 
 ## Components Overview
@@ -141,7 +239,7 @@ public record JobQueuePrintJobDto(
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| POST | `/` | Enqueue new job with metadata |
+| POST | `/` | Rejected; create through primary `/api/job-queue` |
 | PUT | `/jobs/{jobId}/priority` | Update queue priority |
 | POST | `/jobs/{jobId}/pause` | Pause printing job |
 | POST | `/jobs/{jobId}/resume` | Resume paused job |

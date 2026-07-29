@@ -5,6 +5,7 @@ import clsx from 'clsx';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Card, Alert, ProgressBar } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
+import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { queryKeys } from '@/common/hooks/useApi';
 import type { CommandResult, Printer, PrinterBackendString } from '@/types/api';
 
@@ -39,67 +40,79 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
   const currentStep = WIZARD_STEPS[stepIndex];
   const progressPercent = ((stepIndex + 1) / WIZARD_STEPS.length) * 100;
 
-  const sendGcodeMutation = useMutation({
-    mutationFn: (command: string) => apiClient.sendGcode(printer.id, command),
-    onError: (error: Error) => {
-      toast.error(`Command failed: ${error.message}`);
-    },
-  });
-
   const saveZOffsetMutation = useMutation({
-    mutationFn: (offsetMm: number) =>
-      apiClient.saveZOffset(printer.id, { offsetMm, saveToFirmware: true }),
+    mutationFn: (offsetMm: number) => {
+      if (!printer.rowVersion) {
+        throw new Error('Printer revision unavailable. Refresh and review again.');
+      }
+      return apiClient.saveZOffset(
+        printer.id,
+        { offsetMm, saveToFirmware: true },
+        printer.rowVersion
+      );
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
       toast.success('Z-offset saved successfully');
       setStepIndex(5);
     },
-    onError: (error: Error) => {
-      toast.error(`Failed to save Z-offset: ${error.message}`);
+    onError: (error: unknown) => {
+      toast.error(mutationErrorMessage(error, 'Failed to save Z-offset'));
     },
   });
 
-  const sendGcodeAndWait = useCallback(
-    async (command: string): Promise<CommandResult> => {
+  const executeControlAndWait = useCallback(
+    async (command: () => Promise<CommandResult>): Promise<CommandResult> => {
       setIsCommandRunning(true);
       try {
-        const result = await sendGcodeMutation.mutateAsync(command);
-        return result;
+        return await command();
       } finally {
         setIsCommandRunning(false);
       }
     },
-    [sendGcodeMutation]
+    []
   );
 
   const handleHomeAxes = useCallback(async () => {
-    const result = await sendGcodeAndWait('G28');
+    const result = await executeControlAndWait(() =>
+      apiClient.homePrinter(printer.id)
+    );
     if (result.success) {
       toast.success('Axes homed successfully');
       setStepIndex(2);
     }
-  }, [sendGcodeAndWait]);
+  }, [executeControlAndWait, printer.id]);
 
   const handleMoveToCenter = useCallback(async () => {
     const centerX = bedSizeX / 2;
     const centerY = bedSizeY / 2;
-    const result = await sendGcodeAndWait(
-      `G1 X${centerX.toFixed(0)} Y${centerY.toFixed(0)} Z10 F3000`
+    const result = await executeControlAndWait(() =>
+      apiClient.movePrinterTo(printer.id, {
+        x: centerX,
+        y: centerY,
+        z: 10,
+        f: 3000,
+      })
     );
     if (result.success) {
       toast.success('Moved to bed center');
       setStepIndex(3);
     }
-  }, [sendGcodeAndWait, bedSizeX, bedSizeY]);
+  }, [executeControlAndWait, bedSizeX, bedSizeY, printer.id]);
 
   const handleZAdjust = useCallback(
     async (direction: 'up' | 'down') => {
       const delta = direction === 'down' ? -selectedIncrement : selectedIncrement;
       const newOffset = parseFloat((zOffset + delta).toFixed(3));
       setZOffset(newOffset);
-      await sendGcodeAndWait(`G1 Z${Math.max(0, 10 + newOffset).toFixed(3)} F300`);
+      await executeControlAndWait(() =>
+        apiClient.movePrinterTo(printer.id, {
+          z: Math.max(0, 10 + newOffset),
+          f: 300,
+        })
+      );
     },
-    [sendGcodeAndWait, zOffset, selectedIncrement]
+    [executeControlAndWait, printer.id, zOffset, selectedIncrement]
   );
 
   const handleSave = useCallback(() => {
@@ -200,7 +213,7 @@ function IntroductionStep() {
         This wizard will guide you through calibrating your printer&apos;s Z-offset — the distance
         between the nozzle tip and the print bed when the Z-axis is at its home position.
       </p>
-      <Alert variant="info" title="What is Z-offset?">
+      <Alert type="info" title="What is Z-offset?">
         A correct Z-offset ensures your first layer adheres properly to the bed. Too high and the
         filament won&apos;t stick; too low and the nozzle may scratch the bed.
       </Alert>
@@ -221,7 +234,7 @@ function HomeAxesStep({
       <p className="text-pf-text-primary">
         First, we need to home all axes so the printer knows its exact position.
       </p>
-      <Alert variant="warning" title="Safety Warning">
+      <Alert type="warning" title="Safety Warning">
         Make sure the print bed is clear and nothing obstructs the nozzle path.
       </Alert>
       <div className="flex justify-center">
@@ -374,7 +387,7 @@ function SaveStep({
           </div>
         </Card.Body>
       </Card>
-      <Alert variant="info" title="What happens next">
+      <Alert type="info" title="What happens next">
         The Z-offset will be saved to both PrintFarmer and your printer&apos;s firmware so it
         persists across reboots.
       </Alert>
@@ -396,7 +409,7 @@ function DoneStep({ zOffset }: { zOffset: number }) {
         Your Z-offset of{' '}
         <span className="font-mono font-bold">{zOffset.toFixed(3)} mm</span> has been saved.
       </p>
-      <Alert variant="success" title="Tip">
+      <Alert type="success" title="Tip">
         Run a small test print to verify the first layer. If it still needs adjustment, run this
         wizard again.
       </Alert>

@@ -1,14 +1,18 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -39,7 +43,9 @@ public class SlicePrintBridgeController(
     IJobQueueService? jobQueueService = null,
     ISliceGcodeImportService? importService = null,
     ISpoolmanService? spoolmanService = null,
-    IGcodeFilesService? gcodeFilesService = null) : ControllerBase
+    IGcodeFilesService? gcodeFilesService = null,
+    IDispatchClaimService? dispatchClaimService = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     /// <summary>
     /// Send the completed gcode from a slice job to a printer.
@@ -55,6 +61,7 @@ public class SlicePrintBridgeController(
     /// <response code="502">Upload to printer backend failed.</response>
     /// <response code="503">Slicing module is not enabled.</response>
     [HttpPost("{id:guid}/send-to-printer")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(SendToPrinterResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -85,6 +92,21 @@ public class SlicePrintBridgeController(
             return Forbid();
         }
 
+        if (IsCalibrationSlice(job))
+        {
+            return CalibrationSliceRequiresPrimaryQueue();
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                request.PrinterId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound(new { error = "Printer not found.", printerId = request.PrinterId });
+        }
+
         // 2. Validate the job is completed
         if (job.Status != SliceJobStatus.Completed)
         {
@@ -105,9 +127,7 @@ public class SlicePrintBridgeController(
             return BadRequest(new { error = "Slice job has no gcode artifact.", jobId = id });
         }
 
-        // 4. Validate the target printer exists
-        // NOTE: PrintFarmer is single-tenant — all authenticated users may access all printers.
-        // If multi-tenant support is added, add printer access authorization here.
+        // 4. Validate the target printer exists after the resource-scope check above.
         var printer = await printersService.FindByIdAsync(request.PrinterId, ct);
         if (printer is null)
         {
@@ -155,6 +175,7 @@ public class SlicePrintBridgeController(
     /// <response code="404">Slice job not found.</response>
     /// <response code="503">Slicing module or queue services are not enabled.</response>
     [HttpPost("{id:guid}/add-to-queue")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(AddSliceToQueueResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -200,6 +221,11 @@ public class SlicePrintBridgeController(
         if (!Guid.TryParse(currentUserId, out Guid userId) || job.UserId != userId)
         {
             return Forbid();
+        }
+
+        if (IsCalibrationSlice(job))
+        {
+            return CalibrationSliceRequiresPrimaryQueue();
         }
 
         // 2. Validate the job is completed
@@ -346,20 +372,148 @@ public class SlicePrintBridgeController(
     private async Task<IActionResult> UploadAndStartPrintAsync(
         Guid jobId, Guid printerId, string fileName, Stream stream, CancellationToken ct)
     {
-        UploadAndPrintResult result = await printersService.UploadAndStartPrintAsync(
-            printerId, fileName, stream, progress: null, ct);
+        // =====================================================================
+        // Every start path — including the slice→print bridge — must acquire the
+        // shared dispatch claim BEFORE touching an adapter (issue #900, defect 5).
+        // The claim enforces the printer gates (enabled/available/not in maintenance/
+        // no active lease/telemetry not printing) and writes a durable attempt row so
+        // an unknown outcome is reconcilable instead of invisible.
+        // =====================================================================
+        if (dispatchClaimService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "Dispatch claim service is not available.", code = "DISPATCH_UNAVAILABLE" });
+        }
+
+        string actorSubject = QueueActorIdentity.Resolve(User);
+
+        DispatchClaimResult claim = await dispatchClaimService.AcquireAdHocClaimAsync(
+            new AdHocDispatchClaimRequest(printerId, actorSubject, "SliceBridge", fileName), ct);
+
+        if (!claim.Success || claim.Attempt is null)
+        {
+            logger.LogWarning(
+                "Slice-bridge start denied for job {JobId} on printer {PrinterId}: {Code}",
+                jobId, printerId, claim.ErrorCode);
+
+            return Conflict(new
+            {
+                error = "Printer cannot accept a new print right now.",
+                code = claim.ErrorCode,
+                detail = claim.ErrorDetail,
+            });
+        }
+
+        Guid attemptId = claim.Attempt.Id;
+        string backendFileName = claim.Attempt.BackendFileName
+            ?? throw new InvalidOperationException("Dispatch claim did not persist a backend file identity.");
+
+        UploadAndPrintResult result;
+        try
+        {
+            if (!await dispatchClaimService.RecordBackendCallStartedAsync(
+                    attemptId,
+                    ct))
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
+
+            result = await printersService.UploadAndStartPrintAsync(
+                printerId, backendFileName, stream, progress: null, ct);
+        }
+        catch (Exception ex)
+        {
+            // Unknown outcome: the command may have been delivered. Never release the
+            // lease here — reconciliation owns the resolution.
+            bool applied = await dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                ex.Message,
+                CancellationToken.None);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
+
+            logger.LogError(
+                ex,
+                "Slice-bridge start produced an unknown outcome for job {JobId} on printer {PrinterId}",
+                jobId, printerId);
+
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "The printer start outcome could not be determined; reconciliation is required.",
+                code = "backend_outcome_unknown",
+            });
+        }
+
+        if (!result.Success && result.Outcome == UploadAndPrintOutcome.Unknown)
+        {
+            bool applied = await dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                result.ErrorMessage ?? "The backend response was lost after the start-capable request.",
+                ct);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
+
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                error = "The printer start outcome could not be determined; reconciliation is required.",
+                code = "backend_outcome_unknown",
+            });
+        }
 
         if (!result.Success)
         {
+            bool applied = await dispatchClaimService.ReleaseClaimOnKnownFailureAsync(
+                attemptId,
+                "backend_rejected",
+                result.ErrorMessage ?? "The printer rejected the start command.",
+                ct);
+            if (!applied)
+            {
+                return Conflict(new
+                {
+                    error = "The dispatch attempt no longer owns the printer.",
+                    code = "attempt_superseded",
+                });
+            }
+
             logger.LogWarning(
-                "Upload-and-print failed for job {JobId} to printer {PrinterId}: stage={Stage}, error={Error}",
-                jobId, printerId, result.FailedStage, result.ErrorMessage);
+                "Upload-and-print failed for job {JobId} to printer {PrinterId}: stage={Stage}",
+                jobId, printerId, result.FailedStage);
 
             return StatusCode(StatusCodes.Status502BadGateway, new
             {
                 error = "Failed to upload and start print on the target printer.",
                 failedStage = result.FailedStage.ToString(),
                 detail = result.ErrorMessage
+            });
+        }
+
+        if (!await dispatchClaimService.RecordBackendAcceptedAsync(
+                attemptId,
+                result.BackendJobId,
+                ct))
+        {
+            return Conflict(new
+            {
+                error = "The dispatch attempt no longer owns the printer.",
+                code = "attempt_superseded",
             });
         }
 
@@ -397,4 +551,18 @@ public class SlicePrintBridgeController(
             Message = "Gcode uploaded successfully."
         });
     }
+
+    private static bool IsCalibrationSlice(SliceJob job) =>
+        job.CalibrationProjectId.HasValue ||
+        job.CalibrationAttemptId.HasValue ||
+        job.CalibrationOrchestrationId.HasValue;
+
+    private UnprocessableEntityObjectResult CalibrationSliceRequiresPrimaryQueue() =>
+        UnprocessableEntity(new
+        {
+            error = "calibration_primary_queue_required",
+            detail =
+                "Calibration slice output must be promoted as an immutable G-code artifact and " +
+                "created through POST /api/job-queue. Direct send and generic slice import are not allowed.",
+        });
 }

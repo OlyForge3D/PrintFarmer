@@ -44,6 +44,8 @@ namespace Farm.Infrastructure;
 /// <param name="CameraAccessMode">Client presentation mode for snapshot-only versus stream-capable cameras.</param>
 /// <param name="CameraStreamFormat">Transport format for the stream URL, such as MJPEG, WebRTC, or RTSP.</param>
 /// <param name="CameraSnapshotStrategy">Snapshot capture strategy required by the backend.</param>
+/// <param name="RowVersion">Base-64 public ETag for atomic printer mutations.</param>
+/// <param name="ConfigurationRevision">Logical safety-relevant printer configuration revision.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -81,4 +83,6 @@ public record PrinterDto(
     bool UseModelDispatchDefaults = true,
     CameraAccessMode CameraAccessMode = CameraAccessMode.Unknown,
     CameraStreamFormat CameraStreamFormat = CameraStreamFormat.Unknown,
-    CameraSnapshotStrategy CameraSnapshotStrategy = CameraSnapshotStrategy.None);
+    CameraSnapshotStrategy CameraSnapshotStrategy = CameraSnapshotStrategy.None,
+    string? RowVersion = null,
+    long ConfigurationRevision = 0);

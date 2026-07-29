@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.PartsInventory;
@@ -628,7 +629,7 @@ public class JobQueueServiceTests
         {
             GcodeFileId = gcodeFile.Id,
             AssignedPrinterId = printerId,
-            Priority = (PrintJobPriority)5
+            Priority = PrintJobPriority.High
         };
 
         _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
@@ -651,7 +652,7 @@ public class JobQueueServiceTests
         result.GcodeFileName.Should().Be("test.gcode");
         result.AssignedPrinterId.Should().Be(printerId);
         result.Status.Should().Be(PrintJobStatus.Queued);
-        result.Priority.Should().Be(5);
+        result.Priority.Should().Be((int)PrintJobPriority.High);
         result.QueuePosition.Should().Be(1);
         result.EstimatedPrintTime.Should().Be(TimeSpan.FromMinutes(120));
         result.EstimatedFilamentUsage.Should().Be(25.5);
@@ -660,7 +661,7 @@ public class JobQueueServiceTests
             j.GcodeFileId == gcodeFile.Id &&
             j.AssignedPrinterId == printerId &&
             j.Status == PrintJobStatus.Queued &&
-            j.Priority == 5
+            j.Priority == (int)PrintJobPriority.High
         ), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -896,7 +897,7 @@ public class JobQueueServiceTests
         {
             GcodeFileId = gcodeFile.Id,
             AssignedPrinterId = printerId,
-            Priority = (PrintJobPriority)10 // High priority
+            Priority = PrintJobPriority.Urgent
         };
 
         _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
@@ -911,7 +912,7 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be(10);
+        result!.Priority.Should().Be((int)PrintJobPriority.Urgent);
     }
 
     #endregion
@@ -1160,6 +1161,66 @@ public class JobQueueServiceTests
         result!.HarvestedAt.Should().Be(harvestedAt);
     }
 
+    [Fact]
+    public async Task GetJobAsync_AfterOtherClientStartsAttemptB_HydratesLatestAttemptFence()
+    {
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options;
+        await using AppDbContext db = new(options);
+        PrintJob job = new PrintJobBuilder()
+            .WithAssignedPrinterId(null)
+            .AsQueued()
+            .Build();
+        Guid printerId = Guid.NewGuid();
+        QueueDispatchAttempt attemptA = new()
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            AttemptNumber = 1,
+            ActorSubject = "user:a",
+            StartPathKind = "Manual",
+            ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            Outcome = DispatchAttemptOutcome.Accepted,
+        };
+        QueueDispatchAttempt attemptB = new()
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            AttemptNumber = 2,
+            ActorSubject = "user:b",
+            StartPathKind = "Manual",
+            ClaimedAtUtc = DateTime.UtcNow,
+            Outcome = DispatchAttemptOutcome.Unknown,
+            RequiresReconciliation = true,
+        };
+        db.PrintJobs.Add(job);
+        db.QueueDispatchAttempts.AddRange(attemptA, attemptB);
+        await db.SaveChangesAsync();
+        _mockDataService
+            .Setup(service => service.GetPrintJobByIdAsync(
+                job.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        JobQueueService service = new(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            db: db);
+
+        JobQueuePrintJobDto? result =
+            await service.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.DispatchResult.Should().NotBeNull();
+        result.DispatchResult!.AttemptId.Should().Be(attemptB.Id);
+        result.DispatchResult.AttemptNumber.Should().Be(2);
+        result.DispatchResult.Outcome.Should().Be(DispatchAttemptOutcome.Unknown);
+    }
+
     #endregion
 
     #region RemoveJobAsync Tests
@@ -1271,7 +1332,7 @@ public class JobQueueServiceTests
             .WithPriority(0)
             .AsQueued()
             .Build();
-        var request = new UpdateJobPriorityDto { Priority = 10 };
+        var request = new UpdateJobPriorityDto { Priority = (int)PrintJobPriority.High }; // 2 = High
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1283,8 +1344,8 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be(10);
-        job.Priority.Should().Be(10);
+        result!.Priority.Should().Be((int)PrintJobPriority.High);
+        job.Priority.Should().Be((int)PrintJobPriority.High);
         job.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
         _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -1306,7 +1367,11 @@ public class JobQueueServiceTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        var request = new UpdatePrintJobStatusDto { Status = PrintJobStatus.Printing };
+        var request = new UpdatePrintJobStatusDto
+        {
+            IfMatchJobRowVersion = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
+            Status = PrintJobStatus.Cancelled,
+        };
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(jobId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
 
@@ -1322,7 +1387,7 @@ public class JobQueueServiceTests
     {
         // Arrange
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
-        var request = new UpdatePrintJobStatusDto { Status = PrintJobStatus.Printing };
+        var request = new UpdatePrintJobStatusDto { IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!), Status = PrintJobStatus.Cancelled };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1332,8 +1397,8 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Status.Should().Be(PrintJobStatus.Printing);
-        job.Status.Should().Be(PrintJobStatus.Printing);
+        result!.Status.Should().Be(PrintJobStatus.Cancelled);
+        job.Status.Should().Be(PrintJobStatus.Cancelled);
     }
 
     [Fact]
@@ -1341,7 +1406,7 @@ public class JobQueueServiceTests
     {
         // Arrange
         PrintJob job = new PrintJobBuilder().WithPriority(0).AsQueued().Build();
-        var request = new UpdatePrintJobStatusDto { Priority = (PrintJobPriority)10 };
+        var request = new UpdatePrintJobStatusDto { IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!), Priority = PrintJobPriority.Urgent };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1351,8 +1416,8 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be(10);
-        job.Priority.Should().Be(10);
+        result!.Priority.Should().Be((int)PrintJobPriority.Urgent);
+        job.Priority.Should().Be((int)PrintJobPriority.Urgent);
     }
 
     [Fact]
@@ -1361,7 +1426,7 @@ public class JobQueueServiceTests
         // Arrange
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var invalidPrinterId = Guid.NewGuid();
-        var request = new UpdatePrintJobStatusDto { AssignedPrinterId = invalidPrinterId };
+        var request = new UpdatePrintJobStatusDto { IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!), AssignedPrinterId = invalidPrinterId };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1382,7 +1447,7 @@ public class JobQueueServiceTests
         var newPrinterId = Guid.NewGuid();
         Printer printer = new PrinterBuilder().WithId(newPrinterId).Build();
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
-        var request = new UpdatePrintJobStatusDto { AssignedPrinterId = newPrinterId };
+        var request = new UpdatePrintJobStatusDto { IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!), AssignedPrinterId = newPrinterId };
 
         _mockDataService.SetupSequence(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job) // First call
@@ -1406,6 +1471,7 @@ public class JobQueueServiceTests
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto
         {
+            IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
             Status = PrintJobStatus.Failed,
             FailureReason = "Printer communication lost"
         };
@@ -1427,9 +1493,10 @@ public class JobQueueServiceTests
     public async Task UpdateJobAsync_WithActualFilamentUsage_UpdatesFilamentUsage()
     {
         // Arrange
-        PrintJob job = new PrintJobBuilder().AsPrinting().Build();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto
         {
+            IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
             Status = PrintJobStatus.Completed,
             ActualFilamentUsage = 28.3
         };
@@ -1454,6 +1521,7 @@ public class JobQueueServiceTests
         DateTime deadline = DateTime.UtcNow.AddDays(2);
         var request = new UpdatePrintJobStatusDto
         {
+            IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
             DeadlineAtUtc = deadline
         };
 
@@ -1476,6 +1544,7 @@ public class JobQueueServiceTests
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
         var request = new UpdatePrintJobStatusDto
         {
+            IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
             DeadlineAtUtc = DateTime.UtcNow.AddHours(1)
         };
 
@@ -1509,7 +1578,7 @@ public class JobQueueServiceTests
         // Arrange
         PrintJob job = new PrintJobBuilder().AsQueued().Build();
         DateTime oldUpdatedAt = job.UpdatedAt;
-        var request = new UpdatePrintJobStatusDto { Priority = (PrintJobPriority)5 };
+        var request = new UpdatePrintJobStatusDto { IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!), Priority = PrintJobPriority.High };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);

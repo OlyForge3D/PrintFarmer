@@ -395,8 +395,15 @@ export function useUpdatePrinter() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, printer }: { id: string; printer: UpdatePrinterDto }) =>
-      apiClient.updatePrinter(id, printer),
+    mutationFn: ({
+      id,
+      printer,
+      reviewedRowVersion,
+    }: {
+      id: string;
+      printer: UpdatePrinterDto;
+      reviewedRowVersion: string;
+    }) => apiClient.updatePrinter(id, printer, reviewedRowVersion),
     onMutate: async ({ id, printer }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.printers });
       await queryClient.cancelQueries({ queryKey: queryKeys.printer(id) });
@@ -1334,6 +1341,9 @@ export function useQueuePrintJob() {
           status: 'Queued',
           priority,
           queuePosition: 0,
+          copies: 1,
+          completedCopies: 0,
+          remainingCopies: 1,
           createdAtUtc: new Date().toISOString(),
           updatedAtUtc: new Date().toISOString(),
           queuedAtUtc: new Date().toISOString(),
@@ -1375,8 +1385,14 @@ export function useCancelPrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.cancelPrintQueueJob(jobId),
-    onMutate: async (jobId) => {
+    mutationFn: ({
+      jobId,
+      reviewedRowVersion,
+    }: {
+      jobId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.cancelPrintQueueJob(jobId, reviewedRowVersion),
+    onMutate: async ({ jobId }) => {
       const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
@@ -1406,8 +1422,14 @@ export function useDeletePrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.deletePrintQueueJob(jobId),
-    onMutate: async (jobId) => {
+    mutationFn: ({
+      jobId,
+      reviewedRowVersion,
+    }: {
+      jobId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.deletePrintQueueJob(jobId, reviewedRowVersion),
+    onMutate: async ({ jobId }) => {
       const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
@@ -1968,8 +1990,22 @@ export function useTestObicoServerHealth() {
 export function useSetToolheadSpool() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ printerId, toolheadIndex, spoolId }: { printerId: string; toolheadIndex: number; spoolId: number }) =>
-      apiClient.setToolheadSpool(printerId, toolheadIndex, spoolId),
+    mutationFn: ({
+      printerId,
+      toolheadIndex,
+      spoolId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      toolheadIndex: number;
+      spoolId: number;
+      reviewedRowVersion: string;
+    }) => apiClient.setToolheadSpool(
+      printerId,
+      toolheadIndex,
+      spoolId,
+      reviewedRowVersion
+    ),
     onSuccess: (_data, { printerId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
@@ -1982,8 +2018,19 @@ export function useSetToolheadSpool() {
 export function useClearToolheadSpool() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ printerId, toolheadIndex }: { printerId: string; toolheadIndex: number }) =>
-      apiClient.clearToolheadSpool(printerId, toolheadIndex),
+    mutationFn: ({
+      printerId,
+      toolheadIndex,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      toolheadIndex: number;
+      reviewedRowVersion: string;
+    }) => apiClient.clearToolheadSpool(
+      printerId,
+      toolheadIndex,
+      reviewedRowVersion
+    ),
     onSuccess: (_data, { printerId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });

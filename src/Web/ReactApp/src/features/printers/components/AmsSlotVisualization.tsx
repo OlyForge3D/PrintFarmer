@@ -23,6 +23,8 @@ export interface AmsSlotVisualizationProps {
   compact?: boolean;
   /** Printer ID — when provided, slots become clickable with assign/unassign popovers */
   printerId?: string;
+  /** Printer revision rendered with this visualization. */
+  reviewedRowVersion?: string | null;
 }
 
 // ── Helpers ──
@@ -132,11 +134,12 @@ interface SlotProps {
   onSlotClick?: () => void;
   onPopoverClose?: () => void;
   printerId?: string;
+  reviewedRowVersion?: string | null;
 }
 
-function Slot({ toolhead, slotNumber, slotCount, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: SlotProps) {
+function Slot({ toolhead, slotNumber, slotCount, compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId, reviewedRowVersion }: SlotProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const interactive = !!printerId;
+  const interactive = !!printerId && !!reviewedRowVersion;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
   const color = toolhead.currentFilamentColor;
   const needsBorder = color ? isLightColor(color) : false;
@@ -223,10 +226,11 @@ function Slot({ toolhead, slotNumber, slotCount, compact, isPopoverOpen, onSlotC
   return (
     <div ref={containerRef} className="relative">
       {wrapped}
-      {isPopoverOpen && printerId && (
+      {isPopoverOpen && printerId && reviewedRowVersion && (
         <SlotPopover
           toolhead={toolhead}
           printerId={printerId}
+          reviewedRowVersion={reviewedRowVersion}
           onClose={onPopoverClose ?? (() => {})}
           align={popoverAlign}
         />
@@ -243,11 +247,12 @@ interface NozzleIndicatorProps {
   onSlotClick?: () => void;
   onPopoverClose?: () => void;
   printerId?: string;
+  reviewedRowVersion?: string | null;
 }
 
-function NozzleIndicator({ toolhead, popoverAlign = 'center', compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId }: NozzleIndicatorProps) {
+function NozzleIndicator({ toolhead, popoverAlign = 'center', compact, isPopoverOpen, onSlotClick, onPopoverClose, printerId, reviewedRowVersion }: NozzleIndicatorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const interactive = !!printerId;
+  const interactive = !!printerId && !!reviewedRowVersion;
   const hasFilament = toolhead.currentFilamentColor != null || toolhead.currentMaterial != null;
   const color = toolhead.currentFilamentColor;
 
@@ -337,10 +342,11 @@ function NozzleIndicator({ toolhead, popoverAlign = 'center', compact, isPopover
   return (
     <div ref={containerRef} className="relative">
       {wrapped}
-      {isPopoverOpen && printerId && (
+      {isPopoverOpen && printerId && reviewedRowVersion && (
         <SlotPopover
           toolhead={toolhead}
           printerId={printerId}
+          reviewedRowVersion={reviewedRowVersion}
           onClose={onPopoverClose ?? (() => {})}
           align={popoverAlign}
         />
@@ -361,7 +367,12 @@ function NozzleIndicator({ toolhead, popoverAlign = 'center', compact, isPopover
  *
  * Purely presentational — receives toolheads as prop.
  */
-export function AmsSlotVisualization({ toolheads, compact = false, printerId }: AmsSlotVisualizationProps) {
+export function AmsSlotVisualization({
+  toolheads,
+  compact = false,
+  printerId,
+  reviewedRowVersion,
+}: AmsSlotVisualizationProps) {
   const [activeSlotIndex, setActiveSlotIndex] = useState<number | null>(null);
 
   if (!toolheads || toolheads.length === 0) return null;
@@ -391,6 +402,7 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
               popoverAlign={idx === 0 ? 'start' : idx === topPhysicalHeads.length - 1 ? 'end' : 'center'}
               compact={compact}
               printerId={printerId}
+              reviewedRowVersion={reviewedRowVersion}
               isPopoverOpen={activeSlotIndex === toolhead.index}
               onSlotClick={() => setActiveSlotIndex(activeSlotIndex === toolhead.index ? null : toolhead.index)}
               onPopoverClose={() => setActiveSlotIndex(null)}
@@ -424,6 +436,7 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
                 slotCount={unit.slots.length}
                 compact={compact}
                 printerId={printerId}
+                reviewedRowVersion={reviewedRowVersion}
                 isPopoverOpen={activeSlotIndex === slot.index}
                 onSlotClick={() => setActiveSlotIndex(activeSlotIndex === slot.index ? null : slot.index)}
                 onPopoverClose={() => setActiveSlotIndex(null)}
@@ -448,6 +461,7 @@ export function AmsSlotVisualization({ toolheads, compact = false, printerId }: 
                 popoverAlign={idx === 0 ? 'start' : idx === externalSpools.length - 1 ? 'end' : 'center'}
                 compact={compact}
                 printerId={printerId}
+                reviewedRowVersion={reviewedRowVersion}
                 isPopoverOpen={activeSlotIndex === toolhead.index}
                 onSlotClick={() => setActiveSlotIndex(activeSlotIndex === toolhead.index ? null : toolhead.index)}
                 onPopoverClose={() => setActiveSlotIndex(null)}

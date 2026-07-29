@@ -4,6 +4,10 @@ import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
@@ -570,8 +574,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     try {
       const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
       const feedrate = extrudeSpeed * 60; // mm/s to mm/min
-      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
-      const result = await apiClient.sendGcode(printer.id, gcode);
+      const result = await apiClient.extrudeFilament(
+        printer.id,
+        distance,
+        feedrate
+      );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
       }
@@ -1307,7 +1314,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           if (!toolheads) return null;
           return (
             <CollapsibleSection title="Material Slots" expanded={true}>
-              <AmsSlotVisualization toolheads={toolheads} printerId={printerId ?? undefined} />
+              <AmsSlotVisualization
+                toolheads={toolheads}
+                printerId={printerId ?? undefined}
+                reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+              />
             </CollapsibleSection>
           );
         })()}
@@ -1344,17 +1355,38 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                         onClick={async () => {
                           setSpoolActionPending(true);
                           try {
-                            await apiClient.clearActiveSpool(printer.id);
+                            const reviewedRowVersion =
+                              displayPrinter?.rowVersion ?? printer.rowVersion;
+                            if (!reviewedRowVersion) {
+                              toast.error('Printer revision unavailable. Refresh and review again.');
+                              return;
+                            }
+                            const nextRowVersion = await apiClient.clearActiveSpool(
+                              printer.id,
+                              reviewedRowVersion
+                            );
                             // Optimistically update cached printers to clear spool info
                             // SignalR will deliver the authoritative update on next status cycle
                             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                               old?.map(p => p.id === printer.id
-                                ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                                ? {
+                                    ...p,
+                                    rowVersion: nextRowVersion,
+                                    spoolInfo: { hasActiveSpool: false },
+                                  }
                                 : p
                               )
                             );
                           } catch (err) {
                             console.error('Failed to eject spool:', err);
+                            if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                              await queryClient.invalidateQueries({
+                                queryKey: ['printers'],
+                              });
+                            }
+                            toast.error(
+                              mutationErrorMessage(err, 'Failed to eject spool')
+                            );
                           } finally {
                             setSpoolActionPending(false);
                           }
@@ -1387,6 +1419,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   <ToolheadSpoolPicker
                     printerId={printer.id}
                     toolheads={effectiveToolheads}
+                    reviewedRowVersion={
+                      displayPrinter?.rowVersion ?? printer.rowVersion
+                    }
                     onSpoolChange={() => {
                       queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                     }}
@@ -1479,13 +1514,24 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            await apiClient.setActiveSpool(printer.id, spoolId);
+            const reviewedRowVersion =
+              displayPrinter?.rowVersion ?? printer.rowVersion;
+            if (!reviewedRowVersion) {
+              toast.error('Printer revision unavailable. Refresh and review again.');
+              return;
+            }
+            const nextRowVersion = await apiClient.setActiveSpool(
+              printer.id,
+              spoolId,
+              reviewedRowVersion
+            );
             setShowSpoolPicker(false);
             // Optimistically update cached printers with new spool info
             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
               old?.map(p => p.id === printer.id
                 ? {
                     ...p,
+                    rowVersion: nextRowVersion,
                     currentSpoolId: spool.id,
                     spoolInfo: {
                       hasActiveSpool: true,
@@ -1505,6 +1551,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             // SignalR will deliver the authoritative update on next status cycle
           } catch (err) {
             console.error('Failed to set active spool:', err);
+            if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+              await queryClient.invalidateQueries({ queryKey: ['printers'] });
+            }
+            toast.error(
+              mutationErrorMessage(err, 'Failed to set active spool')
+            );
           } finally {
             setSpoolActionPending(false);
           }

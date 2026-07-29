@@ -1,5 +1,18 @@
 import Foundation
 
+struct AcknowledgeBedClearRequest: Encodable, Sendable {
+    let printerId: UUID
+    let expectedPrinterConfigRevision: Int64?
+}
+
+struct AcknowledgeBedClearResponse: Decodable, Sendable {
+    let message: String?
+    let jobETag: String?
+    let dispatchStateETag: String?
+    let error: String?
+    let detail: String?
+}
+
 // MARK: - Printer Request DTOs
 
 struct UpdatePrinterRequest: Codable, Sendable {

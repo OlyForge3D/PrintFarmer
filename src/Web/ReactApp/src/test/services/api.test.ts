@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApiClient } from "@/services/api";
-import { PrinterBackend } from "@/types/api";
+import { PrinterBackend, type AutoDispatchDetailedStatus } from "@/types/api";
 
 // Mock axios
 vi.mock("axios", () => ({
@@ -110,6 +110,206 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("typed queue dispatch outcomes", () => {
+    it.each([
+      [200, "Accepted", "accepted"],
+      [202, "Unknown", "reconciliation"],
+      [409, "Rejected", "conflict"],
+    ] as const)(
+      "normalizes the production job body for HTTP %i/%s",
+      async (status, outcome, expectedKind) => {
+        const job = {
+          id: "job-1",
+          rowVersion: "next-etag",
+          dispatchResult: {
+            outcome,
+            attemptId: "attempt-1",
+            attemptNumber: 2,
+            errorCode: outcome === "Rejected" ? "printer_busy" : undefined,
+            errorDetail:
+              outcome === "Unknown" ? "reconciliation required" : undefined,
+          },
+        };
+        const mockPost = vi.fn().mockResolvedValue({ status, data: job });
+        (
+          apiClient as unknown as { client: { post: typeof mockPost } }
+        ).client.post = mockPost;
+
+        const result = await apiClient.dispatchPrintQueueJob(
+          "job-1",
+          "reviewed-etag"
+        );
+
+        expect(result.kind).toBe(expectedKind);
+        expect(result.httpStatus).toBe(status);
+        expect("job" in result ? result.job : undefined).toEqual(job);
+        expect(mockPost).toHaveBeenCalledWith(
+          "/job-queue/job-1/dispatch",
+          undefined,
+          expect.objectContaining({
+            timeout: 0,
+            headers: { "If-Match": '"reviewed-etag"' },
+          })
+        );
+      }
+    );
+
+    it.each([
+      [412, "stale"],
+      [503, "unavailable"],
+    ] as const)(
+      "normalizes typed dispatch failure HTTP %i as %s",
+      async (status, expectedKind) => {
+        const mockPost = vi.fn().mockResolvedValue({
+          status,
+          data: {
+            error:
+              status === 412
+                ? "dispatch_revision_conflict"
+                : "dispatch_outcome_unavailable",
+            detail: "review or retry",
+          },
+        });
+        (
+          apiClient as unknown as { client: { post: typeof mockPost } }
+        ).client.post = mockPost;
+
+        const result = await apiClient.dispatchPrintQueueJob(
+          "job-1",
+          "reviewed-etag"
+        );
+
+        expect(result.kind).toBe(expectedKind);
+        expect(result.httpStatus).toBe(status);
+        expect("errorCode" in result ? result.errorCode : undefined).toBe(
+          status === 412
+            ? "dispatch_revision_conflict"
+            : "dispatch_outcome_unavailable"
+        );
+      }
+    );
+  });
+
+  describe("reviewed printer mutation ETags", () => {
+    it("sends displayed revisions for edit, maintenance, Z-offset, spool, and toolhead mutations", async () => {
+      const put = vi.fn().mockResolvedValue({
+        data: { id: "printer-1", success: true },
+        headers: { etag: '"printer-v2"' },
+      });
+      const post = vi.fn().mockResolvedValue({
+        data: { success: true },
+        headers: { etag: '"printer-v2"' },
+      });
+      const del = vi.fn().mockResolvedValue({
+        data: { success: true },
+        headers: { etag: '"printer-v3"' },
+      });
+      (
+        apiClient as unknown as {
+          client: { put: typeof put; post: typeof post; delete: typeof del };
+        }
+      ).client.put = put;
+      (
+        apiClient as unknown as {
+          client: { put: typeof put; post: typeof post; delete: typeof del };
+        }
+      ).client.post = post;
+      (
+        apiClient as unknown as {
+          client: { put: typeof put; post: typeof post; delete: typeof del };
+        }
+      ).client.delete = del;
+
+      await apiClient.updatePrinter(
+        "printer-1",
+        { name: "Reviewed" },
+        "printer-v1"
+      );
+      await apiClient.setPrinterMaintenance(
+        "printer-1",
+        true,
+        "printer-v1"
+      );
+      await apiClient.saveZOffset(
+        "printer-1",
+        { offsetMm: 0.1, saveToFirmware: false },
+        "printer-v1"
+      );
+      expect(
+        await apiClient.setActiveSpool(
+          "printer-1",
+          42,
+          "printer-v1"
+        )
+      ).toBe("printer-v2");
+      expect(
+        await apiClient.setToolheadSpool(
+          "printer-1",
+          0,
+          42,
+          "printer-v1"
+        )
+      ).toBe("printer-v2");
+      expect(
+        await apiClient.clearToolheadSpool(
+          "printer-1",
+          0,
+          "printer-v2"
+        )
+      ).toBe("printer-v3");
+
+      for (const call of [...put.mock.calls, ...post.mock.calls]) {
+        const config = call.at(-1) as { headers?: Record<string, string> };
+        if (config?.headers?.["If-Match"]) {
+          expect(config.headers["If-Match"]).toMatch(/^"printer-v1"$/);
+        }
+      }
+      expect(del).toHaveBeenCalledWith(
+        "/printers/printer-1/toolheads/0/spool",
+        { headers: { "If-Match": '"printer-v2"' } }
+      );
+    });
+  });
+
+  describe("job scheduling wall-time contract", () => {
+    it.each([
+      ["scheduleJob", "post", "/job-scheduling/job-1/schedule"],
+      ["rescheduleJob", "put", "/job-scheduling/job-1/reschedule"],
+    ] as const)(
+      "%s sends offset-free non-UTC wall time without conversion",
+      async (method, verb, route) => {
+        const request = {
+          scheduledLocalTime: "2026-11-02T09:30:00",
+          timeZone: "America/New_York",
+          recurrencePattern: "Daily" as const,
+          recurrenceInterval: 2,
+          recurrenceEndLocalTime: "2026-11-10T09:30:00",
+        };
+        const transport = vi.fn().mockResolvedValue({
+          data: {
+            id: "schedule-1",
+            jobId: "job-1",
+            scheduledLocalTime: request.scheduledLocalTime,
+            scheduledStartTimeUtc: "2026-11-02T14:30:00Z",
+            timeZone: request.timeZone,
+            recurrencePattern: request.recurrencePattern,
+            recurrenceInterval: request.recurrenceInterval,
+          },
+        });
+        (
+          apiClient as unknown as {
+            client: { post: typeof transport; put: typeof transport };
+          }
+        ).client[verb] = transport;
+
+        await apiClient[method]("job-1", request);
+
+        expect(transport).toHaveBeenCalledWith(route, request);
+        expect(request.scheduledLocalTime).not.toMatch(/[zZ]|[+-]\d\d:\d\d$/);
+      }
+    );
+  });
+
   describe("auto-dispatch endpoints", () => {
     it("should fetch global auto-dispatch status from the auto-dispatch route", async () => {
       const mockResponse = {
@@ -167,9 +367,16 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
 
-      const result = await apiClient.confirmAutoDispatchReady("printer-1");
+      const result = await apiClient.confirmAutoDispatchReady(
+        "printer-1",
+        "dispatch-etag"
+      );
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/ready");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/ready",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
       expect(result).toEqual(mockResponse.data);
     });
 
@@ -183,9 +390,22 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
 
-      await apiClient.skipAutoDispatchJob("printer-1");
+      await apiClient.skipAutoDispatchJob(
+        "printer-1",
+        "dispatch-etag",
+        "job-etag"
+      );
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/skip");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/skip",
+        undefined,
+        {
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Job-If-Match": '"job-etag"',
+          },
+        }
+      );
     });
 
     it("should post cancel requests to the auto-dispatch route", async () => {
@@ -193,9 +413,13 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
 
-      await apiClient.cancelAutoDispatch("printer-1");
+      await apiClient.cancelAutoDispatch("printer-1", "dispatch-etag");
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/cancel");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/cancel",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
     });
 
     it("should post pre-clear requests to the auto-dispatch route", async () => {
@@ -213,9 +437,16 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
         mockPost;
 
-      const result = await apiClient.preClearAutoDispatchBed("printer-1");
+      const result = await apiClient.preClearAutoDispatchBed(
+        "printer-1",
+        "dispatch-etag"
+      );
 
-      expect(mockPost).toHaveBeenCalledWith("/auto-dispatch/printer-1/pre-clear");
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/pre-clear",
+        undefined,
+        { headers: { "If-Match": '"dispatch-etag"' } }
+      );
       expect(result).toEqual(mockResponse.data);
     });
 
@@ -224,9 +455,23 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { put: typeof mockPut } }).client.put =
         mockPut;
 
-      await apiClient.setAutoDispatchEnabled("printer-1", true);
+      await apiClient.setAutoDispatchEnabled(
+        "printer-1",
+        true,
+        "dispatch-etag",
+        "printer-etag"
+      );
 
-      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/printer-1/enabled", { enabled: true });
+      expect(mockPut).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/enabled",
+        { enabled: true },
+        {
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Printer-If-Match": '"printer-etag"',
+          },
+        }
+      );
     });
 
     it("should put global enabled changes to the auto-dispatch route", async () => {
@@ -234,9 +479,176 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { put: typeof mockPut } }).client.put =
         mockPut;
 
-      await apiClient.setAutoDispatchGlobalEnabled(false);
+      const statuses: AutoDispatchDetailedStatus[] = [
+        {
+          printerId: "printer-1",
+          printerName: "Printer 1",
+          enabled: true,
+          isReady: true,
+          queueDepth: 1,
+          readyGateChecks: [],
+          state: "Ready",
+          dispatchStateETag: "dispatch-etag",
+          printerETag: "printer-etag",
+        },
+      ];
+      await apiClient.setAutoDispatchGlobalEnabled(false, statuses);
 
-      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/enabled", { enabled: false });
+      expect(mockPut).toHaveBeenCalledWith("/auto-dispatch/enabled", {
+        enabled: false,
+        expectedVersions: {
+          "printer-1": {
+            dispatchStateETag: "dispatch-etag",
+            printerETag: "printer-etag",
+          },
+        },
+      });
+    });
+
+    it.each([
+      [200, "replayed"],
+      [202, "accepted"],
+      [409, "conflict"],
+      [412, "stale"],
+      [422, "incompatible"],
+      [503, "unavailable"],
+    ] as const)(
+      "normalizes exact calibration acknowledgement HTTP %i as %s",
+      async (status, expectedKind) => {
+        const data =
+          status === 200 || status === 202
+            ? {
+                message: "acknowledged",
+                jobETag: "job-next",
+                dispatchStateETag: "dispatch-next",
+              }
+            : {
+                error: "typed_failure",
+                detail: "retry requires reviewed state",
+              };
+        const mockPost = vi.fn().mockResolvedValue({ status, data });
+        (
+          apiClient as unknown as { client: { post: typeof mockPost } }
+        ).client.post = mockPost;
+
+        const result =
+          await apiClient.acknowledgeCalibrationBedClearAndStart({
+            jobId: "job-1",
+            printerId: "printer-1",
+            jobETag: "job-etag",
+            dispatchStateETag: "dispatch-etag",
+            expectedPrinterConfigRevision: 7,
+            idempotencyKey: "stable-key",
+          });
+
+        expect(result.kind).toBe(expectedKind);
+        expect(result.httpStatus).toBe(status);
+        expect(mockPost).toHaveBeenCalledWith(
+          "/job-queue/job-1/acknowledge-bed-clear-and-start",
+          {
+            printerId: "printer-1",
+            expectedPrinterConfigRevision: 7,
+          },
+          expect.objectContaining({
+            headers: {
+              "Idempotency-Key": "stable-key",
+              "If-Match": '"job-etag"',
+              "X-Dispatch-State-If-Match": '"dispatch-etag"',
+            },
+          })
+        );
+      }
+    );
+
+    it.each([
+      [200, "Accepted", "accepted"],
+      [202, "Unknown", "reconciliation"],
+      [409, "Rejected", "conflict"],
+      [412, null, "stale"],
+      [503, "InProgress", "unavailable"],
+    ] as const)(
+      "normalizes dispatch-to HTTP %i as %s",
+      async (status, outcome, expectedKind) => {
+        const job = outcome
+          ? {
+              id: "job-1",
+              rowVersion: "job-v2",
+              status: outcome === "Accepted" ? "Printing" : "Starting",
+              dispatchResult: {
+                attemptId: "attempt-2",
+                attemptNumber: 2,
+                outcome,
+                errorCode: outcome === "Rejected" ? "printer_busy" : null,
+                errorDetail: outcome === "Rejected" ? "Printer busy." : null,
+                isRetryable: outcome === "Rejected",
+                requiresReconciliation: outcome === "Unknown",
+                jobRevision: "job-v2",
+                dispatchStateRevision: "dispatch-v2",
+              },
+            }
+          : undefined;
+        const data =
+          status === 412
+            ? { error: "revision_conflict", detail: "Refresh required." }
+            : status === 503
+              ? { error: "dispatch_outcome_unavailable", job }
+              : job;
+        const mockPost = vi.fn().mockResolvedValue({ status, data });
+        (
+          apiClient as unknown as { client: { post: typeof mockPost } }
+        ).client.post = mockPost;
+
+        const result = await apiClient.dispatchJobToPrinter(
+          "job-1",
+          "printer-1",
+          "job-v1"
+        );
+
+        expect(result.kind).toBe(expectedKind);
+        expect(result.httpStatus).toBe(status);
+        expect(mockPost).toHaveBeenCalledWith(
+          "/job-queue/job-1/dispatch-to",
+          { printerId: "printer-1" },
+          expect.objectContaining({
+            headers: { "If-Match": '"job-v1"' },
+            validateStatus: expect.any(Function),
+          })
+        );
+      }
+    );
+
+    it("uses only bounded typed maintenance routes", async () => {
+      const mockPost = vi.fn().mockResolvedValue({
+        data: { success: true },
+      });
+      (
+        apiClient as unknown as { client: { post: typeof mockPost } }
+      ).client.post = mockPost;
+
+      await apiClient.extrudeFilament("printer-1", -5, 300);
+      await apiClient.mmuGateAction("printer-1", {
+        protocol: "Qidibox",
+        action: "Eject",
+        gateIndex: 2,
+      });
+
+      expect(mockPost).toHaveBeenNthCalledWith(
+        1,
+        "/printers/printer-1/extrude",
+        { distanceMm: -5, feedrateMmPerMinute: 300 }
+      );
+      expect(mockPost).toHaveBeenNthCalledWith(
+        2,
+        "/printers/printer-1/mmu/gate-action",
+        {
+          protocol: "Qidibox",
+          action: "Eject",
+          gateIndex: 2,
+        }
+      );
+      expect(
+        mockPost.mock.calls.some(([url]) => String(url).endsWith("/gcode"))
+      ).toBe(false);
     });
 
     describe("printables endpoints", () => {
@@ -482,6 +894,44 @@ describe("ApiClient", () => {
           items: [{ id: "history-1", title: "History model", author: "maker", slug: null, thumbnailUrl: null, likesCount: undefined, downloadsCount: undefined, fileCount: undefined, sourceUrl: undefined, downloadedAt: "2026-06-15T01:02:03Z" }],
           nextCursor: null,
           hasMore: false,
+        });
+      });
+
+      describe("queue body ETags", () => {
+        it("strips header quotes from bulk cancel body tokens", async () => {
+          const mockGet = vi.fn();
+          const mockPost = vi.fn().mockResolvedValue({ data: {} });
+          (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+          (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+          await apiClient.bulkCancelJobs({
+            jobs: [
+              { jobId: "job-a", rowVersion: '"etag-a"' },
+              { jobId: "job-b", rowVersion: 'W/"etag-b"' },
+            ],
+          });
+
+          expect(mockPost).toHaveBeenCalledWith("/job-queue-analytics/bulk/cancel", {
+            jobIds: ["job-a", "job-b"],
+            jobETags: { "job-a": "etag-a", "job-b": "etag-b" },
+          });
+          expect(mockGet).not.toHaveBeenCalled();
+        });
+
+        it("strips header quotes from bulk reorder body tokens", async () => {
+          const mockGet = vi.fn();
+          const mockPost = vi.fn().mockResolvedValue({ data: {} });
+          (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+          (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
+
+          await apiClient.reorderQueueJobs([
+            { jobId: "job-a", newPosition: 2, rowVersion: '"etag-swap"' },
+          ]);
+
+          expect(mockPost).toHaveBeenCalledWith("/job-queue-analytics/bulk/reorder", {
+            moves: [{ jobId: "job-a", newPosition: 2, ifMatch: "etag-swap" }],
+          });
+          expect(mockGet).not.toHaveBeenCalled();
         });
       });
     });

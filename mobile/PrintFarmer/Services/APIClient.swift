@@ -379,6 +379,11 @@ struct AuthenticatedIdentity: Sendable, Equatable {
     }
 }
 
+struct HTTPDecodedResponse<Value: Sendable>: Sendable {
+    let statusCode: Int
+    let value: Value
+}
+
 actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
@@ -837,6 +842,77 @@ actor APIClient {
         return try await execute(request, session: requestSession)
     }
 
+    func post<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String]
+    ) async throws -> T {
+        var request = try buildRequest(path: path, method: "POST")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
+        return try await execute(request)
+    }
+
+    func post<T: Decodable & Sendable, B: Encodable & Sendable>(
+        _ path: String,
+        body: B,
+        headers: [String: String],
+        accepting statusCodes: Set<Int>
+    ) async throws -> HTTPDecodedResponse<T> {
+        var request = try buildRequest(path: path, method: "POST")
+        request.httpBody = try encoder.encode(body)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        apply(headers: headers, to: &request)
+        try await checkTokenExpiry()
+        let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if !statusCodes.contains(http.statusCode) {
+            try validateResponse(response, data: data)
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data)
+            )
+        } catch {
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String],
+        accepting statusCodes: Set<Int>
+    ) async throws -> HTTPDecodedResponse<T> {
+        var request = try buildRequest(path: path, method: "POST")
+        apply(headers: headers, to: &request)
+        try await checkTokenExpiry()
+        let (data, response) = try await performRequest(request)
+        try validateActiveServerGeneration()
+        guard let http = response as? HTTPURLResponse else {
+            throw NetworkError.invalidResponse
+        }
+        if !statusCodes.contains(http.statusCode) {
+            try validateResponse(response, data: data)
+        }
+        do {
+            return HTTPDecodedResponse(
+                statusCode: http.statusCode,
+                value: try decoder.decode(T.self, from: data)
+            )
+        } catch {
+            throw NetworkError.decodingFailed(
+                ResponseDecodingFailure(error: error, targetType: T.self)
+            )
+        }
+    }
+
     func getData(_ path: String) async throws -> Data {
         let requestSession = captureRequestSession() // A1: capture at entry, before any await
         try await checkTokenExpiry(session: requestSession)
@@ -874,19 +950,19 @@ actor APIClient {
         }
     }
 
-    func post<T: Decodable & Sendable>(_ path: String) async throws -> T {
+    func post<T: Decodable & Sendable>(
+        _ path: String,
+        headers: [String: String] = [:]
+    ) async throws -> T {
         let requestSession = captureRequestSession()
-        let request = try buildRequest(session: requestSession, path: path, method: "POST")
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         return try await execute(request, session: requestSession)
     }
 
-    func postVoid(_ path: String) async throws {
-        let requestSession = captureRequestSession()
-        let request = try buildRequest(session: requestSession, path: path, method: "POST")
-        try await executeVoid(request, session: requestSession)
-    }
-
-    func postVoid(_ path: String, headers: [String: String]) async throws {
+    func postVoid(_ path: String, headers: [String: String] = [:]) async throws {
         let requestSession = captureRequestSession()
         var request = try buildRequest(session: requestSession, path: path, method: "POST")
         for (name, value) in headers {
@@ -917,18 +993,10 @@ actor APIClient {
         try await executeVoid(request, session: requestSession)
     }
 
-    func put<T: Decodable & Sendable, B: Encodable & Sendable>(_ path: String, body: B) async throws -> T {
-        let requestSession = captureRequestSession()
-        var request = try buildRequest(session: requestSession, path: path, method: "PUT")
-        request.httpBody = try encoder.encode(body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        return try await execute(request, session: requestSession)
-    }
-
     func put<T: Decodable & Sendable, B: Encodable & Sendable>(
         _ path: String,
         body: B,
-        headers: [String: String]
+        headers: [String: String] = [:]
     ) async throws -> T {
         let requestSession = captureRequestSession()
         var request = try buildRequest(session: requestSession, path: path, method: "PUT")
@@ -948,9 +1016,12 @@ actor APIClient {
         return try await execute(request, session: requestSession)
     }
 
-    func delete(_ path: String) async throws {
+    func delete(_ path: String, headers: [String: String] = [:]) async throws {
         let requestSession = captureRequestSession()
-        let request = try buildRequest(session: requestSession, path: path, method: "DELETE")
+        var request = try buildRequest(session: requestSession, path: path, method: "DELETE")
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
         try await executeVoid(request, session: requestSession)
     }
 
@@ -1031,6 +1102,36 @@ actor APIClient {
             generationAtCreation: generationAtCreation,
             authSessionToken: authSessionToken
         )
+    }
+
+    private func apply(headers: [String: String], to request: inout URLRequest) {
+        for (name, value) in headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+    }
+
+    /// Convenience overload for call sites that do not need to thread an explicit
+    /// `RequestSession` through themselves. Captures a fresh session synchronously
+    /// (A1: no await precedes this capture within these wrappers) and delegates to
+    /// the session-aware implementation below.
+    private func buildRequest(path: String, method: String) throws -> URLRequest {
+        try buildRequest(session: captureRequestSession(), path: path, method: method)
+    }
+
+    private func execute<T: Decodable>(_ request: URLRequest) async throws -> T {
+        try await execute(request, session: captureRequestSession())
+    }
+
+    private func executeVoid(_ request: URLRequest) async throws {
+        try await executeVoid(request, session: captureRequestSession())
+    }
+
+    private func checkTokenExpiry() async throws {
+        try await checkTokenExpiry(session: captureRequestSession())
+    }
+
+    private func validateResponse(_ response: URLResponse, data: Data) throws {
+        try validateResponse(response, data: data, authSessionToken: authSessionToken)
     }
 
     private func execute<T: Decodable>(_ request: URLRequest, session requestSession: RequestSession) async throws -> T {
@@ -1189,6 +1290,12 @@ actor APIClient {
                 throw NetworkError.partsInventoryConflict(conflict)
             }
             throw NetworkError.conflict
+        case 412:
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            throw NetworkError.preconditionFailed(apiError)
+        case 428:
+            let apiError = try? decoder.decode(APIError.self, from: data)
+            throw NetworkError.preconditionRequired(apiError)
         case 400...499:
             let apiError = try? decoder.decode(APIError.self, from: data)
             throw NetworkError.clientError(http.statusCode, apiError)
@@ -1280,6 +1387,8 @@ enum NetworkError: LocalizedError, Sendable {
     /// decoded ``PartsInventoryConflict`` to render the exact guidance the
     /// backend adjudicated, rather than a generic conflict message.
     case partsInventoryConflict(PartsInventoryConflict)
+    case preconditionFailed(APIError?)
+    case preconditionRequired(APIError?)
     case noConnection
     case timeout
     case serverUnreachable
@@ -1304,6 +1413,12 @@ enum NetworkError: LocalizedError, Sendable {
             return "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
         case .conflict: return "Conflict — resource was modified"
         case .partsInventoryConflict(let conflict): return conflict.detail ?? conflict.title ?? "Printed-parts conflict"
+        case .preconditionFailed(let apiError):
+            return apiError?.detail
+                ?? "This item changed after you reviewed it. Refresh and confirm again."
+        case .preconditionRequired(let apiError):
+            return apiError?.detail
+                ?? "A reviewed revision is required. Refresh and confirm again."
         case .noConnection: return "No internet connection"
         case .timeout: return "Request timed out"
         case .serverUnreachable: return "Server is unreachable"

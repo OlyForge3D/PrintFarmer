@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
@@ -176,7 +177,8 @@ public sealed class TestEmulatorPollingService(
             SpoolInfo: null,
             FileName: PrinterStatusDto.ExtractFileName(jobName));
 
-        await hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+            .SendAsync("printerupdated", signalRUpdate, ct);
     }
 
     /// <summary>

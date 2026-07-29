@@ -227,6 +227,7 @@ public sealed class PrusaLinkPollingService(
 
                     // Check for state transition from printing to idle/finished for job completion sync
                     string? previousState = state.LastKnownState;
+                    string? previousJobName = state.LastKnownJobName;
                     bool stateChanged = status.State != previousState;
 
                     // Update state tracking (including PreviousState for transition detection)
@@ -246,7 +247,12 @@ public sealed class PrusaLinkPollingService(
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null)
                     {
-                        await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State!, ct);
+                        await CheckAndSyncJobCompletionAsync(
+                            printerId,
+                            previousState,
+                            status.State!,
+                            previousJobName,
+                            ct);
                     }
 
                     // Resolve spool info from DB assignment
@@ -293,7 +299,8 @@ public sealed class PrusaLinkPollingService(
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                    await _hub.Clients.Group(
+                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                         .SendAsync("printerupdated", signalRUpdate, ct);
                     await _coverageBroadcaster
                         .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
@@ -351,7 +358,8 @@ public sealed class PrusaLinkPollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                             .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
@@ -396,7 +404,12 @@ public sealed class PrusaLinkPollingService(
     /// Checks for print completion/failure state transitions and synchronizes job status in database.
     /// Called when printer state changes from "printing" to idle/finished (completion) or error (failure).
     /// </summary>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -415,7 +428,11 @@ public sealed class PrusaLinkPollingService(
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
                 // Print completed successfully
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[PrusaLinkPollingService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -424,7 +441,11 @@ public sealed class PrusaLinkPollingService(
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
                 // Print failed
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[PrusaLinkPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);

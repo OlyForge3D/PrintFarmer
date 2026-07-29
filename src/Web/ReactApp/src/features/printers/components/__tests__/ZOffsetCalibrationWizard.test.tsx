@@ -5,12 +5,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ZOffsetCalibrationWizard } from '../ZOffsetCalibrationWizard';
 import type { Printer } from '@/types/api';
 
-const mockSendGcode = vi.fn();
+const mockHomePrinter = vi.fn();
+const mockMovePrinterTo = vi.fn();
 const mockSaveZOffset = vi.fn();
 
 vi.mock('@/services/api', () => ({
   apiClient: {
-    sendGcode: (...args: unknown[]) => mockSendGcode(...args),
+    homePrinter: (...args: unknown[]) => mockHomePrinter(...args),
+    movePrinterTo: (...args: unknown[]) => mockMovePrinterTo(...args),
     saveZOffset: (...args: unknown[]) => mockSaveZOffset(...args),
   },
 }));
@@ -42,6 +44,7 @@ function createTestPrinter(overrides: Partial<Printer> = {}): Printer {
     isOnline: true,
     state: 'Idle',
     serverUrl: 'http://test.local',
+    rowVersion: 'printer-v1',
     ...overrides,
   } as Printer;
 }
@@ -68,7 +71,8 @@ function renderWizard(props: { isOpen?: boolean; printer?: Printer } = {}) {
 describe('ZOffsetCalibrationWizard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSendGcode.mockResolvedValue({ success: true });
+    mockHomePrinter.mockResolvedValue({ success: true });
+    mockMovePrinterTo.mockResolvedValue({ success: true });
     mockSaveZOffset.mockResolvedValue({ success: true });
   });
 
@@ -98,7 +102,7 @@ describe('ZOffsetCalibrationWizard', () => {
     expect(screen.getByRole('button', { name: /home all axes/i })).toBeInTheDocument();
   });
 
-  it('sends G28 command when homing and auto-advances', async () => {
+  it('uses the typed home endpoint and auto-advances', async () => {
     const user = userEvent.setup();
     renderWizard();
 
@@ -106,7 +110,7 @@ describe('ZOffsetCalibrationWizard', () => {
     await user.click(screen.getByRole('button', { name: /next/i }));
     await user.click(screen.getByRole('button', { name: /home all axes/i }));
 
-    expect(mockSendGcode).toHaveBeenCalledWith('printer-1', 'G28');
+    expect(mockHomePrinter).toHaveBeenCalledWith('printer-1');
     // After success, auto-advances to Move to Center
     await waitFor(() => {
       expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
@@ -149,7 +153,7 @@ describe('ZOffsetCalibrationWizard', () => {
     expect(screen.getByText('0.1 mm')).toBeInTheDocument();
   });
 
-  it('adjusts Z-offset down and sends relative G-code', async () => {
+  it('adjusts Z-offset down through the typed move endpoint', async () => {
     const user = userEvent.setup();
     renderWizard();
 
@@ -160,11 +164,11 @@ describe('ZOffsetCalibrationWizard', () => {
     await user.click(screen.getByRole('button', { name: /move to center/i }));
     await waitFor(() => expect(screen.getByText(/Z-Offset:/)).toBeInTheDocument());
 
-    // Click Nozzle Down — sends absolute move from Z=10 offset by -0.05
+    // Click Nozzle Down — sends an absolute typed move from Z=10 offset by -0.05
     await user.click(screen.getByRole('button', { name: /nozzle down/i }));
-    expect(mockSendGcode).toHaveBeenLastCalledWith(
+    expect(mockMovePrinterTo).toHaveBeenLastCalledWith(
       'printer-1',
-      expect.stringContaining('G1 Z'),
+      expect.objectContaining({ z: 9.95, f: 300 }),
     );
   });
 

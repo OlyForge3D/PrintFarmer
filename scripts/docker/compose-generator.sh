@@ -615,7 +615,15 @@ generate_compose() {
     # This ensures the single source of truth (container-versions.conf) is used
     if command -v envsubst >/dev/null 2>&1; then
         log_info "Populating container image versions from container-versions.conf..."
-        envsubst < "$compose_file" > "${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
+        local envsubst_output
+        envsubst_output="$(mktemp)"
+        if ! envsubst < "$compose_file" > "$envsubst_output"; then
+            rm -f "$envsubst_output"
+            log_error "Failed to populate container image versions"
+            return 1
+        fi
+
+        mv "$envsubst_output" "$compose_file"
     fi
     
     # Inject health check anchors from common compose file

@@ -549,6 +549,46 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testPreconditionFailedResponseRequiresReview() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 412)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.preconditionFailed")
+        } catch let error as NetworkError {
+            guard case .preconditionFailed = error else {
+                XCTFail("Expected .preconditionFailed, got \(error)")
+                return
+            }
+            XCTAssertEqual(
+                error.errorDescription,
+                "This item changed after you reviewed it. Refresh and confirm again."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testPreconditionRequiredResponseRequiresRefresh() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 428)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.preconditionRequired")
+        } catch let error as NetworkError {
+            guard case .preconditionRequired = error else {
+                XCTFail("Expected .preconditionRequired, got \(error)")
+                return
+            }
+            XCTAssertEqual(
+                error.errorDescription,
+                "A reviewed revision is required. Refresh and confirm again."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     func testMethodNotAllowedResponseHasActionableMessage() async {
         mockAPIClient.stubResponse(json: "{}", statusCode: 405)
 

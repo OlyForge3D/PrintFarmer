@@ -178,31 +178,60 @@ final class JobListViewModelTests: XCTestCase {
 
     // MARK: - Cancel Job
 
-    func testCancelJobCallsService() async {
-        let id = UUID()
-        mockJobService.queuedJobResponsesToReturn = []
+    func testCancelJobCallsService() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
 
         await viewModel.cancelJob(id: id)
 
         XCTAssertEqual(mockJobService.cancelCalledWith, id)
     }
 
-    func testCancelJobReloadsOnSuccess() async {
-        let id = UUID()
-        mockJobService.queuedJobResponsesToReturn = []
+    func testCancelJobReloadsOnSuccess() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
+        mockJobService.queuedJobResponsesToReturn = [job]
 
         await viewModel.cancelJob(id: id)
 
         XCTAssertTrue(mockJobService.listAllJobsCalled)
     }
 
-    func testCancelJobSetsErrorOnFailure() async {
-        let id = UUID()
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+    func testCancelJobSetsErrorOnFailure() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.cancelJob(id: id)
 
         XCTAssertNotNil(viewModel.errorMessage)
+    }
+
+    func testCancelJobStaleRevisionReloadsAndRequiresReconfirmation() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseQueued
+        )
+        let id = try XCTUnwrap(job.job.jobUUID)
+        viewModel.jobs = [job]
+        mockJobService.queuedJobResponsesToReturn = [job]
+        mockJobService.actionErrorToThrow = NetworkError.preconditionFailed(nil)
+
+        await viewModel.cancelJob(id: id)
+
+        XCTAssertTrue(mockJobService.listAllJobsCalled)
+        XCTAssertEqual(
+            viewModel.errorMessage,
+            "This job changed after you reviewed it. Review the refreshed row and confirm again."
+        )
     }
 
     func testCancelWithoutConfigureDoesNotCrash() async {
@@ -213,27 +242,38 @@ final class JobListViewModelTests: XCTestCase {
 
     // MARK: - Abort Job
 
-    func testAbortJobCallsService() async {
-        let id = UUID()
-        mockJobService.queuedJobResponsesToReturn = []
+    func testAbortJobCallsService() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
 
         await viewModel.abortJob(id: id)
 
         XCTAssertEqual(mockJobService.abortCalledWith, id)
     }
 
-    func testAbortJobReloadsOnSuccess() async {
-        let id = UUID()
-        mockJobService.queuedJobResponsesToReturn = []
+    func testAbortJobReloadsOnSuccess() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
+        mockJobService.queuedJobResponsesToReturn = [job]
 
         await viewModel.abortJob(id: id)
 
         XCTAssertTrue(mockJobService.listAllJobsCalled)
     }
 
-    func testAbortJobSetsErrorOnFailure() async {
-        let id = UUID()
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+    func testAbortJobSetsErrorOnFailure() async throws {
+        let job = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+        let id = job.job.jobUUID!
+        viewModel.jobs = [job]
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.abortJob(id: id)
 

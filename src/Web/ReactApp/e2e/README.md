@@ -20,10 +20,13 @@ with the **TestEmulator** plugin enabled plus the React dev server.
 
 ```bash
 cd src
-PFARM__TestEmulator__Enabled=true dotnet run --project ./api/Farm.Web.Api.csproj
+ASPNETCORE_ENVIRONMENT=E2E PFARM__TestEmulator__Enabled=true \
+  dotnet run --no-launch-profile --project ./api/Farm.Web.Api.csproj \
+  --urls http://localhost:5245
 ```
 
-The emulator registers three virtual printers:
+The E2E configuration registers three virtual printers. Debug builds copy the
+disabled-by-default TestEmulator plugin into the runtime plugin directory:
 
 | Name                | State              | Notes                            |
 |---------------------|--------------------|----------------------------------|

@@ -109,11 +109,13 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// </summary>
     /// <param name="request">The HTTP request to send</param>
     /// <param name="timeoutSeconds">Timeout in seconds (default: 30)</param>
+    /// <param name="allowRetry">Whether a transient transport failure may be retried.</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The HTTP response</returns>
     private async Task<HttpResponseMessage> SendWithRetryAsync(
         HttpRequestMessage request,
         int timeoutSeconds = 0,
+        bool allowRetry = true,
         CancellationToken cancellationToken = default)
     {
         if (timeoutSeconds <= 0)
@@ -122,6 +124,22 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
 
         LogRequest(request);
+
+        byte[]? bufferedContent = null;
+        List<KeyValuePair<string, IEnumerable<string>>>? bufferedContentHeaders = null;
+        if (request.Content is not null)
+        {
+            bufferedContent = await request.Content.ReadAsByteArrayAsync(cancellationToken);
+            bufferedContentHeaders = request.Content.Headers
+                .Select(header =>
+                    new KeyValuePair<string, IEnumerable<string>>(
+                        header.Key,
+                        header.Value.ToArray()))
+                .ToList();
+            request.Content = CreateBufferedContent(
+                bufferedContent,
+                bufferedContentHeaders);
+        }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
@@ -142,14 +160,20 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 LogError($"Request timeout after {timeoutSeconds} seconds");
                 throw new HttpRequestException($"OctoPrint request timeout after {timeoutSeconds} seconds");
             }
-            catch (HttpRequestException ex) when (attemptNumber < MaxRetryAttempts && IsTransientError(ex))
+            catch (HttpRequestException ex)
+                when (allowRetry &&
+                      attemptNumber < MaxRetryAttempts &&
+                      IsTransientError(ex))
             {
                 // Transient error - retry
                 LogError($"Transient error on attempt {attemptNumber}, retrying in {RetryDelayMs}ms", ex);
                 await Task.Delay(RetryDelayMs * attemptNumber, cancellationToken); // Exponential backoff
 
                 // Recreate request for retry (important: HttpRequestMessage can only be sent once)
-                request = CloneRequest(request);
+                request = CloneRequest(
+                    request,
+                    bufferedContent,
+                    bufferedContentHeaders);
             }
         }
     }
@@ -171,10 +195,19 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Creates a copy of an HTTP request (since requests can only be sent once).
     /// </summary>
     /// <param name="request">The HTTP request message to clone.</param>
+    /// <param name="bufferedContent">The exact buffered request body.</param>
+    /// <param name="bufferedContentHeaders">The original content headers.</param>
     /// <returns>A new HttpRequestMessage with the same properties as the original.</returns>
-    private static HttpRequestMessage CloneRequest(HttpRequestMessage request)
+    private static HttpRequestMessage CloneRequest(
+        HttpRequestMessage request,
+        byte[]? bufferedContent,
+        List<KeyValuePair<string, IEnumerable<string>>>? bufferedContentHeaders)
     {
-        var newRequest = new HttpRequestMessage(request.Method, request.RequestUri);
+        var newRequest = new HttpRequestMessage(request.Method, request.RequestUri)
+        {
+            Version = request.Version,
+            VersionPolicy = request.VersionPolicy,
+        };
 
         // Copy headers
         foreach (KeyValuePair<string, IEnumerable<string>> header in request.Headers)
@@ -183,15 +216,27 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         }
 
         // Copy content if present
-        if (request.Content != null)
+        if (bufferedContent is not null && bufferedContentHeaders is not null)
         {
-#pragma warning disable VSTHRD002
-            string contentAsString = request.Content.ReadAsStringAsync().Result;
-#pragma warning restore VSTHRD002
-            newRequest.Content = new StringContent(contentAsString, Encoding.UTF8, "application/json");
+            newRequest.Content = CreateBufferedContent(
+                bufferedContent,
+                bufferedContentHeaders);
         }
 
         return newRequest;
+    }
+
+    private static ByteArrayContent CreateBufferedContent(
+        byte[] content,
+        IEnumerable<KeyValuePair<string, IEnumerable<string>>> headers)
+    {
+        var buffered = new ByteArrayContent(content);
+        foreach (KeyValuePair<string, IEnumerable<string>> header in headers)
+        {
+            buffered.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        return buffered;
     }
 
     public async Task<bool> TestConnectionAsync(string baseUrl, PrinterCredential? credential)
@@ -264,7 +309,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            HttpResponseMessage response = await SendWithRetryAsync(
+                request,
+                allowRetry: false);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -588,40 +635,173 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         return SendWithRetryAsync(request, cancellationToken: cancellationToken);
     }
 
-    public async Task<HistoryListResponse?> GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
+    public async Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history");
-        request.Headers.Add("X-Api-Key", credential?.ApiKey);
-
-        // OctoPrint supports limit and start query parameters for pagination
-        List<string> queryParams = [];
-        if (limit.HasValue)
-        {
-            queryParams.Add($"limit={limit.Value}");
-        }
-
-        if (start.HasValue)
-        {
-            queryParams.Add($"start={start.Value}");
-        }
-
-        if (queryParams.Count > 0)
-        {
-            request.RequestUri = new Uri($"{baseUrl}/api/history?{string.Join("&", queryParams)}");
-        }
-
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
-            string content = await response.Content.ReadAsStringAsync();
-            return ParseOctoPrintHistoryList(content);
+            int requestedStart = Math.Max(0, start ?? 0);
+            int? requestedLimit = limit is > 0 ? limit : null;
+            bool requiresFullScan =
+                since.HasValue ||
+                before.HasValue ||
+                !string.IsNullOrWhiteSpace(order) ||
+                !requestedLimit.HasValue;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
+
+            const int PageSize = 100;
+            int offset = 0;
+            int sourceCount = 0;
+            int examinedCount = 0;
+            bool reachedSourceEnd = false;
+            var allJobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
+            while (true)
+            {
+                int pageSize = !requiresFullScan && requestedLimit.HasValue
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - allJobs.Count))
+                    : PageSize;
+                HistoryListResponse page = await FetchOctoPrintHistoryPageAsync(
+                    baseUrl,
+                    pageSize,
+                    offset,
+                    credential,
+                    ct);
+                int examined = page.ExaminedSourceEntries;
+                if (examined > 0 && page.Count < offset + examined)
+                {
+                    throw new InvalidDataException(
+                        "OctoPrint history count did not cover the returned source page.");
+                }
+
+                sourceCount = Math.Max(sourceCount, page.Count);
+                allJobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
+                examinedCount += examined;
+                offset += examined;
+                reachedSourceEnd = offset >= sourceCount;
+                bool requestedRangeFilled =
+                    !requiresFullScan &&
+                    requestedLimit.HasValue &&
+                    allJobs.Count >= requestedEnd;
+                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                {
+                    break;
+                }
+            }
+
+            IEnumerable<HistoryJob> filtered = allJobs;
+            if (since.HasValue)
+            {
+                double sinceSeconds = new DateTimeOffset(NormalizeUtc(since.Value))
+                    .ToUnixTimeMilliseconds() / 1000d;
+                filtered = filtered.Where(job => job.StartTime > sinceSeconds);
+            }
+
+            if (before.HasValue)
+            {
+                double beforeSeconds = new DateTimeOffset(NormalizeUtc(before.Value))
+                    .ToUnixTimeMilliseconds() / 1000d;
+                filtered = filtered.Where(job => job.StartTime < beforeSeconds);
+            }
+
+            filtered = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
+                ? filtered.OrderBy(job => job.StartTime)
+                : string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase)
+                    ? filtered.OrderByDescending(job => job.StartTime)
+                    : filtered;
+            HistoryJob[] filteredJobs = filtered.ToArray();
+            HistoryJob[] requestedJobs = filteredJobs
+                .Skip(requestedStart)
+                .Take(requestedLimit ?? int.MaxValue)
+                .ToArray();
+            bool coversRequestedRange = requiresFullScan
+                ? reachedSourceEnd
+                : requestedLimit.HasValue &&
+                  (requestedJobs.Length >= requestedLimit.Value || reachedSourceEnd);
+            return new HistoryListResponse
+            {
+                Count = requiresFullScan ? filteredJobs.Length : sourceCount,
+                Jobs = requestedJobs,
+                ExaminedSourceEntries = examinedCount,
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                    "octoprint",
+                    Math.Max(sourceCount, examinedCount),
+                    examinedCount,
+                    StartsAtBeginning: true,
+                    HasUnambiguousEnd: reachedSourceEnd,
+                    CoversRequestedRange: coversRequestedRange,
+                    ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogError("Get history list timed out", ex);
+            throw new TimeoutException("OctoPrint history request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            LogError("Get history list transport failed", ex);
+            throw;
         }
         catch (Exception ex)
         {
             LogError("Get history list failed", ex);
             return null;
         }
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private async Task<HistoryListResponse> FetchOctoPrintHistoryPageAsync(
+        string baseUrl,
+        int? limit,
+        int start,
+        PrinterCredential? credential,
+        CancellationToken ct)
+    {
+        var queryParams = new List<string>();
+        if (limit.HasValue)
+        {
+            queryParams.Add($"limit={limit.Value}");
+        }
+
+        queryParams.Add($"start={start}");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"{baseUrl}/api/history?{string.Join("&", queryParams)}");
+        request.Headers.Add("X-Api-Key", credential?.ApiKey);
+        using HttpResponseMessage response = await SendWithRetryAsync(
+            request,
+            cancellationToken: ct);
+        response.EnsureSuccessStatusCode();
+        string content = await response.Content.ReadAsStringAsync(ct);
+        return ParseOctoPrintHistoryList(content)
+            ?? throw new InvalidDataException(
+                "OctoPrint returned malformed history list data.");
     }
 
     public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
@@ -633,13 +813,31 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         try
         {
             HttpResponseMessage response = await SendWithRetryAsync(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                throw new HistoryJobNotFoundException(
+                    $"OctoPrint history job {jobId} was not found.");
+            }
+
+            response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync();
-            return ParseOctoPrintHistoryJob(content);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
+            {
+                throw new InvalidDataException(
+                    $"OctoPrint returned malformed history detail for {jobId}.");
+            }
+
+            return parsed;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             LogError("Get history job failed", ex);
-            return null;
+            throw;
         }
     }
 
@@ -1221,6 +1419,26 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <returns>Success status</returns>
     public async Task<bool> UploadFileAsync(string baseUrl, PrinterCredential? credential, byte[] fileContent, string fileName, string? path = null, bool startPrint = false)
     {
+        using HttpResponseMessage response = await SendUploadFileAsync(
+            baseUrl,
+            credential,
+            fileContent,
+            fileName,
+            path,
+            startPrint,
+            CancellationToken.None);
+        return response.IsSuccessStatusCode;
+    }
+
+    private async Task<HttpResponseMessage> SendUploadFileAsync(
+        string baseUrl,
+        PrinterCredential? credential,
+        byte[] fileContent,
+        string fileName,
+        string? path,
+        bool startPrint,
+        CancellationToken ct)
+    {
         baseUrl = NormalizeBaseUrl(baseUrl);
 
         // Build endpoint URL
@@ -1228,15 +1446,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             ? $"{baseUrl}/api/files/local"
             : $"{baseUrl}/api/files/local/{path.TrimStart('/')}";
 
-        HttpRequestMessage request = new(HttpMethod.Post, endpoint);
+        using HttpRequestMessage request = new(HttpMethod.Post, endpoint);
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Build multipart form data
-        var content = new MultipartFormDataContent();
+        using var content = new MultipartFormDataContent();
 
         // Add file content
-        var fileStream = new MemoryStream(fileContent);
-        var streamContent = new StreamContent(fileStream);
+        var streamContent = new ByteArrayContent(fileContent);
         streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         content.Add(streamContent, "file", fileName);
 
@@ -1250,8 +1467,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
-            return response.IsSuccessStatusCode;
+            return await SendWithRetryAsync(
+                request,
+                cancellationToken: ct,
+                allowRetry: !startPrint);
         }
         catch (Exception ex)
         {
@@ -1519,28 +1738,57 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 return null;
             }
 
+            if (!root.TryGetProperty("results", out JsonElement resultsProp) ||
+                resultsProp.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
             List<HistoryJob> jobs = new();
-
-            // Parse the results array
-            if (root.TryGetProperty("results", out JsonElement resultsProp) && resultsProp.ValueKind == JsonValueKind.Array)
+            List<HistoryExcludedEntryEvidence> excludedEntries = new();
+            int examinedEntries = resultsProp.GetArrayLength();
+            foreach (JsonElement jobElement in resultsProp.EnumerateArray())
             {
-                foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+                HistoryJob? job = ParseOctoPrintJobElement(
+                    jobElement,
+                    requireCompleteListEntry: true);
+                if (job is null)
                 {
-                    HistoryJob? job = ParseOctoPrintJobElement(jobElement);
-                    if (job != null)
+                    try
                     {
-                        jobs.Add(job);
+                        excludedEntries.Add(
+                            CreateExcludedHistoryEvidence(jobElement));
                     }
+                    catch (Exception)
+                    {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            BackendJobId: null,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_entry"));
+                    }
+
+                    continue;
                 }
+
+                jobs.Add(job);
             }
 
-            int count = jobs.Count;
-            if (root.TryGetProperty("count", out JsonElement countProp))
+            if (!root.TryGetProperty("count", out JsonElement countProp) ||
+                !countProp.TryGetInt32(out int count) ||
+                count < 0 ||
+                count < examinedEntries)
             {
-                count = countProp.GetInt32();
+                return null;
             }
 
-            return new HistoryListResponse { Count = count, Jobs = jobs.ToArray() };
+            return new HistoryListResponse
+            {
+                Count = count,
+                Jobs = jobs.ToArray(),
+                ExaminedSourceEntries = examinedEntries,
+                ExcludedEntries = excludedEntries.ToArray(),
+            };
         }
         catch
         {
@@ -1552,26 +1800,62 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// Parses a single OctoPrint job element into a HistoryJob object.
     /// </summary>
     /// <param name="jobElement">JSON element representing a job from OctoPrint</param>
-    private static HistoryJob? ParseOctoPrintJobElement(JsonElement jobElement)
+    /// <param name="requireCompleteListEntry">Whether list-authority fields are mandatory.</param>
+    private static HistoryJob? ParseOctoPrintJobElement(
+        JsonElement jobElement,
+        bool requireCompleteListEntry = false)
     {
         try
         {
-            var job = new HistoryJob();
-
-            // Extract basic job information
-            if (jobElement.TryGetProperty("name", out JsonElement nameProp))
+            if (jobElement.ValueKind != JsonValueKind.Object ||
+                !jobElement.TryGetProperty("name", out JsonElement nameProp) ||
+                nameProp.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(nameProp.GetString()))
             {
-                job.Filename = nameProp.GetString() ?? string.Empty;
-                job.JobId = job.Filename;
+                return null;
             }
 
-            if (jobElement.TryGetProperty("success", out JsonElement successProp))
+            var job = new HistoryJob
+            {
+                Filename = nameProp.GetString()!,
+                JobId = nameProp.GetString()!,
+            };
+
+            bool successPresent =
+                jobElement.TryGetProperty("success", out JsonElement successProp);
+            bool timestampPresent =
+                jobElement.TryGetProperty("timestamp", out JsonElement timestampProp);
+            if ((successPresent &&
+                 successProp.ValueKind is not JsonValueKind.True and not JsonValueKind.False) ||
+                (timestampPresent && timestampProp.ValueKind != JsonValueKind.Number))
+            {
+                return null;
+            }
+
+            bool hasSuccess = successPresent;
+            bool hasTimestamp = timestampPresent;
+            if (requireCompleteListEntry && (!hasSuccess || !hasTimestamp))
+            {
+                return null;
+            }
+
+            if (hasSuccess)
             {
                 job.Status = successProp.GetBoolean() ? "Completed" : "Failed";
             }
 
+            if (hasTimestamp)
+            {
+                job.StartTime = timestampProp.GetDouble();
+            }
+
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind != JsonValueKind.Null)
             {
+                if (printTimeProp.ValueKind != JsonValueKind.Number)
+                {
+                    return null;
+                }
+
                 job.PrintDuration = printTimeProp.GetDouble();
             }
 
@@ -1579,18 +1863,22 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 if (filamentProp.TryGetProperty("length", out JsonElement lengthProp))
                 {
+                    if (lengthProp.ValueKind != JsonValueKind.Number)
+                    {
+                        return null;
+                    }
+
                     job.FilamentUsed = lengthProp.GetDouble() / 1000.0; // Convert from mm to m
                 }
             }
 
-            // Extract timestamp information
-            if (jobElement.TryGetProperty("timestamp", out JsonElement timestampProp))
-            {
-                job.StartTime = timestampProp.GetDouble();
-            }
-
             if (jobElement.TryGetProperty("completionTime", out JsonElement completionProp) && completionProp.ValueKind != JsonValueKind.Null)
             {
+                if (completionProp.ValueKind != JsonValueKind.Number)
+                {
+                    return null;
+                }
+
                 job.EndTime = completionProp.GetDouble();
             }
 
@@ -1601,6 +1889,45 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             return null;
         }
     }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
+        string? filename = TryReadString(entry, "name");
+        return new HistoryExcludedEntryEvidence(
+            TryReadString(entry, "id") ?? filename,
+            filename,
+            TryReadNumber(entry, "timestamp"),
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadString(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+    }
+
+    private static double? TryReadNumber(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out JsonElement property) &&
+        property.ValueKind == JsonValueKind.Number &&
+        property.TryGetDouble(out double value)
+            ? value
+            : null;
 
     /// <summary>
     /// Parses an OctoPrint history job detail JSON response into a HistoryJob object.
@@ -1872,22 +2199,50 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // OctoPrint supports upload+start as a single atomic operation via the "print" form param.
         progress?.Report(UploadAndPrintStage.Uploading);
 
-        bool success;
+        byte[] bytes;
         if (fileContent is MemoryStream ms)
         {
-            success = await UploadFileAsync(baseUrl, credential, ms.ToArray(), fileName, null, startPrint: true);
+            bytes = ms.ToArray();
         }
         else
         {
             using var memoryStream = new MemoryStream();
             await fileContent.CopyToAsync(memoryStream, ct);
-            success = await UploadFileAsync(baseUrl, credential, memoryStream.ToArray(), fileName, null, startPrint: true);
+            bytes = memoryStream.ToArray();
         }
 
-        if (!success)
+        try
+        {
+            using HttpResponseMessage response = await SendUploadFileAsync(
+                baseUrl,
+                credential,
+                bytes,
+                fileName,
+                path: null,
+                startPrint: true,
+                ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                progress?.Report(UploadAndPrintStage.Failed);
+                return (int)response.StatusCode is >= 400 and < 500
+                    ? UploadAndPrintResult.FailedBeforeStart(
+                        UploadAndPrintStage.StartingPrint,
+                        $"OctoPrint explicitly rejected upload+print with HTTP {(int)response.StatusCode}.")
+                    : UploadAndPrintResult.Unknown(
+                        UploadAndPrintStage.StartingPrint,
+                        $"OctoPrint upload+print outcome is unknown for {fileName}");
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (HttpRequestException ex)
         {
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"OctoPrint atomic upload+print failed for {fileName}");
+            return UploadAndPrintResult.Unknown(
+                UploadAndPrintStage.StartingPrint,
+                ex.Message);
         }
 
         progress?.Report(UploadAndPrintStage.Completed);

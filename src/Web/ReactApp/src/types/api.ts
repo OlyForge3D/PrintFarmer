@@ -376,6 +376,10 @@ export interface PrinterBase extends
   PrinterOperationalState {
   /** Location assignment (farm location) */
   location?: LocationSummary;
+  /** Base-64 reviewed revision required by printer mutations. */
+  rowVersion?: string | null;
+  /** Safety-relevant logical configuration revision. */
+  configurationRevision?: number;
 }
 
 /**
@@ -1265,6 +1269,7 @@ export interface ToolheadDto {
 // Printer details for edit page
 export interface PrinterDetails {
   id: string;
+  rowVersion?: string | null;
   name: string;
   serverUrl: string;
   notes?: string;
@@ -1899,6 +1904,8 @@ export enum JobQueueStatus {
 
 export interface JobQueuePrintJob {
   id: string;
+  rowVersion?: string | null;
+  dispatchStateRowVersion?: string | null;
   printerId: string;
   printerName?: string;
   gcodeFileId: string;
@@ -1920,6 +1927,59 @@ export interface JobQueuePrintJob {
   updatedAt: Date;
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
+  dispatchResult?: {
+    attemptId?: string | null;
+    attemptNumber?: number | null;
+    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown";
+    backendAcceptedAtUtc?: string | null;
+    errorCode?: string | null;
+    isRetryable: boolean;
+    requiresReconciliation: boolean;
+    jobRevision?: string | null;
+    dispatchStateRevision?: string | null;
+  } | null;
+}
+
+export interface QueueEventEnvelope {
+  schemaVersion: string;
+  eventId: string;
+  sequence: number;
+  eventType: string;
+  occurredAtUtc: string;
+  jobId?: string | null;
+  printerId?: string | null;
+  projectId?: string | null;
+  calibrationAttemptId?: string | null;
+  jobStatus?: string | null;
+  jobKind?: string | null;
+  jobRevision?: string | null;
+  dispatchStateRevision?: string | null;
+  attemptId?: string | null;
+  attemptNumber?: number | null;
+  attemptOutcome?: string | null;
+  bedClearState?: string | null;
+  bedClearCommandId?: string | null;
+  bedClearExpiresAtUtc?: string | null;
+  errorCode?: string | null;
+  failureCode?: string | null;
+  failureRetryable?: boolean | null;
+  failureRequiresReconciliation?: boolean | null;
+  payloadJson?: string | null;
+  jobLogicalRevision?: number | null;
+  dispatchStateLogicalRevision?: number | null;
+}
+
+export interface QueueChangeFeed {
+  afterSequence: number;
+  nextSequence: number;
+  hasMore: boolean;
+  events: QueueEventEnvelope[];
+}
+
+export interface QueueSubscriptionResources {
+  printerIds: string[];
+  jobIds: string[];
+  projectIds: string[];
 }
 
 /**
@@ -2123,6 +2183,11 @@ export interface DiscoveryCompletedDto {
 // Dispatch upload progress (SignalR)
 export interface DispatchUploadProgressDto {
   jobId: string;
+  attemptId: string;
+  attemptNumber: number;
+  sequence: number;
+  jobRevision?: string | null;
+  dispatchStateRevision?: string | null;
   printerId: string;
   fileName: string;
   bytesSent: number;
@@ -2342,10 +2407,13 @@ export interface GcodeUploadProgressDto {
 
 export interface QueuedPrintJobDto {
   id: string;
+  rowVersion?: string | null;
   name: string;
-  gcodeFileId: string;
+  gcodeFileId?: string | null;
   fileName?: string; // Original G-code filename for display
   assignedPrinterId?: string;
+  jobKind?: 'Standard' | 'FilamentCalibration';
+  calibrationProjectId?: string | null;
   status: string;
   priority: number;
   queuePosition: number;
@@ -2392,6 +2460,7 @@ export interface QueuedPrintJobDto {
   thumbnailUrl?: string;
   /** Per-toolhead filament usage tracking */
   toolheadUsages?: PrintJobToolheadUsage[];
+  dispatchResult?: DispatchAttemptResultDto | null;
 }
 
 export interface QueueGcodeFileMetaDto {
@@ -2409,6 +2478,7 @@ export interface QueueGcodeFileMetaDto {
 
 export interface QueuePrinterMetaDto {
   id: string;
+  rowVersion?: string | null;
   name: string;
   modelName: string;
   status: string;
@@ -2419,9 +2489,45 @@ export interface QueuedPrintJobWithFileMetaDto {
   job: QueuedPrintJobDto;
   gcodeFile?: QueueGcodeFileMetaDto;
   assignedPrinter?: QueuePrinterMetaDto;
+  dispatchStateRowVersion?: string | null;
   estimatedStartTime?: string;
   estimatedCompletionTime?: string;
 }
+
+export type DispatchAttemptOutcome =
+  | 'Accepted'
+  | 'Rejected'
+  | 'FailedBeforeStart'
+  | 'Unknown'
+  | 'InProgress';
+
+export interface DispatchAttemptResultDto {
+  attemptId?: string | null;
+  attemptNumber?: number | null;
+  outcome: DispatchAttemptOutcome;
+  backendAcceptedAtUtc?: string | null;
+  errorCode?: string | null;
+  errorDetail?: string | null;
+  isRetryable: boolean;
+  requiresReconciliation: boolean;
+  jobRevision?: string | null;
+  dispatchStateRevision?: string | null;
+}
+
+export type DispatchClientResult =
+  | {
+      kind: 'accepted' | 'reconciliation';
+      httpStatus: 200 | 202;
+      job: QueuedPrintJobDto;
+      dispatch: DispatchAttemptResultDto;
+    }
+  | {
+      kind: 'conflict' | 'stale' | 'unavailable';
+      httpStatus: 409 | 412 | 503;
+      errorCode: string;
+      detail?: string;
+      job?: QueuedPrintJobDto;
+    };
 
 export interface QueueStatsDto {
   totalQueued: number;
@@ -3384,6 +3490,13 @@ export interface AutoDispatchStatus {
   currentJobName?: string;
   lastActivity?: string;
   bedPreConfirmed?: boolean;
+  dispatchStateETag?: string | null;
+  printerETag?: string | null;
+  nextJobId?: string | null;
+  nextJobName?: string | null;
+  nextJobETag?: string | null;
+  nextJobKind?: 'Standard' | 'FilamentCalibration' | null;
+  nextJobPrinterConfigRevision?: number | null;
   readyGateChecks?: ReadyGateCheck[];
   attentionMessage?: string;
   attentionReason?: string;
@@ -3396,6 +3509,9 @@ export interface AutoDispatchNextJob {
   estimatedFilamentUsageG?: number;
   requiredMaterialType?: string;
   estimatedPrintTime?: string;
+  jobKind: 'Standard' | 'FilamentCalibration';
+  jobETag?: string | null;
+  expectedPrinterConfigRevision?: number | null;
 }
 
 export interface FilamentCheckResult {
@@ -3413,6 +3529,21 @@ export interface AutoDispatchReadyResult {
   nextJob?: AutoDispatchNextJob;
   filamentCheck?: FilamentCheckResult;
 }
+
+export type BedClearAcknowledgementResult =
+  | {
+      kind: 'accepted' | 'replayed';
+      httpStatus: 200 | 202;
+      jobETag?: string | null;
+      dispatchStateETag?: string | null;
+      message?: string;
+    }
+  | {
+      kind: 'conflict' | 'stale' | 'incompatible' | 'unavailable';
+      httpStatus: 409 | 412 | 422 | 503;
+      errorCode: string;
+      detail?: string;
+    };
 
 // ── Printer Groups ──────────────────────────────────────────────
 
@@ -3814,38 +3945,51 @@ export interface TelegramTestResult {
 // ============== Job Scheduling ==============
 
 export type RecurrenceType = 'once' | 'daily' | 'weekly' | 'monthly';
-export type ScheduleStatus = 'active' | 'paused' | 'completed' | 'cancelled';
+export type RecurrencePattern = 'Daily' | 'Weekly' | 'Monthly';
+export type ScheduleStatus =
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'reauthorizationRequired';
 
 export interface ScheduledJob {
   id: string;
   jobId: string;
   jobName: string;
   printerName: string;
-  printerId: string;
-  scheduledTime: string;
-  recurrence?: RecurrenceType;
-  recurrenceInterval?: number;
+  printerId?: string | null;
+  scheduledStartTimeUtc: string;
+  scheduledLocalTime: string;
+  timeZone: string;
+  recurrencePattern?: RecurrencePattern | null;
+  recurrenceInterval: number;
+  recurrenceEndTimeUtc?: string | null;
+  isActive: boolean;
+  isPaused: boolean;
+  requiresOperatorReauthorization: boolean;
   status: ScheduleStatus;
-  nextExecution?: string;
-  lastExecution?: string;
-  createdAt: string;
 }
 
 export interface JobExecution {
   id: string;
-  scheduledJobId: string;
-  startedAt: string;
-  completedAt?: string;
+  occurrenceJobId?: string | null;
+  dispatchAttemptId?: string | null;
+  scheduledExecutionTime: string;
+  actualStartTime?: string | null;
   status: string;
-  errorMessage?: string;
+  message?: string | null;
+  durationSeconds?: number | null;
 }
 
 export interface ScheduleJobRequest {
-  scheduledTime: string;
-  timezone: string;
-  recurrenceType: RecurrenceType;
-  recurrenceInterval?: number;
+  scheduledLocalTime: string;
+  timeZone: string;
+  recurrencePattern?: RecurrencePattern | null;
+  recurrenceInterval: number;
+  recurrenceEndLocalTime?: string | null;
 }
+
+export type RescheduleJobRequest = ScheduleJobRequest;
 
 export interface MarkMultipleAsReadRequest {
   notificationIds: string[];
@@ -3930,21 +4074,10 @@ export interface ReadyGateCheck {
   checkedAt: string;
 }
 
-export interface AutoDispatchDetailedStatus {
-  printerId: string;
+export interface AutoDispatchDetailedStatus extends AutoDispatchStatus {
   printerName: string;
-  enabled: boolean;
   isReady: boolean;
-  currentJobName?: string;
-  queueDepth: number;
   readyGateChecks: ReadyGateCheck[];
-  lastActivity?: string;
-  /** Auto-dispatch workflow state: "None", "PendingReady", or "Ready" */
-  state: string;
-  bedPreConfirmed?: boolean;
-  attentionMessage?: string;
-  attentionReason?: string;
-  operatorAction?: string;
 }
 
 export interface AutoDispatchGlobalStatus {

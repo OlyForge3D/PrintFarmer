@@ -454,13 +454,169 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
+  # dotnet-test-providers — runs DbHeavy and Docker-tagged provider tests
+  # against real PostgreSQL and SQL Server instances. Provisions each database
+  # service, applies provider migrations, then runs DbHeavy production races for
+  # claim, bed-clear, consumer, reconciliation, physical control, and external print.
+  # The job fails visibly when a provider is unavailable or migration fails.
+  # ---------------------------------------------------------------------------
+  dotnet-test-providers:
+    name: .NET provider tests (DbHeavy)
+    needs: [select, ci-tools, dotnet-build]
+    if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pfarm
+          POSTGRES_PASSWORD: pfarm_ci
+          POSTGRES_DB: pfarm_test
+        options: >-
+          --health-cmd "pg_isready -U pfarm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          SA_PASSWORD: "Pfarm_CI_2024!"
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Pfarm_CI_2024!' -Q 'SELECT 1' -No"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 8
+        ports:
+          - 1433:1433
+    env:
+      PFARM_TEST_POSTGRES_CONN: "Host=localhost;Port=5432;Database=pfarm_test;Username=pfarm;Password=pfarm_ci"
+      PFARM_TEST_SQLSERVER_CONN: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install -g dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Restore solution
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Build solution
+        working-directory: src
+        run: dotnet build ./farm-web.sln -c Debug --no-restore
+
+      - name: Verify PostgreSQL is reachable
+        run: |
+          set -euo pipefail
+          PGPASSWORD=pfarm_ci psql -h localhost -U pfarm -d pfarm_test -c "SELECT 1;" \
+            || { echo "::error::PostgreSQL is not reachable — aborting provider tests"; exit 1; }
+
+      - name: Verify SQL Server is reachable
+        run: |
+          set -euo pipefail
+          # The service container health-check already verified SQL Server readiness via
+          # sqlcmd inside the container. This step confirms port 1433 is reachable from the runner.
+          timeout 20 bash -c 'until 2>/dev/null >/dev/tcp/localhost/1433; do sleep 2; done' \
+            || { echo "::error::SQL Server TCP port 1433 not reachable — aborting provider tests"; exit 1; }
+
+      - name: Apply PostgreSQL migrations (Farm.App)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          dotnet ef database update \
+            --project migrations/Farm.Migrations.PostgreSQL \
+            --startup-project migrations/Farm.Migrations.PostgreSQL \
+            --no-build \
+            --connection "$PFARM_TEST_POSTGRES_CONN" \
+            || { echo "::error::PostgreSQL Farm migration failed"; exit 1; }
+
+      - name: Apply SQL Server migrations (Farm.App)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          dotnet ef database update \
+            --project migrations/Farm.Migrations.SqlServer \
+            --startup-project migrations/Farm.Migrations.SqlServer \
+            --no-build \
+            --connection "$PFARM_TEST_SQLSERVER_CONN" \
+            || { echo "::error::SQL Server Farm migration failed"; exit 1; }
+
+      - name: Run DbHeavy provider business-race and production-call-chain tests
+        working-directory: src
+        env:
+          PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
+          PFARM_TEST_SQLSERVER_CONN: ${{ env.PFARM_TEST_SQLSERVER_CONN }}
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults
+          dotnet test tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj \
+            -c Debug --no-build \
+            --filter "Category=DbHeavy|Category=Docker" \
+            --logger "trx;LogFileName=provider-tests.trx" \
+            --results-directory TestResults
+
+      - name: Assert non-zero provider test execution
+        working-directory: src
+        run: |
+          set -e
+          python3 - "provider-tests" <<'PY'
+          import sys, os
+          import xml.etree.ElementTree as ET
+          name = sys.argv[1]
+          path = os.path.join("TestResults", f"{name}.trx")
+          if not os.path.isfile(path):
+              print(f"::error::TRX not found at {path}")
+              sys.exit(1)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as e:
+              print(f"::error::TRX parse failed: {e}")
+              sys.exit(1)
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          counters = root.find(f"{ns}ResultSummary/{ns}Counters")
+          if counters is None:
+              print("::error::TRX missing ResultSummary/Counters")
+              sys.exit(1)
+          try:
+              total = int(counters.get("total", "0"))
+              executed = int(counters.get("executed", "0"))
+          except ValueError:
+              print("::error::TRX counters not numeric")
+              sys.exit(1)
+          if total <= 0 or executed <= 0:
+              print(f"::error::TRX reports total={total} executed={executed} — no provider tests ran")
+              sys.exit(1)
+          print(f"{name}: total={total} executed={executed}")
+          PY
+
+      - name: Upload provider TRX
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dotnet-test-results-provider
+          path: src/TestResults/provider-tests.trx
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   # summary — publishes an aggregate step summary and, most importantly,
   # fails the required CI check when any *selected* job failed or was
   # cancelled. Skipped-because-not-selected does not fail.
   # ---------------------------------------------------------------------------
   summary:
     name: CI summary
-    needs: [select, ci-tools, frontend, dotnet-build, migration-drift, dotnet-test]
+    needs: [select, ci-tools, frontend, dotnet-build, migration-drift, dotnet-test, dotnet-test-providers]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -472,6 +628,7 @@ jobs:
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
+          DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
@@ -491,6 +648,7 @@ jobs:
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
             printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
+            printf -- '- dotnet-test-providers: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail if any required dependency failed or was cancelled
@@ -501,6 +659,7 @@ jobs:
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
           DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
+          DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
           WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
           WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
           WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
@@ -536,5 +695,6 @@ jobs:
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"
           check_conditional dotnet-test "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
+          check_conditional dotnet-test-providers "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
 
           exit "$fail"

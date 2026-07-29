@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -31,22 +32,50 @@ public interface IAutoDispatchService
     /// </summary>
     Task<AutoDispatchReadyResult> MarkReadyAsync(Guid printerId, CancellationToken ct = default);
 
+    Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Skips the next queued job (cancels it) and remains in PendingReady state
     /// if more jobs are queued, or transitions to None if the queue is empty.
     /// </summary>
     Task<AutoDispatchStatusDto> SkipNextJobAsync(Guid printerId, CancellationToken ct = default);
 
+    Task<AutoDispatchStatusDto> SkipNextJobAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        byte[] expectedJobVersion,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Cancels the auto-dispatch ready-gate workflow and returns the printer to None state.
     /// </summary>
     Task<AutoDispatchStatusDto> CancelAutoAsync(Guid printerId, CancellationToken ct = default);
+
+    Task<AutoDispatchStatusDto> CancelAutoAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Pre-confirms that the printer bed is clear, allowing immediate job dispatch
     /// when the next job is queued without waiting for PendingReady confirmation.
     /// </summary>
     Task<AutoDispatchStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default);
+
+    Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        CancellationToken ct = default) =>
+        MarkPreClearAsync(printerId, ct);
+
+    Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Gets the current auto-dispatch status for a printer.
@@ -58,6 +87,13 @@ public interface IAutoDispatchService
     /// </summary>
     Task<AutoDispatchStatusDto> SetEnabledAsync(Guid printerId, bool enabled, CancellationToken ct = default);
 
+    Task<AutoDispatchStatusDto> SetEnabledAsync(
+        Guid printerId,
+        bool enabled,
+        byte[] expectedDispatchStateVersion,
+        byte[] expectedPrinterVersion,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Gets auto-dispatch status for all printers, wrapped with global enabled state.
     /// </summary>
@@ -67,7 +103,16 @@ public interface IAutoDispatchService
     /// Enables or disables auto-dispatch for all printers at once.
     /// </summary>
     Task<List<AutoDispatchStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default);
+
+    Task<List<AutoDispatchStatusDto>> SetAllEnabledAsync(
+        bool enabled,
+        IReadOnlyDictionary<Guid, AutoDispatchExpectedVersions> expectedVersions,
+        CancellationToken ct = default);
 }
+
+public sealed record AutoDispatchExpectedVersions(
+    byte[] DispatchStateVersion,
+    byte[] PrinterVersion);
 
 /// <summary>
 /// Result of marking a printer as ready in the auto-dispatch ready-gate workflow.
@@ -98,6 +143,13 @@ public class NextJobDto
     public string? RequiredMaterialType { get; set; }
 
     public TimeSpan? EstimatedPrintTime { get; set; }
+
+    public string JobKind { get; set; } =
+        nameof(Farm.Infrastructure.Domain.JobKind.Standard);
+
+    public string? JobETag { get; set; }
+
+    public long? ExpectedPrinterConfigRevision { get; set; }
 }
 
 public class FilamentCheckResult
@@ -138,6 +190,20 @@ public class AutoDispatchStatusDto
     public string State { get; set; } = "None";
 
     public bool BedPreConfirmed { get; set; }
+
+    public string? DispatchStateETag { get; set; }
+
+    public string? PrinterETag { get; set; }
+
+    public Guid? NextJobId { get; set; }
+
+    public string? NextJobName { get; set; }
+
+    public string? NextJobETag { get; set; }
+
+    public string? NextJobKind { get; set; }
+
+    public long? NextJobPrinterConfigRevision { get; set; }
 
     public string? AttentionMessage { get; set; }
 }
@@ -209,7 +275,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
 
         if (hasActiveJob)
@@ -242,7 +310,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var readyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
 
             // Trigger immediate dispatch
             dispatchTrigger?.NotifyJobQueued(printerId);
@@ -258,18 +326,34 @@ public class AutoDispatchService(
 
         // Broadcast state change via SignalR
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue(AutoDispatchPendingWebhookEventName, new { printerId, printerName = printer.Name });
     }
 
-    public async Task<AutoDispatchReadyResult> MarkReadyAsync(Guid printerId, CancellationToken ct = default)
+    public Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        CancellationToken ct = default) =>
+        MarkReadyCoreAsync(printerId, expectedDispatchStateVersion: null, ct);
+
+    public Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default) =>
+        MarkReadyCoreAsync(printerId, expectedDispatchStateVersion, ct);
+
+    private async Task<AutoDispatchReadyResult> MarkReadyCoreAsync(
+        Guid printerId,
+        byte[]? expectedDispatchStateVersion,
+        CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
+
+        BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
 
         if (!printer.AutoDispatchEnabled)
         {
@@ -280,7 +364,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
         AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobs.QueueDepth, hasActiveJob);
         bool hasReadyConfirmation = effectiveState == AutoDispatchState.PendingReady
@@ -303,7 +389,7 @@ public class AutoDispatchService(
             await db.SaveChangesAsync(ct);
 
             var emptyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, emptyStatus, ct);
 
             return new AutoDispatchReadyResult
             {
@@ -311,6 +397,12 @@ public class AutoDispatchService(
                 NextJob = null,
                 FilamentCheck = new FilamentCheckResult { Sufficient = true, Message = "No queued jobs remaining" },
             };
+        }
+
+        if (nextJob.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new InvalidOperationException(
+                "Calibration jobs require the exact-job acknowledge-bed-clear-and-start endpoint.");
         }
 
         // Perform filament pre-flight check
@@ -323,7 +415,7 @@ public class AutoDispatchService(
         await db.SaveChangesAsync(ct);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         logger.LogInformation(
             ReadyGateLogPrefix + " Printer {PrinterId} marked Ready. Next job: {JobName} (filament sufficient: {Sufficient})",
@@ -342,12 +434,44 @@ public class AutoDispatchService(
                 EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
                 RequiredMaterialType = nextJob.RequiredMaterialType,
                 EstimatedPrintTime = nextJob.EstimatedPrintTime,
+                JobKind = (
+                    nextJob.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+                JobETag = nextJob.RowVersion is { Length: > 0 }
+                    ? Convert.ToBase64String(nextJob.RowVersion)
+                    : null,
+                ExpectedPrinterConfigRevision =
+                    nextJob.PinnedPrinterConfigRevision,
             },
             FilamentCheck = filamentCheck,
         };
     }
 
-    public async Task<AutoDispatchStatusDto> SkipNextJobAsync(Guid printerId, CancellationToken ct = default)
+    public Task<AutoDispatchStatusDto> SkipNextJobAsync(
+        Guid printerId,
+        CancellationToken ct = default) =>
+        SkipNextJobCoreAsync(
+            printerId,
+            expectedDispatchStateVersion: null,
+            expectedJobVersion: null,
+            ct);
+
+    public Task<AutoDispatchStatusDto> SkipNextJobAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        byte[] expectedJobVersion,
+        CancellationToken ct = default) =>
+        SkipNextJobCoreAsync(
+            printerId,
+            expectedDispatchStateVersion,
+            expectedJobVersion,
+            ct);
+
+    private async Task<AutoDispatchStatusDto> SkipNextJobCoreAsync(
+        Guid printerId,
+        byte[]? expectedDispatchStateVersion,
+        byte[]? expectedJobVersion,
+        CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
@@ -355,16 +479,18 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
 
-        // Find and cancel the next queued job
+        BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
+
+        // Find and cancel the next queued job, using the SINGLE shared ordering selector
+        // (Urgent first — an ascending sort would cancel the LOWEST-priority job).
         PrintJob? nextJob = await db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt)
+            .OrderByPriorityDescending()
             .FirstOrDefaultAsync(ct);
 
         if (nextJob != null)
         {
+            BindJobVersion(nextJob, expectedJobVersion);
             nextJob.Status = PrintJobStatus.Cancelled;
             nextJob.UpdatedAt = DateTime.UtcNow;
             logger.LogInformation(
@@ -392,18 +518,34 @@ public class AutoDispatchService(
         }
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
 
-    public async Task<AutoDispatchStatusDto> CancelAutoAsync(Guid printerId, CancellationToken ct = default)
+    public Task<AutoDispatchStatusDto> CancelAutoAsync(
+        Guid printerId,
+        CancellationToken ct = default) =>
+        CancelAutoCoreAsync(printerId, expectedDispatchStateVersion: null, ct);
+
+    public Task<AutoDispatchStatusDto> CancelAutoAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default) =>
+        CancelAutoCoreAsync(printerId, expectedDispatchStateVersion, ct);
+
+    private async Task<AutoDispatchStatusDto> CancelAutoCoreAsync(
+        Guid printerId,
+        byte[]? expectedDispatchStateVersion,
+        CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
+
+        BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
 
         EnsureDispatchState(printer).AutoDispatchState = AutoDispatchState.Dismissed;
         await db.SaveChangesAsync(ct);
@@ -411,18 +553,53 @@ public class AutoDispatchService(
         logger.LogInformation(ReadyGateLogPrefix + " Auto-dispatch ready gate cancelled for printer {PrinterId} ({Name})", printerId, printer.Name);
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         return status;
     }
 
-    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(Guid printerId, CancellationToken ct = default)
+    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        CancellationToken ct = default) =>
+        await MarkPreClearAsync(
+            printerId,
+            QueueActorIdentity.AutoDispatch,
+            ct);
+
+    public async Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        CancellationToken ct = default) =>
+        await MarkPreClearCoreAsync(
+            printerId,
+            actorSubject,
+            expectedDispatchStateVersion: null,
+            ct);
+
+    public Task<AutoDispatchStatusDto> MarkPreClearAsync(
+        Guid printerId,
+        string actorSubject,
+        byte[] expectedDispatchStateVersion,
+        CancellationToken ct = default) =>
+        MarkPreClearCoreAsync(
+            printerId,
+            actorSubject,
+            expectedDispatchStateVersion,
+            ct);
+
+    private async Task<AutoDispatchStatusDto> MarkPreClearCoreAsync(
+        Guid printerId,
+        string actorSubject,
+        byte[]? expectedDispatchStateVersion,
+        CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
         }
+
+        BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
 
         if (!printer.AutoDispatchEnabled)
         {
@@ -433,7 +610,9 @@ public class AutoDispatchService(
         bool hasActiveJob = await db.PrintJobs
             .AnyAsync(
                 j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
+                     && (j.Status == PrintJobStatus.Starting ||
+                         j.Status == PrintJobStatus.Printing ||
+                         j.Status == PrintJobStatus.Paused),
                 ct);
 
         if (hasActiveJob)
@@ -442,8 +621,30 @@ public class AutoDispatchService(
         }
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
+        if (queuedJobs.NextJob?.JobKind == JobKind.FilamentCalibration)
+        {
+            throw new InvalidOperationException(
+                "Calibration jobs cannot use generic bed pre-clear; acknowledge the exact job instead.");
+        }
 
-        EnsureDispatchState(printer).BedPreConfirmed = true;
+        PrinterDispatchState preClearState = EnsureDispatchState(printer);
+        preClearState.BedPreConfirmed = true;
+
+        // Pre-clearing the bed is a SAFETY OVERRIDE: it lets the next job dispatch without
+        // the per-job bed-clear acknowledgement. It must be durably audited in the SAME
+        // transaction as the flag it sets (issue #900, defect 13).
+        _ = QueueAuditWriter.Add(
+            db,
+            actorSubject,
+            QueueAuditOperations.SafetyOverride,
+            QueueAuditOutcomes.Success,
+            nameof(Printer),
+            resourceId: printerId,
+            printerId: printerId,
+            reasonCode: "bed_pre_confirmed",
+            dispatchStateRowVersion: preClearState.RowVersion,
+            detail: new { queueDepth = queuedJobs.QueueDepth });
+
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
@@ -455,7 +656,7 @@ public class AutoDispatchService(
         }
 
         var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(AutoDispatchStateChangedEventName, status, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
 
@@ -477,12 +678,48 @@ public class AutoDispatchService(
         return await BuildStatusDtoAsync(printer, ct);
     }
 
-    public async Task<AutoDispatchStatusDto> SetEnabledAsync(Guid printerId, bool enabled, CancellationToken ct = default)
+    public Task<AutoDispatchStatusDto> SetEnabledAsync(
+        Guid printerId,
+        bool enabled,
+        CancellationToken ct = default) =>
+        SetEnabledCoreAsync(
+            printerId,
+            enabled,
+            expectedDispatchStateVersion: null,
+            expectedPrinterVersion: null,
+            ct);
+
+    public Task<AutoDispatchStatusDto> SetEnabledAsync(
+        Guid printerId,
+        bool enabled,
+        byte[] expectedDispatchStateVersion,
+        byte[] expectedPrinterVersion,
+        CancellationToken ct = default) =>
+        SetEnabledCoreAsync(
+            printerId,
+            enabled,
+            expectedDispatchStateVersion,
+            expectedPrinterVersion,
+            ct);
+
+    private async Task<AutoDispatchStatusDto> SetEnabledCoreAsync(
+        Guid printerId,
+        bool enabled,
+        byte[]? expectedDispatchStateVersion,
+        byte[]? expectedPrinterVersion,
+        CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
         if (printer is null)
         {
             throw new InvalidOperationException($"Printer {printerId} not found");
+        }
+
+        BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
+        if (expectedPrinterVersion is not null)
+        {
+            db.Entry(printer).Property(candidate => candidate.RowVersion).OriginalValue =
+                expectedPrinterVersion;
         }
 
         printer.AutoDispatchEnabled = enabled;
@@ -515,7 +752,8 @@ public class AutoDispatchService(
                 statuses.Add(BuildStatusDto(
                     printer,
                     queuedJobs.QueueDepth,
-                    currentJobs.GetValueOrDefault(printer.Id)));
+                    currentJobs.GetValueOrDefault(printer.Id),
+                    queuedJobs.NextJob));
             }
             catch (Exception ex)
             {
@@ -533,9 +771,38 @@ public class AutoDispatchService(
 
     public async Task<List<AutoDispatchStatusDto>> SetAllEnabledAsync(bool enabled, CancellationToken ct = default)
     {
+        return await SetAllEnabledCoreAsync(enabled, expectedVersions: null, ct);
+    }
+
+    public Task<List<AutoDispatchStatusDto>> SetAllEnabledAsync(
+        bool enabled,
+        IReadOnlyDictionary<Guid, AutoDispatchExpectedVersions> expectedVersions,
+        CancellationToken ct = default) =>
+        SetAllEnabledCoreAsync(enabled, expectedVersions, ct);
+
+    private async Task<List<AutoDispatchStatusDto>> SetAllEnabledCoreAsync(
+        bool enabled,
+        IReadOnlyDictionary<Guid, AutoDispatchExpectedVersions>? expectedVersions,
+        CancellationToken ct)
+    {
         List<Printer> printers = await db.Printers.Include(p => p.DispatchState).ToListAsync(ct);
         foreach (Printer printer in printers)
         {
+            if (expectedVersions is not null)
+            {
+                if (!expectedVersions.TryGetValue(printer.Id, out AutoDispatchExpectedVersions? expected))
+                {
+                    throw new QueuePreconditionRequiredException(
+                        $"Expected versions are required for printer {printer.Id}.");
+                }
+
+                BindDispatchStateVersion(
+                    printer.DispatchState,
+                    expected.DispatchStateVersion);
+                db.Entry(printer).Property(candidate => candidate.RowVersion).OriginalValue =
+                    expected.PrinterVersion;
+            }
+
             printer.AutoDispatchEnabled = enabled;
             if (!enabled)
             {
@@ -564,7 +831,39 @@ public class AutoDispatchService(
         return statuses;
     }
 
-    private static AutoDispatchStatusDto BuildStatusDto(Printer printer, int queuedJobCount, string? currentJobName = null)
+    private void BindDispatchStateVersion(
+        PrinterDispatchState? state,
+        byte[]? expectedVersion)
+    {
+        if (expectedVersion is null)
+        {
+            return;
+        }
+
+        if (state is null)
+        {
+            throw new QueueRevisionConflictException(
+                "The printer dispatch state no longer exists.");
+        }
+
+        db.Entry(state).Property(candidate => candidate.RowVersion).OriginalValue =
+            expectedVersion;
+    }
+
+    private void BindJobVersion(PrintJob job, byte[]? expectedVersion)
+    {
+        if (expectedVersion is not null)
+        {
+            db.Entry(job).Property(candidate => candidate.RowVersion).OriginalValue =
+                expectedVersion;
+        }
+    }
+
+    private static AutoDispatchStatusDto BuildStatusDto(
+        Printer printer,
+        int queuedJobCount,
+        string? currentJobName = null,
+        PrintJob? nextJob = null)
     {
         string now = DateTime.UtcNow.ToString("o");
         bool hasActiveJob = !string.IsNullOrWhiteSpace(currentJobName);
@@ -584,6 +883,24 @@ public class AutoDispatchService(
             ReadyGateChecks = gateChecks,
             State = effectiveState.ToString(),
             BedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false,
+            DispatchStateETag = printer.DispatchState?.RowVersion is { Length: > 0 } rowVersion
+                ? Convert.ToBase64String(rowVersion)
+                : null,
+            PrinterETag = printer.RowVersion is { Length: > 0 } printerRowVersion
+                ? Convert.ToBase64String(printerRowVersion)
+                : null,
+            NextJobId = nextJob?.Id,
+            NextJobName = nextJob?.Name ?? nextJob?.GcodeFile?.Name,
+            NextJobETag = nextJob?.RowVersion is { Length: > 0 } jobRowVersion
+                ? Convert.ToBase64String(jobRowVersion)
+                : null,
+            NextJobKind = nextJob is null
+                ? null
+                : (
+                    nextJob.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+            NextJobPrinterConfigRevision =
+                nextJob?.PinnedPrinterConfigRevision,
             AttentionMessage = attentionMessage,
         };
     }
@@ -598,7 +915,11 @@ public class AutoDispatchService(
             .Select(j => j.Name ?? j.GcodeFile!.Name)
             .FirstOrDefaultAsync(ct);
 
-        return BuildStatusDto(printer, queuedJobs.QueueDepth, currentJobName);
+        return BuildStatusDto(
+            printer,
+            queuedJobs.QueueDepth,
+            currentJobName,
+            queuedJobs.NextJob);
     }
 
     private static AutoDispatchState ResolveEffectiveState(Printer printer, int queuedJobCount, bool hasActiveJob)
@@ -744,17 +1065,15 @@ public class AutoDispatchService(
 
     private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(Guid printerId, bool includeGcodeFile, CancellationToken ct)
     {
+        // Ready-head selection MUST use the single shared ordering selector so the job the
+        // operator sees at the head of the queue is exactly the job that gets dispatched.
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt);
+            .OrderByPriorityDescending();
 
         IQueryable<PrintJob> unassignedQuery = db.PrintJobs
             .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
-            .OrderBy(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
-            .ThenBy(j => j.QueuedAt);
+            .OrderByPriorityDescending();
 
         if (includeGcodeFile)
         {

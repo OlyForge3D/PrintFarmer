@@ -227,3 +227,80 @@ test.describe('Maintenance & Scheduling — Emulator', () => {
     }
   });
 });
+
+test.describe('Scheduling wall time — Chromium', () => {
+  test.use({ timezoneId: 'Pacific/Honolulu' });
+
+  test('renders and buckets reviewed time in the schedule zone across DST', async ({
+    page,
+  }) => {
+    const rootJobId = '00000000-0000-0000-0000-000000000201';
+    await page.route('**/api/job-scheduling/scheduled*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: '00000000-0000-0000-0000-000000000202',
+            jobId: rootJobId,
+            jobName: 'DST validation cube',
+            printerName: 'Test Printer Alpha',
+            printerId: '00000000-0000-0000-0000-000000000203',
+            scheduledStartTimeUtc: '2026-11-01T08:30:00Z',
+            scheduledLocalTime: '2026-11-01T03:30:00',
+            timeZone: 'America/New_York',
+            recurrencePattern: 'Daily',
+            recurrenceInterval: 1,
+            recurrenceEndTimeUtc: null,
+            isActive: true,
+            isPaused: false,
+            requiresOperatorReauthorization: false,
+            status: 'active',
+          },
+        ]),
+      });
+    });
+    await page.route(
+      `**/api/job-scheduling/${rootJobId}/executions`,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify([
+            {
+              id: '00000000-0000-0000-0000-000000000204',
+              occurrenceJobId: '00000000-0000-0000-0000-000000000205',
+              dispatchAttemptId: '00000000-0000-0000-0000-000000000206',
+              scheduledExecutionTime: '2026-11-02T08:30:00Z',
+              actualStartTime: '2026-11-02T08:30:05Z',
+              status: 'Completed',
+              message: 'The backend confirmed the scheduled start.',
+            },
+          ]),
+        });
+      }
+    );
+
+    await page.goto('/scheduling');
+    await expect(
+      page.getByText(/Nov 1, 2026, 3:30 AM \(America\/New_York\)/)
+    ).toBeVisible();
+
+    const monthHeading = page.locator('h3').first();
+    for (let index = 0; index < 6; index++) {
+      if ((await monthHeading.textContent())?.includes('November 2026')) break;
+      await page.getByRole('button', { name: 'Next month' }).click();
+    }
+    await expect(monthHeading).toHaveText('November 2026');
+    const novemberFirst = page.getByRole('button').filter({
+      has: page.getByText('DST validation cube'),
+    });
+    await expect(novemberFirst).toContainText('3:30 America/New_York');
+
+    await page.getByRole('button', { name: 'History' }).click();
+    await expect(page.getByText('Completed')).toBeVisible();
+    await expect(
+      page.getByText(/Nov 2, 2026, 3:30 AM \(America\/New_York\)/)
+    ).toBeVisible();
+  });
+});

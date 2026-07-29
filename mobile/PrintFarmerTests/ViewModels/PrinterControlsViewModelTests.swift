@@ -263,6 +263,31 @@ final class PrinterControlsViewModelTests: XCTestCase {
         XCTAssertEqual(vm.lastError?.isRetryable, false)
     }
 
+    func test_errorMapping_preconditions_requireRefreshAndAreNotRetryable() {
+        let stale = PrinterControlsViewModel.mapError(
+            NetworkError.preconditionFailed(
+                APIError(
+                    title: nil,
+                    status: 412,
+                    detail: "Printer changed after review.",
+                    errors: nil,
+                    message: nil
+                )
+            )
+        )
+        let missing = PrinterControlsViewModel.mapError(
+            NetworkError.preconditionRequired(nil)
+        )
+
+        XCTAssertEqual(stale.message, "Printer changed after review.")
+        XCTAssertFalse(stale.isRetryable)
+        XCTAssertEqual(
+            missing.message,
+            "A reviewed revision is required. Refresh and confirm again."
+        )
+        XCTAssertFalse(missing.isRetryable)
+    }
+
     func test_errorMapping_network_isRetryable() async throws {
         mockService.errorToThrow = NetworkError.noConnection
         let vm = try makeViewModel(printer: try idlePrinter(), capabilities: Self.fullCaps)

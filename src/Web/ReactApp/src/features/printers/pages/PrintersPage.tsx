@@ -8,6 +8,10 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import type { AutoDispatchStatus } from '@/types/api';
 import { apiClient } from '@/services/api';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
 import { toast } from 'sonner';
 import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
@@ -352,7 +356,16 @@ export function PrintersPage() {
         if (window.PrintFarmerDebug?.printers) {
           console.log(`Updating printer ${printer.id} (${printer.name}) to inMaintenance=${inMaintenance}`);
         }
-        await apiClient.setPrinterMaintenance(printer.id, inMaintenance);
+        if (!printer.rowVersion) {
+          throw new Error(
+            `Printer ${printer.name} has no reviewed revision. Refresh and review again.`
+          );
+        }
+        await apiClient.setPrinterMaintenance(
+          printer.id,
+          inMaintenance,
+          printer.rowVersion
+        );
       }));
       
       
@@ -368,6 +381,12 @@ export function PrintersPage() {
       if (window.PrintFarmerDebug?.printers) {
         console.error('Failed to update maintenance status:', error);
       }
+      if ([412, 428].includes(mutationErrorStatus(error) ?? 0)) {
+        await queryClient.refetchQueries({ queryKey: ['printers'] });
+      }
+      toast.error(
+        mutationErrorMessage(error, 'Failed to update maintenance status')
+      );
     }
   };
 
@@ -599,12 +618,29 @@ export function PrintersPage() {
                     onToggleEnabled={async (printer) => {
                       try {
                         const updated = { isEnabled: !printer.isEnabled } as unknown as import('@/types/api').UpdatePrinterDto;
-                        await apiClient.updatePrinter(printer.id, updated);
+                        if (!printer.rowVersion) {
+                          throw new Error('Printer revision unavailable; refresh and review again.');
+                        }
+                        await apiClient.updatePrinter(
+                          printer.id,
+                          updated,
+                          printer.rowVersion
+                        );
                         toast.success(`${printer.name || 'Printer'} ${updated.isEnabled ? 'enabled' : 'disabled'}`);
                         await queryClient.invalidateQueries({ queryKey: ['printers'] });
                       } catch (err) {
                         console.error('Failed to toggle enabled', err);
-                        toast.error('Failed to toggle enabled state');
+                        if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                          await queryClient.refetchQueries({
+                            queryKey: ['printers'],
+                          });
+                        }
+                        toast.error(
+                          mutationErrorMessage(
+                            err,
+                            'Failed to toggle enabled state'
+                          )
+                        );
                       }
                     }}
                   />

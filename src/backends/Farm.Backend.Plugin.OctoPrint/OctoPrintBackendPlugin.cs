@@ -50,6 +50,9 @@ public class OctoPrintBackendPlugin : IExtendedBackendPlugin
     /// </summary>
     public Type? StatusClientInterfaceType => typeof(IPrinterStatusClient);
 
+    public BackendTelemetryCadence TelemetryCadence =>
+        new(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+
     /// <summary>
     /// Gets the version of this plugin.
     /// </summary>

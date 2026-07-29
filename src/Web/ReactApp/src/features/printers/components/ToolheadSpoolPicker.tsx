@@ -10,9 +10,11 @@ import {
   type SpoolMatchConfidence,
   type ToolheadSpoolMatch,
 } from '@/features/printers/utils/toolheadSpoolMatching';
+import { toast } from 'sonner';
 
 interface ToolheadSpoolPickerProps {
   printerId: string;
+  reviewedRowVersion?: string | null;
   toolheads: ToolheadDto[];
   onSpoolChange?: () => void;
   targetFilamentColorHex?: string[];
@@ -54,6 +56,7 @@ function formatDeltaE(deltaE: number | null): string {
  */
 export function ToolheadSpoolPicker({
   printerId,
+  reviewedRowVersion,
   toolheads,
   onSpoolChange,
   targetFilamentColorHex,
@@ -65,6 +68,15 @@ export function ToolheadSpoolPicker({
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
   const showAutoMatch = targetFilamentColorHex !== undefined;
+
+  const requireRevision = () => {
+    if (!reviewedRowVersion) {
+      throw new Error(
+        'Printer revision unavailable. Refresh and review again.'
+      );
+    }
+    return reviewedRowVersion;
+  };
 
   const suggestions = useMemo(() => {
     if (!showAutoMatch) return [];
@@ -102,6 +114,7 @@ export function ToolheadSpoolPicker({
       printerId,
       toolheadIndex: selectedToolheadIndex,
       spoolId,
+      reviewedRowVersion: requireRevision(),
     });
 
     setManualOverrideIndexes(prev => new Set(prev).add(selectedToolheadIndex));
@@ -114,6 +127,7 @@ export function ToolheadSpoolPicker({
       printerId,
       toolheadIndex,
       spoolId,
+      reviewedRowVersion: requireRevision(),
     });
 
     onSpoolChange?.();
@@ -127,11 +141,13 @@ export function ToolheadSpoolPicker({
         && item.toolhead.currentSpoolId !== item.suggestion.spoolId
         && !manualOverrideIndexes.has(item.toolhead.index));
 
+    let currentRevision = requireRevision();
     for (const { toolhead, suggestion } of updates) {
-      await setSpoolMutation.mutateAsync({
+      currentRevision = await setSpoolMutation.mutateAsync({
         printerId,
         toolheadIndex: toolhead.index,
         spoolId: suggestion.spoolId!,
+        reviewedRowVersion: currentRevision,
       });
     }
 
@@ -139,9 +155,14 @@ export function ToolheadSpoolPicker({
   };
 
   const handleClearSpool = (toolheadIndex: number) => {
+    if (!reviewedRowVersion) {
+      toast.error('Printer revision unavailable. Refresh and review again.');
+      return;
+    }
     clearSpoolMutation.mutate({
       printerId,
       toolheadIndex,
+      reviewedRowVersion,
     });
     setManualOverrideIndexes(prev => new Set(prev).add(toolheadIndex));
     onSpoolChange?.();

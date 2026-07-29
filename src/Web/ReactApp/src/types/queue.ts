@@ -102,6 +102,7 @@ export interface ModelStats {
  */
 export interface JobDetails {
   id: string;
+  rowVersion?: string | null;
   name: string;
   status: string;
   priority: number;
@@ -157,4 +158,3 @@ export interface JobDetails {
   // Multi-toolhead filament tracking
   toolheadUsages?: import('@/types/api').PrintJobToolheadUsage[];
 }
-

@@ -133,6 +133,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
         )
         mockAutoDispatchService.readyResultToReturn = readyResult
         mockAutoDispatchService.statusToReturn = readyResult.status
+        viewModel.status = readyResult.status
 
         await viewModel.markReady(printerId: testPrinterId)
 
@@ -146,6 +147,12 @@ final class AutoDispatchViewModelTests: XCTestCase {
     }
 
     func testMarkReadyHandlesError() async {
+        viewModel.status = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady"
+        )
         mockAutoDispatchService.errorToThrow = TestError.generic
 
         await viewModel.markReady(printerId: testPrinterId)
@@ -164,6 +171,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
             state: "idle"
         )
         mockAutoDispatchService.statusToReturn = status
+        viewModel.status = status
 
         await viewModel.skip(printerId: testPrinterId)
 
@@ -174,11 +182,47 @@ final class AutoDispatchViewModelTests: XCTestCase {
     }
 
     func testSkipHandlesError() async {
+        viewModel.status = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady"
+        )
         mockAutoDispatchService.errorToThrow = TestError.generic
 
         await viewModel.skip(printerId: testPrinterId)
 
         XCTAssertNotNil(viewModel.error)
+    }
+
+    func testStaleBedClearRefetchesAndRequiresReview() async {
+        viewModel.status = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady",
+            dispatchStateETag: "dispatch-v1",
+            nextJobETag: "job-v1"
+        )
+        mockAutoDispatchService.statusToReturn = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady",
+            dispatchStateETag: "dispatch-v2",
+            nextJobETag: "job-v2"
+        )
+        mockAutoDispatchService.errorToThrow =
+            BedClearAcknowledgementError.stale(
+                code: "dispatch_revision_conflict",
+                detail: "Review the refreshed job."
+            )
+
+        await viewModel.markReady(printerId: testPrinterId)
+
+        XCTAssertEqual(mockAutoDispatchService.getStatusCalledWith, testPrinterId)
+        XCTAssertEqual(viewModel.error, "Review the refreshed job.")
+        XCTAssertFalse(viewModel.isMarkingReady)
     }
 
     // MARK: - Toggle Enabled

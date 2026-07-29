@@ -18,6 +18,7 @@ import { hasResolvedQueryData } from '@/common/utils/queryState';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
+import { QueueRealtimeBridge } from '@/common/components/QueueRealtimeBridge';
 
 // Services
 import { assetService } from '@/services/assetService';
@@ -247,11 +248,8 @@ function AuthenticatedAppRoutes() {
       return;
     }
 
-    Promise.all([
-      printerSignalRService.connect(),
-      harvestSignalRService.connect(),
-    ]).catch(err => {
-      logger.warn('Failed to establish authenticated SignalR connections', {
+    harvestSignalRService.connect().catch(err => {
+      logger.warn('Failed to establish authenticated SignalR connection', {
         error: err instanceof Error ? err.message : String(err),
       });
     });
@@ -304,7 +302,9 @@ function AuthenticatedAppRoutes() {
     return <Navigate to="/dashboard" replace />;
   }
   return (
-    <Routes>
+    <>
+      {isAuthenticated && user?.isActive !== false && <QueueRealtimeBridge />}
+      <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -382,7 +382,8 @@ function AuthenticatedAppRoutes() {
         <Route path="profiles/import" element={lazyRoute(<LazyProfileImportWizardPage />)} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

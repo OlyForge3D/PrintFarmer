@@ -136,8 +136,12 @@ A confirmation workflow that ensures operators clear the print bed before the ne
 1. Print completes on auto-dispatch-enabled printer
 2. Printer transitions to `PendingReady` state
 3. UI displays "Bed Clear Banner" with Confirm/Skip/Cancel buttons
-4. Operator confirms bed is clear
-5. Next queued job is dispatched
+4. Operator confirms the reviewed bed-clear state
+5. Standard jobs use the printer-ready endpoint; calibration jobs use the
+   exact-job acknowledgement endpoint with stable idempotency, job, dispatch,
+   and printer revisions
+6. A `412` or `428` refreshes client state and requires a new confirmation
+7. The reviewed job is dispatched
 
 ### 3. Auto-Print (Future Hardware Feature — Bed Clearing)
 **Status:** Not yet implemented. Planned for future releases.

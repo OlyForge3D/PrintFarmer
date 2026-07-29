@@ -292,6 +292,9 @@ public class PrintApprovalServiceTests : IDisposable
         public Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
             => Task.FromResult(true);
 
+        public Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct)
+            => Task.FromResult(true);
+
         public Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
             => Task.FromResult<JobQueuePrintJobDto?>(null);
 

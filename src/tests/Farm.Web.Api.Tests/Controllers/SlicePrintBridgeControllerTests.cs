@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -33,16 +34,55 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
     private readonly Mock<IArtifactsService> _artifactsMock = new();
     private readonly Mock<IPrintersService> _printersMock = new();
     private readonly Mock<ILogger<SlicePrintBridgeController>> _loggerMock = new();
+    private readonly Mock<IDispatchClaimService> _dispatchClaimMock = new();
     private readonly SlicePrintBridgeController _controller;
     private readonly string _tempDir;
 
     public SlicePrintBridgeControllerTests()
     {
+        // The slice→print bridge is a START PATH and must acquire the shared dispatch
+        // claim before touching an adapter (issue #900, defect 5). The stub grants the
+        // claim so the test exercises the adapter orchestration that follows it.
+        _dispatchClaimMock
+            .Setup(s => s.AcquireAdHocClaimAsync(
+                It.IsAny<AdHocDispatchClaimRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => DispatchClaimResult.Ok(new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = Guid.NewGuid(),
+                BackendCommandId = "test-command",
+                BackendFileName = "model.gcode",
+            }));
+        _dispatchClaimMock
+            .Setup(s => s.RecordBackendCallStartedAsync(
+                It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.RecordBackendAcceptedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.ReleaseClaimOnKnownFailureAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _dispatchClaimMock
+            .Setup(s => s.RecordUnknownOutcomeAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         _controller = new SlicePrintBridgeController(
             _printersMock.Object,
             _loggerMock.Object,
             _jobRepoMock.Object,
-            _artifactsMock.Object);
+            _artifactsMock.Object,
+            dispatchClaimService: _dispatchClaimMock.Object);
 
         var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, TestUserId.ToString()) };
         var identity = new ClaimsIdentity(claims, "TestAuth");
@@ -107,6 +147,54 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
         var notFound = result.Should().BeOfType<NotFoundObjectResult>().Subject;
         notFound.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "SlicePrintBridge")]
+    public async Task SendToPrinter_CalibrationSlice_Returns422WithoutBackendEffect(bool startPrint)
+    {
+        Guid jobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        SliceJob calibrationJob = CreateJob(jobId, SliceJobStatus.Completed);
+        calibrationJob.CalibrationProjectId = Guid.NewGuid();
+        calibrationJob.CalibrationAttemptId = Guid.NewGuid();
+
+        _jobRepoMock
+            .Setup(r => r.GetByIdAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(calibrationJob);
+
+        IActionResult result = await _controller.SendToPrinterAsync(
+            jobId,
+            new SendToPrinterRequest { PrinterId = printerId, StartPrint = startPrint },
+            CancellationToken.None);
+
+        result.Should().BeOfType<UnprocessableEntityObjectResult>()
+            .Which.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity);
+        _artifactsMock.Verify(
+            a => a.ListByJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _dispatchClaimMock.Verify(
+            c => c.AcquireAdHocClaimAsync(
+                It.IsAny<AdHocDispatchClaimRequest>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _printersMock.Verify(
+            p => p.UploadAndStartPrintAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        _printersMock.Verify(
+            p => p.UploadGcodeAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<Stream>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // =========================================================================
