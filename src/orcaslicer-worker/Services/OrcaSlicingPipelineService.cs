@@ -259,9 +259,26 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new InvalidOperationException("Authenticated worker identity is unavailable.");
         }
 
-        Uri requestUri = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri)
-            ? absoluteUri
-            : new Uri(_apiBaseUri, modelUrl);
+        Uri requestUri;
+        if (modelUrl.StartsWith("//", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Protocol-relative model download URLs are not supported.");
+        }
+
+        if (modelUrl.StartsWith('/')
+            || !Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri))
+        {
+            requestUri = new Uri(_apiBaseUri, modelUrl);
+        }
+        else if (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps)
+        {
+            requestUri = absoluteUri;
+        }
+        else
+        {
+            throw new InvalidOperationException("Model download URLs must use HTTP or HTTPS.");
+        }
+
         var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
         request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
