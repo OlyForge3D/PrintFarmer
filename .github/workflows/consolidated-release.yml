@@ -220,9 +220,10 @@ jobs:
             archive
 
       - name: Verify archived marketing version
-        run: ./scripts/verify-marketing-version.sh resolved \
-          "${{ steps.version.outputs.version }}" \
-          build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
+        run: |
+          ./scripts/verify-marketing-version.sh resolved \
+            "${{ steps.version.outputs.version }}" \
+            build/PrintFarmer.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
 
       - name: Export IPA
         run: |
