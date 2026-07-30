@@ -289,7 +289,7 @@ struct LoginView: View {
 
     private var demoModeButton: some View {
         Button {
-            authViewModel.loginAsDemo()
+            Task { await authViewModel.loginAsDemo() }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "play.circle")

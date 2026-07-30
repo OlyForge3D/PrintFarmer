@@ -45,6 +45,7 @@ final class ServiceContainer: @unchecked Sendable {
     @ObservationIgnored private let userDefaultsBox: AuthServiceUserDefaultsBox
     @ObservationIgnored private let apiClientFactory: APIClientFactory
     @ObservationIgnored private let signalRServiceFactory: SignalRServiceFactory
+    @ObservationIgnored private let offlineReplayProviderResolutionHook: @Sendable () async -> Void
     @ObservationIgnored private let activeGeneration: ActiveServerGeneration
     @ObservationIgnored private var observesRegistry: Bool
     @ObservationIgnored private var activeServerID: UUID?
@@ -65,7 +66,7 @@ final class ServiceContainer: @unchecked Sendable {
     /// captured server so the worker never re-derives it from the mutable registry.
     enum DesiredTarget {
         case none        // logged out / no active server
-        case demo        // demo composition (applied synchronously; worker never rebuilds real)
+        case demo        // demo composition (applied by switchToDemo; worker never rebuilds real)
         case server(RegisteredServer)
     }
 
@@ -115,22 +116,48 @@ final class ServiceContainer: @unchecked Sendable {
         FilamentCoverageReadCacheAdapter(store: featureReadCacheStore)
 
     // MARK: Durable offline write queue (issue #787, F10-Q1)
+    @ObservationIgnored private let offlineWriteReplayAuthority = OfflineWriteReplayAuthority()
+    @ObservationIgnored private let offlineWriteQueueStore: any OfflineWriteQueueStoring
+
     /// The single, actor-isolated outbox for offline part-adjustment / harvest
     /// writes. Lazily built (file-backed, Application Support) with a transport
     /// that resolves the CURRENT `partsInventoryService` at replay time so a
     /// server switch never replays through a stale client. Bound to the active
     /// `(serverID, userID)` namespace via `syncOfflineWriteQueue()`.
     @ObservationIgnored private(set) lazy var offlineWriteQueue: OfflineWriteQueue = {
-        let store = FileOfflineWriteQueueStore(directory: Self.offlineWriteQueueDirectory())
-        let transport = DynamicOfflineReplayTransport { [weak self] in
+        let transport = DynamicOfflineReplayTransport(
+            replayAuthority: offlineWriteReplayAuthority,
+            beforeProviderResolution: offlineReplayProviderResolutionHook
+        ) { [weak self] in
             OfflineReplayServices(
+                identity: self?.currentOfflineReplayIdentity(),
                 parts: self?.partsInventoryService,
                 tasks: self?.shiftTaskService,
                 printers: self?.printerService
             )
         }
-        return OfflineWriteQueue(store: store, transport: transport)
+        return OfflineWriteQueue(
+            store: offlineWriteQueueStore,
+            transport: transport,
+            replayAuthority: offlineWriteReplayAuthority
+        )
     }()
+
+    private func currentOfflineReplayIdentity() -> OfflineWriteReplayIdentity? {
+        guard let activeServerID,
+              serverRegistry?.activeServerID == activeServerID,
+              let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: activeServerID) else {
+            return nil
+        }
+        let derivedIdentity = OfflineWriteReplayIdentity(
+            serverID: activeServerID,
+            userID: ownerID
+        )
+        guard offlineWriteReplayAuthority.currentIdentity == derivedIdentity else {
+            return nil
+        }
+        return derivedIdentity
+    }
 
     private static func offlineWriteQueueDirectory() -> URL {
         let base = (try? FileManager.default.url(
@@ -149,22 +176,72 @@ final class ServiceContainer: @unchecked Sendable {
     /// Safe to call repeatedly — duplicate calls collapse to one replay owner.
     func syncOfflineWriteQueue() async {
         let queue = offlineWriteQueue
+        let authorityRevision = offlineWriteReplayAuthority.captureRevision()
         guard let serverRegistry,
               let active = serverRegistry.activeServer,
+              activeServerID == active.id,
+              Self.validAccessToken(for: active, credentialsStore: credentialsStore) != nil,
               let ownerID = farmSnapshotOwnerStore.ownerUserID(serverID: active.id) else {
-            await queue.unbind()
+            let invalidationRevision = offlineWriteReplayAuthority.invalidate()
+            _ = await queue.unbind(authorityRevision: invalidationRevision)
             return
         }
-        await queue.bind(serverID: active.id, userID: ownerID)
-        await queue.setReplayEnabled(capabilitiesService.resolved.offlineWriteReplayEnabled)
+        let expectedCapabilitiesService = capabilitiesService
+        await expectedCapabilitiesService.refresh()
+        guard serverRegistry.activeServerID == active.id,
+              activeServerID == active.id,
+              farmSnapshotOwnerStore.ownerUserID(serverID: active.id) == ownerID,
+              capabilitiesService === expectedCapabilitiesService,
+              offlineWriteReplayAuthority.isCurrent(revision: authorityRevision) else {
+            return
+        }
+        guard let binding = offlineWriteReplayAuthority.bindIfCurrent(
+            revision: authorityRevision,
+            serverID: active.id,
+            userID: ownerID
+        ) else {
+            return
+        }
+        guard await queue.bind(binding: binding) else { return }
+        await queue.setReplayEnabled(expectedCapabilitiesService.resolved.offlineWriteReplayEnabled)
+        guard offlineWriteReplayAuthority.isCurrent(binding) else { return }
         await queue.replayPending()
+    }
+
+    func invalidateOfflineWriteReplayAuthority() {
+        offlineWriteReplayAuthority.invalidate()
+    }
+
+    func authorizeOfflineWriteReplayBinding() {
+        offlineWriteReplayAuthority.authorizeBinding()
+    }
+
+    func makeOfflineReplaySessionExpiryInvalidator() -> @Sendable (Int?, Int?) -> Bool {
+        let generation = activeGeneration
+        let authEpoch = authOperationEpoch
+        let authority = offlineWriteReplayAuthority
+        return { eventGeneration, eventAuthToken in
+            guard let eventGeneration,
+                  let eventAuthToken,
+                  generation.isCurrent(eventGeneration),
+                  authEpoch.isCurrent(eventAuthToken) else {
+                return false
+            }
+            authority.invalidate()
+            return true
+        }
+    }
+
+    var currentOfflineWriteReplayIdentity: OfflineWriteReplayIdentity? {
+        offlineWriteReplayAuthority.currentIdentity
     }
 
     /// Immediately abandons any in-flight replay and unbinds the outbox (logout
     /// / server teardown). Retained items stay on disk but are never replayed
     /// until a matching identity is bound again.
     func unbindOfflineWriteQueue() async {
-        await offlineWriteQueue.unbind()
+        let invalidationRevision = offlineWriteReplayAuthority.invalidate()
+        _ = await offlineWriteQueue.unbind(authorityRevision: invalidationRevision)
     }
 
     /// Builds the operator-facing status view model for the outbox.
@@ -203,6 +280,9 @@ final class ServiceContainer: @unchecked Sendable {
         /// (instead of a temp-rooted pre-built record) exercises exactly
         /// the shipping composition path.
         farmSnapshotRootURL: URL? = nil,
+        synchronizeOfflineQueueOnStartup: Bool = true,
+        offlineWriteQueueStore: (any OfflineWriteQueueStoring)? = nil,
+        offlineReplayProviderResolutionHook: @escaping @Sendable () async -> Void = {},
         apiClientFactory: @escaping APIClientFactory = { baseURL, generation, accessToken, authSessionToken, serverID in
             let identity = accessToken.flatMap { token in
                 serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
@@ -223,8 +303,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.userDefaultsBox = userDefaultsBox
         self.apiClientFactory = apiClientFactory
         self.signalRServiceFactory = signalRServiceFactory
+        self.offlineReplayProviderResolutionHook = offlineReplayProviderResolutionHook
         self.activeGeneration = ActiveServerGeneration()
         self.observesRegistry = observeRegistry
+        self.offlineWriteQueueStore = offlineWriteQueueStore
+            ?? FileOfflineWriteQueueStore(directory: Self.offlineWriteQueueDirectory())
 
         // H4/E (issue #816 reject, Bishop+Hicks): the effective snapshot root
         // is the injected `farmSnapshotRootURL` (test seam) OR the shipping
@@ -348,7 +431,9 @@ final class ServiceContainer: @unchecked Sendable {
         Task { await startupStore.prepareStartup() }
         // #787: bind the durable outbox to the (restored) active identity and
         // drive an initial replay pass on launch.
-        Task { await self.syncOfflineWriteQueue() }
+        if synchronizeOfflineQueueOnStartup {
+            Task { await self.syncOfflineWriteQueue() }
+        }
     }
 
     /// Route registry deletion through the store's awaited purge (Gate E). Wired
@@ -402,7 +487,8 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     /// Replaces all services with demo implementations at runtime.
-    func switchToDemo() {
+    func switchToDemo() async {
+        let replayRevision = offlineWriteReplayAuthority.invalidate()
         // H1: record the demo desired target + advance the transition epoch
         // synchronously, so any suspended real switch is invalidated and the worker
         // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
@@ -414,12 +500,19 @@ final class ServiceContainer: @unchecked Sendable {
         // session, and the snapshot publication CAS), so it can have zero real side
         // effects while demo is active — not merely a disabled button.
         authOperationEpoch.advance()
+        let epoch = transitionEpoch.current
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
         // C: capture the displaced real signalR and disconnect that EXACT instance so a
         // connected real receive loop cannot linger as an orphan under demo.
         let displacedSignalR = self.signalRService
+        guard await offlineWriteQueue.unbind(authorityRevision: replayRevision),
+              transitionEpoch.isCurrent(epoch) else {
+            return
+        }
+        await displacedSignalR.disconnect()
+        guard transitionEpoch.isCurrent(epoch) else { return }
         self.apiClient = nil
         self.authService = DemoAuthService()
         self.printerService = DemoPrinterService()
@@ -443,7 +536,6 @@ final class ServiceContainer: @unchecked Sendable {
         self.capabilitiesService = StubSystemCapabilitiesService()
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
-        Task { await displacedSignalR.disconnect() }
         #if canImport(UIKit)
         self.qrScannerService = nil
         self.barcodeScannerService = nil
@@ -453,6 +545,7 @@ final class ServiceContainer: @unchecked Sendable {
 
     /// Replaces all services with real implementations backed by the active or given base URL.
     func switchToReal(baseURL: URL? = nil) {
+        offlineWriteReplayAuthority.invalidate()
         let server = serverRegistry?.activeServer
         // H1: record the real/none desired target + advance the epoch synchronously.
         recordTarget(server.map { .server($0) } ?? .none)
@@ -480,6 +573,7 @@ final class ServiceContainer: @unchecked Sendable {
 
     func switchToServer(_ server: RegisteredServer) async {
         guard activeServerID != server.id else { return }
+        offlineWriteReplayAuthority.invalidate()
         // H1: request the server target and let the single reconciliation worker apply
         // it; await the worker so callers observe the settled switch.
         requestTarget(.server(server))
@@ -650,10 +744,12 @@ final class ServiceContainer: @unchecked Sendable {
     private func observeActiveServer() {
         guard observesRegistry, let serverRegistry else { return }
         let transitionEpoch = self.transitionEpoch
+        let offlineWriteReplayAuthority = self.offlineWriteReplayAuthority
         withObservationTracking {
             _ = serverRegistry.activeServerID
             _ = serverRegistry.servers
         } onChange: { [weak self] in
+            offlineWriteReplayAuthority.invalidate()
             // Reserve an ordering slot SYNCHRONOUSLY on the mutating (MainActor) thread
             // so this notification is ordered against any concurrent explicit intent.
             transitionEpoch.advance()
@@ -692,7 +788,7 @@ final class ServiceContainer: @unchecked Sendable {
             let target = desiredTarget
             switch target {
             case .demo:
-                // Demo is applied synchronously by `switchToDemo`; the worker never
+                // Demo is applied explicitly by `switchToDemo`; the worker never
                 // rebuilds real services while demo is the desired target (no undo).
                 break
             case .none:
@@ -706,6 +802,7 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
+        offlineWriteReplayAuthority.invalidate()
         // Capture immutable target + outgoing service/session BEFORE any await (H1).
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
@@ -766,6 +863,7 @@ final class ServiceContainer: @unchecked Sendable {
         // stale identity. A change of identity abandons any prior in-flight
         // replay inside `bind`.
         guard transitionEpoch.isCurrent(epoch) else { return }
+        offlineWriteReplayAuthority.authorizeBinding()
         await syncOfflineWriteQueue()
     }
 
@@ -803,6 +901,11 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     private func switchToNoActiveServer(epoch: Int) async {
+        let replayRevision = offlineWriteReplayAuthority.invalidate()
+        guard await offlineWriteQueue.unbind(authorityRevision: replayRevision),
+              transitionEpoch.isCurrent(epoch) else {
+            return
+        }
         guard activeServerID != nil else { return }
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
@@ -818,10 +921,6 @@ final class ServiceContainer: @unchecked Sendable {
         }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
-        // #787: logout / no active server — immediately abandon any in-flight
-        // replay and unbind. Retained items stay on disk, never replayed under a
-        // different identity.
-        await unbindOfflineWriteQueue()
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the
@@ -969,7 +1068,11 @@ final class ServiceContainer: @unchecked Sendable {
                 await client.currentAccessToken()
             }
         }
+        self.offlineReplayProviderResolutionHook = {}
         self.activeGeneration = ActiveServerGeneration()
+        self.offlineWriteQueueStore = FileOfflineWriteQueueStore(
+            directory: Self.offlineWriteQueueDirectory()
+        )
         // Demo composition does not rebuild real services on registry changes, so
         // it does not observe until a real login reattaches the observer.
         self.observesRegistry = false

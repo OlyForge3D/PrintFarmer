@@ -67,10 +67,93 @@ private final class OrphanProbeSignalR: SignalRServiceProtocol, @unchecked Senda
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) { base.onFallbackGroupsUpdated(handler) }
 }
 
+@MainActor
+private final class BlockingCapabilitiesService: SystemCapabilitiesServiceProtocol, @unchecked Sendable {
+    let resolved: ResolvedSystemCapabilities
+    let refreshBarrier = AsyncBarrier()
+
+    init(resolved: ResolvedSystemCapabilities = .defaults) {
+        self.resolved = resolved
+    }
+
+    func refresh() async {
+        await refreshBarrier.arriveAndWait()
+    }
+
+    func close() {
+        refreshBarrier.close()
+    }
+}
+
+private final class BlockingLogoutAuthService: AuthServiceProtocol, @unchecked Sendable {
+    let logoutBarrier = AsyncBarrier()
+    var loginResponse: AuthResponse?
+
+    func login(
+        serverURL: String,
+        username: String,
+        password: String,
+        operation: AuthOperationToken
+    ) async throws -> AuthLoginOutcome {
+        guard let loginResponse else { throw NetworkError.authFailed("not used") }
+        return .applied(loginResponse)
+    }
+
+    func logout(operation: AuthOperationToken) async {
+        await logoutBarrier.arriveAndWait()
+    }
+
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
+        .noSession
+    }
+
+    func currentUser() async throws -> UserDTO {
+        throw NetworkError.unauthorized
+    }
+
+    var isAuthenticated: Bool {
+        get async { true }
+    }
+
+    func close() {
+        logoutBarrier.close()
+    }
+}
+
+private actor ArmedReplayProviderGate {
+    nonisolated let barrier = AsyncBarrier()
+    private var isArmed = false
+
+    func arm() {
+        isArmed = true
+    }
+
+    func waitIfArmed() async {
+        guard isArmed else { return }
+        isArmed = false
+        await barrier.arriveAndWait()
+    }
+
+    nonisolated func close() {
+        barrier.close()
+    }
+}
+
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
 @MainActor
 final class FarmSnapshotContainerAuthorityTests: XCTestCase {
+
+    private struct ParkedOfflineReplay {
+        let container: ServiceContainer
+        let registry: ServerRegistry
+        let owners: FarmSnapshotOwnerStore
+        let server: RegisteredServer
+        let userA: UUID
+        let parts: MockPartsInventoryService
+        let replayBarrier: AsyncBarrier
+        let replayTask: Task<Void, Never>
+    }
 
     private var roots: [URL] = []
 
@@ -96,6 +179,430 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
     private func registry() -> ServerRegistry {
         ServerRegistry(userDefaults: UserDefaults(suiteName: trackedSuiteName("reg"))!, migrateLegacyServerURL: false)
+    }
+
+    private func makeParkedOfflineReplay(
+        observeRegistry: Bool,
+        signalRService: MockSignalRService = MockSignalRService()
+    ) async throws -> ParkedOfflineReplay {
+        let reg = registry()
+        let owners = ownerStore()
+        let server = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let userA = UUID()
+        owners.setOwner(userID: userA, serverID: server.id)
+        try reg.setActive(id: server.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: server.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let store = FarmSnapshotStore(authority: authority, rootURL: newRoot())
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: observeRegistry,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: store,
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            offlineWriteQueueStore: InMemoryOfflineWriteQueueStore(),
+            signalRServiceFactory: { _, _ in signalRService }
+        )
+        container.capabilitiesService = StubSystemCapabilitiesService()
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+
+        let replayBarrier = AsyncBarrier()
+        let parts = MockPartsInventoryService()
+        parts.adjustmentToReturn = PartAdjustmentResponse(
+            id: UUID(),
+            partInventoryId: UUID(),
+            sku: "SKU-A",
+            binId: nil,
+            binCode: nil,
+            delta: -1,
+            resultingBalance: 4,
+            reason: .qcReject,
+            printJobId: nil,
+            operationKey: nil,
+            notes: nil,
+            userId: userA.uuidString,
+            createdAt: OfflineQueueFixtures.epoch
+        )
+        parts.adjustPartGate = { await replayBarrier.arriveAndWait() }
+        container.partsInventoryService = parts
+        _ = await container.offlineWriteQueue.enqueue(
+            OfflineQueueFixtures.adjust(sku: "SKU-A", key: "owner-a-adjustment")
+        )
+        let replayTask = Task { await container.offlineWriteQueue.replayPending() }
+        await replayBarrier.waitUntilArrived()
+
+        return ParkedOfflineReplay(
+            container: container,
+            registry: reg,
+            owners: owners,
+            server: server,
+            userA: userA,
+            parts: parts,
+            replayBarrier: replayBarrier,
+            replayTask: replayTask
+        )
+    }
+
+    func testParkedReplayLogoutUnbindsBeforeAuthAwaitAndRequiresVerifiedSameServerRebind() async throws {
+        let parked = try await makeParkedOfflineReplay(observeRegistry: false)
+        defer { parked.replayBarrier.close() }
+        let auth = BlockingLogoutAuthService()
+        defer { auth.close() }
+        parked.container.authService = auth
+        let viewModel = AuthViewModel(services: parked.container)
+
+        let logout = Task { await viewModel.logout() }
+        await auth.logoutBarrier.waitUntilArrived()
+
+        let boundDuringAuthTeardown = await parked.container.offlineWriteQueue.boundIdentity
+        XCTAssertNil(
+            boundDuringAuthTeardown,
+            "logout must complete actor unbind before auth teardown suspends"
+        )
+
+        await parked.container.syncOfflineWriteQueue()
+        XCTAssertNil(
+            parked.container.currentOfflineWriteReplayIdentity,
+            "logout invalidation cannot rebind without a verified new owner"
+        )
+        auth.logoutBarrier.release()
+        await logout.value
+
+        let userB = UUID()
+        parked.owners.setOwner(userID: userB, serverID: parked.server.id)
+        auth.loginResponse = AuthResponse(
+            success: true,
+            token: "token-b",
+            expiresAt: nil,
+            user: UserDTO(
+                id: userB,
+                username: "owner-b",
+                email: "owner-b@example.com",
+                firstName: nil,
+                lastName: nil,
+                isActive: true,
+                emailConfirmed: true,
+                lastLogin: nil,
+                createdAt: OfflineQueueFixtures.epoch,
+                roles: ["operator"],
+                permissions: []
+            ),
+            error: nil
+        )
+        await viewModel.login(
+            serverURL: parked.server.normalizedURLString,
+            username: "owner-b",
+            password: "password"
+        )
+
+        XCTAssertEqual(
+            parked.container.currentOfflineWriteReplayIdentity,
+            OfflineWriteReplayIdentity(serverID: parked.server.id, userID: userB)
+        )
+        _ = await parked.container.offlineWriteQueue.enqueue(
+            OfflineQueueFixtures.adjust(sku: "SKU-B", key: "owner-b-adjustment")
+        )
+        let immediateBReplay = Task {
+            await parked.container.offlineWriteQueue.replayPending()
+        }
+
+        parked.replayBarrier.release()
+        await parked.replayTask.value
+        await immediateBReplay.value
+        let retainedA = await parked.container.offlineWriteQueue.items(
+            forServer: parked.server.id,
+            user: parked.userA
+        )
+        let pendingB = await parked.container.offlineWriteQueue.items(
+            forServer: parked.server.id,
+            user: userB
+        )
+        XCTAssertEqual(
+            retainedA.count,
+            1,
+            "the parked A result is discarded and its intent remains durable"
+        )
+        XCTAssertEqual(
+            pendingB.count,
+            1,
+            "B's immediate replay cannot inherit A's in-flight drain"
+        )
+
+        await parked.container.offlineWriteQueue.replayPending()
+        let remainingB = await parked.container.offlineWriteQueue.items(
+            forServer: parked.server.id,
+            user: userB
+        )
+        XCTAssertTrue(remainingB.isEmpty)
+        XCTAssertEqual(parked.parts.adjustPartCalls.map { $0.sku }, ["SKU-A", "SKU-B"])
+    }
+
+    func testParkedReplayDemoTransitionUnbindsBeforeServiceReplacement() async throws {
+        let signalR = MockSignalRService()
+        let parked = try await makeParkedOfflineReplay(
+            observeRegistry: false,
+            signalRService: signalR
+        )
+        defer { parked.replayBarrier.close() }
+        let disconnectBarrier = AsyncBarrier()
+        defer { disconnectBarrier.close() }
+        signalR.disconnectHook = { await disconnectBarrier.arriveAndWait() }
+
+        let transition = Task { await parked.container.switchToDemo() }
+        await disconnectBarrier.waitUntilArrived()
+
+        let boundDuringDemoTeardown = await parked.container.offlineWriteQueue.boundIdentity
+        XCTAssertNil(
+            boundDuringDemoTeardown,
+            "demo transition must unbind before disconnecting or replacing services"
+        )
+        disconnectBarrier.release()
+        await transition.value
+        parked.replayBarrier.release()
+        await parked.replayTask.value
+        let retained = await parked.container.offlineWriteQueue.items(
+            forServer: parked.server.id,
+            user: parked.userA
+        )
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertNil(parked.container.currentOfflineWriteReplayIdentity)
+        XCTAssertNil(parked.container.apiClient)
+    }
+
+    func testParkedReplayNoActiveTransitionUnbindsBeforeDisconnect() async throws {
+        let signalR = MockSignalRService()
+        let parked = try await makeParkedOfflineReplay(
+            observeRegistry: true,
+            signalRService: signalR
+        )
+        defer { parked.replayBarrier.close() }
+        let disconnectBarrier = AsyncBarrier()
+        defer { disconnectBarrier.close() }
+        signalR.disconnectHook = { await disconnectBarrier.arriveAndWait() }
+
+        try parked.registry.setActive(id: nil)
+        await disconnectBarrier.waitUntilArrived()
+
+        let boundDuringNoActiveTeardown = await parked.container.offlineWriteQueue.boundIdentity
+        XCTAssertNil(
+            boundDuringNoActiveTeardown,
+            "no-active transition must unbind before disconnect/rebuild awaits"
+        )
+        disconnectBarrier.release()
+        await parked.container.awaitActiveServerSettled()
+        parked.replayBarrier.release()
+        await parked.replayTask.value
+        let retained = await parked.container.offlineWriteQueue.items(
+            forServer: parked.server.id,
+            user: parked.userA
+        )
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertNil(parked.container.currentOfflineWriteReplayIdentity)
+    }
+
+    func testAuthorityInvalidationBeforeProviderResolutionPreventsServiceCall() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let server = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let user = UUID()
+        owners.setOwner(userID: user, serverID: server.id)
+        try reg.setActive(id: server.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: server.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let gate = ArmedReplayProviderGate()
+        defer { gate.close() }
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: FarmSnapshotStore(authority: authority, rootURL: newRoot()),
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false,
+            offlineWriteQueueStore: InMemoryOfflineWriteQueueStore(),
+            offlineReplayProviderResolutionHook: {
+                await gate.waitIfArmed()
+            }
+        )
+        container.capabilitiesService = StubSystemCapabilitiesService()
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+
+        let parts = MockPartsInventoryService()
+        container.partsInventoryService = parts
+        _ = await container.offlineWriteQueue.enqueue(
+            OfflineQueueFixtures.adjust(sku: "SKU-A", key: "owner-a-adjustment")
+        )
+        await gate.arm()
+        let replay = Task {
+            await container.offlineWriteQueue.replayPending()
+        }
+        await gate.barrier.waitUntilArrived()
+
+        container.invalidateOfflineWriteReplayAuthority()
+        gate.barrier.release()
+        await replay.value
+
+        XCTAssertTrue(parts.adjustPartCalls.isEmpty)
+        let retained = await container.offlineWriteQueue.items(
+            forServer: server.id,
+            user: user
+        )
+        XCTAssertEqual(retained.count, 1)
+        XCTAssertTrue(retained.first?.status.isPending == true)
+    }
+
+    func testStaleCapabilitiesRefreshCannotGateOrReplayNewIdentity() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let serverA = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let serverB = try reg.add(
+            displayName: "B",
+            baseURL: URL(string: "https://b.example.com")!
+        )
+        let userA = UUID()
+        let userB = UUID()
+        owners.setOwner(userID: userA, serverID: serverA.id)
+        owners.setOwner(userID: userB, serverID: serverB.id)
+        try reg.setActive(id: serverA.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: serverA.id
+        )
+        credentials.save(
+            ServerCredentials(accessToken: "token-b", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: serverB.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: store,
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false
+        )
+
+        let slowA = BlockingCapabilitiesService()
+        defer { slowA.close() }
+        container.capabilitiesService = slowA
+        let staleSync = Task { await container.syncOfflineWriteQueue() }
+        await slowA.refreshBarrier.waitUntilArrived()
+
+        try reg.setActive(id: serverB.id)
+        container.switchToReal()
+        container.authorizeOfflineWriteReplayBinding()
+        container.capabilitiesService = StubSystemCapabilitiesService(
+            resolved: ResolvedSystemCapabilities(
+                attentionEnabled: true,
+                nativePushEnabled: false,
+                filamentCoverageEnabled: true,
+                guidedSwapEnabled: true,
+                multiSlotFallbackEnabled: true,
+                shiftPlanEnabled: true,
+                printedPartsInventoryEnabled: true,
+                offlineWriteReplayEnabled: false
+            )
+        )
+        await container.syncOfflineWriteQueue()
+        slowA.refreshBarrier.release()
+        await staleSync.value
+
+        let identity = await container.offlineWriteQueue.activeIdentity
+        XCTAssertEqual(identity?.serverID, serverB.id)
+        XCTAssertEqual(identity?.userID, userB)
+        let replayEnabled = await container.offlineWriteQueue.isReplayEnabled
+        XCTAssertFalse(replayEnabled, "server B's disabled gate must survive stale A completion")
+    }
+
+    func testLogoutInvalidatesOfflineReplayAuthorityBeforeAuthTeardownCompletes() async throws {
+        let reg = registry()
+        let owners = ownerStore()
+        let server = try reg.add(
+            displayName: "A",
+            baseURL: URL(string: "https://a.example.com")!
+        )
+        let user = UUID()
+        owners.setOwner(userID: user, serverID: server.id)
+        try reg.setActive(id: server.id)
+        let credentials = ServerCredentialsStore(keychain: InMemoryKeychain())
+        credentials.save(
+            ServerCredentials(accessToken: "token-a", expiresAt: Date().addingTimeInterval(3_600)),
+            serverId: server.id
+        )
+        let authority = FarmSnapshotFixtures.makeAuthority(
+            tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!
+        )
+        let root = newRoot()
+        let store = FarmSnapshotStore(authority: authority, rootURL: root)
+        let container = ServiceContainer(
+            serverRegistry: reg,
+            credentialsStore: credentials,
+            userDefaultsBox: box(),
+            observeRegistry: false,
+            farmSnapshotAuthority: authority,
+            farmSnapshotStore: store,
+            farmSnapshotOwnerStore: owners,
+            synchronizeOfflineQueueOnStartup: false
+        )
+        container.capabilitiesService = StubSystemCapabilitiesService()
+        await container.syncOfflineWriteQueue()
+        XCTAssertNil(
+            container.currentOfflineWriteReplayIdentity,
+            "persisted credentials must not bind replay before verified session restoration"
+        )
+
+        container.authorizeOfflineWriteReplayBinding()
+        await container.syncOfflineWriteQueue()
+        XCTAssertEqual(container.currentOfflineWriteReplayIdentity?.userID, user)
+
+        let blockingAuth = BlockingLogoutAuthService()
+        defer { blockingAuth.close() }
+        container.authService = blockingAuth
+        let viewModel = AuthViewModel(services: container)
+        let logout = Task { await viewModel.logout() }
+        await blockingAuth.logoutBarrier.waitUntilArrived()
+
+        XCTAssertNil(
+            container.currentOfflineWriteReplayIdentity,
+            "replay authority must be synchronously revoked before auth teardown awaits"
+        )
+
+        blockingAuth.logoutBarrier.release()
+        await logout.value
     }
 
     // MARK: Structural: activation resolves the settled server's OWN owner
@@ -455,7 +962,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         // Demo supersedes the suspended real switch by advancing the shared
         // transition epoch synchronously. The resumed B switch is invalidated and
         // must neither build nor bind B services.
-        container.switchToDemo()
+        await container.switchToDemo()
         recorder.firstDisconnectBarrier.release()
         await switchTask.value
 
@@ -495,7 +1002,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         await recorder.firstDisconnectBarrier.waitUntilArrived()
 
         // Demo supersedes the suspended real switch (records .demo + advances epoch).
-        container.switchToDemo()
+        await container.switchToDemo()
         recorder.firstDisconnectBarrier.release()
         await container.awaitActiveServerSettled()
 
@@ -600,7 +1107,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         io.removeItemBarrier = barrier
         let task = Task { await container.activateFarmSnapshotForActiveServer(authToken: token) }
         await barrier.waitUntilArrived() // login's snapshot activation parked in readiness
-        container.switchToDemo()          // enter demo through the production path
+        await container.switchToDemo()    // enter demo through the production path
         barrier.release()
         _ = await task.value
 
@@ -851,7 +1358,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             // epoch + record the new desired target SYNCHRONOUSLY, so the supersession has
             // executed BEFORE we release connect (MainActor serialization — no poll/sleep).
             if enterDemo {
-                container.switchToDemo()
+                await container.switchToDemo()
             } else {
                 try reg.setActive(id: nil)   // no-active target
                 container.switchToReal()     // apply the no-active/real target synchronously
@@ -899,7 +1406,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         realService?.disconnectHook = { disconnected.signal() }
 
         // Entering demo must disconnect that EXACT displaced real instance, not orphan it.
-        container.switchToDemo()
+        await container.switchToDemo()
         await disconnected.waitUntilArrived()
 
         XCTAssertTrue(realService?.disconnectCalled ?? false, "displaced real signalR must be disconnected on demo")
@@ -917,6 +1424,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         private(set) var createdBaseURLs: [URL] = []
         private(set) var services: [String: MockSignalRService] = [:] // host -> service
         private var callCount = 0
+        private var firstDisconnectConsumed = false
         private let barrierOnFirst: Bool
 
         init(barrierOnFirst: Bool) { self.barrierOnFirst = barrierOnFirst }
@@ -936,6 +1444,14 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             return services[host]
         }
 
+        private func consumeFirstDisconnect() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !firstDisconnectConsumed else { return false }
+            firstDisconnectConsumed = true
+            return true
+        }
+
         var factory: ServiceContainer.SignalRServiceFactory {
             { [weak self] baseURL, _ in
                 guard let self else { return MockSignalRService() }
@@ -949,7 +1465,10 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
                 }()
                 if isFirst && self.barrierOnFirst {
                     let barrier = self.firstDisconnectBarrier
-                    service.disconnectHook = { await barrier.arriveAndWait() }
+                    service.disconnectHook = { [weak self] in
+                        guard self?.consumeFirstDisconnect() == true else { return }
+                        await barrier.arriveAndWait()
+                    }
                 }
                 if let host = baseURL.host, host == self.connectBarrierHost {
                     let barrier = self.connectBarrier

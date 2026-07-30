@@ -7,6 +7,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Repositories.Notifications;
@@ -38,6 +40,69 @@ public sealed class DeviceTokenInstallationIdentityTests
 
         GetInstallationId(postgreSql).GetCollation().Should().BeNull();
         GetInstallationId(sqlite).GetCollation().Should().BeNull();
+    }
+
+    [Fact]
+    public void InstallationId_AllProviderModels_EnforceOneActiveGlobalOwner()
+    {
+        IModel[] models =
+        [
+            BuildModel(builder => builder.UseSqlServer(
+                "Server=(localdb)\\ModelOnly;Database=model_only;Trusted_Connection=True;TrustServerCertificate=True")),
+            BuildModel(builder => builder.UseNpgsql(
+                "Host=localhost;Database=model_only;Username=model_only;Password=model_only")),
+            BuildModel(builder => builder.UseSqlite("DataSource=:memory:")),
+        ];
+
+        string[] filters = ["[IsActive] = 1", "\"IsActive\"", "\"IsActive\" = 1"];
+
+        for (int index = 0; index < models.Length; index++)
+        {
+            IModel model = models[index];
+            IEntityType entity = model.FindEntityType(typeof(DeviceToken))!;
+            IIndex ownerIndex = entity.GetIndexes()
+                .Single(index => index.GetDatabaseName() == "IX_DeviceTokens_InstallationId");
+
+            ownerIndex.IsUnique.Should().BeTrue();
+            ownerIndex.Properties.Select(property => property.Name)
+                .Should().Equal(nameof(DeviceToken.InstallationId));
+            ownerIndex.GetFilter().Should().Be(filters[index]);
+            entity.GetIndexes().Should().NotContain(index =>
+                index.GetDatabaseName() == "IX_DeviceTokens_UserId_InstallationId");
+        }
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_Sqlite_DeactivatesCompetingOwnersBeforeFilteredIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.Sqlite.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "\"DeviceTokens\"",
+            "\"InstallationId\"",
+            "\"RegistrationVersion\" DESC",
+            "\"IsActive\" = 1");
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_PostgreSql_DeactivatesCompetingOwnersBeforeFilteredIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.PostgreSQL.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "\"DeviceTokens\"",
+            "\"InstallationId\"",
+            "\"RegistrationVersion\" DESC",
+            "\"IsActive\"");
+    }
+
+    [Fact]
+    public void InstallationOwnerMigration_SqlServer_DeactivatesCompetingOwnersBeforeFilteredIndex()
+    {
+        AssertOwnerMigration(
+            new Farm.Migrations.SqlServer.Migrations.EnforceGlobalDeviceTokenInstallationOwner(),
+            "[DeviceTokens]",
+            "[InstallationId]",
+            "[RegistrationVersion] DESC",
+            "[IsActive] = 1");
     }
 
     [Fact]
@@ -101,5 +166,46 @@ public sealed class DeviceTokenInstallationIdentityTests
             ?.FindProperty(nameof(DeviceToken.InstallationId));
         property.Should().NotBeNull();
         return property!;
+    }
+
+    private static void AssertOwnerMigration(
+        Migration migration,
+        string tableIdentifier,
+        string installationIdentifier,
+        string versionOrdering,
+        string filter)
+    {
+        IReadOnlyList<MigrationOperation> up = migration.UpOperations;
+        up.Should().HaveCount(4);
+        SqlOperation ownershipRepair = up[0].Should().BeOfType<SqlOperation>().Subject;
+        ownershipRepair.Sql.Should().Contain("ROW_NUMBER()");
+        ownershipRepair.Sql.Should().Contain(tableIdentifier);
+        ownershipRepair.Sql.Should().Contain(installationIdentifier);
+        ownershipRepair.Sql.Should().Contain(versionOrdering);
+        ownershipRepair.Sql.Should().Contain("IsActive");
+        ownershipRepair.Sql.Should().Contain("UPDATE");
+        ownershipRepair.Sql.Should().NotContain("DELETE");
+
+        SqlOperation indexReplacement = up[1].Should().BeOfType<SqlOperation>().Subject;
+        indexReplacement.Sql.Should().Contain("IX_DeviceTokens_UserId_InstallationId");
+        indexReplacement.Sql.Should().Contain("IX_DeviceTokens_InstallationId");
+        indexReplacement.Sql.Should().Contain("IF EXISTS");
+
+        CreateIndexOperation globalOwnerIndex = up[2].Should().BeOfType<CreateIndexOperation>().Subject;
+        globalOwnerIndex.Name.Should().Be("IX_DeviceTokens_InstallationId");
+        globalOwnerIndex.Columns.Should().Equal(nameof(DeviceToken.InstallationId));
+        globalOwnerIndex.IsUnique.Should().BeTrue();
+        globalOwnerIndex.Filter.Should().Be(filter);
+
+        CreateIndexOperation userIndex = up[3].Should().BeOfType<CreateIndexOperation>().Subject;
+        userIndex.Name.Should().Be("IX_DeviceTokens_UserId");
+        userIndex.IsUnique.Should().BeFalse();
+
+        migration.DownOperations.OfType<SqlOperation>().Should().BeEmpty();
+        migration.DownOperations.OfType<CreateIndexOperation>()
+            .Should().ContainSingle(index =>
+                index.Name == "IX_DeviceTokens_UserId_InstallationId"
+                && index.IsUnique
+                && index.Filter == filter);
     }
 }

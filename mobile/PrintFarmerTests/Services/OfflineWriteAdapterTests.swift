@@ -73,7 +73,10 @@ final class ControllableTaskService: ShiftTaskServiceProtocol, @unchecked Sendab
 /// the real precondition/classification logic, not a re-implementation.
 struct BundleReplayTransport: OfflineWriteReplayTransport {
     let services: OfflineReplayServices
-    func replay(_ operation: OfflineWriteOperation) async -> OfflineWriteReplayOutcome {
+    func replay(
+        _ operation: OfflineWriteOperation,
+        expectedBinding _: OfflineWriteReplayBinding
+    ) async -> OfflineWriteReplayOutcome {
         await OfflineWriteReplayExecutor.execute(operation, using: services)
     }
 }

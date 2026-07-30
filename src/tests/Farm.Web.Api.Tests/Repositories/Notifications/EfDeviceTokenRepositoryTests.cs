@@ -87,19 +87,87 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Upsert_ReactivatesRow_AndResetsFailures()
+    public async Task Upsert_AfterFailureDeactivation_CreatesNewActiveIncarnation()
     {
         Guid userId = Guid.NewGuid();
         DeviceToken row = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
         long failedVersion = row.RegistrationVersion;
         await _repo.RecordFailureAsync(row.Id, failedVersion, DateTime.UtcNow, failureThreshold: 1);
 
-        DeviceToken reactivated = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
+        DeviceToken active = await _repo.UpsertAsync(userId, "install-a", "token-1", "ios", "production", null);
 
-        reactivated.RegistrationVersion.Should().Be(failedVersion + 1);
-        reactivated.IsActive.Should().BeTrue();
-        reactivated.ConsecutiveFailureCount.Should().Be(0);
-        reactivated.LastFailureAt.Should().BeNull();
+        active.Id.Should().NotBe(row.Id);
+        active.RegistrationVersion.Should().Be(1);
+        active.IsActive.Should().BeTrue();
+        active.ConsecutiveFailureCount.Should().Be(0);
+        active.LastFailureAt.Should().BeNull();
+        DeviceToken history = await _db.DeviceTokens.AsNoTracking().SingleAsync(token => token.Id == row.Id);
+        history.RegistrationVersion.Should().Be(failedVersion);
+        history.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Upsert_InactiveHistoryExists_CreatesNewActiveOwnerWithoutMutatingHistory()
+    {
+        _ = await _db.Database.ExecuteSqlRawAsync(
+            "DROP INDEX \"IX_DeviceTokens_InstallationId\";");
+        _ = await _db.Database.ExecuteSqlRawAsync(
+            "CREATE UNIQUE INDEX \"IX_DeviceTokens_InstallationId\" "
+                + "ON \"DeviceTokens\" (\"InstallationId\") WHERE \"IsActive\" = 1;");
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        Guid historyA = Guid.NewGuid();
+        Guid historyB = Guid.NewGuid();
+        const string installationId = "installation-with-history";
+        _db.DeviceTokens.AddRange(
+            new DeviceToken
+            {
+                Id = historyA,
+                UserId = userA,
+                RegistrationVersion = 7,
+                InstallationId = installationId,
+                Token = new string('a', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = DateTime.UtcNow.AddDays(-2),
+                IsActive = false,
+            },
+            new DeviceToken
+            {
+                Id = historyB,
+                UserId = userB,
+                RegistrationVersion = 9,
+                InstallationId = installationId,
+                Token = new string('b', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = DateTime.UtcNow.AddDays(-1),
+                IsActive = false,
+            });
+        await _db.SaveChangesAsync();
+        _db.ChangeTracker.Clear();
+
+        DeviceToken active = await _repo.UpsertAsync(
+            userB,
+            installationId,
+            new string('c', 64),
+            "ios",
+            "production",
+            "com.example.app");
+
+        DeviceToken[] rows = await _db.DeviceTokens
+            .AsNoTracking()
+            .Where(token => token.InstallationId == installationId)
+            .ToArrayAsync();
+        rows.Should().HaveCount(3);
+        rows.Where(token => !token.IsActive)
+            .Select(token => token.Id)
+            .Should().BeEquivalentTo([historyA, historyB]);
+        rows.Should().ContainSingle(token =>
+            token.Id == active.Id
+            && token.UserId == userB
+            && token.IsActive
+            && token.RegistrationVersion == 1);
     }
 
     [Fact]
@@ -390,13 +458,97 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
             provider.SqliteErrorCode.Should().Be(19);
             provider.SqliteExtendedErrorCode.Should().Be(2067);
             provider.Message.Should().Contain(
-                "UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId");
+                "UNIQUE constraint failed: DeviceTokens.InstallationId");
 
             await using AppDbContext verify = new(plainOptions);
             DeviceToken persisted = await verify.DeviceTokens.AsNoTracking().SingleAsync();
             persisted.UserId.Should().Be(userId);
             persisted.InstallationId.Should().Be("installation-race");
             persisted.Token.Should().BeOneOf(new string('a', 64), new string('b', 64));
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    [Fact]
+    public async Task Upsert_ConcurrentCrossUserFirstClaim_NoIncumbent_ConvergesToOneActiveOwner()
+    {
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"device-token-owner-race-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
+        DbContextOptions<AppDbContext> plainOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        var interceptor = new ConcurrentInsertBarrierInterceptor();
+        DbContextOptions<AppDbContext> racingOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(interceptor)
+            .Options;
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+
+        try
+        {
+            await using (AppDbContext seed = new(plainOptions))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.Users.AddRange(
+                    new Farm.Infrastructure.Domain.User
+                    {
+                        Id = userA,
+                        Username = $"device-token-owner-a-{userA:N}",
+                        Email = $"device-token-owner-a-{userA:N}@example.com",
+                        PasswordHash = "x",
+                    },
+                    new Farm.Infrastructure.Domain.User
+                    {
+                        Id = userB,
+                        Username = $"device-token-owner-b-{userB:N}",
+                        Email = $"device-token-owner-b-{userB:N}@example.com",
+                        PasswordHash = "x",
+                    });
+                await seed.SaveChangesAsync();
+            }
+
+            await using AppDbContext contextA = new(racingOptions);
+            await using AppDbContext contextB = new(racingOptions);
+            var repositoryA = new EfDeviceTokenRepository(contextA);
+            var repositoryB = new EfDeviceTokenRepository(contextB);
+
+            Task<DeviceToken> claimA = repositoryA.UpsertAsync(
+                userA,
+                "installation-owner-race",
+                new string('a', 64),
+                "ios",
+                "production",
+                "com.example.app");
+            Task<DeviceToken> claimB = repositoryB.UpsertAsync(
+                userB,
+                "installation-owner-race",
+                new string('b', 64),
+                "ios",
+                "production",
+                "com.example.app");
+
+            await interceptor.BothInitialInsertsReached.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            DeviceToken[] results = await Task.WhenAll(claimA, claimB).WaitAsync(TimeSpan.FromSeconds(10));
+
+            results.Should().HaveCount(2);
+            interceptor.Failures.Should().ContainSingle(
+                "the database owner index must serialize concurrent first claims");
+            await using AppDbContext verify = new(plainOptions);
+            DeviceToken[] rows = await verify.DeviceTokens.AsNoTracking().ToArrayAsync();
+            DeviceToken persisted = rows.Should().ContainSingle(token => token.IsActive).Subject;
+            rows.Should().ContainSingle();
+            persisted.InstallationId.Should().Be("installation-owner-race");
+            new[] { userA, userB }.Should().Contain(persisted.UserId);
+            persisted.IsActive.Should().BeTrue();
+            persisted.RegistrationVersion.Should().Be(2);
         }
         finally
         {
@@ -533,7 +685,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId", true)]
+    [InlineData("UNIQUE constraint failed: DeviceTokens.InstallationId", true)]
     [InlineData("UNIQUE constraint failed: DeviceTokens.Token", false)]
     [InlineData("UNIQUE constraint failed: DeviceTokens.UserId, DeviceTokens.InstallationId, DeviceTokens.Token", false)]
     [InlineData("UNIQUE constraint failed: Other.UserId, Other.InstallationId", false)]
@@ -547,9 +699,9 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("IX_DeviceTokens_UserId_InstallationId", true)]
-    [InlineData("ix_devicetokens_userid_installationid", false)]
-    [InlineData("IX_DeviceTokens_UserId_InstallationId_Extra", false)]
+    [InlineData("IX_DeviceTokens_InstallationId", true)]
+    [InlineData("ix_devicetokens_installationid", false)]
+    [InlineData("IX_DeviceTokens_InstallationId_Extra", false)]
     public void IsUniqueDeviceTokenConflict_PostgresRequiresExactConstraintName(
         string constraintName,
         bool expected)

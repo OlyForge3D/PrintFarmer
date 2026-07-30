@@ -1,8 +1,9 @@
 ﻿namespace Farm.Infrastructure.Domain.Notifications;
 
 /// <summary>
-/// Native push registration for a specific mobile installation. One row per
-/// <c>(UserId, InstallationId)</c>. See <c>docs/OPERATOR_NATIVE_PUSH.md</c> and issue #708.
+/// Native push registration history for a mobile installation. A filtered
+/// unique index permits exactly one active row per <c>InstallationId</c> while
+/// retaining any number of inactive historical rows.
 /// </summary>
 /// <remarks>
 /// Rows are only removed by:
@@ -33,9 +34,9 @@ public sealed class DeviceToken
     public User? User { get; set; }
 
     /// <summary>
-    /// Per-installation identifier supplied by the mobile app. Together with
-    /// <see cref="UserId"/> forms the upsert key so re-registration replaces the token
-    /// atomically without leaving orphaned rows.
+    /// Per-installation identifier supplied by the mobile app. Active ownership
+    /// is global: a registration upsert updates the current active owner or inserts
+    /// a new active row when only inactive history remains.
     /// </summary>
     public string InstallationId { get; set; } = string.Empty;
 
@@ -68,7 +69,7 @@ public sealed class DeviceToken
     /// Count of consecutive provider-attributed token failures since the last success.
     /// Relay, configuration, JWT, topic, payload, and unknown failures do not increment it.
     /// When it reaches the configured threshold the row is soft-deactivated;
-    /// a subsequent successful registration upsert re-activates it.
+    /// a subsequent successful registration creates a new active incarnation.
     /// </summary>
     public int ConsecutiveFailureCount { get; set; }
 

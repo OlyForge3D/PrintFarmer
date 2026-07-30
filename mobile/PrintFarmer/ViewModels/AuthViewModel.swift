@@ -42,6 +42,7 @@ final class AuthViewModel {
 
     init(services: ServiceContainer) {
         self.services = services
+        let invalidateOfflineReplay = services.makeOfflineReplaySessionExpiryInvalidator()
         sessionExpiredObserver = NotificationCenter.default.addObserver(
             forName: .sessionExpired,
             object: nil,
@@ -53,6 +54,7 @@ final class AuthViewModel {
             // event entirely (A), so a missing identity is discarded here too.
             let generation = (note.userInfo?["generation"] as? Int)
             let authSessionToken = (note.userInfo?["authSessionToken"] as? Int)
+            guard invalidateOfflineReplay(generation, authSessionToken) else { return }
             Task { @MainActor in
                 await self.handleSessionExpiration(generation: generation, authSessionToken: authSessionToken)
             }
@@ -67,6 +69,10 @@ final class AuthViewModel {
     /// directly; the current token is NEVER borrowed to authorize an old event.
     private func handleSessionExpiration(generation: Int?, authSessionToken: Int?) async {
         guard let generation, let authSessionToken else { return } // suppress identity-less events
+        guard services.isActiveGeneration(generation),
+              services.authOperationEpoch.isCurrent(authSessionToken) else { return }
+        services.invalidateOfflineWriteReplayAuthority()
+        await services.unbindOfflineWriteQueue()
         guard services.isActiveGeneration(generation),
               services.authOperationEpoch.isCurrent(authSessionToken) else { return }
         await services.revokeFarmSnapshot()
@@ -140,6 +146,11 @@ final class AuthViewModel {
         )
         guard services.authOperationEpoch.isCurrent(pending.authToken) else { return nil }
         recordActivationOutcome(result, authToken: pending.authToken)
+        if result == .activated {
+            services.authorizeOfflineWriteReplayBinding()
+            await services.syncOfflineWriteQueue()
+            guard services.authOperationEpoch.isCurrent(pending.authToken) else { return nil }
+        }
         return result
     }
 
@@ -163,6 +174,7 @@ final class AuthViewModel {
         // logout landed. The token is threaded into activation so a logout landing
         // during the activation await cannot rebind.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
+        services.invalidateOfflineWriteReplayAuthority()
         isLoading = true
         if case .restored(let user) = await services.authService.restoreSession(operation: token) {
             guard services.authOperationEpoch.isCurrent(token.value) else {
@@ -180,6 +192,11 @@ final class AuthViewModel {
                 return
             }
             recordActivationOutcome(activation, authToken: token.value)
+            if activation == .activated {
+                services.authorizeOfflineWriteReplayBinding()
+                await services.syncOfflineWriteQueue()
+                guard services.authOperationEpoch.isCurrent(token.value) else { return }
+            }
         } else {
             guard services.authOperationEpoch.isCurrent(token.value) else {
                 return
@@ -214,6 +231,7 @@ final class AuthViewModel {
         // also passed into activation so a logout landing DURING the activation await
         // fails the final snapshot-publication CAS.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
+        services.invalidateOfflineWriteReplayAuthority()
         isLoading = true
         errorMessage = nil
 
@@ -237,6 +255,11 @@ final class AuthViewModel {
                 // snapshot is NOT ready — record a retryable pending activation instead of
                 // silently declaring fully ready.
                 recordActivationOutcome(activation, authToken: token.value)
+                if activation == .activated {
+                    services.authorizeOfflineWriteReplayBinding()
+                    await services.syncOfflineWriteQueue()
+                    guard services.authOperationEpoch.isCurrent(token.value) else { return }
+                }
                 isLoading = false
             case .superseded:
                 return // no view-state change, no loading clobber, for superseded work
@@ -260,7 +283,11 @@ final class AuthViewModel {
         // login starting during logout's awaits supersedes this logout, so its clears
         // (including the loading flag) are skipped and never clobber the newer op.
         let token = AuthOperationToken(value: services.authOperationEpoch.advance())
+        services.invalidateOfflineWriteReplayAuthority()
+        await services.unbindOfflineWriteQueue()
+        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.revokeFarmSnapshot()
+        guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false
@@ -281,9 +308,10 @@ final class AuthViewModel {
 
     // MARK: - Demo Mode
 
-    func loginAsDemo() {
+    func loginAsDemo() async {
+        services.invalidateOfflineWriteReplayAuthority()
+        await services.switchToDemo()
         DemoMode.shared.activate()
-        services.switchToDemo()
         currentUser = DemoData.demoUser
         isAuthenticated = true
     }

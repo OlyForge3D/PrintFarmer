@@ -71,7 +71,10 @@ public sealed class SqliteNativePushSchemaUpgradeTests
                 _ = await setup.Database.ExecuteSqlRawAsync(
                     "DROP INDEX \"IX_DeviceTokens_Token\";");
                 _ = await setup.Database.ExecuteSqlRawAsync(
-                    "DROP INDEX \"IX_DeviceTokens_UserId_InstallationId\";");
+                    "DROP INDEX \"IX_DeviceTokens_InstallationId\";");
+                _ = await setup.Database.ExecuteSqlRawAsync(
+                    "CREATE UNIQUE INDEX \"IX_DeviceTokens_UserId_InstallationId\" "
+                        + "ON \"DeviceTokens\" (\"UserId\", \"InstallationId\");");
                 _ = await setup.Database.ExecuteSqlRawAsync(
                     "ALTER TABLE \"NotificationPreferences\" "
                         + "DROP COLUMN \"AttentionPushCategoryPreferencesJson\";");
@@ -112,7 +115,11 @@ public sealed class SqliteNativePushSchemaUpgradeTests
 
                 IReadOnlyCollection<string> indexes = await ReadDeviceTokenIndexesAsync(upgraded);
                 indexes.Should().Contain("IX_DeviceTokens_Token");
-                indexes.Should().Contain("IX_DeviceTokens_UserId_InstallationId");
+                indexes.Should().Contain("IX_DeviceTokens_InstallationId");
+                indexes.Should().Contain("IX_DeviceTokens_UserId");
+                indexes.Should().NotContain("IX_DeviceTokens_UserId_InstallationId");
+                (await ReadIndexSqlAsync(upgraded, "IX_DeviceTokens_InstallationId"))
+                    .Should().Contain("WHERE \"IsActive\" = 1");
             }
         }
         finally
@@ -146,6 +153,35 @@ public sealed class SqliteNativePushSchemaUpgradeTests
             }
 
             return names;
+        }
+        finally
+        {
+            if (closeConnection)
+            {
+                await connection.CloseAsync();
+            }
+        }
+    }
+
+    private static async Task<string?> ReadIndexSqlAsync(AppDbContext db, string indexName)
+    {
+        DbConnection connection = db.Database.GetDbConnection();
+        bool closeConnection = connection.State != System.Data.ConnectionState.Open;
+        if (closeConnection)
+        {
+            await connection.OpenAsync();
+        }
+
+        try
+        {
+            await using DbCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = $name;";
+            DbParameter parameter = command.CreateParameter();
+            parameter.ParameterName = "$name";
+            parameter.Value = indexName;
+            _ = command.Parameters.Add(parameter);
+            return await command.ExecuteScalarAsync() as string;
         }
         finally
         {
