@@ -572,9 +572,10 @@ final class OfflineWriteQueueTests: XCTestCase {
         let authority = OfflineWriteReplayAuthority()
         let expectedBinding = authority.bind(serverID: serverA, userID: userA)
         let parts = MockPartsInventoryService()
+        let mismatchedIdentity = OfflineWriteReplayIdentity(serverID: serverA, userID: userB)
         let transport = DynamicOfflineReplayTransport(replayAuthority: authority) {
             OfflineReplayServices(
-                identity: OfflineWriteReplayIdentity(serverID: self.serverA, userID: self.userB),
+                identity: mismatchedIdentity,
                 parts: parts
             )
         }
