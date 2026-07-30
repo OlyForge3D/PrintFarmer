@@ -36,9 +36,14 @@ public sealed record OperatorFeatureFlagsDto
     [JsonPropertyName("shiftPlanEnabled")]
     public bool ShiftPlanEnabled { get; init; } = true;
 
-    /// <summary>Printed-part stock, bins, harvest, and scan/inventory API (#714). Default true.</summary>
+    /// <summary>
+    /// Printed-part stock, bins, harvest, and scan/inventory API (#714). Default false: the
+    /// workflow depends on part SKUs and output mappings, and until an operator configures
+    /// those a harvest action has no outputs to resolve and can only fail. Mirrors
+    /// <see cref="NativePushEnabled"/>, which is likewise off until configured. See issue #1000.
+    /// </summary>
     [JsonPropertyName("printedPartsInventoryEnabled")]
-    public bool PrintedPartsInventoryEnabled { get; init; } = true;
+    public bool PrintedPartsInventoryEnabled { get; init; }
 
     /// <summary>Idempotent write queue and offline replay (#715). Default true.</summary>
     [JsonPropertyName("offlineWriteReplayEnabled")]

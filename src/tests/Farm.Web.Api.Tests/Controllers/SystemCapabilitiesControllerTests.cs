@@ -152,7 +152,7 @@ public class SystemCapabilitiesControllerTests
         flags.GuidedSwapEnabled.Should().BeTrue();
         flags.MultiSlotFallbackEnabled.Should().BeTrue();
         flags.ShiftPlanEnabled.Should().BeTrue();
-        flags.PrintedPartsInventoryEnabled.Should().BeTrue();
+        flags.PrintedPartsInventoryEnabled.Should().BeFalse("missing flags fall back to the documented default, which is off until mappings exist (#1000)");
         flags.OfflineWriteReplayEnabled.Should().BeTrue();
     }
 

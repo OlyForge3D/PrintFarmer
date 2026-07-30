@@ -70,10 +70,10 @@ public class OperatorFeatureSettings : IAppSetting
 
     [SettingDisplay(
         Name = "Printed parts inventory",
-        Description = "Printed-part stock, bins, harvest, and scan/inventory API (#714).",
+        Description = "Printed-part stock, bins, harvest, and scan/inventory API (#714). Disabled by default until part SKUs and output mappings are configured; until they exist a harvest action cannot resolve any output and can only fail.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("printedPartsInventoryEnabled")]
-    public bool PrintedPartsInventoryEnabled { get; set; } = true;
+    public bool PrintedPartsInventoryEnabled { get; set; }
 
     [SettingDisplay(
         Name = "Offline write replay",

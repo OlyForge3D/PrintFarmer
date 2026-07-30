@@ -39,8 +39,10 @@ final class SystemCapabilitiesTests: XCTestCase {
 
     func testDefaultsMatchDocumentedContract() {
         // #725 acceptance: attention/filament-coverage/guided-swap/
-        // multi-slot-fallback/shift-plan/printed-parts/offline-replay
-        // default true; native push defaults false until relay configured.
+        // multi-slot-fallback/shift-plan/offline-replay default true.
+        // Native push defaults false until a relay is configured, and
+        // printed-parts inventory defaults false until part SKUs and
+        // output mappings exist (#1000).
         let defaults = ResolvedSystemCapabilities.defaults
         XCTAssertTrue(defaults.attentionEnabled)
         XCTAssertFalse(defaults.nativePushEnabled)
@@ -48,7 +50,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(defaults.guidedSwapEnabled)
         XCTAssertTrue(defaults.multiSlotFallbackEnabled)
         XCTAssertTrue(defaults.shiftPlanEnabled)
-        XCTAssertTrue(defaults.printedPartsInventoryEnabled)
+        XCTAssertFalse(defaults.printedPartsInventoryEnabled)
         XCTAssertTrue(defaults.offlineWriteReplayEnabled)
     }
 
@@ -97,7 +99,7 @@ final class SystemCapabilitiesTests: XCTestCase {
     func testPartiallyPopulatedResponseOnlyOverridesProvidedFlags() throws {
         // A server that ships #725 but does not yet expose the printed
         // parts flag must still resolve that flag to its documented
-        // default of `true`.
+        // default of `false` (#1000).
         let json = """
         {
             "attentionEnabled": false,
@@ -114,7 +116,7 @@ final class SystemCapabilitiesTests: XCTestCase {
         XCTAssertTrue(resolved.guidedSwapEnabled)
         XCTAssertTrue(resolved.multiSlotFallbackEnabled)
         XCTAssertTrue(resolved.shiftPlanEnabled)
-        XCTAssertTrue(resolved.printedPartsInventoryEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
     }
 
