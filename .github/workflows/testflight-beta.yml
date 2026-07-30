@@ -283,14 +283,10 @@ jobs:
           CI_KEYCHAIN_PWD="ci-keychain-temp-password"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$CI_KEYCHAIN_PWD" "$KEYCHAIN_PATH"
 
-      - name: Update build version numbers
+      - name: Update build number
         run: |
           set -euo pipefail
           agvtool new-version -all ${{ steps.version.outputs.build_number }}
-          agvtool new-marketing-version ${{ steps.version.outputs.version }}
-          ./scripts/verify-marketing-version.sh resolved \
-            "${{ steps.version.outputs.version }}" \
-            PrintFarmer/Info.plist
 
       - name: Resolve package dependencies
         run: |
@@ -314,6 +310,7 @@ jobs:
             CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="${{ steps.profile.outputs.name }}" \
             DEVELOPMENT_TEAM=ZPKA84F3TY \
+            MARKETING_VERSION="${{ steps.version.outputs.version }}" \
             SWIFT_STRICT_CONCURRENCY=minimal \
             OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH" \
             archive

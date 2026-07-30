@@ -52,23 +52,27 @@ jobs:
             -resolvePackageDependencies \
             -clonedSourcePackagesDirPath build/SourcePackages
 
-      - name: Resolve pinned iOS simulator destination
-        run: ../scripts/ci/resolve-ios-simulator.sh
-
-      - name: Build (Debug)
+      - name: Archive future marketing version
         timeout-minutes: 20
         run: |
           xcodebuild \
             -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
-            -configuration Debug \
-            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
             -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages \
-            CODE_SIGN_IDENTITY="-" \
-            CODE_SIGNING_REQUIRED=NO \
+            -archivePath build/MarketingVersion.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            MARKETING_VERSION=1.1 \
+            SKIP_INSTALL=NO \
             SWIFT_STRICT_CONCURRENCY=minimal \
-            build
+            archive
+
+      - name: Verify future archived marketing version
+        run: |
+          ./scripts/verify-marketing-version.sh resolved 1.1 \
+            build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
 
   test:
     name: Unit Tests (iOS)

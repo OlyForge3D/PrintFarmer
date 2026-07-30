@@ -2107,6 +2107,7 @@
 				DEVELOPMENT_TEAM = ZPKA84F3TY;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PrintFarmer/Info.plist;
+				INFOPLIST_KEY_CFBundleShortVersionString = "$(MARKETING_VERSION)";
 				INFOPLIST_KEY_NFCReaderUsageDescription = "PrintFarmer uses NFC to read and write tags on filament spools for inventory management.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "PrintFarmer uses the camera to scan QR codes on filament spools for quick identification and tracking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -2277,6 +2278,7 @@
 				DEVELOPMENT_TEAM = ZPKA84F3TY;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = PrintFarmer/Info.plist;
+				INFOPLIST_KEY_CFBundleShortVersionString = "$(MARKETING_VERSION)";
 				INFOPLIST_KEY_NFCReaderUsageDescription = "PrintFarmer uses NFC to read and write tags on filament spools for inventory management.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "PrintFarmer uses the camera to scan QR codes on filament spools for quick identification and tracking.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

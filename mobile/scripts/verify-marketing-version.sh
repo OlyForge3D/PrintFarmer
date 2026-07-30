@@ -18,7 +18,7 @@ case "$MODE" in
         total_marketing_version_count="$(grep -F -c "MARKETING_VERSION = " "$PROJECT_FILE" || true)"
         marketing_version_count="$(grep -F -c "MARKETING_VERSION = ${EXPECTED_VERSION};" "$PROJECT_FILE" || true)"
         versioning_system_count="$(grep -F -c "VERSIONING_SYSTEM = apple-generic;" "$PROJECT_FILE" || true)"
-        plist_version="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$SOURCE_PLIST")"
+        generated_version_binding_count="$(grep -F -c "INFOPLIST_KEY_CFBundleShortVersionString = \"\$(MARKETING_VERSION)\";" "$PROJECT_FILE" || true)"
 
         if [[ "$total_marketing_version_count" -ne "$EXPECTED_TARGET_CONFIGURATIONS" || "$marketing_version_count" -ne "$EXPECTED_TARGET_CONFIGURATIONS" ]]; then
             echo "Expected all ${EXPECTED_TARGET_CONFIGURATIONS} target configurations at MARKETING_VERSION ${EXPECTED_VERSION}; found ${marketing_version_count} of ${total_marketing_version_count}" >&2
@@ -28,8 +28,12 @@ case "$MODE" in
             echo "Expected ${EXPECTED_TARGET_CONFIGURATIONS} target configurations using apple-generic versioning; found ${versioning_system_count}" >&2
             exit 1
         fi
-        if [[ "$plist_version" != "\$(MARKETING_VERSION)" ]]; then
-            echo "Source CFBundleShortVersionString must resolve from MARKETING_VERSION; found ${plist_version}" >&2
+        if [[ "$generated_version_binding_count" -ne 2 ]]; then
+            echo "Expected app Debug and Release to generate CFBundleShortVersionString from MARKETING_VERSION; found ${generated_version_binding_count} bindings" >&2
+            exit 1
+        fi
+        if /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$SOURCE_PLIST" >/dev/null 2>&1; then
+            echo "Static Info.plist must not define CFBundleShortVersionString; MARKETING_VERSION is authoritative" >&2
             exit 1
         fi
         ;;
