@@ -283,7 +283,7 @@ final class UITestBootstrapTests: XCTestCase {
         XCTAssertTrue(resolved.guidedSwapEnabled)
         XCTAssertTrue(resolved.multiSlotFallbackEnabled)
         XCTAssertTrue(resolved.shiftPlanEnabled)
-        XCTAssertTrue(resolved.printedPartsInventoryEnabled)
+        XCTAssertFalse(resolved.printedPartsInventoryEnabled)
         XCTAssertTrue(resolved.offlineWriteReplayEnabled)
     }
 

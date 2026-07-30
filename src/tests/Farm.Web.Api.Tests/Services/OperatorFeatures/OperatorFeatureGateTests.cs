@@ -78,7 +78,7 @@ public class OperatorFeatureGateTests
         flags.GuidedSwapEnabled.Should().BeTrue();
         flags.MultiSlotFallbackEnabled.Should().BeTrue();
         flags.ShiftPlanEnabled.Should().BeTrue();
-        flags.PrintedPartsInventoryEnabled.Should().BeTrue();
+        flags.PrintedPartsInventoryEnabled.Should().BeFalse("issue #1000 requires printed-parts inventory disabled until part SKUs and output mappings are configured");
         flags.OfflineWriteReplayEnabled.Should().BeTrue();
     }
 

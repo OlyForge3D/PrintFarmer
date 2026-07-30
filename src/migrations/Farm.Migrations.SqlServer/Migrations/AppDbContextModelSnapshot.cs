@@ -3894,29 +3894,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.MutationCounter", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<long>("Value")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("MutationCounters");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Value = 0L
-                        });
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3995,6 +3972,29 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .IsUnique();
 
                     b.ToTable("ModelCollectionMemberships", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MutationCounter", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("Value")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MutationCounters");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Value = 0L
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
@@ -4202,8 +4202,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasIndex("InstallationId")
                         .IsUnique()
-                        .HasFilter("[IsActive] = 1")
-                        .HasDatabaseName("IX_DeviceTokens_InstallationId");
+                        .HasDatabaseName("IX_DeviceTokens_InstallationId")
+                        .HasFilter("[IsActive] = 1");
 
                     b.HasIndex("Token")
                         .HasDatabaseName("IX_DeviceTokens_Token");
@@ -4620,6 +4620,34 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.ToTable("ObicoServers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OutboxSequenceStates");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            NextSequence = 0L
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PartHarvestOutputSnapshot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4886,34 +4914,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                             t.HasCheckConstraint("CK_PartOutputMappings_ExactlyOneSource", "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
 
                             t.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "\"Quantity\" > 0");
-                        });
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<long>("NextSequence")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("OutboxSequenceStates");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            NextSequence = 0L
                         });
                 });
 
@@ -6027,6 +6027,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("ActiveToolheadIndex")
+                        .HasColumnType("int");
+
                     b.Property<string>("ApiKey")
                         .HasColumnType("nvarchar(max)");
 
@@ -6038,139 +6041,12 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
-                    b.Property<int>("BackendPort")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("BedTypeId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("BuddyCameraIp")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<string>("CurrentMaterial")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int?>("CurrentSpoolId")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("DateAcquired")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int?>("FrontendPort")
-                        .HasColumnType("int");
-
-                    b.Property<bool>("HasEnclosure")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("HasHeatedBed")
-                        .HasColumnType("bit");
-
-                    b.Property<bool?>("HasMmu")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("InMaintenance")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsAvailable")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("LocationId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal?>("MachineHourlyRate")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<Guid>("ManufacturerId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int?>("MaxBedTemp")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("MaxBuildVolumeX")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("MaxBuildVolumeY")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("MaxBuildVolumeZ")
-                        .HasColumnType("float");
-
-                    b.Property<int?>("MaxPrintSpeed")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("ModelId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("MultiMaterial")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("nvarchar(128)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<double?>("NozzleDiameter")
-                        .HasColumnType("float");
-
-                    b.Property<bool>("ObicoEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("OriginalServerUrl")
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<string>("Password")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid?>("PrinterGroupId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
-
-                    b.Property<string>("ServerUrl")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
-
-                    b.Property<bool>("SupportsAutoLeveling")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("SupportsPerToolAttribution")
-                        .HasColumnType("bit");
-
-                    b.Property<Guid?>("TemplateMachineProfileId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<bool>("UseModelDispatchDefaults")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("Username")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("Wattage")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("ZOffsetMm")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<int?>("ActiveToolheadIndex")
-                        .HasColumnType("int");
-
                     b.Property<string>("BackendApiVersion")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("BackendPort")
+                        .HasColumnType("int");
 
                     b.Property<string>("BackendVersion")
                         .HasMaxLength(128)
@@ -6181,6 +6057,12 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<double?>("BedOriginY")
                         .HasColumnType("float");
+
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BuddyCameraIp")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
                         .HasColumnType("datetime2");
@@ -6227,6 +6109,15 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
+                    b.Property<string>("CurrentMaterial")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("CurrentSpoolId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DateAcquired")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -6258,18 +6149,66 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<int?>("FrontendPort")
+                        .HasColumnType("int");
+
                     b.Property<int>("GcodeDialect")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
+                    b.Property<bool>("HasEnclosure")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("HasHeatedBed")
+                        .HasColumnType("bit");
+
                     b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("bit");
+
+                    b.Property<bool?>("HasMmu")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("InMaintenance")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsAvailable")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("MachineHourlyRate")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("ManufacturerId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("MaxAcceleration")
                         .HasColumnType("int");
 
+                    b.Property<int?>("MaxBedTemp")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("MaxBuildVolumeX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("MaxBuildVolumeY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("MaxBuildVolumeZ")
+                        .HasColumnType("float");
+
                     b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MaxPrintSpeed")
                         .HasColumnType("int");
 
                     b.Property<int?>("MaxTravelAcceleration")
@@ -6278,14 +6217,75 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("MaxTravelSpeed")
                         .HasColumnType("int");
 
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("MultiMaterial")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("float");
+
+                    b.Property<bool>("ObicoEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("OriginalServerUrl")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Password")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("PrinterGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("ServerUrl")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<bool>("SupportsAutoLeveling")
+                        .HasColumnType("bit");
 
                     b.Property<bool?>("SupportsFirmwareRetraction")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("SupportsPerToolAttribution")
+                        .HasColumnType("bit");
+
                     b.Property<bool?>("SupportsPressureAdvance")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("TemplateMachineProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("UseModelDispatchDefaults")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Username")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("Wattage")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("ZOffsetMm")
+                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 
@@ -7773,8 +7773,19 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int?>("CurrentSpoolId")
                         .HasColumnType("int");
 
+                    b.Property<string>("DriveType")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ExtruderGearRatio")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<Guid?>("ExtruderModelId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("HotendMaxTemperature")
+                        .HasColumnType("int");
 
                     b.Property<Guid?>("HotendModelId")
                         .HasColumnType("uniqueidentifier");
@@ -7782,18 +7793,49 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<int>("Index")
                         .HasColumnType("int");
 
+                    b.Property<bool?>("IsDirectDrive")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsPrimary")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(false);
+
+                    b.Property<double?>("MaxVolumetricFlow")
+                        .HasColumnType("float");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("float");
+
+                    b.Property<bool?>("NozzleIsHardened")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("NozzleMaterial")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int?>("NozzleMaxTemperature")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("NozzleModelId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("NozzleType")
+                        .HasColumnType("int");
+
+                    b.Property<double?>("OffsetX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("OffsetY")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("OffsetZ")
+                        .HasColumnType("float");
 
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
@@ -7811,48 +7853,6 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
-
-                    b.Property<string>("DriveType")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<string>("ExtruderGearRatio")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<int?>("HotendMaxTemperature")
-                        .HasColumnType("int");
-
-                    b.Property<bool?>("IsDirectDrive")
-                        .HasColumnType("bit");
-
-                    b.Property<double?>("MaxVolumetricFlow")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("NozzleDiameter")
-                        .HasColumnType("float");
-
-                    b.Property<bool?>("NozzleIsHardened")
-                        .HasColumnType("bit");
-
-                    b.Property<string>("NozzleMaterial")
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<int?>("NozzleMaxTemperature")
-                        .HasColumnType("int");
-
-                    b.Property<int?>("NozzleType")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("OffsetX")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("OffsetY")
-                        .HasColumnType("float");
-
-                    b.Property<double?>("OffsetZ")
-                        .HasColumnType("float");
 
                     b.HasKey("Id");
 

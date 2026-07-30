@@ -64,7 +64,7 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
         new(OperatorFeature.GuidedSwap, "guidedSwapEnabled", s => s.GuidedSwapEnabled, true),
         new(OperatorFeature.MultiSlotFallback, "multiSlotFallbackEnabled", s => s.MultiSlotFallbackEnabled, true),
         new(OperatorFeature.ShiftPlan, "shiftPlanEnabled", s => s.ShiftPlanEnabled, true),
-        new(OperatorFeature.PrintedPartsInventory, "printedPartsInventoryEnabled", s => s.PrintedPartsInventoryEnabled, true),
+        new(OperatorFeature.PrintedPartsInventory, "printedPartsInventoryEnabled", s => s.PrintedPartsInventoryEnabled, false),
         new(OperatorFeature.OfflineWriteReplay, "offlineWriteReplayEnabled", s => s.OfflineWriteReplayEnabled, true),
     ];
 

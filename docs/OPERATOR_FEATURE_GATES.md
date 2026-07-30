@@ -22,7 +22,7 @@ Effective flags are exposed on the wire in camelCase.
 | `guidedSwapEnabled` | `true` | [#710](https://github.com/OlyForge3D/PFarm/issues/710) | Per-tool requirements, swap validation, and guided swap flow. |
 | `multiSlotFallbackEnabled` | `true` | [#711](https://github.com/OlyForge3D/PFarm/issues/711) | Fallback groups, per-tool maintenance, dispatch loadout. |
 | `shiftPlanEnabled` | `true` | [#713](https://github.com/OlyForge3D/PFarm/issues/713) | Shift compiler and Tasks feed. |
-| `printedPartsInventoryEnabled` | `true` | [#714](https://github.com/OlyForge3D/PFarm/issues/714) | Printed-part stock, bins, harvest, scan/inventory API. |
+| `printedPartsInventoryEnabled` | `false` | [#714](https://github.com/OlyForge3D/PFarm/issues/714) | Printed-part stock, bins, harvest, scan/inventory API. Off until part SKUs and output mappings are configured; without them a harvest action has no outputs to resolve and can only fail ([#1000](https://github.com/OlyForge3D/PrintFarmer/issues/1000)). |
 | `offlineWriteReplayEnabled` | `true` | [#715](https://github.com/OlyForge3D/PFarm/issues/715) | Idempotent write queue and offline replay. |
 
 ## Resolution order
@@ -79,7 +79,7 @@ defaults rather than a 500.
     "guidedSwapEnabled": true,
     "multiSlotFallbackEnabled": true,
     "shiftPlanEnabled": true,
-    "printedPartsInventoryEnabled": true,
+    "printedPartsInventoryEnabled": false,
     "offlineWriteReplayEnabled": true
   }
 }

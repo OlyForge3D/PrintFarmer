@@ -31,7 +31,7 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
     /// * `guidedSwapEnabled` — `true`
     /// * `multiSlotFallbackEnabled` — `true`
     /// * `shiftPlanEnabled` — `true`
-    /// * `printedPartsInventoryEnabled` — `true`
+    /// * `printedPartsInventoryEnabled` — `false` (until part SKUs/output mappings configured)
     /// * `offlineWriteReplayEnabled` — `true`
     var resolved: ResolvedSystemCapabilities {
         ResolvedSystemCapabilities(
@@ -41,7 +41,7 @@ struct SystemCapabilities: Codable, Sendable, Equatable {
             guidedSwapEnabled: guidedSwapEnabled ?? true,
             multiSlotFallbackEnabled: multiSlotFallbackEnabled ?? true,
             shiftPlanEnabled: shiftPlanEnabled ?? true,
-            printedPartsInventoryEnabled: printedPartsInventoryEnabled ?? true,
+            printedPartsInventoryEnabled: printedPartsInventoryEnabled ?? false,
             offlineWriteReplayEnabled: offlineWriteReplayEnabled ?? true
         )
     }
@@ -59,8 +59,9 @@ struct ResolvedSystemCapabilities: Sendable, Equatable {
     var offlineWriteReplayEnabled: Bool
 
     /// The default snapshot used before `/api/system/capabilities` responds,
-    /// after a 404, or when the endpoint is unreachable. Matches #725's
-    /// documented defaults so the app boots into a fully-enabled state.
+    /// after a 404, or when the endpoint is unreachable. Mirrors the server-side
+    /// defaults so the app never advertises an action the backend will reject —
+    /// notably harvest, which requires configured part SKUs and output mappings.
     static let defaults = ResolvedSystemCapabilities(
         attentionEnabled: true,
         nativePushEnabled: false,
@@ -68,7 +69,7 @@ struct ResolvedSystemCapabilities: Sendable, Equatable {
         guidedSwapEnabled: true,
         multiSlotFallbackEnabled: true,
         shiftPlanEnabled: true,
-        printedPartsInventoryEnabled: true,
+        printedPartsInventoryEnabled: false,
         offlineWriteReplayEnabled: true
     )
 }
