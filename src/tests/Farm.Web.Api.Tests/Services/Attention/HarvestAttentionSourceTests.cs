@@ -23,6 +23,8 @@ namespace Farm.Web.Api.Tests.Services.Attention;
 
 public class HarvestAttentionSourceTests : IDisposable
 {
+    private static readonly DateTime FixedNow = new(2026, 7, 30, 12, 0, 0, DateTimeKind.Utc);
+
     private readonly SqliteConnection _connection;
     private readonly DbContextOptions<AppDbContext> _options;
     private readonly IDbContextFactory<AppDbContext> _factory;
@@ -244,6 +246,119 @@ public class HarvestAttentionSourceTests : IDisposable
 
         Assert.Equal(AttentionActionOutcome.Ok, result.Outcome);
         harvest.VerifyAll();
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_CompletionOlderThanStaleWindow_IsExcluded()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid staleJobId = Guid.NewGuid();
+        Guid freshJobId = Guid.NewGuid();
+        await using (var db = new AppDbContext(_options))
+        {
+            SeedPrinter(db, printerId);
+            _ = db.PrintJobs.Add(new PrintJob
+            {
+                Id = staleJobId,
+                Name = "archived.gcode",
+                Status = PrintJobStatus.Completed,
+                AssignedPrinterId = printerId,
+                ActualEndTime = FixedNow - HarvestAttentionSource.StaleWindow - TimeSpan.FromHours(1),
+                UpdatedAt = FixedNow,
+            });
+            _ = db.PrintJobs.Add(new PrintJob
+            {
+                Id = freshJobId,
+                Name = "bracket.gcode",
+                Status = PrintJobStatus.Completed,
+                AssignedPrinterId = printerId,
+                ActualEndTime = FixedNow - TimeSpan.FromHours(1),
+                UpdatedAt = FixedNow,
+            });
+            _ = await db.SaveChangesAsync();
+        }
+
+        HarvestAttentionSource source = CreateSource();
+
+        AttentionItemDto item = Assert.Single(await source.GetItemsAsync(CancellationToken.None));
+
+        Assert.Equal(freshJobId, item.JobId);
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_MoreCompletionsThanCap_KeepsNewestAndDropsOldest()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid[] jobIds = new Guid[101];
+        await using (var db = new AppDbContext(_options))
+        {
+            SeedPrinter(db, printerId);
+            for (int index = 0; index < jobIds.Length; index++)
+            {
+                jobIds[index] = Guid.NewGuid();
+                _ = db.PrintJobs.Add(new PrintJob
+                {
+                    Id = jobIds[index],
+                    Name = $"part-{index}.gcode",
+                    Status = PrintJobStatus.Completed,
+                    AssignedPrinterId = printerId,
+
+                    // Every completion stays inside the stale window so only the cap decides.
+                    ActualEndTime = FixedNow - TimeSpan.FromHours(index),
+                    UpdatedAt = FixedNow,
+                });
+            }
+
+            _ = await db.SaveChangesAsync();
+        }
+
+        HarvestAttentionSource source = CreateSource();
+
+        IReadOnlyList<AttentionItemDto> items = await source.GetItemsAsync(CancellationToken.None);
+
+        Assert.Equal(100, items.Count);
+        Assert.Contains(items, item => item.JobId == jobIds[0]);
+        Assert.DoesNotContain(items, item => item.JobId == jobIds[^1]);
+    }
+
+    private HarvestAttentionSource CreateSource()
+    {
+        var gate = new Mock<IOperatorFeatureGate>();
+        gate.Setup(value => value.IsEnabled(OperatorFeature.PrintedPartsInventory)).Returns(true);
+        gate.Setup(value => value.IsEnabledAsync(OperatorFeature.PrintedPartsInventory, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        return new HarvestAttentionSource(
+            _factory,
+            gate.Object,
+            timeProvider: new FixedTimeProvider(FixedNow));
+    }
+
+    private static void SeedPrinter(AppDbContext db, Guid printerId)
+    {
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        _ = db.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Test Manufacturer" });
+        _ = db.PrinterModels.Add(new PrinterModel
+        {
+            Id = modelId,
+            Name = "Test Model",
+            ManufacturerId = manufacturerId,
+        });
+        _ = db.Printers.Add(new Printer
+        {
+            Id = printerId,
+            Name = "Printer A",
+            ServerUrl = "http://printer-a",
+            BackendPort = 7125,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+        });
+    }
+
+    private sealed class FixedTimeProvider(DateTime nowUtc) : TimeProvider
+    {
+        private readonly DateTimeOffset _now = new(nowUtc, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
     }
 
     private sealed class ConstantWatermarkReader(long value) : IMutationWatermarkReader

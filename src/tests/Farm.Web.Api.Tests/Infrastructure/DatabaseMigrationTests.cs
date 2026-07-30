@@ -50,7 +50,8 @@ public sealed class DatabaseMigrationTests
             "20260727215428_RequireScheduleOperatorReauthorization",
             "20260728023427_AddScheduledOccurrenceIdentity",
             "20260728063711_AddCalibrationAttemptToQueueEvents",
-            "20260729191406_EnforceGlobalDeviceTokenInstallationOwner");
+            "20260729191406_EnforceGlobalDeviceTokenInstallationOwner",
+            "20260730161316_BackfillLegacyHarvestedAt");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();

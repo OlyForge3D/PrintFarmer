@@ -3887,29 +3887,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("Model3DTag", (string)null);
                 });
 
-            modelBuilder.Entity("Farm.Infrastructure.Domain.MutationCounter", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<long>("Value")
-                        .HasColumnType("bigint");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("MutationCounters");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            Value = 0L
-                        });
-                });
-
             modelBuilder.Entity("Farm.Infrastructure.Domain.ModelCollection", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3988,6 +3965,29 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .IsUnique();
 
                     b.ToTable("ModelCollectionMemberships", (string)null);
+                });
+
+            modelBuilder.Entity("Farm.Infrastructure.Domain.MutationCounter", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("Value")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("MutationCounters");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            Value = 0L
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.NfcDevice", b =>
@@ -4194,8 +4194,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasIndex("InstallationId")
                         .IsUnique()
-                        .HasFilter("\"IsActive\"")
-                        .HasDatabaseName("IX_DeviceTokens_InstallationId");
+                        .HasDatabaseName("IX_DeviceTokens_InstallationId")
+                        .HasFilter("\"IsActive\"");
 
                     b.HasIndex("Token")
                         .HasDatabaseName("IX_DeviceTokens_Token");
@@ -4612,6 +4612,34 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.ToTable("ObicoServers");
                 });
 
+            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<long>("NextSequence")
+                        .HasColumnType("bigint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .HasMaxLength(16)
+                        .HasColumnType("bytea");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("OutboxSequenceStates");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            NextSequence = 0L
+                        });
+                });
+
             modelBuilder.Entity("Farm.Infrastructure.Domain.PartHarvestOutputSnapshot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4873,34 +4901,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                             t.HasCheckConstraint("CK_PartOutputMappings_ExactlyOneSource", "(\"GcodeFileId\" IS NULL AND \"PrintProjectFileId\" IS NOT NULL) OR (\"GcodeFileId\" IS NOT NULL AND \"PrintProjectFileId\" IS NULL)");
 
                             t.HasCheckConstraint("CK_PartOutputMappings_Quantity_Positive", "\"Quantity\" > 0");
-                        });
-                });
-
-            modelBuilder.Entity("Farm.Infrastructure.Domain.OutboxSequenceState", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<long>("NextSequence")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("OutboxSequenceStates");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            NextSequence = 0L
                         });
                 });
 
@@ -6008,6 +6008,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("ActiveToolheadIndex")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ApiKey")
                         .HasColumnType("text");
 
@@ -6019,139 +6022,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
-                    b.Property<int>("BackendPort")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid?>("BedTypeId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("BuddyCameraIp")
-                        .HasColumnType("text");
-
-                    b.Property<string>("CurrentMaterial")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("CurrentSpoolId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("DateAcquired")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("FrontendPort")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("HasEnclosure")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("HasHeatedBed")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool?>("HasMmu")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("InMaintenance")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsAvailable")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("IsEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("LocationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<decimal?>("MachineHourlyRate")
-                        .HasColumnType("numeric");
-
-                    b.Property<Guid>("ManufacturerId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int?>("MaxBedTemp")
-                        .HasColumnType("integer");
-
-                    b.Property<double?>("MaxBuildVolumeX")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("MaxBuildVolumeY")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("MaxBuildVolumeZ")
-                        .HasColumnType("double precision");
-
-                    b.Property<int?>("MaxPrintSpeed")
-                        .HasColumnType("integer");
-
-                    b.Property<Guid>("ModelId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("MultiMaterial")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<string>("Notes")
-                        .HasColumnType("text");
-
-                    b.Property<double?>("NozzleDiameter")
-                        .HasColumnType("double precision");
-
-                    b.Property<bool>("ObicoEnabled")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("OriginalServerUrl")
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<string>("Password")
-                        .HasColumnType("text");
-
-                    b.Property<Guid?>("PrinterGroupId")
-                        .HasColumnType("uuid");
-
-                    b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
-
-                    b.Property<string>("ServerUrl")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<bool>("SupportsAutoLeveling")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool>("SupportsPerToolAttribution")
-                        .HasColumnType("boolean");
-
-                    b.Property<Guid?>("TemplateMachineProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<bool>("UseModelDispatchDefaults")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Username")
-                        .HasColumnType("text");
-
-                    b.Property<decimal?>("Wattage")
-                        .HasColumnType("numeric");
-
-                    b.Property<decimal?>("ZOffsetMm")
-                        .HasColumnType("numeric");
-
-                    b.Property<int?>("ActiveToolheadIndex")
-                        .HasColumnType("integer");
-
                     b.Property<string>("BackendApiVersion")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
+
+                    b.Property<int>("BackendPort")
+                        .HasColumnType("integer");
 
                     b.Property<string>("BackendVersion")
                         .HasMaxLength(128)
@@ -6162,6 +6038,12 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<double?>("BedOriginY")
                         .HasColumnType("double precision");
+
+                    b.Property<Guid?>("BedTypeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BuddyCameraIp")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("CalibrationConfigurationUpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -6208,6 +6090,15 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("bigint")
                         .HasDefaultValue(1L);
 
+                    b.Property<string>("CurrentMaterial")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("CurrentSpoolId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DateAcquired")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ExcludedRegionsJson")
                         .HasColumnType("text");
 
@@ -6239,18 +6130,66 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<int?>("FrontendPort")
+                        .HasColumnType("integer");
+
                     b.Property<int>("GcodeDialect")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
+                    b.Property<bool>("HasEnclosure")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("HasHeatedBed")
+                        .HasColumnType("boolean");
+
                     b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("boolean");
+
+                    b.Property<bool?>("HasMmu")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("InMaintenance")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsAvailable")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LastZOffsetCalibrationAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LocationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal?>("MachineHourlyRate")
+                        .HasColumnType("numeric");
+
+                    b.Property<Guid>("ManufacturerId")
+                        .HasColumnType("uuid");
 
                     b.Property<int?>("MaxAcceleration")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("MaxBedTemp")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("MaxBuildVolumeX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("MaxBuildVolumeY")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("MaxBuildVolumeZ")
+                        .HasColumnType("double precision");
+
                     b.Property<int?>("MaxChamberTemp")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxPrintSpeed")
                         .HasColumnType("integer");
 
                     b.Property<int?>("MaxTravelAcceleration")
@@ -6258,6 +6197,33 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<int?>("MaxTravelSpeed")
                         .HasColumnType("integer");
+
+                    b.Property<Guid>("ModelId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("MultiMaterial")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("double precision");
+
+                    b.Property<bool>("ObicoEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("OriginalServerUrl")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Password")
+                        .HasColumnType("text");
 
                     b.Property<string>("PrintablePolygonJson")
                         .HasColumnType("text");
@@ -6281,8 +6247,26 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool?>("SupportsFirmwareRetraction")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("SupportsPerToolAttribution")
+                        .HasColumnType("boolean");
+
                     b.Property<bool?>("SupportsPressureAdvance")
                         .HasColumnType("boolean");
+
+                    b.Property<Guid?>("TemplateMachineProfileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("UseModelDispatchDefaults")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Username")
+                        .HasColumnType("text");
+
+                    b.Property<decimal?>("Wattage")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("ZOffsetMm")
+                        .HasColumnType("numeric");
 
                     b.HasKey("Id");
 
@@ -7768,8 +7752,19 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int?>("CurrentSpoolId")
                         .HasColumnType("integer");
 
+                    b.Property<string>("DriveType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("ExtruderGearRatio")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<Guid?>("ExtruderModelId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("HotendMaxTemperature")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("HotendModelId")
                         .HasColumnType("uuid");
@@ -7777,18 +7772,49 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<int>("Index")
                         .HasColumnType("integer");
 
+                    b.Property<bool?>("IsDirectDrive")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsPrimary")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(false);
+
+                    b.Property<double?>("MaxVolumetricFlow")
+                        .HasColumnType("double precision");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<double?>("NozzleDiameter")
+                        .HasColumnType("double precision");
+
+                    b.Property<bool?>("NozzleIsHardened")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("NozzleMaterial")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int?>("NozzleMaxTemperature")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("NozzleModelId")
                         .HasColumnType("uuid");
+
+                    b.Property<int?>("NozzleType")
+                        .HasColumnType("integer");
+
+                    b.Property<double?>("OffsetX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("OffsetY")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("OffsetZ")
+                        .HasColumnType("double precision");
 
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
@@ -7806,48 +7832,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("DriveType")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("ExtruderGearRatio")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int?>("HotendMaxTemperature")
-                        .HasColumnType("integer");
-
-                    b.Property<bool?>("IsDirectDrive")
-                        .HasColumnType("boolean");
-
-                    b.Property<double?>("MaxVolumetricFlow")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("NozzleDiameter")
-                        .HasColumnType("double precision");
-
-                    b.Property<bool?>("NozzleIsHardened")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("NozzleMaterial")
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<int?>("NozzleMaxTemperature")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("NozzleType")
-                        .HasColumnType("integer");
-
-                    b.Property<double?>("OffsetX")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("OffsetY")
-                        .HasColumnType("double precision");
-
-                    b.Property<double?>("OffsetZ")
-                        .HasColumnType("double precision");
 
                     b.HasKey("Id");
 

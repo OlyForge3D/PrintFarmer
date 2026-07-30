@@ -9,16 +9,35 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.Attention.Sources;
 
-/// <summary>Surfaces completed, unharvested print jobs as stable harvest attention items.</summary>
+/// <summary>Surfaces recently completed, unharvested print jobs as stable harvest attention items.</summary>
+/// <remarks>
+/// <para>
+/// A stale completion window keeps the feed to actionable plates only. <c>HarvestedAt</c> was
+/// introduced as a nullable column, so every job completed before printed-parts inventory
+/// shipped reads as "never harvested". Without a window those archived jobs flood the feed with
+/// cards whose advertised harvest action can never succeed (they have no part-output mappings).
+/// Older completions remain queryable through queue history.
+/// </para>
+/// <para>
+/// Selection is newest-first so that genuinely harvest-ready plates always win the item cap.
+/// Ordering ascending here would spend the cap on the oldest rows and hide current work.
+/// </para>
+/// </remarks>
 public sealed class HarvestAttentionSource(
     IDbContextFactory<AppDbContext> dbFactory,
     IOperatorFeatureGate featureGate,
     IMutationWatermarkReader? watermarkReader = null,
-    ILogger<HarvestAttentionSource>? logger = null) : IAttentionSource, IAttentionSourceWithOrigin
+    ILogger<HarvestAttentionSource>? logger = null,
+    TimeProvider? timeProvider = null) : IAttentionSource, IAttentionSourceWithOrigin
 {
+    /// <summary>Only surface plates completed within this window.</summary>
+    public static readonly TimeSpan StaleWindow = TimeSpan.FromDays(7);
+
     private const int MaxItems = 100;
     private readonly ILogger<HarvestAttentionSource> _logger =
         logger ?? NullLogger<HarvestAttentionSource>.Instance;
+
+    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
     public string SourceName => AttentionIdPrefixes.Harvest;
@@ -80,14 +99,16 @@ public sealed class HarvestAttentionSource(
 
     private async Task<List<PrintJob>> GetJobsAsync(int take, CancellationToken cancellationToken)
     {
+        DateTime cutoff = _clock.GetUtcNow().UtcDateTime - StaleWindow;
         await using AppDbContext db = await dbFactory.CreateDbContextAsync(cancellationToken);
         return await db.PrintJobs
             .AsNoTracking()
             .Include(job => job.AssignedPrinter)
             .Where(job => job.Status == PrintJobStatus.Completed
                 && job.HarvestedAt == null
-                && job.AssignedPrinterId != null)
-            .OrderBy(job => job.ActualEndTime ?? job.UpdatedAt)
+                && job.AssignedPrinterId != null
+                && (job.ActualEndTime ?? job.UpdatedAt) >= cutoff)
+            .OrderByDescending(job => job.ActualEndTime ?? job.UpdatedAt)
             .ThenBy(job => job.Id)
             .Take(take)
             .ToListAsync(cancellationToken);
