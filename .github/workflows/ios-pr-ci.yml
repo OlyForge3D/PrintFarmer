@@ -32,6 +32,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Verify marketing version consistency
+        run: ./scripts/verify-marketing-version.sh source 1.0
+
       - name: Select Xcode
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
