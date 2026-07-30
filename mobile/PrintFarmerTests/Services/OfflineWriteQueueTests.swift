@@ -574,7 +574,7 @@ final class OfflineWriteQueueTests: XCTestCase {
         let parts = MockPartsInventoryService()
         let transport = DynamicOfflineReplayTransport(replayAuthority: authority) {
             OfflineReplayServices(
-                identity: OfflineWriteReplayIdentity(serverID: serverA, userID: userB),
+                identity: OfflineWriteReplayIdentity(serverID: self.serverA, userID: self.userB),
                 parts: parts
             )
         }

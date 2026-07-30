@@ -233,7 +233,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             printJobId: nil,
             operationKey: nil,
             notes: nil,
-            userId: userA,
+            userId: userA.uuidString,
             createdAt: OfflineQueueFixtures.epoch
         )
         parts.adjustPartGate = { await replayBarrier.arriveAndWait() }
