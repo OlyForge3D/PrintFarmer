@@ -537,15 +537,22 @@ LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
       component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
       orcaslicer.distribution="upstream" \
-      orcaslicer.sha256="${ORCASLICER_SHA256}" \
+      orcaslicer.attestation="/etc/printfarmer/orcaslicer.sha256" \
       orcaslicer.allow_stub="${ALLOW_STUB}" \
       security.sandbox="true"
 
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
-# Attestation of what the build actually installed. Empty means "no verified binary" (stub build).
-COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256
+# A legacy external binary context may predate attestation support. Preserve an existing
+# attestation, or write an empty one so the worker registers the installed binary as unverified.
+RUN --mount=type=bind,from=orcaslicer-binaries,source=/orcaslicer-dist,target=/tmp/orcaslicer-dist,readonly \
+    install -d -o appuser -g appuser -m 0755 /etc/printfarmer && \
+    if [ -f /tmp/orcaslicer-dist/orcaslicer.sha256 ]; then \
+        install -o appuser -g appuser -m 0644 /tmp/orcaslicer-dist/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
+    else \
+        install -o appuser -g appuser -m 0644 /dev/null /etc/printfarmer/orcaslicer.sha256; \
+    fi
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
