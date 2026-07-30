@@ -163,12 +163,13 @@ struct SpoolInventoryView: View {
                 await viewModel.loadSpools()
                 if let spoolId = router.pendingSpoolHighlightId {
                     router.pendingSpoolHighlightId = nil
-                    viewModel.highlightedSpoolId = spoolId
+                    viewModel.setHighlight(spoolId: spoolId)
                 }
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear {
                 viewModel.isViewActive = false
+                viewModel.invalidateHighlightOwnership()
                 activeTasks.forEach { $0.cancel() }
             }
         }
@@ -329,14 +330,13 @@ struct SpoolInventoryView: View {
             }
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
+                // Scroll animation only. Highlight expiry is owned synchronously
+                // by the view model inside `setHighlight`, so no expiry task is
+                // spawned here — this avoids the assignment-to-authority gap
+                // that previously let a stale timer clear a newer highlight.
                 if let newId {
                     withAnimation {
                         proxy.scrollTo(newId, anchor: .center)
-                    }
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        guard !Task.isCancelled else { return }
-                        withAnimation { viewModel.clearHighlight() }
                     }
                 }
             }

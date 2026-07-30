@@ -55,6 +55,15 @@ vi.mock('@/services/sliceJobService', () => ({
   },
 }));
 
+// Mock slicerService (issue #578 registry query — QuickSlice reads latest online version)
+vi.mock('@/services/slicerService', () => ({
+  slicerService: {
+    listEngines: vi.fn(() => Promise.resolve([
+      { engine: 'OrcaSlicer', versions: ['2.4.1'], versionEntries: [{ version: '2.4.1', available: true }], latest: '2.4.1' },
+    ])),
+  },
+}));
+
 // Mock apiUrlHelpers
 vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getApiBaseUrl: () => 'http://localhost:5245/api',

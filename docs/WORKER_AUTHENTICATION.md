@@ -110,6 +110,7 @@ The protected routes are:
 - `POST /api/slice/{jobId}/progress`
 - `POST /api/slice/{jobId}/renew-lease`
 - `GET /api/slice/{jobId}/model`
+- `GET /api/slice/{jobId}/models/{modelIndex}`
 - `POST /api/slice/{jobId}/artifacts`
 - `POST /api/slice/{jobId}/complete`
 - `POST /api/slice/{jobId}/fail`
@@ -119,6 +120,20 @@ header GUID, body GUID, and credential-bound service must agree. After a claim,
 PrintFarmer stores the internal worker ID on the job. Model downloads, artifact
 uploads, progress, lease renewal, completion, and failure are allowed only
 while that job is processing and assigned to the resolved worker.
+
+Each successful claim returns an opaque `claimToken`. The worker must send it
+on every subsequent job operation:
+
+```http
+X-Claim-Token: <claim-token>
+```
+
+The token identifies one claim incarnation. It changes whenever a job is
+claimed again, including when the same worker reclaims the same job. Requests
+from an earlier claim are rejected even when their worker identity still
+matches. Model downloads are rechecked after storage opens, artifact uploads
+are fenced when their database record is inserted, and completion accepts only
+artifacts produced under the active claim token.
 
 Workers receive a same-origin model route rather than the model storage path.
 They upload artifacts through the job-scoped multipart route. Completion only

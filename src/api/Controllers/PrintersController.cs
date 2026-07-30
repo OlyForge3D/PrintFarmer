@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -18,6 +19,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Settings;
@@ -26,6 +28,7 @@ using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
 using Farm.Web.Api.Infrastructure.Authorization;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
@@ -38,6 +41,7 @@ using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
+using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -927,15 +931,21 @@ public class PrintersController(
     /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="fallbackGroupService">Injected fallback-group service used to include per-printer fallback chains in the details payload.</param>
+    /// <param name="featureGate">Operator feature gate consulted to decide whether multi-slot fallback chains are exposed (issue #711, FIX E).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings.</returns>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, settings, and configured fallback groups.</returns>
     /// <response code="200">Returns detailed printer information.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(PrinterDetailsDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService fallbackGroupService,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
+        CancellationToken ct)
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
@@ -945,6 +955,15 @@ public class PrintersController(
 
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
+
+        // Only expose per-tool attribution surface (SupportsPerToolAttribution flag and
+        // per-toolhead CumulativePrintHours) when the multi-slot-fallback operator feature
+        // is on AND the printer's persisted domain capability flag is true (issue #711, F6
+        // backend). When either condition fails, both the capability flag and the odometer
+        // values collapse to their unset defaults (false / null) so #719 UI consumers see a
+        // deterministic "not applicable" shape rather than stale or fabricated wear.
+        bool multiSlotFallbackEnabled = await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+        bool perToolAttributionActive = multiSlotFallbackEnabled && p.SupportsPerToolAttribution;
 
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
         // This provides backward compatibility while we transition to using Toolheads directly
@@ -994,7 +1013,21 @@ public class PrintersController(
             t.ToolheadType,
             t.CurrentSpoolId,
             t.CurrentMaterial,
-            t.CurrentFilamentColor)).ToArray();
+            t.CurrentFilamentColor,
+
+            // Only project the per-toolhead odometer when the capability is active for this
+            // printer; otherwise emit explicit null so consumers can distinguish "no
+            // attribution available" from "zero hours accrued" (a supported printer with a
+            // fresh baseline still returns 0.0 here).
+            perToolAttributionActive ? t.CumulativePrintHours : null)).ToArray();
+
+        // Only expose fallback chains when the multi-slot-fallback operator feature is on
+        // (issue #711, FIX E); otherwise return an empty list so gated-off clients never
+        // see fallback config.
+        IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
+            multiSlotFallbackEnabled
+                ? await fallbackGroupService.ListForPrinterAsync(id, ct)
+                : [];
 
         string? rowVersion = p.RowVersion is { Length: > 0 }
             ? Convert.ToBase64String(p.RowVersion)
@@ -1035,6 +1068,8 @@ public class PrintersController(
             p.BuddyCameraIp,
             p.NozzleDiameter,
             p.HasMmu,
+            fallbackGroups,
+            perToolAttributionActive,
             !string.IsNullOrWhiteSpace(p.ServerUrl),
             !string.IsNullOrWhiteSpace(p.ApiKey),
             !string.IsNullOrWhiteSpace(p.Username),
@@ -1735,7 +1770,7 @@ public class PrintersController(
 
         if (wasMultiMaterial != p.MultiMaterial)
         {
-            _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
+            await _printersService.SyncMmuToolheadsOnEntityAsync(p, wasMultiMaterial, ct: ct);
         }
 
         if (dto.SupportsAutoLeveling.HasValue && dto.SupportsAutoLeveling.Value != p.SupportsAutoLeveling)
@@ -1964,6 +1999,13 @@ public class PrintersController(
             }
         }
 
+        // Backend, multi-material, and topology edits all converge on one equality-guarded
+        // capability derivation before the unit of work commits.
+        _ = PerToolAttributionCapability.Refresh(p);
+
+        // The endpoint is revision-guarded (BindPrinterIfMatch above). A concurrency
+        // conflict must surface as a typed 412 to honor the If-Match contract rather than
+        // silently retrying, so callers can refetch and re-issue against the new revision.
         try
         {
             await _printersService.SaveChangesAsync(ct);
@@ -2987,27 +3029,35 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Unloads filament from the extruder.
+    /// Unloads filament from the extruder and returns residual weight of the outgoing spool.
+    /// The residual weight is captured from Spoolman before the unload command is sent so the
+    /// operator's "return to shelf" workflow can log inventory without extra client round-trips.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / MMU-gate / U1-lane index whose spool is being unloaded.
+    /// When omitted, the outgoing spool defaults to <c>Printer.CurrentSpoolId</c> falling
+    /// back to the primary toolhead's <c>CurrentSpoolId</c> — the legacy single-tool path.
+    /// Guided swap flow supplies the target lane on multi-slot printers.
+    /// </param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <returns>Result including success/failure, message, spool ID, material, and residual weight (g).</returns>
     /// <response code="200">Filament unload command sent successfully.</response>
-    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability, unknown toolhead index).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/filament-unload")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
-    [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(typeof(CommandResult), 400)]
-    [ProducesResponseType(404)]
-    public async Task<ActionResult<CommandResult>> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    [ProducesResponseType(typeof(FilamentUnloadResult), 200)]
+    [ProducesResponseType(typeof(FilamentUnloadResult), 400)]
+    [ProducesResponseType(typeof(FilamentUnloadResult), 404)]
+    public async Task<ActionResult<FilamentUnloadResult>> UnloadFilamentAsync(
+        Guid id,
+        [FromQuery] int? toolheadIndex,
+        CancellationToken ct)
     {
-        return await ExecuteDirectCommandControlAsync(
-            id,
-            "filament_unload",
-            "unload_filament",
-            token => _printersService.UnloadFilamentAsync(id, token),
-            ct);
+        FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
+        _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
+        return MapFilamentUnloadResult(result);
     }
 
     /// <summary>
@@ -3343,24 +3393,47 @@ public class PrintersController(
     /// <summary>
     /// Assigns a Spoolman spool to a specific toolhead (by index) on a printer.
     /// Fetches spool details from Spoolman to populate material and color information.
+    /// <para>
+    /// The server enforces the guided-swap material check here: if the scanned spool
+    /// does not match the expected material for this toolhead (per active/queued jobs)
+    /// and the request does not carry an explicit override, the assignment is rejected
+    /// with <c>409 Conflict</c> and a typed <see cref="Farm.Infrastructure.Services.Printers.SwapValidationResultDto"/>
+    /// body. This makes the hard-stop authoritative — thin clients cannot bypass it by
+    /// skipping the pre-flight validation endpoint.
+    /// </para>
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
-    /// <param name="request">Request containing the spool ID to assign.</param>
+    /// <param name="request">Request containing the spool ID to assign and optional override flag.</param>
+    /// <param name="validator">Injected swap validator (server-enforced material check).</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725) controlling the guided-swap path.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Result indicating success or failure with descriptive message.</returns>
     /// <response code="200">Spool was assigned successfully.</response>
     /// <response code="400">If the request failed (invalid spool ID, Spoolman not configured).</response>
     /// <response code="404">If the printer or toolhead was not found.</response>
+    /// <response code="409">Material mismatch and no valid override — body carries the SwapValidationResultDto.</response>
+    /// <remarks>
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): the
+    /// server-enforced validation / override-audit path is wrapped in a
+    /// <c>guidedSwapEnabled</c> check. This binding endpoint itself stays available even
+    /// when the guided flow is disabled (it is a direct capability-gated control per the
+    /// #710 acceptance addendum); when disabled it reverts to the pre-#710 blind
+    /// assignment (no pre-flight validation 409, no override log/telemetry).
+    /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [Idempotent(IdempotencyRouteKeys.PrinterToolheadSpoolBind)]
     [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 409)]
     public async Task<ActionResult<CommandResult>> SetToolheadSpoolAsync(
         Guid id,
         int toolheadIndex,
         [FromBody] SetActiveSpoolRequest? request,
+        [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
         if (request?.SpoolId is not { } spoolId)
@@ -3374,27 +3447,124 @@ public class PrintersController(
             return NotFound(new CommandResult(false, "Printer not found."));
         }
 
+        // #900 revision guard: this binding endpoint is If-Match protected. Verify the
+        // supplied precondition against the current printer revision before any mutation.
         if (BindPrinterIfMatch(printer) is { } precondition)
         {
             return precondition;
         }
 
-        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
-            id,
-            "set_toolhead_spool",
-            "set_toolhead_spool",
-            token => _printersService.SetToolheadSpoolAsync(
+        // An override is only honoured when the operator both set the flag AND supplied a
+        // non-empty reason (issue #710 contract: mismatch overrides are recorded with a
+        // reason). A flag without a reason is NOT a valid override.
+        bool hasOverrideIntent = request.OverrideMismatch
+            && !string.IsNullOrWhiteSpace(request.OverrideReason);
+
+        // Guided-swap gate (#725): the server-enforced material check and override audit
+        // only apply when guidedSwapEnabled is on. When disabled, revert to the pre-#710
+        // blind assignment so the direct spool-binding control remains usable.
+        bool guidedSwapEnabled = await featureGate.IsEnabledAsync(
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false);
+
+        // Audit context is built ONLY for an authorized mismatch override and passed to the
+        // service so the durable record commits atomically with the binding (B6). Null on
+        // every other path (ok / disabled / unknown / not-found).
+        Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext? overrideAudit = null;
+
+        if (guidedSwapEnabled)
+        {
+            // B1: ALWAYS validate before any binding — even when an override flag/reason is
+            // present. The override can only be honoured for a genuine mismatch (below).
+            Farm.Infrastructure.Services.Printers.SwapValidationResult validation =
+                await validator.ValidateAsync(id, toolheadIndex, spoolId, ct).ConfigureAwait(false);
+
+            // B2: an invalid / unresolved lane must NEVER fall through to a blind bind.
+            switch (validation.Outcome)
+            {
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+                    return NotFound(new CommandResult(false, $"Printer {id} not found"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                    return NotFound(new CommandResult(false, $"Toolhead index {toolheadIndex} not found on printer {id}"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                    return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range"));
+            }
+
+            Farm.Infrastructure.Services.Printers.SwapValidationResultDto body = validation.Result!;
+
+            switch (body.Status)
+            {
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok:
+                    // Normal write permitted; no override, no audit.
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Mismatch:
+                    // Override permitted ONLY for a real mismatch AND explicit flag AND reason.
+                    if (!hasOverrideIntent)
+                    {
+                        return Conflict(body);
+                    }
+
+                    overrideAudit = new Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext(
+                        UserId: User?.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                        UserName: User?.Identity?.Name,
+                        Reason: request.OverrideReason!.Trim(),
+                        ExpectedMaterial: body.Expected,
+                        ScannedMaterial: body.Scanned,
+                        AffectedJobIds: body.AffectedJobs.Select(j => j.JobId).ToList());
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Unknown:
+                default:
+                    // B7: never override unknown — no write, no audit.
+                    return Conflict(body);
+            }
+        }
+
+        // C1: the guided binding contract (fail closed on a null commit-time re-resolution)
+        // applies only when the guided-swap feature is on. When disabled we pass Direct so the
+        // generic/legacy direct binding semantics are preserved unchanged. Guided mode is NOT
+        // inferred from overrideAudit — a normal guided `ok` bind has no audit but must still
+        // fail closed.
+        Farm.Infrastructure.Services.Printers.SpoolBindPolicy bindPolicy = guidedSwapEnabled
+            ? Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Guided
+            : Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Direct;
+
+        CommandResult result = await _printersService
+            .SetToolheadSpoolAsync(id, toolheadIndex, spoolId, overrideAudit, bindPolicy, ct)
+            .ConfigureAwait(false);
+        _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
+
+        // Emit override telemetry ONLY after an authorized-override assignment succeeded. The
+        // durable audit row is written atomically inside the service; this is best-effort
+        // observability on top. A failed write leaves neither audit row nor telemetry.
+        if (overrideAudit is not null && result.Success)
+        {
+            _logger.LogWarning(
+                "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
+                overrideAudit.UserName ?? overrideAudit.UserId ?? "(unknown)",
+                spoolId,
                 id,
                 toolheadIndex,
-                spoolId,
-                token),
-            ct);
-        if (result.Result is OkObjectResult)
+                overrideAudit.Reason);
+            _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
+        }
+
+        if (result is ToolheadSpoolBindResult
+            {
+                FailureKind: ToolheadSpoolBindFailureKind.TopologyConflict,
+            })
+        {
+            return Conflict(result);
+        }
+
+        // Advance and surface the printer revision only on a committed binding so callers
+        // can chain subsequent If-Match requests against the new ETag.
+        if (result.Success)
         {
             WritePrinterEtag(printer);
         }
 
-        return result;
+        return MapCommandResult(result);
     }
 
     /// <summary>
@@ -3484,6 +3654,83 @@ public class PrintersController(
             WritePrinterEtag(printer);
         }
 
+        return result;
+    }
+
+    /// <summary>
+    /// Validates a scanned Spoolman spool against the expected material for a specific
+    /// toolhead on the given printer. Thin endpoint that backs the guided filament swap flow.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">Zero-based toolhead index (T0, T1, T2, ...).</param>
+    /// <param name="spoolId">Spoolman spool identifier being scanned.</param>
+    /// <param name="validator">Injected swap validator service.</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Typed validation result describing ok/mismatch, expected/scanned material, and affected jobs.</returns>
+    /// <response code="200">Validation completed (ok or mismatch result in body).</response>
+    /// <response code="400">If the query is missing or invalid (e.g., spoolId missing).</response>
+    /// <response code="404">If the printer or toolhead was not found, or the guided-swap feature is disabled (ProblemDetails code=featureDisabled).</response>
+    /// <remarks>
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): this guided-swap
+    /// validation endpoint is gated by <c>guidedSwapEnabled</c>. When disabled it short-circuits
+    /// to <c>404 Not Found</c> with ProblemDetails extension <c>code: "featureDisabled"</c> before
+    /// any read or telemetry, matching the shape defined by #725.
+    /// </remarks>
+    [HttpGet("{id:guid}/toolheads/{toolheadIndex:int}/swap-validation")]
+    [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<Farm.Infrastructure.Services.Printers.SwapValidationResultDto>> GetToolheadSwapValidationAsync(
+        Guid id,
+        int toolheadIndex,
+        [FromQuery] int? spoolId,
+        [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
+        CancellationToken ct)
+    {
+        // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
+        // ProblemDetails before any read/validation/telemetry.
+        if (!await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false))
+        {
+            return Farm.Web.Api.Infrastructure.OperatorFeatures.OperatorFeatureProblemDetails.NotFound(
+                featureGate,
+                Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
+        }
+
+        if (spoolId is null || spoolId <= 0)
+        {
+            return BadRequest(new CommandResult(false, "spoolId query parameter is required and must be positive."));
+        }
+
+        if (toolheadIndex < 0)
+        {
+            return BadRequest(new CommandResult(false, "toolheadIndex must be zero or greater."));
+        }
+
+        Farm.Infrastructure.Services.Printers.SwapValidationResult validation = await validator
+            .ValidateAsync(id, toolheadIndex, spoolId.Value, ct)
+            .ConfigureAwait(false);
+
+        switch (validation.Outcome)
+        {
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                return NotFound();
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range."));
+        }
+
+        Farm.Infrastructure.Services.Printers.SwapValidationResultDto? result = validation.Result;
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        _telemetryService.RecordPrinterOperation(
+            "swap_validation",
+            id.ToString(),
+            result.Status == Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok);
         return result;
     }
 
@@ -4812,5 +5059,28 @@ public class PrintersController(
         }
 
         return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Maps a <see cref="FilamentUnloadResult"/> to the appropriate HTTP status code so callers
+    /// still get consistent 404 semantics when the printer is missing, while success and other
+    /// failure paths preserve the residual-weight payload. Uses the typed
+    /// <see cref="FilamentUnloadFailureKind"/> discriminator rather than brittle message
+    /// substring matching (issue #710 low-severity fix): a missing printer is 404, an invalid
+    /// toolhead index is 400, and any other failure is 400.
+    /// </summary>
+    private ActionResult<FilamentUnloadResult> MapFilamentUnloadResult(FilamentUnloadResult result)
+    {
+        if (result.Success)
+        {
+            return Ok(result);
+        }
+
+        return result.FailureKind switch
+        {
+            FilamentUnloadFailureKind.PrinterNotFound => NotFound(result),
+            FilamentUnloadFailureKind.InvalidToolhead => BadRequest(result),
+            _ => BadRequest(result),
+        };
     }
 }

@@ -46,8 +46,7 @@ struct LoginView: View {
             .frame(maxWidth: sizeClass == .regular ? 500 : .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .contentShape(Rectangle())
-        .onTapGesture { focusedField = nil }
+        .accessibilityIdentifier("loginView")
         .animation(.easeInOut(duration: 0.2), value: authViewModel.errorMessage)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isServerURLExpanded)
         .onAppear {
@@ -118,6 +117,7 @@ struct LoginView: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($focusedField, equals: .serverURL)
                     .submitLabel(.next)
+                    .accessibilityIdentifier("serverURLField")
                     .onSubmit { focusedField = .username }
             }
         }
@@ -234,6 +234,7 @@ struct LoginView: View {
                 .focused($focusedField, equals: .username)
                 .submitLabel(.next)
                 .onSubmit { focusedField = .password }
+                .accessibilityIdentifier("usernameField")
 
             SecureField("Password", text: $viewModel.password)
                 .textContentType(.password)
@@ -241,6 +242,7 @@ struct LoginView: View {
                 .focused($focusedField, equals: .password)
                 .submitLabel(.go)
                 .onSubmit { attemptLogin() }
+                .accessibilityIdentifier("passwordField")
         }
     }
 
@@ -280,13 +282,14 @@ struct LoginView: View {
         }
         .buttonStyle(.borderedProminent)
         .disabled(!viewModel.isFormValid || authViewModel.isLoading)
+        .accessibilityIdentifier("loginButton")
     }
 
     // MARK: - Demo Mode
 
     private var demoModeButton: some View {
         Button {
-            authViewModel.loginAsDemo()
+            Task { await authViewModel.loginAsDemo() }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "play.circle")

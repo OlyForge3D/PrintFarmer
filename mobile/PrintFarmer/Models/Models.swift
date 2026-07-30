@@ -439,6 +439,10 @@ struct PrinterStatusDetail: Codable, Sendable {
     let homedAxes: String?
     let spoolInfo: PrinterSpoolInfo?
     let mmuStatus: MmuStatus?
+    /// Seconds until the active print finishes, as computed by the backend
+    /// (`PrinterStatusDto.PrintTimeLeftSeconds`). Surfaced for the Printer
+    /// Detail v2 current-job ETA (issue #712) so the app never recomputes it.
+    let printTimeLeftSeconds: Double?
 
     init(
         id: UUID,
@@ -458,7 +462,8 @@ struct PrinterStatusDetail: Codable, Sendable {
         bedTarget: Double?,
         homedAxes: String? = nil,
         spoolInfo: PrinterSpoolInfo?,
-        mmuStatus: MmuStatus?
+        mmuStatus: MmuStatus?,
+        printTimeLeftSeconds: Double? = nil
     ) {
         self.id = id
         self.isOnline = isOnline
@@ -478,6 +483,7 @@ struct PrinterStatusDetail: Codable, Sendable {
         self.homedAxes = homedAxes
         self.spoolInfo = spoolInfo
         self.mmuStatus = mmuStatus
+        self.printTimeLeftSeconds = printTimeLeftSeconds
     }
 }
 
@@ -599,6 +605,14 @@ struct PrintJob: Codable, Identifiable, Sendable {
     let remainingCopies: Int
     let projectFileId: UUID?
     let thumbnailUrl: String?
+    /// Non-nil once `POST /api/parts-inventory/harvest/{jobId}` has been
+    /// applied for this job (Dispute C, #714). Additive/optional so the
+    /// existing `DemoJobService.swift` memberwise-init call site — outside
+    /// this dispute's mobile-only file scope — needs no changes. Must be
+    /// `var`, not `let`: a `let` with an initial value is never decoded by
+    /// Swift's synthesized `Decodable` (silently stays at its default
+    /// regardless of the JSON payload).
+    var harvestedAt: Date? = nil
     var dispatchResult: DispatchAttemptResult? = nil
 
     var name: String { gcodeFileName }
@@ -695,6 +709,13 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
     let copies: Int
     let completedCopies: Int
     let remainingCopies: Int
+    /// Non-nil once the job has been harvested (Dispute C, #714). Additive/
+    /// optional so `DemoJobService.swift`'s memberwise-init call site —
+    /// outside this dispute's mobile-only file scope — needs no changes.
+    /// Must be `var`, not `let`: a `let` with an initial value is never
+    /// decoded by Swift's synthesized `Decodable` (silently stays at its
+    /// default regardless of the JSON payload).
+    var harvestedAt: Date? = nil
     var jobKind: String? = nil
     var calibrationProjectId: String? = nil
 

@@ -29,6 +29,18 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CleanupReservationToken")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CleanupReservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -639,6 +651,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime?>("ClaimedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -728,6 +743,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("OperationId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("PinnedWorkerId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uuid");
 
@@ -764,6 +782,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 
+                    b.Property<string>("SlicerBinarySha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
@@ -776,6 +798,10 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer");
 
                     b.Property<string>("SlicerEngineName")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("SlicerEngineVersion")
                         .HasMaxLength(32)
                         .HasColumnType("character varying(32)");
 

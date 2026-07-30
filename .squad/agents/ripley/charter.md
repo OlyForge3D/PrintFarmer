@@ -40,6 +40,10 @@
 - **Rationale:** Coordinator selects the best model based on task type — cost first unless writing code
 - **Fallback:** Standard chain — the coordinator handles fallback automatically
 
+## Machine-Local Execution Policy (this worktree)
+
+On this machine, Ripley uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+
 ## Collaboration
 
 Before starting work, run `git rev-parse --show-toplevel` to find the repo root, or use the `TEAM ROOT` provided in the spawn prompt. All `.squad/` paths must be resolved relative to this root — do not assume CWD is the repo root (you may be in a worktree or subdirectory).

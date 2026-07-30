@@ -218,6 +218,7 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { throw NetworkError.notFound }
     func getSnapshot(id: UUID) async throws -> Data { Data() }
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? { nil }
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList { PrinterHistoryList(count: 0, jobs: []) }
     func pause(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func resume(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func cancel(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
@@ -238,6 +239,9 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     ) async throws -> CommandResult {
         CommandResult(success: true, message: nil)
     }
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
+        CommandResult(success: true, message: nil)
+    }
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { [] }
     func loadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func unloadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
@@ -250,4 +254,13 @@ private final class PreheatSubgroupTestService: PrinterServiceProtocol, @uncheck
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities {
         PrinterBackendCapabilities.fallback(for: .moonraker)
     }
+
+    // #711 F6 stubs — not exercised by preheat tests but required for conformance.
+    func getDetails(id: UUID) async throws -> PrinterDetails { throw NetworkError.notFound }
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { [] }
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func createFallbackGroup(printerId: UUID, _ request: CreateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func updateFallbackGroup(printerId: UUID, groupId: UUID, _ request: UpdateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup { throw NetworkError.notFound }
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
+    func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }

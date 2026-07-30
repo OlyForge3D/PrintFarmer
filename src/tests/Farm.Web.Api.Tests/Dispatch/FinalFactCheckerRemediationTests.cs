@@ -802,7 +802,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             new GcodeCommandRequest { Command = "M112" },
             CancellationToken.None);
         _ = await controller.LoadFilamentAsync(printerId, CancellationToken.None);
-        _ = await controller.UnloadFilamentAsync(printerId, CancellationToken.None);
+        _ = await controller.UnloadFilamentAsync(printerId, null, CancellationToken.None);
         _ = await controller.ChangeFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.MmuChangeToolAsync(printerId, 1, CancellationToken.None);
         _ = await controller.MmuEjectAsync(printerId, CancellationToken.None);
@@ -826,6 +826,8 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         printers.Verify(service => service.FindByIdAsync(
             printerId,
             It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.UnloadFilamentAsync(
+            printerId, (int?)null, It.IsAny<CancellationToken>()), Times.Once);
         printers.VerifyNoOtherCalls();
     }
 
@@ -1145,6 +1147,11 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                 ServerUrl = "http://denied.invalid",
                 RowVersion = rowVersion,
             });
+        Mock.Get(printers).Setup(service => service.UnloadFilamentAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<int?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FilamentUnloadResult(true, "unloaded"));
         var db = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>()
                 .UseInMemoryDatabase($"denied-{Guid.NewGuid():N}")

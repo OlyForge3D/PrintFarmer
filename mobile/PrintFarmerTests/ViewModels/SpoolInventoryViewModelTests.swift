@@ -10,8 +10,8 @@ final class SpoolInventoryViewModelTests: XCTestCase {
     private var mockScanner: MockScannerService!
     private var viewModel: SpoolInventoryViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockSpoolService()
         mockScanner = MockScannerService()
         viewModel = SpoolInventoryViewModel()
@@ -19,11 +19,11 @@ final class SpoolInventoryViewModelTests: XCTestCase {
         viewModel.configureNFC(scanner: mockScanner)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockScanner = nil
         mockService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State
@@ -431,6 +431,193 @@ final class SpoolInventoryViewModelTests: XCTestCase {
     func testClearHighlight() {
         viewModel.highlightedSpoolId = 42
         viewModel.clearHighlight()
+        XCTAssertNil(viewModel.highlightedSpoolId)
+    }
+
+    // MARK: - #726 Highlight authority (generation + identity guard)
+
+    /// Deterministic park/release helper for the highlight-expiry seam.
+    /// Awaits a `CheckedContinuation` keyed by (generation, spoolId) so tests
+    /// can pause the retained expiry task, mutate authority synchronously,
+    /// then release the parked continuation and `await task.value` to
+    /// observe the guard's decision. No sleep / Task.yield / polling / clock.
+    private final class ExpiryPark: @unchecked Sendable {
+        private let lock = NSLock()
+        private var waiting: [String: CheckedContinuation<Void, Never>] = [:]
+        private var preReleased: Set<String> = []
+
+        private static func key(_ gen: UInt64, _ spoolId: Int) -> String {
+            "\(gen)-\(spoolId)"
+        }
+
+        func park(gen: UInt64, spoolId: Int) async {
+            let k = Self.key(gen, spoolId)
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                lock.lock()
+                if preReleased.remove(k) != nil {
+                    lock.unlock()
+                    c.resume()
+                } else {
+                    waiting[k] = c
+                    lock.unlock()
+                }
+            }
+        }
+
+        func release(gen: UInt64, spoolId: Int) {
+            let k = Self.key(gen, spoolId)
+            lock.lock()
+            if let c = waiting.removeValue(forKey: k) {
+                lock.unlock()
+                c.resume()
+            } else {
+                preReleased.insert(k)
+                lock.unlock()
+            }
+        }
+    }
+
+    func testSetHighlightAdvancesGenerationSynchronously() {
+        XCTAssertEqual(viewModel.highlightGeneration, 0)
+        viewModel.setHighlight(spoolId: 1)
+        XCTAssertEqual(viewModel.highlightedSpoolId, 1)
+        XCTAssertEqual(viewModel.highlightGeneration, 1)
+        viewModel.setHighlight(spoolId: 2)
+        XCTAssertEqual(viewModel.highlightedSpoolId, 2)
+        XCTAssertEqual(viewModel.highlightGeneration, 2)
+    }
+
+    func testStaleExpiryUnderControlledContinuationDoesNotClearNewerHighlight() async {
+        // Primary Dallas-required test: park expiry A immediately before its
+        // clear attempt, synchronously accept/publish B, release A, and prove
+        // B and its destination identity remain. Then release B's expiry and
+        // prove B clears exactly once.
+        let park = ExpiryPark()
+        viewModel._highlightExpirySleepOverride = { gen, sid in
+            await park.park(gen: gen, spoolId: sid)
+        }
+
+        viewModel.setHighlight(spoolId: 1)
+        let taskA = viewModel._currentHighlightExpiryTask
+        XCTAssertNotNil(taskA)
+        XCTAssertEqual(viewModel.highlightedSpoolId, 1)
+        XCTAssertEqual(viewModel.highlightGeneration, 1)
+
+        // Synchronously accept/publish B; the authority advance happens
+        // inside the setter, not deferred to a SwiftUI `.onChange`.
+        viewModel.setHighlight(spoolId: 2)
+        let taskB = viewModel._currentHighlightExpiryTask
+        XCTAssertNotNil(taskB)
+        XCTAssertEqual(viewModel.highlightedSpoolId, 2)
+        XCTAssertEqual(viewModel.highlightGeneration, 2)
+
+        // Release A's parked continuation. Its cancellation was requested by
+        // `setHighlight(spoolId: 2)`, but the guard must not depend on that:
+        // even if the sleep-override ignores cancellation and resumes, the
+        // captured (gen=1, spoolId=1) must not match current (gen=2, spoolId=2).
+        park.release(gen: 1, spoolId: 1)
+        await taskA?.value
+
+        XCTAssertEqual(viewModel.highlightedSpoolId, 2,
+                       "Stale expiry A must not clear newer highlight B")
+        XCTAssertEqual(viewModel.highlightGeneration, 2)
+
+        // Release B's current expiry and prove it clears exactly once.
+        park.release(gen: 2, spoolId: 2)
+        await taskB?.value
+
+        XCTAssertNil(viewModel.highlightedSpoolId, "Current expiry B clears B")
+    }
+
+    func testStaleExpiryClearsNothingEvenWhenSpoolIdCollides() async {
+        // Same-spool sequence: A=1 → B=2 → C=1. C reassigns spoolId 1 with
+        // generation 3. Stale expiry for the first assignment (gen=1, id=1)
+        // must not clear C, because generations differ even though ids match.
+        let park = ExpiryPark()
+        viewModel._highlightExpirySleepOverride = { gen, sid in
+            await park.park(gen: gen, spoolId: sid)
+        }
+
+        viewModel.setHighlight(spoolId: 1)
+        let taskA = viewModel._currentHighlightExpiryTask
+        viewModel.setHighlight(spoolId: 2)
+        viewModel.setHighlight(spoolId: 1)
+        XCTAssertEqual(viewModel.highlightedSpoolId, 1)
+        XCTAssertEqual(viewModel.highlightGeneration, 3)
+
+        park.release(gen: 1, spoolId: 1)
+        await taskA?.value
+
+        XCTAssertEqual(viewModel.highlightedSpoolId, 1,
+                       "Same-id stale expiry must be a no-op via generation guard")
+        XCTAssertEqual(viewModel.highlightGeneration, 3)
+    }
+
+    func testCurrentExpiryClearsHighlightWhenGuardMatches() async {
+        let park = ExpiryPark()
+        viewModel._highlightExpirySleepOverride = { gen, sid in
+            await park.park(gen: gen, spoolId: sid)
+        }
+
+        viewModel.setHighlight(spoolId: 7)
+        let task = viewModel._currentHighlightExpiryTask
+        XCTAssertEqual(viewModel.highlightedSpoolId, 7)
+
+        park.release(gen: viewModel.highlightGeneration, spoolId: 7)
+        await task?.value
+
+        XCTAssertNil(viewModel.highlightedSpoolId)
+    }
+
+    func testInvalidateHighlightOwnershipPreventsParkedExpiryFromClearing() async {
+        // Simulates the view's `.onDisappear` invalidating expiry ownership
+        // while a parked task exists. Releasing the parked continuation must
+        // not clear the still-visible highlight, and must not mutate the
+        // highlight after the view is off-screen.
+        let park = ExpiryPark()
+        viewModel._highlightExpirySleepOverride = { gen, sid in
+            await park.park(gen: gen, spoolId: sid)
+        }
+
+        viewModel.setHighlight(spoolId: 9)
+        let parkedTask = viewModel._currentHighlightExpiryTask
+        XCTAssertEqual(viewModel.highlightedSpoolId, 9)
+        let priorGen = viewModel.highlightGeneration
+
+        viewModel.invalidateHighlightOwnership()
+        XCTAssertEqual(viewModel.highlightedSpoolId, 9,
+                       "Invalidation must not preemptively clear the visible highlight")
+        XCTAssertGreaterThan(viewModel.highlightGeneration, priorGen,
+                             "Invalidation must advance generation to stale parked expiries")
+        XCTAssertNil(viewModel._currentHighlightExpiryTask,
+                     "Invalidation must release ownership of the expiry task")
+
+        park.release(gen: priorGen, spoolId: 9)
+        await parkedTask?.value
+
+        XCTAssertEqual(viewModel.highlightedSpoolId, 9,
+                       "Stale off-screen expiry must not clear the highlight")
+    }
+
+    func testClearHighlightInvalidatesGenerationAndClearsValue() async {
+        // Legacy `clearHighlight()` must also invalidate any retained expiry
+        // ownership so a parked task cannot later revive/clear stale state.
+        let park = ExpiryPark()
+        viewModel._highlightExpirySleepOverride = { gen, sid in
+            await park.park(gen: gen, spoolId: sid)
+        }
+
+        viewModel.setHighlight(spoolId: 5)
+        let parkedTask = viewModel._currentHighlightExpiryTask
+        let priorGen = viewModel.highlightGeneration
+
+        viewModel.clearHighlight()
+        XCTAssertNil(viewModel.highlightedSpoolId)
+        XCTAssertGreaterThan(viewModel.highlightGeneration, priorGen)
+
+        park.release(gen: priorGen, spoolId: 5)
+        await parkedTask?.value
+
         XCTAssertNil(viewModel.highlightedSpoolId)
     }
 

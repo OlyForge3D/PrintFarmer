@@ -42,6 +42,19 @@ public class MaintenanceAlert
     public MaintenanceTask? MaintenanceTask { get; set; }
 
     /// <summary>
+    /// Optional physical toolhead scope. When null, the alert is printer-wide (legacy behavior).
+    /// When set, the alert is scoped to a specific physical toolhead (issue #711, F6).
+    /// Only <see cref="ToolheadType.Physical"/> toolheads may be scoped here — MMU gates are
+    /// not hotend maintenance targets. Enforced in the service layer.
+    /// </summary>
+    public Guid? ToolheadId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the scoped toolhead. Null when the alert is printer-wide.
+    /// </summary>
+    public Toolhead? Toolhead { get; set; }
+
+    /// <summary>
     /// Alert title/summary
     /// </summary>
     [MaxLength(128)]

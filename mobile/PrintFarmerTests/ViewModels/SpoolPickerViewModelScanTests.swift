@@ -9,8 +9,8 @@ final class SpoolPickerViewModelScanTests: XCTestCase {
     private var mockScanner: MockScannerService!
     private var viewModel: SpoolPickerViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockSpoolService = MockSpoolService()
         mockScanner = MockScannerService()
         viewModel = SpoolPickerViewModel()
@@ -18,11 +18,11 @@ final class SpoolPickerViewModelScanTests: XCTestCase {
         viewModel.configureNFCScanner(mockScanner)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockScanner = nil
         mockSpoolService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Helpers

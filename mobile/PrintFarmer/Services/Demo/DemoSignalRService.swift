@@ -5,28 +5,77 @@ import Foundation
 /// Simulates real-time printer updates without a WebSocket connection.
 /// Uses Task.sleep timers to emit progress updates every few seconds.
 final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
-    private(set) var connectionState: SignalRConnectionState = .disconnected
-    private var printerHandler: (@Sendable (PrinterStatusUpdate) -> Void)?
-    private var jobQueueHandler: (@Sendable (JobQueueUpdate) -> Void)?
+    private let coordinator = SignalRHubCoordinator(label: "com.printfarmer.demo.signalr.hubs")
+    private let connectionStateHub: SignalRConnectionStateHub
+    private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
+    private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
+    private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
+    private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
+    private let filamentCoverageChangedHub: SignalREventHub<FilamentCoverageChangedEvent>
     private var simulationTask: Task<Void, Never>?
 
+    init() {
+        self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
+        self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
+        self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
+        self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
+        self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
+        self.filamentCoverageChangedHub = SignalREventHub<FilamentCoverageChangedEvent>(coordinator: coordinator)
+    }
+
+    var connectionState: SignalRConnectionState { connectionStateHub.snapshot() }
+
     func connect() async throws {
-        connectionState = .connected
+        connectionStateHub.setStateSync(.connected)
         startSimulation()
     }
 
     func disconnect() async {
         simulationTask?.cancel()
         simulationTask = nil
-        connectionState = .disconnected
+        connectionStateHub.setStateSync(.disconnected)
     }
 
-    func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) {
-        printerHandler = handler
+    @discardableResult
+    func onConnectionStateChanged(
+        _ handler: @escaping @Sendable (SignalRConnectionState) -> Void
+    ) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
+        connectionStateHub.subscribe(handler)
     }
 
-    func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {
-        jobQueueHandler = handler
+    @discardableResult
+    func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
+        printerUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
+        jobQueueUpdateHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
+        attentionChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onFilamentCoverageChanged(
+        _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+    ) -> SignalRSubscription {
+        filamentCoverageChangedHub.subscribe(handler)
+    }
+
+    @discardableResult
+    func onTaskInvalidated(
+        _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+    ) -> SignalRSubscription {
+        taskInvalidationHub.subscribe(handler)
+    }
+
+    func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {
+        // Demo mode never emits fallback-group invalidations; retain a no-op
+        // to satisfy the SignalRServiceProtocol requirement added for #711.
+        _ = handler
     }
 
     // MARK: - Simulation
@@ -34,9 +83,8 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     private func startSimulation() {
         simulationTask?.cancel()
 
-        // Capture handlers and initial state before entering the Task
-        let printerHandler = self.printerHandler
-        let jobQueueHandler = self.jobQueueHandler
+        let printerHub = self.printerUpdateHub
+        let jobQueueHub = self.jobQueueUpdateHub
 
         simulationTask = Task.detached { [weak self] in
             var printerProgress: [UUID: Double] = [
@@ -86,10 +134,9 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
                         hotendTarget: isPrinting ? config.hotend : 0.0,
                         bedTarget: isPrinting ? config.bed : 0.0,
                         homedAxes: "xyz", spoolInfo: nil, mmuStatus: nil)
-                    printerHandler?(update)
+                    printerHub.deliver(update)
                 }
 
-                // Every 6th tick (~30s), emit a job queue update
                 if tick % 6 == 0 {
                     let queueUpdate = JobQueueUpdate(
                         printerId: DemoData.prusaMK4_1_ID,
@@ -99,7 +146,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
                                 status: .printing, priority: 1, queuedAt: Date().addingTimeInterval(-86400),
                                 actualStartTime: Date().addingTimeInterval(-7200), actualEndTime: nil),
                         ])
-                    jobQueueHandler?(queueUpdate)
+                    jobQueueHub.deliver(queueUpdate)
                 }
             }
         }

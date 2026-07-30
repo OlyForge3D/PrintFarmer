@@ -1,14 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -22,6 +24,8 @@ public class SpoolmanControllerTests
     private readonly Mock<ISettingsService> _settingsServiceMock;
     private readonly Mock<IBarcodeScanLogService> _barcodeScanLogServiceMock;
     private readonly Mock<ILogger<SpoolmanController>> _loggerMock;
+    private readonly Mock<IFilamentCoverageBroadcaster> _coverageBroadcasterMock;
+    private readonly Mock<ISpoolBurnRateProjectionService> _burnRateProjectionMock;
     private readonly SpoolmanController _controller;
 
     public SpoolmanControllerTests()
@@ -30,11 +34,80 @@ public class SpoolmanControllerTests
         _settingsServiceMock = new Mock<ISettingsService>();
         _barcodeScanLogServiceMock = new Mock<IBarcodeScanLogService>();
         _loggerMock = new Mock<ILogger<SpoolmanController>>();
+        _coverageBroadcasterMock = new Mock<IFilamentCoverageBroadcaster>(MockBehavior.Strict);
+        _burnRateProjectionMock = new Mock<ISpoolBurnRateProjectionService>();
         _controller = new SpoolmanController(
             _spoolmanServiceMock.Object,
             _settingsServiceMock.Object,
             _barcodeScanLogServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            _coverageBroadcasterMock.Object,
+            _burnRateProjectionMock.Object)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(
+                        [new Claim(ClaimTypes.Name, "admin")],
+                        "test")),
+                },
+            },
+        };
+    }
+
+    [Fact]
+    public async Task GetBurnRateAsync_ValidIdentity_ReturnsProjection()
+    {
+        CanonicalSpoolIdentity identity = new(
+            SpoolSourceKind.Central,
+            "HTTP://CENTRAL.LOCAL:80/",
+            42);
+        SpoolBurnRateProjectionDto projection = new(
+            identity.SourceKind,
+            identity.SourceIdentity,
+            identity.SpoolId,
+            500,
+            90,
+            3,
+            new DateTime(2026, 8, 20, 12, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 21, 12, 0, 0, DateTimeKind.Utc),
+            3,
+            SpoolBurnRateProjectionState.Ready);
+        _burnRateProjectionMock.Setup(service => service.ProjectAsync(
+                identity,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(projection);
+
+        ActionResult<SpoolBurnRateProjectionDto> result =
+            await _controller.GetBurnRateAsync(
+                42,
+                SpoolSourceKind.Central,
+                "HTTP://CENTRAL.LOCAL:80/",
+                CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Same(projection, ok.Value);
+    }
+
+    [Theory]
+    [InlineData(0, SpoolSourceKind.Central, "http://central.local")]
+    [InlineData(42, null, "http://central.local")]
+    [InlineData(42, SpoolSourceKind.Central, "")]
+    public async Task GetBurnRateAsync_InvalidIdentity_ReturnsBadRequest(
+        int spoolId,
+        SpoolSourceKind? sourceKind,
+        string sourceIdentity)
+    {
+        ActionResult<SpoolBurnRateProjectionDto> result =
+            await _controller.GetBurnRateAsync(
+                spoolId,
+                sourceKind,
+                sourceIdentity,
+                CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _burnRateProjectionMock.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -132,25 +205,42 @@ public class SpoolmanControllerTests
     }
 
     [Fact]
-    public void SetConfig_WithNullConfig_ReturnsBadRequest()
+    public async Task SetConfig_WithNullConfig_ReturnsBadRequest()
     {
-        // Note: SetConfig has [Authorize] attribute, so direct call fails without proper auth context
-        // This test verifies the method signature exists
-        MethodInfo? methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
-        Assert.NotNull(methodInfo);
+        IActionResult result = await _controller.SetConfigAsync(null);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result);
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
     }
 
     [Fact]
-    public void SetConfig_WithValidConfig_ReturnsNoContent()
+    public async Task SetConfig_WithValidConfig_BroadcastsAfterSuccess()
     {
-        // Note: SetConfig has [Authorize] attribute, so direct call fails without proper auth context
-        // This test verifies the method accepts SpoolmanConfigDto
-        MethodInfo? methodInfo = typeof(SpoolmanController).GetMethod("SetConfig");
-        Assert.NotNull(methodInfo);
-        ParameterInfo[]? parameters = methodInfo?.GetParameters();
-        Assert.NotNull(parameters);
-        Assert.Single(parameters);
-        Assert.Contains("SpoolmanConfigDto", parameters![0].ParameterType.Name);
+        SpoolmanConfigDto config = new("http://localhost:7912");
+        MockSequence sequence = new();
+        _spoolmanServiceMock.InSequence(sequence).Setup(s => s.SetConfig(config));
+        _coverageBroadcasterMock.InSequence(sequence).Setup(b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        IActionResult result = await _controller.SetConfigAsync(config);
+
+        _ = Assert.IsType<NoContentResult>(result);
+        _coverageBroadcasterMock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task SetConfig_WhenPersistenceFails_DoesNotBroadcast()
+    {
+        SpoolmanConfigDto config = new("http://localhost:7912");
+        _spoolmanServiceMock.Setup(s => s.SetConfig(config))
+            .Throws(new InvalidOperationException("save failed"));
+
+        Func<Task> act = () => _controller.SetConfigAsync(config);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(act);
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -240,18 +330,23 @@ public class SpoolmanControllerTests
     }
 
     [Fact]
-    public void ClearConfig_ReturnsNoContent()
+    public async Task ClearConfig_ReturnsNoContentAndBroadcasts()
     {
-        // Act
-        IActionResult result = _controller.ClearConfig();
+        MockSequence sequence = new();
+        _spoolmanServiceMock.InSequence(sequence).Setup(s => s.ClearConfig());
+        _coverageBroadcasterMock.InSequence(sequence).Setup(b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
-        // Assert
-        NoContentResult noContentResult = Assert.IsType<NoContentResult>(result);
-        _spoolmanServiceMock.Verify(s => s.ClearConfig(), Times.Once);
+        IActionResult result = await _controller.ClearConfigAsync();
+
+        _ = Assert.IsType<NoContentResult>(result);
+        _coverageBroadcasterMock.VerifyAll();
     }
 
     [Fact]
-    public void ClearConfig_WithException_ReturnsInternalServerError()
+    public async Task ClearConfig_WithException_ReturnsInternalServerError()
     {
         // Arrange
         _spoolmanServiceMock
@@ -259,11 +354,134 @@ public class SpoolmanControllerTests
             .Throws(new InvalidOperationException("Clear failed"));
 
         // Act
-        IActionResult result = _controller.ClearConfig();
+        IActionResult result = await _controller.ClearConfigAsync();
 
         // Assert
         ObjectResult statusCodeResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(500, statusCodeResult.StatusCode);
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateSpoolAsync_Success_BroadcastsSpoolWeight()
+    {
+        SpoolmanSpoolRequest request = new() { RemainingWeight = 120 };
+        _spoolmanServiceMock.Setup(s => s.UpdateSpoolInSpoolmanAsync(7, request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(7, "spool", "PLA", 120, null, true));
+        SetupFleetBroadcast();
+
+        _ = await _controller.UpdateSpoolAsync(7, request, CancellationToken.None);
+
+        _coverageBroadcasterMock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateSpoolAsync_RemoteFailure_DoesNotBroadcast()
+    {
+        SpoolmanSpoolRequest request = new() { RemainingWeight = 120 };
+        _spoolmanServiceMock.Setup(s => s.UpdateSpoolInSpoolmanAsync(7, request, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("offline"));
+
+        _ = await _controller.UpdateSpoolAsync(7, request, CancellationToken.None);
+
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DeleteSpoolAsync_Success_BroadcastsSpoolWeight()
+    {
+        _spoolmanServiceMock.Setup(s => s.DeleteSpoolFromSpoolmanAsync(7, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        SetupFleetBroadcast();
+
+        _ = await _controller.DeleteSpoolAsync(7, CancellationToken.None);
+
+        _coverageBroadcasterMock.VerifyAll();
+    }
+
+    [Fact]
+    public async Task BulkUpdateSpoolsAsync_WithSuccessfulUpdates_BroadcastsOnce()
+    {
+        SpoolmanBulkUpdateSpoolsRequest request = new() { SpoolIds = [1, 2], Location = "rack" };
+        _spoolmanServiceMock.Setup(s => s.BulkUpdateSpoolsAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanBulkUpdateResult(2, 0, []));
+        SetupFleetBroadcast();
+
+        _ = await _controller.BulkUpdateSpoolsAsync(request, CancellationToken.None);
+
+        _coverageBroadcasterMock.Verify(
+            b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task BulkDeleteSpoolsAsync_WithSuccessfulDeletes_BroadcastsOnce()
+    {
+        SpoolmanBulkDeleteSpoolsRequest request = new() { SpoolIds = [1, 2] };
+        _spoolmanServiceMock.Setup(s => s.BulkDeleteSpoolsAsync(request.SpoolIds, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanBulkUpdateResult(2, 0, []));
+        SetupFleetBroadcast();
+
+        _ = await _controller.BulkDeleteSpoolsAsync(request, CancellationToken.None);
+
+        _coverageBroadcasterMock.Verify(
+            b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task BulkUpdateSpoolsAsync_WithNoSuccessfulUpdates_DoesNotBroadcast()
+    {
+        SpoolmanBulkUpdateSpoolsRequest request = new() { SpoolIds = [1] };
+        _spoolmanServiceMock.Setup(s => s.BulkUpdateSpoolsAsync(request, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanBulkUpdateResult(0, 1, ["failed"]));
+
+        _ = await _controller.BulkUpdateSpoolsAsync(request, CancellationToken.None);
+
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ImportSpoolsCsvAsync_ExistingSpoolUpdates_BroadcastsOnceAfterImport()
+    {
+        const string csv = "Id,RemainingWeightG\n7,120\n8,80\n";
+        using MemoryStream stream = new(System.Text.Encoding.UTF8.GetBytes(csv));
+        FormFile file = new(stream, 0, stream.Length, "file", "spools.csv");
+        _spoolmanServiceMock.Setup(s => s.UpdateSpoolInSpoolmanAsync(
+                It.IsAny<int>(),
+                It.IsAny<SpoolmanSpoolRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int id, SpoolmanSpoolRequest _, CancellationToken _) =>
+                new SpoolmanSpoolDto(id, "spool", "PLA", 100, null, true));
+        SetupFleetBroadcast();
+
+        _ = await _controller.ImportSpoolsCsvAsync(file, CancellationToken.None);
+
+        _coverageBroadcasterMock.Verify(
+            b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ImportSpoolsCsvAsync_WhollyNewSpools_DoesNotBroadcast()
+    {
+        const string csv = "FilamentId,RemainingWeightG\n4,120\n";
+        using MemoryStream stream = new(System.Text.Encoding.UTF8.GetBytes(csv));
+        FormFile file = new(stream, 0, stream.Length, "file", "spools.csv");
+        _spoolmanServiceMock.Setup(s => s.CreateSpoolInSpoolmanAsync(
+                It.IsAny<SpoolmanSpoolRequest>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(9, "new", "PLA", 120, null, false));
+
+        _ = await _controller.ImportSpoolsCsvAsync(file, CancellationToken.None);
+
+        _coverageBroadcasterMock.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -296,6 +514,14 @@ public class SpoolmanControllerTests
 
         // Assert
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+    }
+
+    private void SetupFleetBroadcast()
+    {
+        _coverageBroadcasterMock.Setup(b => b.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
     }
 
     [Fact]

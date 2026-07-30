@@ -89,6 +89,7 @@ struct SettingsView: View {
                     } label: {
                         Label("Manage Servers", systemImage: "server.rack")
                     }
+                    .accessibilityIdentifier("settings.manageServers")
                 }
 
                 Section("About") {

@@ -44,6 +44,21 @@ public static class DatabaseInitializationExtensions
 
             try
             {
+                bool isSqlite = (db.Database.ProviderName ?? string.Empty)
+                    .Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
+                if (isSqlite
+                    && await HasLegacySqliteSchemaAsync(db, startupCts.Token))
+                {
+                    await SqliteNativePushSchemaUpgrade.ApplyAsync(
+                        db,
+                        logger,
+                        startupCts.Token);
+                    await SqliteMutationWatermarkSchemaUpgrade.ApplyAsync(
+                        db,
+                        logger,
+                        startupCts.Token);
+                }
+
                 _ = await ProviderAwareMigrationRunner.MigrateAsync(
                     db,
                     DatabaseMigrationTarget.Core,
@@ -224,6 +239,35 @@ public static class DatabaseInitializationExtensions
             logger.LogError(ex, "[Startup] FATAL: Database initialization failed: {Message}", ex.Message);
             await Console.Error.WriteAsync($"[Startup] FATAL: Database initialization failed: {ex.Message}\n{ex.StackTrace}");
             throw; // Fail fast for container restart
+        }
+    }
+
+    private static async Task<bool> HasLegacySqliteSchemaAsync(
+        AppDbContext db,
+        CancellationToken cancellationToken)
+    {
+        DbConnection connection = db.Database.GetDbConnection();
+        bool closeConnection = connection.State != System.Data.ConnectionState.Open;
+        if (closeConnection)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        try
+        {
+            await using DbCommand command = connection.CreateCommand();
+            command.CommandText =
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'Printers') "
+                + "AND NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '__EFMigrationsHistory');";
+            object? result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is long value && value != 0;
+        }
+        finally
+        {
+            if (closeConnection)
+            {
+                await connection.CloseAsync();
+            }
         }
     }
 }

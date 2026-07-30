@@ -55,4 +55,11 @@ public class SliceJobEvent
 
     /// <summary>Gets or sets when this event was generated.</summary>
     public DateTime Timestamp { get; set; }
+
+    /// <summary>
+    /// Resolved slicer engine version for this job (issue #578). Null for legacy /
+    /// unpinned jobs. Clients use this to render version-correct icons, profile
+    /// metadata, and lifecycle warnings.
+    /// </summary>
+    public string? SlicerEngineVersion { get; set; }
 }

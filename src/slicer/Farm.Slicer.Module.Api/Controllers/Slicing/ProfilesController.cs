@@ -808,6 +808,7 @@ public class ProfilesController(
     /// <param name="manufacturer">Manufacturer name.</param>
     /// <param name="model">Model name.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/{manufacturer}/{model}")]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
@@ -815,11 +816,12 @@ public class ProfilesController(
         [FromServices] HttpClient httpClient,
         string manufacturer,
         string model,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct);
+            IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForModelAsync(httpClient, manufacturer, model, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -840,6 +842,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="modelId">The printer model ID from the catalog.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpGet("machine/for-model/{modelId:guid}")]
     [ProducesResponseType(typeof(List<MachineProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -847,7 +850,8 @@ public class ProfilesController(
     public async Task<IActionResult> GetMachineProfilesForModelIdAsync(
         [FromServices] HttpClient httpClient,
         Guid modelId,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
@@ -879,7 +883,8 @@ public class ProfilesController(
             IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
                 httpClient,
                 orcaAliases,
-                ct);
+                ct,
+                slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -900,17 +905,19 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("process/for-machines")]
     [ProducesResponseType(typeof(List<ProcessProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetProcessProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            IReadOnlyList<ProcessProfileDto> profiles = await _profilesService.GetProcessProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -931,17 +938,19 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="request">Request containing list of machine profile names.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="slicerEngineVersion">Optional OrcaSlicer engine version to route to (issue #578).</param>
     [HttpPost("filament/for-machines")]
     [ProducesResponseType(typeof(List<FilamentProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetFilamentProfilesForMachinesAsync(
         [FromServices] HttpClient httpClient,
         [FromBody] ForMachinesRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromQuery] string? slicerEngineVersion = null)
     {
         try
         {
-            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct);
+            IReadOnlyList<FilamentProfileDto> profiles = await _profilesService.GetFilamentProfilesForMachinesAsync(httpClient, request.MachineNames, ct, slicerEngineVersion);
             return Ok(profiles);
         }
         catch (HttpRequestException ex)
@@ -1376,59 +1385,65 @@ public class ProfilesController(
         }
     }
 
-    // ── Schema metadata endpoints (static, public, cached) ─────────
+    // ── Schema metadata endpoints (engine-version-aware, public, cached) ─────
 
     /// <summary>
     /// Returns combined schema metadata for all profile types (process, machine, filament),
-    /// powering schema-driven settings editors in the UI.
+    /// powering schema-driven settings editors in the UI. When <paramref name="engineVersion"/>
+    /// is provided (e.g. "2.3.1", "2.4.1"), fields are filtered to those applicable to that
+    /// OrcaSlicer engine version and renamed to that engine's key convention where needed
+    /// (issue #578). Null / unparsable version returns all fields unfiltered.
     /// </summary>
     [HttpGet("schemas")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileSchemasResponseDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetAllSchemas()
+    public IActionResult GetAllSchemas([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetAllSchemas());
+        return Ok(ProfileSchemaProvider.GetAllSchemas(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for process profile fields.
+    /// Returns schema metadata for process profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/process")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetProcessSchema()
+    public IActionResult GetProcessSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetProcessSchema());
+        return Ok(ProfileSchemaProvider.GetProcessSchema(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for machine profile fields.
+    /// Returns schema metadata for machine profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/machine")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetMachineSchema()
+    public IActionResult GetMachineSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetMachineSchema());
+        return Ok(ProfileSchemaProvider.GetMachineSchema(engineVersion));
     }
 
     /// <summary>
-    /// Returns schema metadata for filament profile fields.
+    /// Returns schema metadata for filament profile fields, optionally filtered to the
+    /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/filament")]
     [AllowAnonymous]
-    [ResponseCache(Duration = 3600)]
+    [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
-    public IActionResult GetFilamentSchema()
+    public IActionResult GetFilamentSchema([FromQuery] string? engineVersion = null)
     {
-        return Ok(ProfileSchemaProvider.GetFilamentSchema());
+        return Ok(ProfileSchemaProvider.GetFilamentSchema(engineVersion));
     }
 
     /// <summary>

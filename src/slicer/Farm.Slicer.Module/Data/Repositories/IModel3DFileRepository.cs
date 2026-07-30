@@ -25,6 +25,13 @@ public interface IModel3DFileRepository
     /// <remarks>Used for file download operations where physical file access is needed regardless of validation status.</remarks>
     Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct);
 
+    /// <summary>
+    /// Clears pending tracking state and reloads a model by stable identity after an unknown save outcome.
+    /// </summary>
+    /// <param name="id">The model identity whose commit outcome is being reconciled.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3D?> GetByIdForReconciliationAsync(Guid id, CancellationToken ct);
+
     /// <summary>Retrieves a model by its SHA-256 file hash (deduplication).</summary>
     /// <param name="fileHash">The SHA-256 hash of the model file.</param>
     /// <param name="ct">Cancellation token.</param>

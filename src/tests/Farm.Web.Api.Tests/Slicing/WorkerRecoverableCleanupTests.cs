@@ -150,9 +150,10 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
                 Id = jobId,
                 ModelFileName = "model.stl",
                 EngineType = SlicerEngineType.OrcaSlicer,
-                LeaseToken = Guid.NewGuid(),
+                ClaimToken = Guid.NewGuid(),
                 LeaseFence = 1,
             };
+            job.LeaseToken = job.ClaimToken;
 
             await InvokeHandleJobAsync(job, client);
         }

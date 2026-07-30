@@ -65,6 +65,24 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
         _ = await _db.SaveChangesAsync(ct);
     }
 
+    public void Add(PrintJob item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _ = _db.PrintJobs.Add(item);
+    }
+
+    public async Task AddWithoutSaveAsync(PrintJob item, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _ = await _db.PrintJobs.AddAsync(item, ct);
+    }
+
+    public void AddDispatchLog(DispatchLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        _ = _db.DispatchLogs.Add(log);
+    }
+
     /// <summary>
     /// Removes a print job from the database and saves changes immediately.
     /// </summary>

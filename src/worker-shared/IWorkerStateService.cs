@@ -5,7 +5,8 @@
 /// </summary>
 /// <param name="Token">Lease token issued by the claim.</param>
 /// <param name="Fence">Fencing counter issued by the claim.</param>
-public readonly record struct WorkerJobLease(Guid Token, long Fence);
+/// <param name="ClaimToken">Durable claim-incarnation token issued by the claim.</param>
+public readonly record struct WorkerJobLease(Guid Token, long Fence, Guid ClaimToken);
 
 public interface IWorkerStateService
 {

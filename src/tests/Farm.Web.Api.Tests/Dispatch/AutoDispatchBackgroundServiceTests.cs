@@ -274,10 +274,10 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Once);
 
-        // Assert: SignalR event was sent
+        // Assert: SignalR event was sent once (broadcast is now group-scoped only)
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("jobautodispatched", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+            Times.Once);
     }
 
     [Fact]
@@ -487,10 +487,10 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             d => d.DispatchJobAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
-        // Should send dispatchsuggestion event
+        // Should send dispatchsuggestion event once (broadcast is now group-scoped only)
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("dispatchsuggestion", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+            Times.Once);
     }
 
     [Fact]
@@ -687,10 +687,10 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
 
-        // Should send dispatchfailed SignalR event
+        // Should send dispatchfailed SignalR event once (broadcast is now group-scoped only)
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("dispatchfailed", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+            Times.Once);
 
         // Should log failure to DispatchLogs
         List<DispatchLog> logs = await _db.DispatchLogs.ToListAsync();

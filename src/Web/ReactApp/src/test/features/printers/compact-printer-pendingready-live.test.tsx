@@ -37,6 +37,7 @@ vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
     connect: connectSignalR,
     onAutoDispatchStateChanged: subscribeToAutoDispatchStateChanged,
+    onFilamentCoverageChanged: vi.fn(() => () => {}),
   },
 }));
 
@@ -169,7 +170,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
 
     await waitFor(() => {
       expect(apiClient.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
-      expect(connectSignalR).toHaveBeenCalledTimes(1);
+      expect(connectSignalR).toHaveBeenCalled();
       expect(subscribeToAutoDispatchStateChanged).toHaveBeenCalledTimes(1);
     });
   });

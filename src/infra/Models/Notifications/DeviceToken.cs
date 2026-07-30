@@ -1,0 +1,78 @@
+﻿namespace Farm.Infrastructure.Domain.Notifications;
+
+/// <summary>
+/// Native push registration history for a mobile installation. A filtered
+/// unique index permits exactly one active row per <c>InstallationId</c> while
+/// retaining any number of inactive historical rows.
+/// </summary>
+/// <remarks>
+/// Rows are only removed by:
+/// <list type="bullet">
+///   <item>Explicit unregister (<c>DELETE /api/notifications/device-tokens</c>),</item>
+///   <item>Provider signaling permanent invalidation (<c>410 Gone</c> / <c>BadDeviceToken</c>),</item>
+///   <item>User deletion (cascade FK).</item>
+/// </list>
+/// Toggling the <c>OperatorFeatures.NativePushEnabled</c> flag off never mutates this table
+/// — tokens are retained so re-enable resumes delivery without re-registration.
+/// </remarks>
+public sealed class DeviceToken
+{
+    /// <summary>Primary key.</summary>
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// Monotonic incarnation of this registration. Every successful upsert rotates the
+    /// value so a provider outcome for an older routing snapshot cannot mutate the current
+    /// token, environment, bundle/topic, installation, or owner registration.
+    /// </summary>
+    public long RegistrationVersion { get; set; }
+
+    /// <summary>Owning user (cascade delete).</summary>
+    public Guid UserId { get; set; }
+
+    /// <summary>Navigation to owning user.</summary>
+    public User? User { get; set; }
+
+    /// <summary>
+    /// Per-installation identifier supplied by the mobile app. Active ownership
+    /// is global: a registration upsert updates the current active owner or inserts
+    /// a new active row when only inactive history remains.
+    /// </summary>
+    public string InstallationId { get; set; } = string.Empty;
+
+    /// <summary>Provider-issued device token (APNs hex today).</summary>
+    public string Token { get; set; } = string.Empty;
+
+    /// <summary>Client platform: <c>ios</c> today; <c>android</c> reserved.</summary>
+    public string Platform { get; set; } = "ios";
+
+    /// <summary>APNs environment: <c>development</c> or <c>production</c>.</summary>
+    public string Environment { get; set; } = "production";
+
+    /// <summary>
+    /// App bundle identifier captured at registration. Recorded for diagnostics; the
+    /// server-side <c>apns-topic</c> header used on send comes from server configuration
+    /// (never from the client) so a hostile client cannot direct a push at another app.
+    /// </summary>
+    public string? AppBundleId { get; set; }
+
+    /// <summary>UTC creation timestamp.</summary>
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Last successful send timestamp (also updated on registration upsert).</summary>
+    public DateTime? LastUsedAt { get; set; }
+
+    /// <summary>Last transient send-failure timestamp.</summary>
+    public DateTime? LastFailureAt { get; set; }
+
+    /// <summary>
+    /// Count of consecutive provider-attributed token failures since the last success.
+    /// Relay, configuration, JWT, topic, payload, and unknown failures do not increment it.
+    /// When it reaches the configured threshold the row is soft-deactivated;
+    /// a subsequent successful registration creates a new active incarnation.
+    /// </summary>
+    public int ConsecutiveFailureCount { get; set; }
+
+    /// <summary>Whether this token participates in the delivery fan-out.</summary>
+    public bool IsActive { get; set; } = true;
+}

@@ -2,6 +2,10 @@ import Foundation
 
 @MainActor @Observable
 final class PrinterListViewModel {
+    typealias CallbackEnqueuer = @Sendable (
+        @escaping @MainActor @Sendable () async -> Void
+    ) -> Void
+
     var printers: [Printer] = []
     var locations: [Location] = []
     var autoDispatchStatuses: [UUID: AutoDispatchStatus] = [:]
@@ -24,19 +28,118 @@ final class PrinterListViewModel {
     private var printerService: (any PrinterServiceProtocol)?
     private var autoPrintService: (any AutoDispatchServiceProtocol)?
     private var signalRService: (any SignalRServiceProtocol)?
+    @ObservationIgnored private var signalRSubscriptions: [SignalRSubscription] = []
+    @ObservationIgnored private var signalRServiceIdentity: ObjectIdentifier?
+    @ObservationIgnored private var signalRAuthorityEpoch: UInt64 = 0
+    @ObservationIgnored private var lastObservedConnectionState: SignalRConnectionState?
+    @ObservationIgnored private let callbackEnqueuer: CallbackEnqueuer
+    @ObservationIgnored private var isActive = true
+    @ObservationIgnored private var canonicalLifecycleEpoch: UInt64 = 0
+    @ObservationIgnored private var canonicalLoadToken: UUID?
+    @ObservationIgnored private var canonicalLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var canonicalLoadRequested = false
+    @ObservationIgnored private var canonicalPassHasRecoveryDemand = false
+    @ObservationIgnored private var canonicalPendingRecoveryDemand = false
+    @ObservationIgnored private let canonicalLoadWaiters = CanonicalLoadWaiterRegistry()
+    @ObservationIgnored private let canonicalTaskTracker = CanonicalLoadTaskTracker()
+    @ObservationIgnored private var autoStatusLoadToken: UUID?
+
+    init(
+        callbackEnqueuer: @escaping CallbackEnqueuer = { operation in
+            Task { @MainActor in await operation() }
+        }
+    ) {
+        self.callbackEnqueuer = callbackEnqueuer
+    }
+
+    deinit {
+        canonicalLoadTask?.cancel()
+        canonicalLoadWaiters.completeAll()
+    }
 
     func configure(printerService: any PrinterServiceProtocol, autoPrintService: any AutoDispatchServiceProtocol) {
+        let changed = !Self.identical(self.printerService, printerService)
+            || !Self.identical(self.autoPrintService, autoPrintService)
+        if changed {
+            invalidateCanonicalLoad()
+        }
         self.printerService = printerService
         self.autoPrintService = autoPrintService
     }
 
+    func activate() {
+        isActive = true
+    }
+
+    func deactivate() {
+        guard isActive else { return }
+        isActive = false
+        invalidateCanonicalLoad()
+        tearDownSignalR()
+    }
+
     func configureSignalR(_ service: any SignalRServiceProtocol) {
+        guard isActive else { return }
+        let serviceIdentity = ObjectIdentifier(service as AnyObject)
+        if signalRServiceIdentity == serviceIdentity, !signalRSubscriptions.isEmpty {
+            return
+        }
+        invalidateCanonicalLoad()
+        tearDownSignalR()
         self.signalRService = service
-        service.onPrinterUpdated { [weak self] update in
-            Task { @MainActor [weak self] in
-                self?.applyListUpdate(update)
+        signalRAuthorityEpoch &+= 1
+        let authorityEpoch = signalRAuthorityEpoch
+        signalRServiceIdentity = serviceIdentity
+        let enqueue = callbackEnqueuer
+        signalRSubscriptions.append(service.onPrinterUpdated { [weak self] update in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                self.applyListUpdate(update)
+            }
+        })
+        let connectionRegistration = service.onConnectionStateChanged { [weak self] state in
+            enqueue { [weak self] in
+                guard let self,
+                      self.hasSignalRAuthority(
+                        epoch: authorityEpoch,
+                        serviceIdentity: serviceIdentity
+                      ) else {
+                    return
+                }
+                let previous = self.lastObservedConnectionState
+                self.lastObservedConnectionState = state
+                guard previous == .reconnecting, state == .connected else {
+                    return
+                }
+                self.requestCanonicalLoad(isRecovery: true)
             }
         }
+        lastObservedConnectionState = connectionRegistration.initial
+        signalRSubscriptions.append(connectionRegistration.subscription)
+    }
+
+    private func tearDownSignalR() {
+        signalRAuthorityEpoch &+= 1
+        for subscription in signalRSubscriptions { subscription.cancel() }
+        signalRSubscriptions.removeAll(keepingCapacity: true)
+        signalRService = nil
+        signalRServiceIdentity = nil
+        lastObservedConnectionState = nil
+    }
+
+    private func hasSignalRAuthority(
+        epoch: UInt64,
+        serviceIdentity: ObjectIdentifier
+    ) -> Bool {
+        isActive
+            && signalRAuthorityEpoch == epoch
+            && signalRServiceIdentity == serviceIdentity
     }
 
     private func applyListUpdate(_ update: PrinterStatusUpdate) {
@@ -54,28 +157,247 @@ final class PrinterListViewModel {
     }
 
     func loadPrinters() async {
-        guard let printerService else { return }
+        guard let waiter = beginCanonicalLoad() else { return }
+        await waiter.wait()
+    }
+
+    private func beginCanonicalLoad() -> CanonicalLoadWaiter? {
+        guard canLoadPrinters else { return nil }
+        let enqueue = callbackEnqueuer
+        let waiter = canonicalLoadWaiters.registerWaiter { [weak self] in
+            enqueue { [weak self] in
+                self?.canonicalWaiterCancelled()
+            }
+        }
+        requestCanonicalLoad()
+        return waiter
+    }
+
+    private var canLoadPrinters: Bool {
+        isActive && printerService != nil
+    }
+
+    private func requestCanonicalLoad(isRecovery: Bool = false) {
+        guard canLoadPrinters else { return }
+        canonicalLoadRequested = true
+        if isRecovery {
+            canonicalPendingRecoveryDemand = true
+        }
+        guard canonicalLoadTask == nil else { return }
+
+        let token = UUID()
+        canonicalLoadToken = token
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+        canonicalPendingRecoveryDemand = false
+        autoStatusLoadToken = nil
         isLoading = true
         errorMessage = nil
+        let authority = makeCanonicalAuthority(token: token)
+        startCanonicalPass(authority: authority)
+    }
 
-        do {
-            printers = try await printerService.list()
-            await loadAutoDispatchStatuses()
-        } catch {
-            errorMessage = error.localizedDescription
+    private func startCanonicalPass(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority),
+              let printerService else {
+            return
+        }
+        let input = CanonicalLoadInput(
+            printerService: printerService,
+            autoPrintService: autoPrintService,
+            fallbackStatuses: autoDispatchStatuses
+        )
+        let taskTracker = canonicalTaskTracker
+        taskTracker.taskStarted()
+        canonicalLoadTask = Task { [weak self, taskTracker, input] in
+            defer { taskTracker.taskFinished() }
+            let result = await Self.loadCanonicalPrinters(input: input)
+            self?.completeCanonicalPass(result, authority: authority)
+        }
+    }
+
+    private func completeCanonicalPass(
+        _ result: CanonicalLoadResult,
+        authority: CanonicalAuthority
+    ) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        if canonicalLoadRequested {
+            canonicalLoadRequested = false
+            canonicalPassHasRecoveryDemand = canonicalPendingRecoveryDemand
+            canonicalPendingRecoveryDemand = false
+            autoStatusLoadToken = nil
+            startCanonicalPass(authority: authority)
+            return
         }
 
+        switch result {
+        case .success(let snapshot):
+            printers = snapshot.printers
+            if autoStatusLoadToken == nil {
+                autoDispatchStatuses = snapshot.autoDispatchStatuses
+            }
+            errorMessage = nil
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        case .superseded:
+            break
+        }
+        finishCanonicalLoad(authority: authority)
+    }
+
+    nonisolated private static func loadCanonicalPrinters(
+        input: CanonicalLoadInput
+    ) async -> CanonicalLoadResult {
+        do {
+            let loadedPrinters = try await input.printerService.list()
+            guard !Task.isCancelled else { return .superseded }
+            var loadedStatuses = input.fallbackStatuses
+            if let autoPrintService = input.autoPrintService {
+                do {
+                    let statuses = try await autoPrintService.getAllStatus()
+                    guard !Task.isCancelled else { return .superseded }
+                    loadedStatuses = Dictionary(
+                        uniqueKeysWithValues: statuses.printers.map { ($0.printerId, $0) }
+                    )
+                } catch where Task.isCancelled {
+                    return .superseded
+                } catch {
+                }
+            }
+            return .success(
+                CanonicalSnapshot(
+                    printers: loadedPrinters,
+                    autoDispatchStatuses: loadedStatuses
+                )
+            )
+        } catch {
+            guard !Task.isCancelled else { return .superseded }
+            return .failure(error)
+        }
+    }
+
+    private func finishCanonicalLoad(authority: CanonicalAuthority) {
+        guard isCanonicalLoadCurrent(authority) else { return }
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
         isLoading = false
+        canonicalLoadWaiters.completeAll()
+    }
+
+    private func invalidateCanonicalLoad() {
+        canonicalLifecycleEpoch &+= 1
+        canonicalLoadTask?.cancel()
+        canonicalLoadTask = nil
+        canonicalLoadToken = nil
+        canonicalLoadRequested = false
+        canonicalPassHasRecoveryDemand = false
+        canonicalPendingRecoveryDemand = false
+        autoStatusLoadToken = nil
+        isLoading = false
+        canonicalLoadWaiters.completeAll()
+    }
+
+    private func canonicalWaiterCancelled() {
+        guard canonicalLoadWaiters.activeCount == 0,
+              !canonicalPassHasRecoveryDemand,
+              !canonicalPendingRecoveryDemand else {
+            return
+        }
+        invalidateCanonicalLoad()
     }
 
     func loadAutoDispatchStatuses() async {
-        guard let autoPrintService else { return }
+        guard isActive, let autoPrintService else { return }
+        let token = UUID()
+        autoStatusLoadToken = token
+        let lifecycleEpoch = canonicalLifecycleEpoch
+        let serviceIdentity = Self.identity(autoPrintService)
         do {
             let statuses = try await autoPrintService.getAllStatus()
+            guard isActive,
+                  autoStatusLoadToken == token,
+                  canonicalLifecycleEpoch == lifecycleEpoch,
+                  Self.identity(self.autoPrintService) == serviceIdentity else {
+                return
+            }
             autoDispatchStatuses = Dictionary(uniqueKeysWithValues: statuses.printers.map { ($0.printerId, $0) })
         } catch {
             // Non-critical — cards will fall back to printer state
         }
+    }
+
+    private func makeCanonicalAuthority(token: UUID) -> CanonicalAuthority {
+        CanonicalAuthority(
+            token: token,
+            lifecycleEpoch: canonicalLifecycleEpoch,
+            printerServiceIdentity: Self.identity(printerService),
+            autoPrintServiceIdentity: Self.identity(autoPrintService)
+        )
+    }
+
+    private func isCanonicalLoadCurrent(_ authority: CanonicalAuthority) -> Bool {
+        isActive
+            && canonicalLoadToken == authority.token
+            && canonicalLifecycleEpoch == authority.lifecycleEpoch
+            && Self.identity(printerService) == authority.printerServiceIdentity
+            && Self.identity(autoPrintService) == authority.autoPrintServiceIdentity
+    }
+
+    private static func identity<T>(_ value: T?) -> ObjectIdentifier? {
+        value.map { ObjectIdentifier($0 as AnyObject) }
+    }
+
+    private static func identical<T>(_ lhs: T?, _ rhs: T?) -> Bool {
+        identity(lhs) == identity(rhs)
+    }
+
+#if DEBUG
+    func beginCanonicalLoadForTesting() -> CanonicalLoadWaiter? {
+        beginCanonicalLoad()
+    }
+
+    var canonicalWaiterCountForTesting: Int {
+        canonicalLoadWaiters.activeCount
+    }
+
+    func waitForCanonicalWaiterCount(_ count: Int) async {
+        await canonicalLoadWaiters.waitForActiveCount(count)
+    }
+
+    func waitForCanonicalLoadToBecomeIdle() async {
+        await canonicalTaskTracker.waitForIdle()
+    }
+
+    func waitForSupersededCanonicalLoads() async {
+        await canonicalTaskTracker.waitForIdle()
+    }
+#endif
+
+    private struct CanonicalAuthority {
+        let token: UUID
+        let lifecycleEpoch: UInt64
+        let printerServiceIdentity: ObjectIdentifier?
+        let autoPrintServiceIdentity: ObjectIdentifier?
+    }
+
+    private struct CanonicalSnapshot {
+        let printers: [Printer]
+        let autoDispatchStatuses: [UUID: AutoDispatchStatus]
+    }
+
+    private struct CanonicalLoadInput: Sendable {
+        let printerService: any PrinterServiceProtocol
+        let autoPrintService: (any AutoDispatchServiceProtocol)?
+        let fallbackStatuses: [UUID: AutoDispatchStatus]
+    }
+
+    private enum CanonicalLoadResult {
+        case success(CanonicalSnapshot)
+        case failure(Error)
+        case superseded
     }
 
     // MARK: - Filtered Results

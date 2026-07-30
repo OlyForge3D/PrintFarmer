@@ -383,7 +383,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         });
         const adminResult = result as unknown as { success?: boolean; token?: string; error?: string };
         if (!(adminResult.success && adminResult.token)) throw new Error((adminResult.error as string) || 'Admin creation failed');
-        localStorage.setItem('auth-token', (adminResult.token as string));
         await login({ username: formData.username, password: formData.password });
         setAdminCreated(true);
       }

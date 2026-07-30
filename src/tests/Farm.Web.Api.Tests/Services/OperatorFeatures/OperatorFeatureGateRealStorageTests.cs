@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
@@ -145,6 +146,76 @@ public class OperatorFeatureGateRealStorageTests
     }
 
     [Fact]
+    public async Task SameScopedGate_ObservesDisableAndReenableCommittedByAnotherRelationalContext()
+    {
+        string databasePath = Path.Combine(
+            Path.GetTempPath(),
+            $"operator-feature-gate-refresh-{Guid.NewGuid():N}.db");
+        string connectionString = $"Data Source={databasePath};Pooling=False";
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+
+        try
+        {
+            await using (AppDbContext seed = new(options))
+            {
+                await seed.Database.EnsureCreatedAsync();
+                seed.AppSettingsEntities.Add(new AppSettingsEntity
+                {
+                    Key = OperatorFeatureSettings.SectionName,
+                    SettingsJson = JsonSerializer.Serialize(new OperatorFeatureSettings
+                    {
+                        NativePushEnabled = true,
+                    }),
+                    UpdatedAt = DateTime.UtcNow,
+                });
+                await seed.SaveChangesAsync();
+            }
+
+            await using AppDbContext gateContext = new(options);
+            OperatorFeatureGate gate = new(
+                new EfAppSettingsRepository(gateContext),
+                ConfigWith(),
+                NullLogger<OperatorFeatureGate>.Instance);
+
+            gate.IsEnabled(OperatorFeature.NativePush).Should().BeTrue();
+
+            await SetNativePushAsync(options, enabled: false);
+            gate.IsEnabled(OperatorFeature.NativePush).Should().BeFalse(
+                "the same scoped gate must bypass its DbContext identity map");
+
+            await SetNativePushAsync(options, enabled: true);
+            gate.IsEnabled(OperatorFeature.NativePush).Should().BeTrue(
+                "re-enabling in persisted state must also be visible without recreating the gate");
+        }
+        finally
+        {
+            File.Delete(databasePath);
+            File.Delete(databasePath + "-shm");
+            File.Delete(databasePath + "-wal");
+        }
+    }
+
+    private static async Task SetNativePushAsync(
+        DbContextOptions<AppDbContext> options,
+        bool enabled)
+    {
+        await using AppDbContext update = new(options);
+        int rows = await update.AppSettingsEntities
+            .Where(row => row.Key == OperatorFeatureSettings.SectionName)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(
+                    row => row.SettingsJson,
+                    JsonSerializer.Serialize(new OperatorFeatureSettings
+                    {
+                        NativePushEnabled = enabled,
+                    }))
+                .SetProperty(row => row.UpdatedAt, DateTime.UtcNow));
+        rows.Should().Be(1);
+    }
+
+    [Fact]
     public void Construction_DoesNotTouchDatabase()
     {
         // Blocker 2 from the #725 convergence: capability lookup must not fail because
@@ -152,7 +223,7 @@ public class OperatorFeatureGateRealStorageTests
         // but whose ctor is cheap — the gate must construct successfully and only fail-soft
         // to defaults on the actual read.
         Mock<IAppSettingsRepository> repo = new();
-        repo.Setup(r => r.GetAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
+        repo.Setup(r => r.GetReadOnlyAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("DB unavailable"));
 
         OperatorFeatureGate gate = new(
@@ -160,9 +231,9 @@ public class OperatorFeatureGateRealStorageTests
             ConfigWith(),
             NullLogger<OperatorFeatureGate>.Instance);
 
-        // Construction must not have called GetAsync.
+        // Construction must not have called GetReadOnlyAsync.
         repo.Verify(
-            r => r.GetAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()),
+            r => r.GetReadOnlyAsync(It.IsAny<string>(), It.IsAny<System.Threading.CancellationToken>()),
             Times.Never);
 
         // First read triggers the throw but degrades to defaults.
@@ -170,7 +241,7 @@ public class OperatorFeatureGateRealStorageTests
         flags.AttentionEnabled.Should().BeTrue();
         flags.NativePushEnabled.Should().BeFalse();
         repo.Verify(
-            r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<System.Threading.CancellationToken>()),
+            r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<System.Threading.CancellationToken>()),
             Times.AtLeastOnce);
     }
 }

@@ -39,8 +39,21 @@ struct PredictiveInsightsView: View {
     private var insightsContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                riskGauge
-                riskFactorsSection
+                if case .failed(let message) = viewModel.predictionStatus {
+                    if viewModel.prediction != nil {
+                        stalePredictionBanner(message: message)
+                        riskDisplay
+                        riskFactorsSection
+                    } else {
+                        predictionUnavailable(message: message)
+                    }
+                } else {
+                    if viewModel.isRefreshingStalePrediction {
+                        refreshingStaleBanner
+                    }
+                    riskDisplay
+                    riskFactorsSection
+                }
                 alertsSection
                 forecastsSection
             }
@@ -48,45 +61,175 @@ struct PredictiveInsightsView: View {
         }
     }
 
-    // MARK: - Risk Gauge
+    // MARK: - Failure & Retry
+
+    private func stalePredictionBanner(message: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Predictive data may be out of date", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(Color.pfError)
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("Retry") {
+                Task { await viewModel.retryPrediction() }
+            }
+            .frame(minHeight: 44)
+            .accessibilityLabel("Retry predictive data load")
+            .accessibilityHint("Reloads the latest predictive failure data.")
+            .accessibilityIdentifier("predictiveInsights.retry")
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfError, lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("predictiveInsights.stale")
+    }
+
+    /// Refresh banner shown when a predictive request is in flight while a
+    /// prior successful prediction is still on screen. Without this, the
+    /// stale gauge below could be mistaken for fresh data because
+    /// `predictFailure`/`retryPrediction` intentionally preserve the last
+    /// value across the refresh (issue #808 Hicks R1).
+    private var refreshingStaleBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Refreshing predictive data…")
+                    .font(.subheadline.weight(.medium))
+                Text("Values below reflect the last successful reading.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Refreshing predictive data. Displayed values reflect the last successful reading.")
+        .accessibilityIdentifier("predictiveInsights.refreshing")
+    }
+
+    private func predictionUnavailable(message: String) -> some View {
+        ContentUnavailableView {
+            Label("Predictive data unavailable", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(message)
+        } actions: {
+            Button("Retry") {
+                Task { await viewModel.retryPrediction() }
+            }
+            .accessibilityLabel("Retry predictive data load")
+            .accessibilityHint("Reloads the latest predictive failure data.")
+            .accessibilityIdentifier("predictiveInsights.retry")
+        }
+        .accessibilityIdentifier("predictiveInsights.unavailable")
+    }
+
+    // MARK: - Risk Display (gauge or unavailable-likelihood card)
+
+    /// Routes between the numeric ring gauge and an "unavailable" card so
+    /// a prediction with a nil `predictedFailureLikelihood` can never
+    /// render as a green 0% Low gauge (issue #808 Hicks R2).
+    @ViewBuilder
+    private var riskDisplay: some View {
+        if viewModel.prediction == nil {
+            emptyPredictionCard
+        } else if viewModel.hasKnownLikelihood {
+            riskGauge
+        } else {
+            riskUnavailableCard
+        }
+    }
 
     private var riskGauge: some View {
         VStack(spacing: 12) {
-            if viewModel.prediction != nil {
-                ZStack {
-                    Circle()
-                        .stroke(Color.pfBackgroundTertiary, lineWidth: 12)
-                        .frame(width: 120, height: 120)
+            ZStack {
+                Circle()
+                    .stroke(Color.pfBackgroundTertiary, lineWidth: 12)
+                    .frame(width: 120, height: 120)
 
-                    Circle()
-                        .trim(from: 0, to: CGFloat(viewModel.riskPercentage) / 100.0)
-                        .stroke(riskColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .frame(width: 120, height: 120)
+                Circle()
+                    .trim(from: 0, to: CGFloat(viewModel.riskPercentage) / 100.0)
+                    .stroke(riskColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                    .frame(width: 120, height: 120)
 
-                    VStack(spacing: 2) {
-                        Text("\(viewModel.riskPercentage)%")
-                            .font(.title.bold().monospacedDigit())
+                VStack(spacing: 2) {
+                    Text("\(viewModel.riskPercentage)%")
+                        .font(.title.bold().monospacedDigit())
 
-                        Text(viewModel.riskLevel)
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(riskColor)
-                    }
+                    Text(viewModel.riskLevel)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(riskColor)
                 }
-
-                Text("Failure Risk")
-                    .font(.headline)
-            } else {
-                Image(systemName: "chart.line.downtrend.xyaxis")
-                    .font(.largeTitle)
-                    .foregroundStyle(.secondary)
-                Text("No predictions available")
-                    .font(.headline)
-                Text("Predictions will appear once enough print history is collected.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
+
+            Text("Failure Risk")
+                .font(.headline)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfBorder, lineWidth: 1)
+        )
+        .opacity(viewModel.isRefreshingStalePrediction ? 0.55 : 1.0)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            viewModel.isRefreshingStalePrediction
+                ? "Failure risk (refreshing): \(viewModel.riskPercentage) percent, \(viewModel.riskLevel)."
+                : "Failure risk: \(viewModel.riskPercentage) percent, \(viewModel.riskLevel)."
+        )
+        .accessibilityIdentifier("predictiveInsights.gauge")
+    }
+
+    private var riskUnavailableCard: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "questionmark.circle")
+                .font(.largeTitle)
+                .foregroundStyle(Color.pfWarning)
+            Text("Failure risk unavailable")
+                .font(.headline)
+            Text("The server returned a prediction without a risk score. Do not treat this as low risk.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.pfWarning, lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Failure risk unavailable. The server returned a prediction without a risk score. Do not treat this as low risk.")
+        .accessibilityIdentifier("predictiveInsights.riskUnavailable")
+    }
+
+    private var emptyPredictionCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "chart.line.downtrend.xyaxis")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text("No predictions available")
+                .font(.headline)
+            Text("Predictions will appear once enough print history is collected.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding()

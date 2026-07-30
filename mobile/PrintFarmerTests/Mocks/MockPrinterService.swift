@@ -8,8 +8,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var cameraUrlsToReturn: [PrinterCameraUrls] = []
     var cameraUrlToReturn: PrinterCameraUrl?
     var currentJobToReturn: PrintJobStatusInfo?
+    var historyToReturn = PrinterHistoryList(count: 0, jobs: [])
     var commandResultToReturn = CommandResult(success: true, message: nil)
     var snapshotDataToReturn = Data()
+    var snapshotHandler: (@Sendable (UUID) async throws -> Data)?
+    var listHandler: (@Sendable (Bool) async throws -> [Printer])?
+    var getHandler: (@Sendable (UUID) async throws -> Printer)?
     var queueOverviewToReturn: [QueueOverview] = []
     var spoolsToReturn: [SpoolmanSpool] = []
     var errorToThrow: Error?
@@ -23,7 +27,10 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var getCameraUrlCalledWith: UUID?
     var getSnapshotCalledWith: UUID?
     var getSnapshotCallCount = 0
+    var listPrintersCallCount = 0
+    var getPrinterCallCount = 0
     var getCurrentJobCalledWith: UUID?
+    var getHistoryCalledWith: (id: UUID, limit: Int?)?
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
     var cancelCalledWith: UUID?
@@ -32,6 +39,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var maintenanceCalledWith: (id: UUID, inMaintenance: Bool)?
     var queueOverviewCalled = false
     var setActiveSpoolCalledWith: (printerId: UUID, spoolId: Int?)?
+    var bindToolheadSpoolCalls: [(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String)] = []
     var listAvailableSpoolsCalledWith: UUID?
     var loadFilamentCalledWith: UUID?
     var unloadFilamentCalledWith: UUID?
@@ -44,13 +52,21 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
 
     func list(includeDisabled: Bool = false) async throws -> [Printer] {
         listPrintersCalled = true
+        listPrintersCallCount += 1
         listIncludeDisabledArg = includeDisabled
+        if let listHandler {
+            return try await listHandler(includeDisabled)
+        }
         if let error = errorToThrow { throw error }
         return printersToReturn
     }
 
     func get(id: UUID) async throws -> Printer {
         getPrinterCalledWith = id
+        getPrinterCallCount += 1
+        if let getHandler {
+            return try await getHandler(id)
+        }
         if let error = errorToThrow { throw error }
         guard let printer = printerToReturn else { throw NetworkError.notFound }
         return printer
@@ -79,6 +95,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     func getSnapshot(id: UUID) async throws -> Data {
         getSnapshotCalledWith = id
         getSnapshotCallCount += 1
+        if let snapshotHandler {
+            return try await snapshotHandler(id)
+        }
         if let error = errorToThrow { throw error }
         return snapshotDataToReturn
     }
@@ -87,6 +106,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getCurrentJobCalledWith = id
         if let error = errorToThrow { throw error }
         return currentJobToReturn
+    }
+
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList {
+        getHistoryCalledWith = (id, limit)
+        if let error = errorToThrow { throw error }
+        return historyToReturn
     }
 
     func pause(id: UUID) async throws -> CommandResult {
@@ -142,6 +167,12 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         reviewedRowVersion: String
     ) async throws -> CommandResult {
         setActiveSpoolCalledWith = (printerId, spoolId)
+        if let error = errorToThrow { throw error }
+        return commandResultToReturn
+    }
+
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult {
+        bindToolheadSpoolCalls.append((printerId, toolheadIndex, request, idempotencyKey))
         if let error = errorToThrow { throw error }
         return commandResultToReturn
     }
@@ -214,6 +245,7 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         cameraUrlsToReturn = []
         cameraUrlToReturn = nil
         currentJobToReturn = nil
+        historyToReturn = PrinterHistoryList(count: 0, jobs: [])
         commandResultToReturn = CommandResult(success: true, message: nil)
         errorToThrow = nil
         listPrintersCalled = false
@@ -224,7 +256,9 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         getCameraUrlCalledWith = nil
         getSnapshotCalledWith = nil
         getSnapshotCallCount = 0
+        snapshotHandler = nil
         getCurrentJobCalledWith = nil
+        getHistoryCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
         cancelCalledWith = nil
@@ -243,5 +277,95 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         homeZCalledWith = nil
         moveCalledWith = nil
         spoolsToReturn = []
+        getDetailsCalledWith = nil
+        detailsToReturn = nil
+        listFallbackGroupsCalledWith = nil
+        fallbackGroupsToReturn = []
+        getFallbackGroupCalledWith = nil
+        fallbackGroupToReturn = nil
+        createFallbackGroupCalledWith = nil
+        updateFallbackGroupCalledWith = nil
+        deleteFallbackGroupCalledWith = nil
+        getAvailableFallbackCalledWith = nil
+        availableFallbackMemberToReturn = nil
+    }
+
+    // MARK: - #711 F6 fallback groups
+
+    var detailsToReturn: PrinterDetails?
+    var fallbackGroupsToReturn: [FilamentFallbackGroup] = []
+    var fallbackGroupToReturn: FilamentFallbackGroup?
+    var availableFallbackMemberToReturn: AvailableFallbackMember?
+
+    var getDetailsCalledWith: UUID?
+    var listFallbackGroupsCalledWith: UUID?
+    var getFallbackGroupCalledWith: (printerId: UUID, groupId: UUID)?
+    var createFallbackGroupCalledWith: (printerId: UUID, request: CreateFilamentFallbackGroupRequest)?
+    var updateFallbackGroupCalledWith: (printerId: UUID, groupId: UUID, request: UpdateFilamentFallbackGroupRequest)?
+    var deleteFallbackGroupCalledWith: (printerId: UUID, groupId: UUID)?
+    var getAvailableFallbackCalledWith: (printerId: UUID, sourceToolheadId: UUID, material: String)?
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        getDetailsCalledWith = id
+        if let error = errorToThrow { throw error }
+        guard let details = detailsToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 1, userInfo: [NSLocalizedDescriptionKey: "No details stubbed"])
+        }
+        return details
+    }
+
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] {
+        listFallbackGroupsCalledWith = printerId
+        if let error = errorToThrow { throw error }
+        return fallbackGroupsToReturn
+    }
+
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        getFallbackGroupCalledWith = (printerId, groupId)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 2, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func createFallbackGroup(
+        printerId: UUID,
+        _ request: CreateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        createFallbackGroupCalledWith = (printerId, request)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 3, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func updateFallbackGroup(
+        printerId: UUID,
+        groupId: UUID,
+        _ request: UpdateFilamentFallbackGroupRequest
+    ) async throws -> FilamentFallbackGroup {
+        updateFallbackGroupCalledWith = (printerId, groupId, request)
+        if let error = errorToThrow { throw error }
+        guard let group = fallbackGroupToReturn else {
+            throw NSError(domain: "MockPrinterService", code: 4, userInfo: [NSLocalizedDescriptionKey: "No group stubbed"])
+        }
+        return group
+    }
+
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {
+        deleteFallbackGroupCalledWith = (printerId, groupId)
+        if let error = errorToThrow { throw error }
+    }
+
+    func getAvailableFallback(
+        printerId: UUID,
+        sourceToolheadId: UUID,
+        material: String
+    ) async throws -> AvailableFallbackMember? {
+        getAvailableFallbackCalledWith = (printerId, sourceToolheadId, material)
+        if let error = errorToThrow { throw error }
+        return availableFallbackMemberToReturn
     }
 }

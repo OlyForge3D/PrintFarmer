@@ -138,6 +138,7 @@ public abstract class HttpJobPollerService(
                 DistributedSlicingJob job = new DistributedSlicingJob
                 {
                     Id = jobStatus.Id,
+                    ClaimToken = jobStatus.ClaimToken,
                     WorkerId = registeredServiceId.Value.ToString(),
                     ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
                     ModelFileName = jobStatus.ModelFileName,
@@ -205,7 +206,9 @@ public abstract class HttpJobPollerService(
         int leaseLost = 0;
         Task? renewalLoop = null;
 
-        _workerState.SetJobLease(job.Id, new WorkerJobLease(job.LeaseToken, job.LeaseFence));
+        _workerState.SetJobLease(
+            job.Id,
+            new WorkerJobLease(job.LeaseToken, job.LeaseFence, job.ClaimToken));
 
         using CancellationTokenSource jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         CancellationToken jobToken = jobCts.Token;
@@ -215,7 +218,13 @@ public abstract class HttpJobPollerService(
             using IServiceScope scope = _serviceProvider.CreateScope();
 
             // Emit initial progress (0%)
-            await TrySendProgressAsync(httpClient, job.Id, 0, "Starting slicing", jobToken);
+            await TrySendProgressAsync(
+                httpClient,
+                job.Id,
+                job.ClaimToken,
+                0,
+                "Starting slicing",
+                jobToken);
 
             // Start a lease-renewal loop to prevent the API from reclaiming the job while we're actively processing.
             try
@@ -280,7 +289,13 @@ public abstract class HttpJobPollerService(
 
             // Mid-progress update (pipeline finished but artifacts pending)
             // Use heuristic progress since SlicingResult doesn't expose granular percentage yet.
-            await TrySendProgressAsync(httpClient, job.Id, 85, "Slicing complete, uploading artifacts", jobToken);
+            await TrySendProgressAsync(
+                httpClient,
+                job.Id,
+                job.ClaimToken,
+                85,
+                "Slicing complete, uploading artifacts",
+                jobToken);
 
             _logger.LogInformation("Job {JobId} slicing completed in {TotalSeconds:F1}s", job.Id, (DateTime.UtcNow - start).TotalSeconds);
 
@@ -354,7 +369,7 @@ public abstract class HttpJobPollerService(
             else
             {
                 // Report failure to the API so the job doesn't sit in Processing until lease expires
-                await TryReportFailureAsync(httpClient, job.Id, ex.Message, ct);
+                await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
             }
 
             // The outcome is ambiguous from the worker's point of view, so the local work is kept
@@ -407,7 +422,7 @@ public abstract class HttpJobPollerService(
     }
 
     /// <summary>
-    /// Builds a request for a job mutation carrying exactly one value for each of the four headers
+    /// Builds a request carrying exactly one value for each worker claim and lease header
     /// <c>AuthorizeWorkerMutationAsync</c> requires.
     /// </summary>
     /// <param name="httpClient">The client the request will be sent on; its default headers are consulted so a value is never presented twice.</param>
@@ -434,7 +449,9 @@ public abstract class HttpJobPollerService(
                 $"Worker registration is unavailable; refusing to send an unauthenticated mutation for job {jobId}.");
         }
 
-        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) || lease.Token == Guid.Empty)
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) ||
+            lease.Token == Guid.Empty ||
+            lease.ClaimToken == Guid.Empty)
         {
             throw new InvalidOperationException(
                 $"No lease is held for job {jobId}; refusing to send an unfenced mutation.");
@@ -446,6 +463,7 @@ public abstract class HttpJobPollerService(
             request.Content = content;
             SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.WorkerKey, state.RegisteredServiceApiKey!);
             SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.WorkerId, serviceId.ToString());
+            SetSingleHeaderValue(request, httpClient, WorkerClaimHeaders.ClaimToken, lease.ClaimToken.ToString());
             SetSingleHeaderValue(request, httpClient, WorkerLeaseHeaders.LeaseToken, lease.Token.ToString());
             SetSingleHeaderValue(
                 request,
@@ -547,10 +565,17 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private async Task TrySendProgressAsync(HttpClient client, Guid jobId, int percent, string message, CancellationToken ct)
+    private async Task TrySendProgressAsync(
+        HttpClient client,
+        Guid jobId,
+        Guid claimToken,
+        int percent,
+        string message,
+        CancellationToken ct)
     {
         try
         {
+            EnsureCurrentClaim(jobId, claimToken);
             SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest
             {
                 ProgressPercent = percent,
@@ -574,10 +599,16 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private async Task TryReportFailureAsync(HttpClient client, Guid jobId, string errorMessage, CancellationToken ct)
+    private async Task TryReportFailureAsync(
+        HttpClient client,
+        Guid jobId,
+        Guid claimToken,
+        string errorMessage,
+        CancellationToken ct)
     {
         try
         {
+            EnsureCurrentClaim(jobId, claimToken);
             string truncated = errorMessage.Length > 1000 ? errorMessage[..1000] : errorMessage;
 
             using HttpRequestMessage request = CreateJobMutationRequest(
@@ -646,6 +677,7 @@ public abstract class HttpJobPollerService(
             new StringContent(gcodeStream.Length.ToString(CultureInfo.InvariantCulture)),
             "sizeBytes");
 
+        EnsureCurrentClaim(job.Id, job.ClaimToken);
         using HttpRequestMessage uploadRequest = CreateJobMutationRequest(
             httpClient,
             HttpMethod.Post,
@@ -670,6 +702,17 @@ public abstract class HttpJobPollerService(
         _logger.LogInformation("Uploaded G-code artifact: {ArtifactResponseId} ({GcodeBytesLength} bytes)", artifactResponse.Id, gcodeStream.Length);
 
         return artifactIds;
+    }
+
+    private void EnsureCurrentClaim(Guid jobId, Guid claimToken)
+    {
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) ||
+            lease.ClaimToken == Guid.Empty ||
+            lease.ClaimToken != claimToken)
+        {
+            throw new InvalidOperationException(
+                $"The claim token for job {jobId} is no longer current.");
+        }
     }
 
     /// <summary>

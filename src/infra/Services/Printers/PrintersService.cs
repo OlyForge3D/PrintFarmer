@@ -27,6 +27,7 @@ using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -69,6 +70,9 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
 /// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
 /// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
+/// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
+/// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
+/// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
@@ -86,7 +90,10 @@ public class PrintersService(
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
     Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
     Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
-    IStoragePathService storagePathService) : IPrintersService
+    IStoragePathService storagePathService,
+    IFilamentCoverageSpoolResolver spoolResolver,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -105,11 +112,22 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
     private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
 
+    // Optional: #709 filament coverage broadcaster. Nullable so unit tests
+    // that build PrintersService directly do not need to supply a mock.
+    private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): shared in-memory per-tool activity accumulator. Nullable so
+    // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
+    // accumulated telemetry when it is deleted.
+    private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
+
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
     /// Most MMU printers support 4-8 toolheads; 16 is a generous upper bound.
     /// </summary>
     private const int MaxToolheadIndex = 16;
+    private const string ToolheadPrinterIndexUniqueIndexName = "UX_Toolheads_PrinterId_Index";
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -691,6 +709,10 @@ public class PrintersService(
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
         await _unitOfWork.Printers.RemoveAsync(p, ct);
+
+        // Discard any accumulated per-tool activity so a deleted printer's buckets do not linger
+        // (issue #711, round-14). Best-effort: the accumulator is a shared in-memory singleton.
+        _activityAccumulator?.Reset(p.Id);
     }
 
     /// <summary>
@@ -1877,6 +1899,11 @@ public class PrintersService(
             HasEnclosure = modelTemplate?.HasEnclosure ?? false,
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+
+            // SupportsPerToolAttribution is derived after the toolheads are built (see
+            // PerToolAttributionCapability.Refresh before AddAsync below): it is true only for a
+            // Moonraker printer with two or more physical hotends, the case where interval-aware
+            // active-tool telemetry can genuinely differentiate per-head wear (issue #711, round-14).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
@@ -1972,6 +1999,11 @@ public class PrintersService(
                 _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
             }
         }
+
+        // Derive per-tool attribution capability now that the physical toolheads exist (issue #711,
+        // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
+        // active-tool telemetry can genuinely differentiate per-head wear.
+        _ = PerToolAttributionCapability.Refresh(p);
 
         await AddAsync(p, ct);
 
@@ -2119,6 +2151,8 @@ public class PrintersService(
                 }
             }
         }
+
+        updated = PerToolAttributionCapability.Refresh(printer) || updated;
 
         // Always mark the sync as complete so HasCatalogUpdate clears,
         // even when the printer already has all template values.
@@ -3019,12 +3053,113 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return new CommandResult(false, $"Printer {id} not found");
+            return new FilamentUnloadResult(
+                false,
+                $"Printer {id} not found",
+                FailureKind: FilamentUnloadFailureKind.PrinterNotFound);
+        }
+
+        // Capture outgoing spool details BEFORE unload so we can return residual weight
+        // even if the printer command later fails partway.
+        //
+        // Source of truth for the outgoing spool (in order):
+        //   1. Explicit toolheadIndex → that lane's CurrentSpoolId (guided swap on
+        //      multi-slot / MMU printers targets a specific gate; do NOT infer from
+        //      the physical primary).
+        //   2. Otherwise: Printer.CurrentSpoolId (legacy single-tool source of truth),
+        //      falling back to primaryToolhead.CurrentSpoolId when the Printer scalar
+        //      is unset.
+        int? outgoingSpoolId;
+        string? outgoingMaterial;
+
+        if (toolheadIndex.HasValue)
+        {
+            Toolhead? targetLane = p.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex.Value);
+            if (targetLane is null)
+            {
+                // B3: legacy single-tool T0 with no materialized Toolhead row → resolve the
+                // outgoing spool from the Printer scalar, never from a fabricated gate.
+                if (toolheadIndex.Value == 0)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    // An explicit, non-zero lane that does not exist is an invalid toolhead
+                    // request → documented HTTP 400 (not a 404 "printer not found").
+                    return new FilamentUnloadResult(
+                        false,
+                        $"Toolhead index {toolheadIndex.Value} not found on printer {p.Name}",
+                        SpoolId: null,
+                        Material: null,
+                        ResidualWeightG: null,
+                        FailureKind: FilamentUnloadFailureKind.InvalidToolhead);
+                }
+            }
+            else if (toolheadIndex.Value == 0)
+            {
+                // B3: when a physical row exists at T0, preserve the read precedence
+                // Printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId.
+                if (p.CurrentSpoolId is not null)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    outgoingSpoolId = targetLane.CurrentSpoolId;
+                    outgoingMaterial = targetLane.CurrentMaterial;
+                }
+            }
+            else
+            {
+                outgoingSpoolId = targetLane.CurrentSpoolId;
+                outgoingMaterial = targetLane.CurrentMaterial;
+            }
+        }
+        else
+        {
+            outgoingSpoolId = p.CurrentSpoolId;
+            outgoingMaterial = null;
+            if (outgoingSpoolId is null)
+            {
+                Toolhead? primary = p.Toolheads?
+                    .OrderByDescending(t => t.IsPrimary)
+                    .ThenBy(t => t.Index)
+                    .FirstOrDefault();
+                outgoingSpoolId = primary?.CurrentSpoolId;
+                outgoingMaterial = primary?.CurrentMaterial;
+            }
+        }
+
+        double? residualWeightG = null;
+
+        if (outgoingSpoolId is int spoolId)
+        {
+            try
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+                if (spool is not null)
+                {
+                    residualWeightG = spool.RemainingWeightG;
+                    outgoingMaterial ??= spool.Material;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "UnloadFilamentAsync: Spoolman lookup for outgoing spool {SpoolId} on printer {PName} ({Id}) failed",
+                    spoolId,
+                    p.Name,
+                    id);
+            }
         }
 
         try
@@ -3034,19 +3169,32 @@ public class PrintersService(
 
             if (client is not ISupportsFilamentControl filamentClient)
             {
-                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+                return new FilamentUnloadResult(
+                    false,
+                    $"Backend '{backend}' does not support filament control",
+                    outgoingSpoolId,
+                    outgoingMaterial,
+                    residualWeightG);
             }
 
             string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             bool result = await filamentClient.UnloadFilamentAsync(url, ct).ConfigureAwait(false);
-            return result
-                ? new CommandResult(true, "Filament unload initiated")
-                : new CommandResult(false, "Printer rejected the filament unload command");
+            return new FilamentUnloadResult(
+                result,
+                result ? "Filament unload initiated" : "Printer rejected the filament unload command",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to unload filament on printer {PName} ({Id})", p.Name, id);
-            return new CommandResult(false, $"Failed to unload filament: {ex.Message}");
+            return new FilamentUnloadResult(
+                false,
+                $"Failed to unload filament: {ex.Message}",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
     }
 
@@ -3149,6 +3297,16 @@ public class PrintersService(
                 : null;
             await _broadcaster.BroadcastSpoolChangeAsync(id, spoolInfo, ct).ConfigureAwait(false);
 
+            // #709 item 5: coverage may have changed (bound spool differs, so
+            // remaining / classification changes).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
+
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
         }
         catch (Exception ex)
@@ -3189,7 +3347,17 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct)
+    public Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct) =>
+        SetToolheadSpoolAsync(id, toolheadIndex, spoolId, null, SpoolBindPolicy.Direct, ct);
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
+        CancellationToken ct)
     {
         // Load printer with toolheads collection
         Printer? p = await _unitOfWork.Printers
@@ -3213,45 +3381,152 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
-        // Auto-create MMU gates when the toolhead doesn't exist.
-        // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
-        // promote it and create the virtual gate rows so spool assignment works.
-        if (toolhead is null)
-        {
-            if (!p.MultiMaterial && toolheadIndex > 0)
-            {
-                _logger.LogInformation(
-                    "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
-                    p.Name, id, toolheadIndex);
-                p.MultiMaterial = true;
-            }
+        // H-3: natural idempotency backstop. Re-binding the SAME spool to the SAME
+        // (printer, toolhead) slot is a no-op, so short-circuit BEFORE any spool
+        // re-resolution, UpdatedAt churn, override-audit staging, SaveChanges, or
+        // coverage broadcast. This gives spool-bind the same durable natural-idempotency
+        // backstop that adjust (OperationKey) and harvest (HarvestedAt + snapshot) already
+        // own, so a re-delivered bind — an Idempotency-Key retry while the replay flag is
+        // off or transitioning, or a staleness-reclaimed retry — cannot produce a duplicate
+        // FilamentSwapOverride audit row or a spurious state change. Returns 200
+        // (CommandResult success) with the existing binding unchanged.
+        bool alreadyBoundToRequestedSpool = toolhead is null && toolheadIndex == 0
+            ? p.CurrentSpoolId == spoolId
+            : toolhead is not null && toolhead.CurrentSpoolId == spoolId;
 
-            if (p.MultiMaterial)
+        if (alreadyBoundToRequestedSpool)
+        {
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: spool {SpoolId} already bound to toolhead T{Index} on printer {PName} ({Id}); returning existing binding unchanged (idempotent no-op re-bind)",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(true, $"Spool {spoolId} already assigned to toolhead T{toolheadIndex}");
+        }
+
+        // B3: legacy single-tool T0 with no materialized Toolhead row → bind via the Printer
+        // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
+        if (toolhead is null && toolheadIndex == 0)
+        {
+            int? previousSpoolId = p.CurrentSpoolId;
+            string? previousMaterial = p.CurrentMaterial;
+            FilamentSwapOverride? stagedAudit = null;
+
+            try
             {
-                int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
-                if (gates.Count > 0)
+                SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                    p,
+                    spoolId,
+                    policy,
+                    ct).ConfigureAwait(false);
+                SpoolmanSpoolDto? spool = resolution.Spool;
+
+                if (policy == SpoolBindPolicy.Guided && spool is null)
                 {
-                    _unitOfWork.Printers.AddToolheads(gates);
-                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    _logger.LogWarning(
+                        "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for legacy T0 on printer {PName} ({Id})",
+                        spoolId, p.Name, id);
+                    return new CommandResult(
+                        false,
+                        BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
                 }
 
-                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
-                           ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+                p.CurrentSpoolId = spoolId;
+                p.CurrentMaterial = spool?.Material ?? null;
+
+                stagedAudit = StageOverrideAudit(
+                    overrideAudit,
+                    id,
+                    toolheadIndex,
+                    spoolId,
+                    spool?.Material);
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                RestoreLegacySpoolBinding(p, previousSpoolId, previousMaterial, stagedAudit);
+                _logger.LogError(
+                    ex,
+                    "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to legacy T0 on printer {PName} ({Id})",
+                    spoolId, p.Name, id);
+                return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
+            }
+
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to legacy T0 (Printer scalar) on printer {PName} ({Id})",
+                spoolId, p.Name, id);
+
+            await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T0");
         }
 
-        if (toolhead is null)
-        {
-            return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
-        }
-
+        bool previousMultiMaterial = p.MultiMaterial;
+        List<Toolhead> stagedGates = [];
+        Toolhead? existingToolhead = toolhead;
+        int? previousToolheadSpoolId = existingToolhead?.CurrentSpoolId;
+        string? previousToolheadMaterial = existingToolhead?.CurrentMaterial;
+        string? previousToolheadColor = existingToolhead?.CurrentFilamentColor;
+        DateTime? previousToolheadUpdatedAt = existingToolhead?.UpdatedAt;
+        FilamentSwapOverride? stagedOverride = null;
         try
         {
-            // Fetch spool details from Spoolman to populate material and color
-            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            // C1/C3: resolve before mutating tracked topology. A guided null or lookup
+            // exception therefore cannot leave a promotion or newly tracked gates behind.
+            SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                p,
+                spoolId,
+                policy,
+                ct).ConfigureAwait(false);
+            SpoolmanSpoolDto? spool = resolution.Spool;
 
-            // Assign spool ID and denormalized info
+            if (policy == SpoolBindPolicy.Guided && spool is null)
+            {
+                _logger.LogWarning(
+                    "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for toolhead T{Index} on printer {PName} ({Id}); no gate/bind/audit persisted",
+                    spoolId, toolheadIndex, p.Name, id);
+                return new CommandResult(
+                    false,
+                    BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
+            }
+
+            if (toolhead is null)
+            {
+                if (!p.MultiMaterial && toolheadIndex > 0)
+                {
+                    _logger.LogInformation(
+                        "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
+                        p.Name, id, toolheadIndex);
+                    p.MultiMaterial = true;
+                    _ = PerToolAttributionCapability.Refresh(p);
+                }
+
+                if (p.MultiMaterial)
+                {
+                    int gateCount = Math.Max(4, toolheadIndex);
+                    stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                    if (stagedGates.Count > 0)
+                    {
+                        _unitOfWork.Printers.AddToolheads(stagedGates);
+                    }
+
+                    toolhead = stagedGates.FirstOrDefault(t => t.Index == toolheadIndex)
+                               ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+                }
+            }
+
+            if (toolhead is null)
+            {
+                RestoreStagedToolheadBinding(
+                    p,
+                    previousMultiMaterial,
+                    stagedGates,
+                    existingToolhead,
+                    previousToolheadSpoolId,
+                    previousToolheadMaterial,
+                    previousToolheadColor,
+                    previousToolheadUpdatedAt,
+                    stagedOverride);
+                return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
+            }
+
             toolhead.CurrentSpoolId = spoolId;
             toolhead.CurrentMaterial = spool?.Material ?? null;
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
@@ -3259,22 +3534,253 @@ public class PrintersService(
             p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
             p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
+            stagedOverride = StageOverrideAudit(
+                overrideAudit,
+                id,
+                toolheadIndex,
+                spoolId,
+                spool?.Material);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
-                spoolId, toolheadIndex, p.Name, id);
-
-            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
+        }
+        catch (DbUpdateConcurrencyException ex) when (stagedGates.Count > 0)
+        {
+            // A concurrent request already won the race to create the same gate and advanced
+            // the printer's RowVersion. Treat this as a topology conflict identical to a
+            // unique-constraint violation: the losing request must retry.
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict (concurrency) for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
+        }
+        catch (DbUpdateException ex) when (
+            stagedGates.Count > 0
+            && IsToolheadPrinterIndexUniqueViolation(ex))
+        {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
         }
         catch (Exception ex)
         {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
             _logger.LogError(
                 ex,
                 "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
                 spoolId, toolheadIndex, p.Name, id);
             return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
         }
+
+        _logger.LogInformation(
+            "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
+            spoolId, toolheadIndex, p.Name, id);
+
+        await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+        return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
+    }
+
+    /// <summary>
+    /// Stages a durable guided-swap override audit record on the shared unit of work so it
+    /// commits atomically with the pending spool binding. No-op when no override context is
+    /// supplied (issue #710, B6).
+    /// </summary>
+    private FilamentSwapOverride? StageOverrideAudit(
+        FilamentSwapOverrideContext? ctx,
+        Guid printerId,
+        int toolheadIndex,
+        int spoolId,
+        string? commitTimeScannedMaterial)
+    {
+        if (ctx is null)
+        {
+            return null;
+        }
+
+        var audit = new FilamentSwapOverride
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            ToolheadIndex = toolheadIndex,
+            SpoolId = spoolId,
+            UserId = ctx.UserId,
+            UserName = ctx.UserName,
+            Reason = ctx.Reason,
+            ExpectedMaterial = ctx.ExpectedMaterial,
+            ScannedMaterial = commitTimeScannedMaterial,
+            AffectedJobIdsJson = JsonSerializer.Serialize(ctx.AffectedJobIds ?? Array.Empty<Guid>()),
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        _unitOfWork.FilamentSwapOverrides.Add(audit);
+        return audit;
+    }
+
+    private void RestoreLegacySpoolBinding(
+        Printer printer,
+        int? previousSpoolId,
+        string? previousMaterial,
+        FilamentSwapOverride? stagedAudit)
+    {
+        printer.CurrentSpoolId = previousSpoolId;
+        printer.CurrentMaterial = previousMaterial;
+        _db.Entry(printer).Property(p => p.CurrentSpoolId).IsModified = false;
+        _db.Entry(printer).Property(p => p.CurrentMaterial).IsModified = false;
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void RestoreStagedToolheadBinding(
+        Printer printer,
+        bool previousMultiMaterial,
+        IReadOnlyCollection<Toolhead> stagedGates,
+        Toolhead? existingToolhead,
+        int? previousSpoolId,
+        string? previousMaterial,
+        string? previousColor,
+        DateTime? previousUpdatedAt,
+        FilamentSwapOverride? stagedAudit)
+    {
+        foreach (Toolhead gate in stagedGates)
+        {
+            printer.Toolheads.Remove(gate);
+            _db.Entry(gate).State = EntityState.Detached;
+        }
+
+        printer.MultiMaterial = previousMultiMaterial;
+        _ = PerToolAttributionCapability.Refresh(printer);
+        _db.Entry(printer).Property(p => p.MultiMaterial).IsModified = false;
+
+        if (existingToolhead is not null && previousUpdatedAt.HasValue)
+        {
+            existingToolhead.CurrentSpoolId = previousSpoolId;
+            existingToolhead.CurrentMaterial = previousMaterial;
+            existingToolhead.CurrentFilamentColor = previousColor;
+            existingToolhead.UpdatedAt = previousUpdatedAt.Value;
+
+            _db.Entry(existingToolhead).Property(t => t.CurrentSpoolId).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentMaterial).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentFilamentColor).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.UpdatedAt).IsModified = false;
+        }
+
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void DetachStagedAudit(FilamentSwapOverride? stagedAudit)
+    {
+        if (stagedAudit is not null)
+        {
+            _db.Entry(stagedAudit).State = EntityState.Detached;
+        }
+    }
+
+    private async Task BroadcastSpoolBindingCoverageAsync(Guid printerId, CancellationToken ct)
+    {
+        if (_coverageBroadcaster is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: spool binding committed for printer {PrinterId}, but coverage notification failed",
+                printerId);
+        }
+    }
+
+    private async Task<SpoolBindingResolution> ResolveToolheadSpoolAsync(
+        Printer printer,
+        int spoolId,
+        SpoolBindPolicy policy,
+        CancellationToken ct)
+    {
+        if (policy == SpoolBindPolicy.Direct)
+        {
+            SpoolmanSpoolDto? directSpool = await _spoolmanService
+                .GetSpoolByIdAsync(spoolId, ct)
+                .ConfigureAwait(false);
+            return new SpoolBindingResolution(directSpool, null);
+        }
+
+        FilamentCoverageSpoolSnapshot snapshot = await _spoolResolver
+            .ResolveSpoolAsync(printer, spoolId, ct)
+            .ConfigureAwait(false);
+        return new SpoolBindingResolution(snapshot.Spool, snapshot.ErrorReason);
+    }
+
+    private static string BuildGuidedResolutionFailureMessage(int spoolId, string? failureReason) =>
+        failureReason is null
+            ? $"Spool {spoolId} could not be resolved at commit time"
+            : $"Spool {spoolId} could not be resolved at commit time ({failureReason})";
+
+    private sealed record SpoolBindingResolution(
+        SpoolmanSpoolDto? Spool,
+        string? FailureReason);
+
+    private static bool IsToolheadPrinterIndexUniqueViolation(DbUpdateException ex)
+    {
+        string fullMessage = ex.ToString();
+        bool identifiesCanonicalIndex =
+            fullMessage.Contains(ToolheadPrinterIndexUniqueIndexName, StringComparison.OrdinalIgnoreCase)
+            || (fullMessage.Contains("Toolheads.PrinterId", StringComparison.OrdinalIgnoreCase)
+                && fullMessage.Contains("Toolheads.Index", StringComparison.OrdinalIgnoreCase));
+        if (!identifiesCanonicalIndex)
+        {
+            return false;
+        }
+
+        return fullMessage.Contains("unique", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("23505", StringComparison.Ordinal)
+            || fullMessage.Contains("2601", StringComparison.Ordinal)
+            || fullMessage.Contains("2627", StringComparison.Ordinal)
+            || fullMessage.Contains("SQLite Error 19", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc/>
@@ -3311,6 +3817,7 @@ public class PrintersService(
                     "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                     p.Name, id, toolheadIndex);
                 p.MultiMaterial = true;
+                _ = PerToolAttributionCapability.Refresh(p);
             }
 
             if (p.MultiMaterial)
@@ -3348,6 +3855,16 @@ public class PrintersService(
             _logger.LogInformation(
                 "ClearToolheadSpoolAsync: Cleared spool from toolhead T{Index} on printer {PName} ({Id})",
                 toolheadIndex, p.Name, id);
+
+            // #709 item 5: clearing a toolhead spool changes coverage
+            // (previously covered slot may now be Unknown/no-spool-assigned).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
 
             return new CommandResult(true, $"Spool cleared from toolhead T{toolheadIndex}");
         }
@@ -3395,7 +3912,11 @@ public class PrintersService(
     }
 
     /// <inheritdoc />
-    public void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4)
+    public async Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default)
     {
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
@@ -3409,18 +3930,61 @@ public class PrintersService(
                 .Where(t => t.ToolheadType == ToolheadType.MmuGate)
                 .ToList();
 
+            HashSet<Guid> gateIds = [.. gatesToRemove.Select(gate => gate.Id)];
+            List<FilamentFallbackGroup> affectedGroups = gateIds.Count == 0
+                ? []
+                : await _db.FilamentFallbackGroups
+                    .Include(group => group.Members)
+                    .Where(group => group.Members.Any(member => gateIds.Contains(member.ToolheadId)))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            int removedMemberships = 0;
+            int removedGroups = 0;
+            foreach (FilamentFallbackGroup group in affectedGroups)
+            {
+                List<FilamentFallbackGroupMember> membershipsToRemove = group.Members
+                    .Where(member => gateIds.Contains(member.ToolheadId))
+                    .ToList();
+
+                _db.FilamentFallbackGroupMembers.RemoveRange(membershipsToRemove);
+                foreach (FilamentFallbackGroupMember membership in membershipsToRemove)
+                {
+                    _ = group.Members.Remove(membership);
+                }
+
+                removedMemberships += membershipsToRemove.Count;
+                if (group.Members.Count < 2)
+                {
+                    _ = _db.FilamentFallbackGroups.Remove(group);
+                    removedGroups++;
+                }
+            }
+
             foreach (Toolhead gate in gatesToRemove)
             {
-                printer.Toolheads.Remove(gate);
+                _ = printer.Toolheads.Remove(gate);
+            }
+
+            if (removedMemberships > 0)
+            {
+                _logger.LogInformation(
+                    "SyncMmuToolheadsOnEntityAsync: Removed {MembershipCount} fallback membership(s) and {GroupCount} under-populated group(s) for printer {PName} ({Id})",
+                    removedMemberships,
+                    removedGroups,
+                    printer.Name,
+                    printer.Id);
             }
 
             if (gatesToRemove.Count > 0)
             {
                 _logger.LogInformation(
-                    "SyncMmuToolheadsOnEntity: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
+                    "SyncMmuToolheadsOnEntityAsync: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
                     gatesToRemove.Count, printer.Name, printer.Id);
             }
         }
+
+        _ = PerToolAttributionCapability.Refresh(printer);
     }
 
     /// <summary>

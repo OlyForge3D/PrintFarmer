@@ -1,19 +1,43 @@
 #!/bin/bash
-# Resolve a deterministic iPhone simulator UDID for GitHub Actions iOS CI.
+# Resolve a deterministic simulator UDID for GitHub Actions iOS CI.
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+# shellcheck source=scripts/common-utils.sh
 source "$SCRIPT_DIR/../common-utils.sh"
 
 : "${GITHUB_ENV:?GITHUB_ENV must be set by GitHub Actions}"
 
-readonly DEVICE_PREFERENCE="${IOS_SIMULATOR_DEVICE_PREFERENCE:-iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e}"
+readonly DEVICE_FAMILY="${IOS_SIMULATOR_DEVICE_FAMILY:-iPhone}"
+case "$DEVICE_FAMILY" in
+  iPhone)
+    DEFAULT_DEVICE_PREFERENCE="iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e"
+    ;;
+  iPad)
+    DEFAULT_DEVICE_PREFERENCE="iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)"
+    ;;
+  *)
+    log_error "IOS_SIMULATOR_DEVICE_FAMILY must be iPhone or iPad; got '$DEVICE_FAMILY'." >&2
+    exit 2
+    ;;
+esac
+readonly DEFAULT_DEVICE_PREFERENCE
+
+readonly DEFAULT_DEVICE_PREFIX="${DEVICE_FAMILY} "
+readonly DEVICE_PREFIX="${IOS_SIMULATOR_DEVICE_PREFIX:-$DEFAULT_DEVICE_PREFIX}"
+if [[ "$DEVICE_PREFIX" != "$DEVICE_FAMILY"* ]]; then
+  log_error "IOS_SIMULATOR_DEVICE_PREFIX '$DEVICE_PREFIX' does not match family '$DEVICE_FAMILY'." >&2
+  exit 2
+fi
+
+readonly DEVICE_PREFERENCE="${IOS_SIMULATOR_DEVICE_PREFERENCE:-$DEFAULT_DEVICE_PREFERENCE}"
 readonly RUNTIME_PREFERENCE="${IOS_SIMULATOR_RUNTIME_PREFERENCE:-iOS 26.4,iOS 26.5}"
 
 SIMCTL_DEVICES_JSON="$(xcrun simctl list devices available -j)"
 readonly SIMCTL_DEVICES_JSON
-export SIMCTL_DEVICES_JSON DEVICE_PREFERENCE RUNTIME_PREFERENCE
+export SIMCTL_DEVICES_JSON DEVICE_FAMILY DEVICE_PREFIX DEVICE_PREFERENCE RUNTIME_PREFERENCE
 
 RESOLVED_SIMULATOR="$(
   python3 <<'PY'
@@ -43,6 +67,8 @@ def preference_values(name: str) -> list[str]:
 data = json.loads(os.environ['SIMCTL_DEVICES_JSON'])
 device_preference = preference_values('DEVICE_PREFERENCE')
 runtime_preference = preference_values('RUNTIME_PREFERENCE')
+device_family = os.environ['DEVICE_FAMILY']
+device_prefix = os.environ['DEVICE_PREFIX']
 
 candidates = []
 for runtime_identifier, devices in data.get('devices', {}).items():
@@ -51,7 +77,7 @@ for runtime_identifier, devices in data.get('devices', {}).items():
         continue
     for device in devices:
         name = device.get('name', '')
-        if device.get('isAvailable') is False or not name.startswith('iPhone '):
+        if device.get('isAvailable') is False or not name.startswith(device_prefix):
             continue
         candidates.append({
             'runtime': runtime,
@@ -64,7 +90,8 @@ for runtime_identifier, devices in data.get('devices', {}).items():
         })
 
 if not candidates:
-    print('No available iPhone simulator found.', file=sys.stderr)
+    print(f'No available {device_family} simulator found.', file=sys.stderr)
+    print(f'Device prefix: {device_prefix!r}', file=sys.stderr)
     print(f'Device preference: {device_preference}', file=sys.stderr)
     print(f'Runtime preference: {runtime_preference}', file=sys.stderr)
     sys.exit(1)
@@ -96,7 +123,7 @@ else:
         key=lambda candidate: (candidate['runtimeVersion'], candidate['model'], candidate['name'], candidate['udid']),
     )
     print(
-        '::warning::Preferred iPhone simulator device/runtime not found; '
+        f'::warning::Preferred {device_family} simulator device/runtime not found; '
         f"falling back to {selected['name']} on newest installed runtime {selected['runtime']}.",
         file=sys.stderr,
     )
@@ -111,6 +138,7 @@ IFS=$'\t' read -r SIMULATOR_UDID SIMULATOR_NAME SIMULATOR_RUNTIME <<< "$RESOLVED
   echo "SIMULATOR_UDID=$SIMULATOR_UDID"
   echo "SIMULATOR_NAME=$SIMULATOR_NAME"
   echo "SIMULATOR_RUNTIME=$SIMULATOR_RUNTIME"
+  echo "SIMULATOR_FAMILY=$DEVICE_FAMILY"
 } >> "$GITHUB_ENV"
 
 log_info "Using iOS simulator: $SIMULATOR_NAME ($SIMULATOR_RUNTIME) [$SIMULATOR_UDID]"

@@ -8,20 +8,20 @@ final class ServerRegistryTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
         userDefaultsSuiteName = "ServerRegistryTests-\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: userDefaultsSuiteName)!
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         mockAPIClient = nil
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         userDefaults = nil
         userDefaultsSuiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testAddPersistsServerAndSetsFirstServerActive() throws {
@@ -72,13 +72,14 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertEqual(updated.updatedAt, updatedDate)
     }
 
-    func testRemoveActiveServerSelectsNextServer() throws {
+    func testRemoveActiveServerSelectsNextServer() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
         let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
 
         try registry.setActive(id: first.id)
-        try registry.remove(id: first.id)
+        try await registry.purgeAndRemove(id: first.id)
 
         XCTAssertEqual(registry.servers.map(\.id), [second.id])
         XCTAssertEqual(registry.activeServerID, second.id)
@@ -175,12 +176,13 @@ final class ServerRegistryTests: XCTestCase {
         XCTAssertFalse(userDefaults.bool(forKey: ServerRegistry.legacyMigrationCompletedKey))
     }
 
-    func testLegacyMigrationDoesNotResurrectDeletedServerWhenRegistryIsEmpty() throws {
+    func testLegacyMigrationDoesNotResurrectDeletedServerWhenRegistryIsEmpty() async throws {
         userDefaults.set("https://legacy.example.com", forKey: APIClient.serverURLKey)
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let server = try registry.add(displayName: "Existing", baseURL: URL(string: "https://existing.example.com")!)
 
-        try registry.remove(id: server.id)
+        try await registry.purgeAndRemove(id: server.id)
         let reloaded = ServerRegistry(userDefaults: userDefaults)
 
         XCTAssertTrue(reloaded.servers.isEmpty)
@@ -408,12 +410,15 @@ final class ServerRegistryTests: XCTestCase {
             serverRegistry: registry,
             credentialsStore: credentialsStore,
             userDefaultsBox: AuthServiceUserDefaultsBox(userDefaults),
-            apiClientFactory: { baseURL, generation, accessToken in
-                APIClient(
+            apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                let identity = accessToken.flatMap { token in
+                    serverID.map { AuthenticatedIdentity(accessToken: token, serverID: $0, authSessionToken: authSessionToken) }
+                }
+                return APIClient(
                     baseURL: baseURL,
                     session: self.mockAPIClient.urlSession,
                     serverGeneration: generation,
-                    accessToken: accessToken
+                    authenticated: identity
                 )
             },
             signalRServiceFactory: { baseURL, client in
@@ -485,9 +490,43 @@ final class ServerRegistryTests: XCTestCase {
             connectionState = .disconnected
         }
 
-        func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) {}
+        @discardableResult
+        func onConnectionStateChanged(
+            _ handler: @escaping @Sendable (SignalRConnectionState) -> Void
+        ) -> (initial: SignalRConnectionState, subscription: SignalRSubscription) {
+            (connectionState, SignalRSubscription {})
+        }
 
-        func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) {}
+        @discardableResult
+        func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
+        func onJobQueueUpdated(_ handler: @escaping @Sendable (JobQueueUpdate) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
+        func onAttentionChanged(_ handler: @escaping @Sendable (AttentionChangedEvent) -> Void) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
+        func onFilamentCoverageChanged(
+            _ handler: @escaping @Sendable (FilamentCoverageChangedEvent) -> Void
+        ) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        @discardableResult
+        func onTaskInvalidated(
+            _ handler: @escaping @Sendable (ShiftTaskInvalidation) -> Void
+        ) -> SignalRSubscription {
+            SignalRSubscription {}
+        }
+
+        func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void) {}
 
         func resumeDisconnect() {
             lock.lock()

@@ -44,7 +44,7 @@ public partial class AddNozzleDiameterAndHasMmuToPrinter : Migration
                     column: x => x.CameraId,
                     principalTable: "Cameras",
                     principalColumn: "Id",
-                    onDelete: ReferentialAction.Cascade);
+                    onDelete: ReferentialAction.NoAction);
                 table.ForeignKey(
                     name: "FK_CameraSnapshots_PrintJobs_PrintJobId",
                     column: x => x.PrintJobId,

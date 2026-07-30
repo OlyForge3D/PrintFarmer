@@ -216,4 +216,7 @@ final class DemoJobService: JobServiceProtocol, @unchecked Sendable {
             detail: nil
         )
     }
+
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate] { [] }
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws {}
 }

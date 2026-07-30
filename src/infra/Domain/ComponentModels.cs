@@ -110,8 +110,9 @@ public class ExtruderModelDefinition : HardwareModel
 
 /// <summary>
 /// A toolhead model definition (e.g., StealthBurner, DragonBurner, Xol).
-/// References manufacturer for brand association.
-/// ManufacturerId is nullable because many toolheads are community designs.
+/// References manufacturer for brand association. ManufacturerId is required
+/// (inherited from HardwareModel); community designs use the seeded "Community"
+/// or "Unknown" manufacturer entries rather than a NULL FK.
 /// </summary>
 public class ToolheadModelDefinition : HardwareModel
 {

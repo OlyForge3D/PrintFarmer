@@ -57,4 +57,11 @@ public sealed class FailureDetectionDto
     /// Whether the job was automatically paused after detection.
     /// </summary>
     public bool AutoPaused { get; set; }
+
+    /// <summary>
+    /// UTC instant at which the incident was resolved by a successful operator attention
+    /// action. Null while the incident is still open. Resolved incidents are suppressed
+    /// from the unified attention feed (issue #707).
+    /// </summary>
+    public DateTime? ResolvedAtUtc { get; set; }
 }

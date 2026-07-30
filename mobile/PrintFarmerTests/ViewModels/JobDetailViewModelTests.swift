@@ -8,17 +8,17 @@ final class JobDetailViewModelTests: XCTestCase {
     private var viewModel: JobDetailViewModel!
     private let testJobId = UUID(uuidString: "770e8400-e29b-41d4-a716-446655440002")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobService = MockJobService()
         viewModel = JobDetailViewModel(jobId: testJobId)
         viewModel.configure(jobService: mockJobService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State
@@ -281,6 +281,28 @@ final class JobDetailViewModelTests: XCTestCase {
         let unconfigured = JobDetailViewModel(jobId: testJobId)
         await unconfigured.cancelJob()
         XCTAssertFalse(unconfigured.isPerformingAction)
+    }
+
+    // MARK: - Dispute C (#714): harvest-to-inventory gating
+
+    func testCanHarvestToInventoryTrueForCompletedUnharvestedJobWithFeatureEnabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobCompleted)
+
+        XCTAssertTrue(canHarvestToInventory(job: job, partsInventoryEnabled: true))
+    }
+
+    func testCanHarvestToInventoryFalseWhenAlreadyHarvested() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertNotNil(job.harvestedAt)
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: true),
+                       "An already-harvested job must not offer Harvest to Inventory again")
+    }
+
+    func testCanHarvestToInventoryFalseWhenFeatureDisabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: false))
     }
 
     private func dispatchResponse(

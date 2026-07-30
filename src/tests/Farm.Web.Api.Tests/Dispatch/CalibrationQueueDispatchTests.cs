@@ -52,6 +52,8 @@ public class CalibrationQueueDispatchTests
             _bedClearSvc.Object,
             Mock.Of<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(),
             Mock.Of<Farm.Infrastructure.Telemetry.IPrintFarmerTelemetryService>(),
+            Mock.Of<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService>(),
+            Mock.Of<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(),
             Mock.Of<ILogger<JobQueueController>>());
 
         _actorId = Guid.NewGuid();

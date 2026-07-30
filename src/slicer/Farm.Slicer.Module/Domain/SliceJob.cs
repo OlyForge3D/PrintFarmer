@@ -8,6 +8,9 @@ namespace Farm.Slicer.Module.Domain;
 /// </summary>
 public class SliceJob
 {
+    public const int MinimumLeaseDurationSeconds = 30;
+    public const int MaximumLeaseDurationSeconds = 3600;
+
     [Key]
     public Guid Id { get; set; }
 
@@ -41,6 +44,17 @@ public class SliceJob
     /// which is authoritative whenever it is present.
     /// </summary>
     public int SlicerEngine { get; set; }
+
+    /// <summary>
+    /// Optional engine-version pin (e.g. "2.4.0", "2.3.1"). NULL = "any version"
+    /// (back-compat with legacy single-engine deployments). When non-NULL the
+    /// submit-side pins the job's <see cref="RequiredCapabilitiesJson"/> to the
+    /// version-only capability tag (e.g. <c>["orcaslicer:2.4.0"]</c>) so only a
+    /// worker of that exact engine version can claim the job. Resolved to the
+    /// registry's latest library version at submit time; never at claim time.
+    /// </summary>
+    [MaxLength(32)]
+    public string? SlicerEngineVersion { get; set; }
 
     /// <summary>
     /// Canonical validated engine name (for example <c>OrcaSlicer</c>). Authoritative when set;
@@ -163,6 +177,12 @@ public class SliceJob
     public DateTime? ClaimedAt { get; set; }
 
     /// <summary>
+    /// Opaque identifier for the current claim incarnation.
+    /// A new value is generated every time a worker claims or reclaims the job.
+    /// </summary>
+    public Guid? ClaimToken { get; set; }
+
+    /// <summary>
     /// When the job lease expires (pull model with timeout).
     /// </summary>
     public DateTime? LeaseExpiresAt { get; set; }
@@ -248,6 +268,13 @@ public class SliceJob
     /// <summary>Pinned slicer container digest the job requires, when the deployment supplies one.</summary>
     [MaxLength(128)]
     public string? SlicerContainerDigest { get; set; }
+
+    /// <summary>Registered worker selected by the authoritative capability probe.</summary>
+    public Guid? PinnedWorkerId { get; set; }
+
+    /// <summary>Pinned SHA-256 digest of the slicer binary.</summary>
+    [MaxLength(64)]
+    public string? SlicerBinarySha256 { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

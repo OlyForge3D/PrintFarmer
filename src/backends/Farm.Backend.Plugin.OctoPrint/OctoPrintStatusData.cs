@@ -5,6 +5,8 @@
 /// </summary>
 public sealed class OctoPrintStatusData
 {
+    internal long? OriginWatermark { get; set; }
+
     public bool IsOnline { get; set; }
 
     public bool Operational { get; set; }

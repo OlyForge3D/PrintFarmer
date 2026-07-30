@@ -8,8 +8,10 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.PrinterGroups;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests.Builders;
 using FluentAssertions;
@@ -661,7 +663,6 @@ public class JobQueueServiceTests
             j.Status == PrintJobStatus.Queued &&
             j.Priority == (int)PrintJobPriority.High
         ), It.IsAny<CancellationToken>()), Times.Once);
-        _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -1123,6 +1124,43 @@ public class JobQueueServiceTests
         result.Status.Should().Be(PrintJobStatus.Queued);
     }
 
+    // #714: harvestedAt must round-trip through JobQueuePrintJobDto so mobile
+    // clients can tell harvested jobs apart from unharvested completed jobs.
+    [Fact]
+    public async Task GetJobAsync_UnharvestedJob_ReturnsNullHarvestedAt()
+    {
+        PrintJob job = new PrintJobBuilder()
+            .AsCompleted()
+            .Build();
+        job.HarvestedAt = null;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.HarvestedAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetJobAsync_HarvestedJob_ProjectsHarvestedAt()
+    {
+        DateTime harvestedAt = new(2026, 7, 15, 12, 34, 56, DateTimeKind.Utc);
+        PrintJob job = new PrintJobBuilder()
+            .AsCompleted()
+            .Build();
+        job.HarvestedAt = harvestedAt;
+
+        _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+
+        JobQueuePrintJobDto? result = await _sut.GetJobAsync(job.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.HarvestedAt.Should().Be(harvestedAt);
+    }
+
     [Fact]
     public async Task GetJobAsync_AfterOtherClientStartsAttemptB_HydratesLatestAttemptFence()
     {
@@ -1242,8 +1280,6 @@ public class JobQueueServiceTests
             .ReturnsAsync(job);
         _mockRepo.Setup(x => x.RemoveAsync(job, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        _mockRepo.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
 
         // Act
         bool result = await _sut.RemoveJobAsync(job.Id, CancellationToken.None);
@@ -1251,7 +1287,6 @@ public class JobQueueServiceTests
         // Assert
         result.Should().BeTrue();
         _mockRepo.Verify(x => x.RemoveAsync(job, It.IsAny<CancellationToken>()), Times.Once);
-        _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -1555,6 +1590,396 @@ public class JobQueueServiceTests
         // Assert
         result.Should().NotBeNull();
         job.UpdatedAt.Should().BeAfter(oldUpdatedAt);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_AssignedJob_BroadcastsJobAssignmentAfterSave()
+    {
+        Guid printerId = Guid.NewGuid();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "part.gcode", FileName = "part.gcode" };
+        QueuePrintJobDto request = new() { GcodeFileId = gcode.Id, AssignedPrinterId = printerId };
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>())).ReturnsAsync(gcode);
+        _mockDataService.Setup(d => d.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        _mockDataService.Setup(d => d.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = printerId, Name = "printer" }]);
+        MockSequence sequence = new();
+        _mockRepo.InSequence(sequence).Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        broadcaster.InSequence(sequence).Setup(b => b.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.JobAssignment,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        _ = await service.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_PersistenceFails_DoesNotBroadcastCoverage()
+    {
+        Guid printerId = Guid.NewGuid();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "part.gcode", FileName = "part.gcode" };
+        QueuePrintJobDto request = new() { GcodeFileId = gcode.Id, AssignedPrinterId = printerId };
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>())).ReturnsAsync(gcode);
+        _mockDataService.Setup(d => d.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(1);
+        _mockRepo.Setup(r => r.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("save failed"));
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        Func<Task> act = () => service.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_AssignedJob_CapturesSnapshotAndDispatchLogInSingleSave()
+    {
+        Guid printerId = Guid.NewGuid();
+        GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "part.gcode", FileName = "part.gcode" };
+        QueuePrintJobDto request = new() { GcodeFileId = gcode.Id, AssignedPrinterId = printerId };
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(value => value.GetGcodeFileAsync(gcode.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcode);
+        _mockDataService.Setup(value => value.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(value => value.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = printerId, Name = "printer" }]);
+        _mockRepo.Setup(value => value.AddWithoutSaveAsync(
+                It.Is<PrintJob>(job => job.AssignedPrinterId == printerId),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                It.Is<PrintJob>(job => job.DispatchedAt != null),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockRepo.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log =>
+                log.PrintJobId != Guid.Empty
+                && log.PrinterId == printerId
+                && log.Action == Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched)));
+        _mockRepo.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        broadcaster.Setup(value => value.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.JobAssignment,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            coverageBroadcaster: broadcaster.Object,
+            partOutputSnapshotService: snapshots.Object);
+
+        _ = await service.AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
+
+        _mockRepo.VerifyAll();
+        snapshots.VerifyAll();
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_FirstAssignment_CapturesSnapshotAndDispatchLog()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        var snapshots = new Mock<IPartOutputSnapshotService>(MockBehavior.Strict);
+        _mockDataService.SetupSequence(value => value.GetPrintJobByIdAsync(
+                job.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job)
+            .ReturnsAsync(job);
+        _mockDataService.Setup(value => value.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = printerId, Name = "printer" }]);
+        snapshots.Setup(value => value.CaptureJobSnapshotIfAbsentAsync(
+                job,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _mockRepo.Setup(value => value.AddDispatchLog(
+            It.Is<DispatchLog>(log => log.PrintJobId == job.Id && log.PrinterId == printerId)));
+        _mockRepo.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var service = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            partOutputSnapshotService: snapshots.Object);
+
+        JobQueuePrintJobDto? result = await service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                AssignedPrinterId = printerId,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        Assert.NotNull(result);
+        Assert.Equal(printerId, job.AssignedPrinterId);
+        Assert.NotNull(job.DispatchedAt);
+        snapshots.VerifyAll();
+        _mockRepo.VerifyAll();
+    }
+
+    [Fact]
+    public async Task RemoveJobAsync_AssignedJob_UsesCapturedPrinterAfterPersistence()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = printerId;
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockRepo.Setup(r => r.RemoveAsync(job, It.IsAny<CancellationToken>()))
+            .Callback(() => job.AssignedPrinterId = null)
+            .Returns(Task.CompletedTask);
+        broadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.QueueChanged,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        bool removed = await service.RemoveJobAsync(job.Id, CancellationToken.None);
+
+        removed.Should().BeTrue();
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task RemoveJobAsync_PersistenceFails_DoesNotBroadcastCoverage()
+    {
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = Guid.NewGuid();
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockRepo.Setup(r => r.RemoveAsync(job, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("save failed"));
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        Func<Task> act = () => service.RemoveJobAsync(job.Id, CancellationToken.None);
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_AssignmentAndStatusChange_BroadcastsOldAndNewOnce()
+    {
+        Guid oldPrinterId = Guid.NewGuid();
+        Guid newPrinterId = Guid.NewGuid();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = oldPrinterId;
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockDataService.Setup(d => d.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new Printer { Id = newPrinterId, Name = "new" }]);
+        _mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        broadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
+                It.IsAny<Guid>(),
+                FilamentCoverageChangeReasons.JobAssignment,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        _ = await service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                AssignedPrinterId = newPrinterId,
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        broadcaster.Verify(b => b.BroadcastPrinterChangedAsync(
+            oldPrinterId,
+            FilamentCoverageChangeReasons.JobAssignment,
+            It.IsAny<CancellationToken>()), Times.Once);
+        broadcaster.Verify(b => b.BroadcastPrinterChangedAsync(
+            newPrinterId,
+            FilamentCoverageChangeReasons.JobAssignment,
+            It.IsAny<CancellationToken>()), Times.Once);
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_StatusOnly_BroadcastsQueueChangedOnceForSamePrinter()
+    {
+        Guid printerId = Guid.NewGuid();
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = printerId;
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        broadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
+                printerId,
+                FilamentCoverageChangeReasons.QueueChanged,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        _ = await service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        broadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_PriorityOnly_DoesNotBroadcastCoverage()
+    {
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = Guid.NewGuid();
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        _ = await service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                Priority = PrintJobPriority.High,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateJobAsync_PersistenceFails_DoesNotBroadcastCoverage()
+    {
+        PrintJob job = new PrintJobBuilder().AsQueued().Build();
+        job.AssignedPrinterId = Guid.NewGuid();
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        _mockDataService.Setup(d => d.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>())).ReturnsAsync(job);
+        _mockRepo.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("save failed"));
+        JobQueueService service = CoverageService(broadcaster.Object);
+
+        Func<Task> act = () => service.UpdateJobAsync(
+            job.Id,
+            new UpdatePrintJobStatusDto
+            {
+                Status = PrintJobStatus.Cancelled,
+                IfMatchJobRowVersion = Convert.ToBase64String(job.RowVersion!),
+            },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+        broadcaster.VerifyNoOtherCalls();
+    }
+
+    private JobQueueService CoverageService(IFilamentCoverageBroadcaster broadcaster)
+        => new(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            coverageBroadcaster: broadcaster);
+
+    #endregion
+
+    #region Per-Tool Requirement Population (issue #710)
+
+    [Fact]
+    public async Task AddJobToQueueAsync_PopulatesPerToolRequirementsFromGcode()
+    {
+        // Regression for issue #710: enqueue through the real production entry
+        // service (JobQueueService, used by JobQueueController /
+        // OctoPrintCompatController / SlicePrintBridge / PrintProjectService /
+        // PrintApprovalService) must project per-tool material metadata onto the
+        // created PrintJob so guided-swap validation has ground truth.
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "multi.gcode",
+            FileName = "multi.gcode",
+            FilamentPerExtruderType = System.Text.Json.JsonSerializer.Serialize(new[] { "PLA", "PETG", "TPU" }),
+            FilamentPerExtruderWeightG = System.Text.Json.JsonSerializer.Serialize(new[] { 10.0, 5.5, 1.25 }),
+            FilamentPerExtruderColorHex = System.Text.Json.JsonSerializer.Serialize(new[] { "#000000", "#FFFFFF", "#FF0000" }),
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        PrintJob? captured = null;
+        _mockRepo.Setup(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => captured = j)
+            .Returns(Task.CompletedTask);
+
+        _ = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.RequiredMaterialsPerTool.Should().NotBeNull();
+        captured.RequiredMaterialsPerTool!.Select(r => r.Tool).Should().Equal(0, 1, 2);
+        captured.RequiredMaterialsPerTool!.Select(r => r.MaterialType).Should().Equal("PLA", "PETG", "TPU");
+        captured.RequiredMaterialsPerTool!.Select(r => r.EstimatedGrams).Should().Equal(10.0, 5.5, 1.25);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_FallsBackToGcodeMaterial_WhenRequestOmitsRequiredMaterialType()
+    {
+        // Regression for issue #710: the persisted RequiredMaterialType must be the
+        // *effective* scalar (i.e. the value that guided validation and downstream
+        // legacy consumers actually see), not the raw pre-fallback request value.
+        var printerId = Guid.NewGuid();
+        var gcodeFile = new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "petg.gcode",
+            FileName = "petg.gcode",
+            RequiredMaterial = "PETG",
+        };
+        Printer printer = new PrinterBuilder().WithId(printerId).AsOnlineAndReady().Build();
+        var request = new QueuePrintJobDto
+        {
+            GcodeFileId = gcodeFile.Id,
+            AssignedPrinterId = printerId,
+            Priority = PrintJobPriority.Normal,
+            RequiredMaterialType = null,
+        };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(gcodeFile);
+        _mockDataService.Setup(x => x.GetNextQueuePositionAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(1);
+        _mockDataService.Setup(x => x.GetAvailablePrintersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Printer> { printer });
+
+        PrintJob? captured = null;
+        _mockRepo.Setup(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()))
+            .Callback<PrintJob, CancellationToken>((j, _) => captured = j)
+            .Returns(Task.CompletedTask);
+
+        _ = await _sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        captured.Should().NotBeNull();
+        captured!.RequiredMaterialType.Should().Be("PETG");
     }
 
     #endregion

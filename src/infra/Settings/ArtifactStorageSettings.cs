@@ -72,4 +72,10 @@ public sealed class ArtifactStorageSettings
     /// Default: 24 hours (daily cleanup).
     /// </summary>
     public int CleanupIntervalHours { get; set; } = 24;
+
+    /// <summary>
+    /// Age in minutes after which an abandoned cleanup reservation may be taken over.
+    /// Default: 30 minutes.
+    /// </summary>
+    public int CleanupReservationTimeoutMinutes { get; set; } = 30;
 }

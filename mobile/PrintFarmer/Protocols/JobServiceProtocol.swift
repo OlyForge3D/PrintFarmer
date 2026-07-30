@@ -27,4 +27,14 @@ protocol JobServiceProtocol: Sendable {
         dispatchStateETag: String,
         idempotencyKey: String
     ) async throws -> AcknowledgeBedClearResponse
+
+    // MARK: - Dispatch (issue #712, F7)
+    //
+    // Thin clients over the existing job-queue routes. `getCandidates`
+    // ranks every printer for a job (`GET /api/job-queue/{id}/candidates`);
+    // `dispatchTo` assigns and dispatches the job to a chosen printer
+    // (`POST /api/job-queue/{id}/dispatch-to`). No scoring is recomputed
+    // on-device — the backend is the sole authority.
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate]
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws
 }

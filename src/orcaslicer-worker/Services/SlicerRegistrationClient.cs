@@ -46,6 +46,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     private readonly IConfiguration _configuration;
     private readonly IOrcaBinaryDetector _binaryDetector;
     private readonly ILogger<SlicerRegistrationClient> _logger;
+    private readonly WorkerCapabilityProvider _capabilityProvider;
     private readonly string _apiBaseUrl;
     private readonly string _serviceName;
     private readonly string _serviceVersion;
@@ -64,12 +65,14 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         HttpClient httpClient,
         IConfiguration configuration,
         IOrcaBinaryDetector binaryDetector,
-        ILogger<SlicerRegistrationClient> logger)
+        ILogger<SlicerRegistrationClient> logger,
+        WorkerCapabilityProvider capabilityProvider)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _binaryDetector = binaryDetector ?? throw new ArgumentNullException(nameof(binaryDetector));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
 
         // Load configuration — prefer unified SlicerApi:BaseUrl, then legacy keys
         _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
@@ -116,7 +119,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 {
                     supportedFormats = new[] { "stl", "obj", "3mf", "step", "stp" },
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
-                    capabilities = WorkerConstants.Capabilities,
+                    capabilities = _capabilityProvider.GetCapabilities(),
+                    engineVersion = _capabilityProvider.EngineVersion,
 
                     // Pinned build identity, so the API can decide whether this worker is the
                     // reproducible upstream image it advertises rather than trusting a version string.

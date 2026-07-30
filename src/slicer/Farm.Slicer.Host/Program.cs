@@ -118,6 +118,27 @@ builder.WebHost.UseUrls("http://0.0.0.0:5246");
 WebApplication app = builder.Build();
 
 app.ConfigureSlicerMetrics();
+
+// ── Slicer plugin sanity check (issue #578) ───────────────────────────────────
+// slicer-host is useless without at least one slicer library plugin — a config
+// or Docker layout regression that ships an empty plugins dir would otherwise
+// present as "no engines" in the API with no clear cause. Fail fast at startup
+// so the container restarts and the deployment problem is visible.
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry registry =
+        scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+    int count = registry.ListAllLibraries().Count();
+    if (count == 0)
+    {
+        string pluginsPath = builder.Configuration["Slicer:PluginsPath"] ?? "(unset)";
+        throw new InvalidOperationException(
+            "slicer-host started with zero registered slicer libraries. " +
+            $"Slicer:PluginsPath={pluginsPath}. Ensure the container image includes " +
+            "Farm.Slicers.OrcaSlicer.v2_4_0.dll / v2_3_1.dll in the plugins directory.");
+    }
+}
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();

@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Services.Spoolman;
+
+namespace Farm.Infrastructure.Domain;
 
 /// <summary>
 /// Records per-toolhead filament usage for a single print job.
@@ -29,10 +31,27 @@ public class PrintJobToolheadUsage
     public int? SpoolmanSpoolId { get; set; }
 
     /// <summary>
+    /// Owning Spoolman namespace captured when this row first receives
+    /// authoritative actual usage. Null marks legacy or unqualified history.
+    /// </summary>
+    public SpoolSourceKind? SpoolSourceKind { get; private set; }
+
+    /// <summary>
+    /// Normalized identity of the owning Spoolman source. This value is write-once.
+    /// </summary>
+    public string? SpoolSourceIdentity { get; private set; }
+
+    /// <summary>
     /// Actual filament consumed by this toolhead in grams.
     /// Null until the job completes and usage is calculated.
     /// </summary>
     public double? FilamentUsageGrams { get; set; }
+
+    /// <summary>
+    /// Whether <see cref="FilamentUsageGrams"/> came from a positive backend
+    /// actual rather than a slicer estimate or other fallback.
+    /// </summary>
+    public bool IsFilamentUsageAuthoritative { get; private set; }
 
     /// <summary>
     /// Slicer's estimated filament usage for this toolhead in grams.
@@ -63,4 +82,44 @@ public class PrintJobToolheadUsage
     /// Navigation property to the parent print job.
     /// </summary>
     public PrintJob PrintJob { get; set; } = null!;
+
+    /// <summary>
+    /// Records the first positive backend actual and its immutable spool source.
+    /// Later completion retries cannot rewrite or duplicate the sample.
+    /// </summary>
+    public bool RecordAuthoritativeUsage(
+        double grams,
+        CanonicalSpoolIdentity? identity)
+    {
+        if (IsFilamentUsageAuthoritative || grams <= 0 || !double.IsFinite(grams))
+        {
+            return false;
+        }
+
+        FilamentUsageGrams = grams;
+        IsFilamentUsageAuthoritative = true;
+
+        if (SpoolmanSpoolId.HasValue
+            && identity.HasValue
+            && identity.Value.SpoolId == SpoolmanSpoolId.Value
+            && SpoolSourceKind is null
+            && SpoolSourceIdentity is null)
+        {
+            SpoolSourceKind = identity.Value.SourceKind;
+            SpoolSourceIdentity = identity.Value.SourceIdentity;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Records an estimate only while no authoritative actual has been captured.
+    /// </summary>
+    public void RecordEstimatedUsage(double grams)
+    {
+        if (!IsFilamentUsageAuthoritative && grams > 0 && double.IsFinite(grams))
+        {
+            FilamentUsageGrams = grams;
+        }
+    }
 }

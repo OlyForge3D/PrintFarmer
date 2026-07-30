@@ -1,0 +1,97 @@
+﻿using System.Diagnostics.Metrics;
+
+namespace Farm.Infrastructure.Services.Notifications.NativePush;
+
+/// <summary>
+/// System.Diagnostics.Metrics facade for the native-push delivery pipeline. Metric names
+/// and tag schema are documented in <c>docs/OPERATOR_NATIVE_PUSH.md §7</c>.
+/// </summary>
+public sealed class NativePushMetrics : IDisposable
+{
+    /// <summary>Meter name used by <c>OpenTelemetry</c> subscribers.</summary>
+    public const string MeterName = "Farm.Infrastructure.Services.Notifications.NativePush";
+
+    private readonly Meter _meter;
+
+    /// <summary>
+    /// Counter of provider transports that crossed the typed transport-start boundary.
+    /// Preparation, dedupe/rate reservations, vetoes, and pre-transport cancellation do
+    /// not increment this counter.
+    /// </summary>
+    public Counter<long> Attempted { get; }
+
+    /// <summary>Counter of successful deliveries. Tag: <c>mode</c>.</summary>
+    public Counter<long> Delivered { get; }
+
+    /// <summary>Counter of transient failures. Tag: <c>mode</c>, <c>reason</c>.</summary>
+    public Counter<long> TransientFailed { get; }
+
+    /// <summary>Counter of terminal failures. Tag: <c>mode</c>, <c>reason</c>.</summary>
+    public Counter<long> TerminalFailed { get; }
+
+    /// <summary>Counter of tokens invalidated by the provider (410).</summary>
+    public Counter<long> TokensInvalidated { get; }
+
+    /// <summary>Counter of skips caused by a disabled operator flag mid-flight.</summary>
+    public Counter<long> SkippedFeatureDisabled { get; }
+
+    /// <summary>Counter of skips caused by dedupe.</summary>
+    public Counter<long> SkippedDedupe { get; }
+
+    /// <summary>Counter of skips caused by rate limit.</summary>
+    public Counter<long> SkippedRateLimit { get; }
+
+    /// <summary>Counter of skips caused by per-user category opt-out.</summary>
+    public Counter<long> SkippedCategoryOptOut { get; }
+
+    /// <summary>Counter of skips caused by an incomplete sender configuration
+    /// (treated as no-op — no failure counter mutation).</summary>
+    public Counter<long> SkippedNotConfigured { get; }
+
+    /// <summary>
+    /// Counter of resolution dismissals skipped because the alert generation
+    /// they would clear never achieved a single successful device delivery
+    /// (issue #756). A benign no-op: the client never received the alert, so
+    /// there is nothing to dismiss.
+    /// </summary>
+    public Counter<long> SkippedNeverDelivered { get; }
+
+    /// <summary>
+    /// Counter of exceptions that were safely attributable to a single device
+    /// send/persist step and therefore isolated so the fan-out continued for
+    /// remaining devices/owners. Tag <c>stage</c> distinguishes send vs persist.
+    /// Fires only for non-cancellation exceptions. Vasquez v6 B1 remediation.
+    /// </summary>
+    public Counter<long> IsolatedDeviceFailure { get; }
+
+    /// <summary>
+    /// Counter of exceptions that were safely attributable to a single owner's
+    /// resolution step (attention lookup, preference read, per-owner token
+    /// list) and therefore isolated so the fan-out continued for remaining
+    /// owners. Fires only for non-cancellation exceptions. Vasquez v6 B1
+    /// remediation.
+    /// </summary>
+    public Counter<long> IsolatedOwnerFailure { get; }
+
+    /// <summary>Constructs the meter and counters.</summary>
+    public NativePushMetrics()
+    {
+        _meter = new Meter(MeterName);
+        Attempted = _meter.CreateCounter<long>("native_push.attempted");
+        Delivered = _meter.CreateCounter<long>("native_push.delivered");
+        TransientFailed = _meter.CreateCounter<long>("native_push.transient_failed");
+        TerminalFailed = _meter.CreateCounter<long>("native_push.terminal_failed");
+        TokensInvalidated = _meter.CreateCounter<long>("native_push.tokens_invalidated");
+        SkippedFeatureDisabled = _meter.CreateCounter<long>("native_push.skipped_feature_disabled");
+        SkippedDedupe = _meter.CreateCounter<long>("native_push.skipped_dedupe");
+        SkippedRateLimit = _meter.CreateCounter<long>("native_push.skipped_rate_limit");
+        SkippedCategoryOptOut = _meter.CreateCounter<long>("native_push.skipped_category_opt_out");
+        SkippedNotConfigured = _meter.CreateCounter<long>("native_push.skipped_not_configured");
+        SkippedNeverDelivered = _meter.CreateCounter<long>("native_push.skipped_never_delivered");
+        IsolatedDeviceFailure = _meter.CreateCounter<long>("native_push.isolated_device_failure");
+        IsolatedOwnerFailure = _meter.CreateCounter<long>("native_push.isolated_owner_failure");
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _meter.Dispose();
+}

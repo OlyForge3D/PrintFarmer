@@ -48,6 +48,13 @@ public class EfModel3DFileRepository(SlicerDbContext db) : IModel3DFileRepositor
     }
 
     /// <inheritdoc/>
+    public async Task<Model3D?> GetByIdForReconciliationAsync(Guid id, CancellationToken ct)
+    {
+        _db.ChangeTracker.Clear();
+        return await _db.Models3D.AsNoTracking().SingleOrDefaultAsync(m => m.Id == id, ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<Model3D>> ListValidAsync(CancellationToken ct)
     {
         return await _db.Models3D

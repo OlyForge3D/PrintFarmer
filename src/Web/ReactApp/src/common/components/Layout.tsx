@@ -26,11 +26,13 @@ import {
   PlayIcon,
   CalendarIcon,
   LocationIcon,
+  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -182,6 +184,15 @@ const navigation: NavigationElement[] = [
     requiredRole: 'farm_admin',
     anchored: true,
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
+  },
+  {
+    id: 'parts-inventory',
+    name: 'Printed Parts',
+    href: '/parts-inventory',
+    icon: PackageIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
   },
   {
     id: 'locations',
@@ -385,6 +396,9 @@ export function Layout() {
 
   const availableNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
     const isHiddenByCapabilities = (item: NavigationItem) => {
+      if (!hasResolvedQueryData(capabilities)) {
+        return item.requiresSlicingCapability || item.requiresModelFiles;
+      }
       if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
       if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
       return false;
@@ -1164,7 +1178,19 @@ export function Layout() {
           <PlatformBanner />
           <InstallBanner />
           <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
-            <RouteErrorBoundary>
+            {/* React Router's `location.key` is a unique string generated
+                per history entry. It changes on ANY navigation — including
+                same-pathname but different search or hash — where
+                `pathname` alone would not. Using `pathname` as the reset
+                key would leave a stuck error boundary on
+                `/reports?range=week` when the operator navigates to
+                `/reports?range=day` or `/reports#summary` because the
+                pathname is identical. Reviewers explicitly flagged this
+                (Hicks #5): tests must exercise real router navigation
+                between same-path/different-query and same-path/different-
+                hash. `location.key` covers both. See:
+                https://reactrouter.com/en/main/hooks/use-location */}
+            <RouteErrorBoundary resetKey={location.key}>
               <Suspense
                 fallback={
                   <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading page">

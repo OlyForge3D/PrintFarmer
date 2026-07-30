@@ -23,7 +23,7 @@
 | ⚙️ Parker | DevOps & Deployment Engineer | .squad/agents/parker/charter.md | Active |
 | 🎨 Newt | Designer (Industrial UI) | .squad/agents/newt/charter.md | Active |
 | 🔍 Bishop | Code Reviewer (Claude Opus 4.8) | .squad/agents/bishop/charter.md | Active |
-| 🔍 Hicks | Code Reviewer (GPT-5.5) | .squad/agents/hicks/charter.md | Active |
+| 🔍 Hicks | Code Reviewer (GPT-5.6 Sol) | .squad/agents/hicks/charter.md | Active |
 | 🔍 Vasquez | Code Reviewer (Gemini 3.1 Pro Preview) | .squad/agents/vasquez/charter.md | Active |
 | ⚛️ Drake | Frontend Dev | .squad/agents/drake/charter.md | Active |
 | 📋 Scribe | Session Logger | .squad/agents/scribe/charter.md | Active |

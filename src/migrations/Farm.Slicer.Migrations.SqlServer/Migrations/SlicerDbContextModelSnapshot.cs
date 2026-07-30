@@ -29,6 +29,18 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CleanupDeletionStartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CleanupReservationToken")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CleanupReservedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("ContentType")
                         .IsRequired()
                         .HasMaxLength(128)
@@ -646,6 +658,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<Guid?>("ClaimToken")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("ClaimedAt")
                         .HasColumnType("datetime2");
 
@@ -735,6 +750,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("OperationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("PinnedWorkerId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
@@ -771,6 +789,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<int>("RetryCount")
                         .HasColumnType("int");
 
+                    b.Property<string>("SlicerBinarySha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
@@ -783,6 +805,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int");
 
                     b.Property<string>("SlicerEngineName")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("SlicerEngineVersion")
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
 

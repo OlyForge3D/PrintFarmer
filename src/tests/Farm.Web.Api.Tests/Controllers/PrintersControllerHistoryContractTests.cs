@@ -411,7 +411,8 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
-            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>());
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 
     private sealed class InlineHandler(

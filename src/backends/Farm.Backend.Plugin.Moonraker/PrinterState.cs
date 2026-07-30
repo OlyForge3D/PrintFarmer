@@ -5,6 +5,13 @@ namespace Farm.Backend.Plugin.Moonraker;
 // Persistent state for a printer to avoid overwriting good values with nulls
 internal sealed class PrinterState
 {
+    public long? OriginWatermark { get; private set; }
+
+    public void IncludeOrigin(long? originWatermark)
+    {
+        OriginWatermark = originWatermark;
+    }
+
     public double? X { get; set; }
 
     public double? Y { get; set; }
@@ -33,6 +40,14 @@ internal sealed class PrinterState
     public string? JobName { get; set; }
 
     public string? HomedAxes { get; set; }
+
+    /// <summary>
+    /// Active Klipper extruder index parsed from the <c>toolhead.extruder</c> field
+    /// ("extruder" → 0, "extruder1" → 1, …). Used to attribute per-tool wear on native
+    /// multi-extruder toolchangers that do not expose an MMU object (issue #711, round-14).
+    /// Null until the printer reports a <c>toolhead.extruder</c> value.
+    /// </summary>
+    public int? ActiveExtruderIndex { get; set; }
 
     public string? CameraStreamUrl { get; set; }
 

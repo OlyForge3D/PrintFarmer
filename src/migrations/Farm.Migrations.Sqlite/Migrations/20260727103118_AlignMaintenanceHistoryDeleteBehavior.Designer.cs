@@ -3139,6 +3139,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<Guid?>("ToolheadId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -3151,6 +3154,8 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("PrinterId");
 
                     b.HasIndex("PrinterMaintenanceScheduleId");
+
+                    b.HasIndex("ToolheadId");
 
                     b.HasIndex("Status", "Severity");
 
@@ -3267,6 +3272,12 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<double?>("ToolheadHoursAtMaintenance")
+                        .HasColumnType("REAL");
+
+                    b.Property<Guid?>("ToolheadId")
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("MaintenanceTaskId");
@@ -3278,6 +3289,8 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.HasIndex("PrinterMaintenanceScheduleId");
 
                     b.HasIndex("ResolvedAlertId");
+
+                    b.HasIndex("ToolheadId");
 
                     b.ToTable("MaintenanceLogs");
                 });
@@ -7862,11 +7875,18 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasForeignKey("PrinterMaintenanceScheduleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
 
                     b.Navigation("PrinterMaintenanceSchedule");
+
+                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenanceLog", b =>
@@ -7892,6 +7912,11 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasForeignKey("ResolvedAlertId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Farm.Infrastructure.Domain.Toolhead", "Toolhead")
+                        .WithMany()
+                        .HasForeignKey("ToolheadId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("MaintenanceTask");
 
                     b.Navigation("Printer");
@@ -7899,6 +7924,8 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Navigation("PrinterMaintenanceSchedule");
 
                     b.Navigation("ResolvedAlert");
+
+                    b.Navigation("Toolhead");
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.MaintenancePlan", b =>

@@ -346,6 +346,8 @@ public static class ServiceCollectionExtensions
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Mutations.IMutationWatermarkReader,
+            Farm.Infrastructure.Services.Mutations.MutationWatermarkReader>();
 
         // Settings repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();
@@ -574,6 +576,11 @@ public static class ServiceCollectionExtensions
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton(TimeProvider.System);
 
+        // Register the per-tool activity accumulator (issue #711, round-14). Singleton so the
+        // backend plugin that samples active-tool telemetry and the statistics sync service that
+        // drains it share one in-memory rolling window.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator, Farm.Infrastructure.Services.Maintenance.ToolheadActivityAccumulator>();
+
         // Register runtime diagnostic channel service (singleton - toggleable verbose logging per subsystem)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Diagnostics.IDiagnosticChannelService, Farm.Infrastructure.Services.Diagnostics.DiagnosticChannelService>();
 
@@ -628,6 +635,11 @@ public static class ServiceCollectionExtensions
 
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
+
+        // Guided filament swap validation (per-tool material requirement check against a scanned spool).
+        _ = services.AddScoped<
+            Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator,
+            Farm.Infrastructure.Services.Printers.PrinterToolheadSwapValidator>();
     }
 
     #endregion
@@ -648,6 +660,16 @@ public static class ServiceCollectionExtensions
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
+
+        // Shift-plan compiler (issue #713): materializes attention, maintenance,
+        // coverage, spool restock, and printed-part reorder signals into anchored UserTask rows.
+        // Sources are additive: register additional IShiftPlanTaskSource impls to extend coverage.
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IIdleWindowService, Farm.Infrastructure.Services.ShiftPlan.IdleWindowService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.AttentionShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.MaintenanceIdleWindowShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.PrintedPartReorderShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.SpoolRestockShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanCompiler, Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompiler>();
 
         // SystemLogs service
         _ = services.AddScoped<Farm.Infrastructure.Services.SystemLogs.ISystemLogService, Farm.Infrastructure.Services.SystemLogs.SystemLogService>();
@@ -729,6 +751,27 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // Source-aware spool resolution plus filament coverage / runout prediction (issue #709).
+        // The scoped resolver is also shared by #710 guided validation and commit-time binding.
+        // Registered as
+        // both IFilamentCoverageService (per-printer + fleet endpoints) and
+        // IFilamentCoverageAttentionSource (narrow input to the #707 adapter). The
+        // broadcaster is a singleton so services that emit invalidations
+        // (spool binding changes, job progress ticks) can inject it without
+        // a scope hop.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver, Farm.Infrastructure.Services.Spoolman.FilamentCoverageSpoolResolver>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.ISpoolBurnRateProjectionService, Farm.Infrastructure.Services.Spoolman.SpoolBurnRateProjectionService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageService>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.Sources.IFilamentRunoutSwitchEvaluator,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutSwitchEvaluator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutAttentionSource>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster, Farm.Infrastructure.Services.Spoolman.FilamentCoverageBroadcaster>();
+
         // Obico ML API HTTP client (15s timeout for image analysis)
         _ = services.AddHttpClient("ObicoML", client =>
         {
@@ -762,6 +805,9 @@ public static class ServiceCollectionExtensions
 
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
+
+            // Shift-plan compiler (issue #713): periodic materialization of operational tasks.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompilerHostedService>();
 
             // Durable queue outbox publisher for calibration queue-dispatch events (SignalR hints only).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();

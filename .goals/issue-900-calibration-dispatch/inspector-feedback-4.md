@@ -30,7 +30,7 @@ Iteration 4 makes substantial progress but introduces critical production-fideli
 ### CRITICAL PRODUCTION-FIDELITY ISSUES
 
 #### 1. **Outbox BackendStartCommand is NOT durable** (Blocker #10 — NOT FIXED)
-   
+
 **Location:** `src/infra/Services/Queue/QueueOutboxPublisherService.cs` lines 192–237
 
 **Issue:** The publisher marks BackendStartCommand as `Published` (line 194) BEFORE the background task executes. If the process crashes during file upload (lines 138–1147 in PrintJobManagementService), the outbox event is marked Published but the job never started. On restart, the publisher will NOT retry the event — it's already marked Published.
@@ -193,4 +193,3 @@ These are production-safety issues that must be fixed before the PR can merge. T
 4. **Reconciliation**: Implement query of authoritative backend state and atomic lease resolution.
 5. **Start path audit**: Verify all production paths route through shared claim service.
 6. **Authorization immutability**: Add SaveChanges guard to prevent mutation of immutable fields.
-

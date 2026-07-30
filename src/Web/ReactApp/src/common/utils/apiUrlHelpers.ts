@@ -41,6 +41,14 @@ export const getAuthHeaders = (): HeadersInit => {
 };
 
 /**
+ * Get the current bearer token for authenticated SignalR connections.
+ * SignalR invokes this factory again during reconnects, so token refreshes
+ * are picked up without rebuilding the connection.
+ */
+export const getSignalRAccessToken = (): string =>
+  localStorage.getItem('auth-token') || '';
+
+/**
  * Get SignalR hub URL respecting external API base URL configuration.
  * Used for WebSocket connections to SignalR hubs.
  * 

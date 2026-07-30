@@ -26,6 +26,13 @@ public class PrinterHub(
     // Marker hub for broadcasting printer updates and discovery progress.
 
     /// <summary>
+    /// SignalR group reserved for administrator-only task broadcasts. Only
+    /// connections whose authenticated principal holds the <c>farm_admin</c> role
+    /// join this group.
+    /// </summary>
+    public const string AdminTaskGroup = "farm_admin";
+
+    /// <summary>
     /// Adds the connection to its authorized SignalR groups, then replays the cached
     /// printer statuses to the newly connected client so its UI is immediately current
     /// instead of waiting for the next backend broadcast. Also runs on automatic
@@ -42,6 +49,10 @@ public class PrinterHub(
         if (PrintFarmerPermissions.IsFarmAdmin(Context.User!))
         {
             await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Administrators);
+            await Groups.AddToGroupAsync(
+                Context.ConnectionId,
+                AdminTaskGroup,
+                Context.ConnectionAborted);
         }
 
         if (PrintFarmerPermissions.HasPermission(

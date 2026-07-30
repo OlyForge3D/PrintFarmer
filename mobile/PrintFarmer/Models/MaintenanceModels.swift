@@ -192,6 +192,105 @@ struct DismissAlertRequest: Encodable, Sendable {
     let reason: String?
 }
 
+// MARK: - Create Maintenance Log Request (matches CreateMaintenanceLogRequest)
+//
+// Body for `POST /api/maintenance/logs`. Used by Printer Detail v2 (issue
+// #712) to record completion of a due odometer item. Only `printerId` and
+// `performedBy` are required by the backend; the rest are optional context.
+
+struct CreateMaintenanceLogRequest: Encodable, Sendable {
+    let printerId: UUID
+    let taskId: UUID?
+    let taskName: String?
+    let componentName: String?
+    let performedAt: Date?
+    let performedBy: String
+    let notes: String?
+    let durationMinutes: Int?
+    let cost: Decimal?
+    let partsReplaced: String?
+    let toolheadId: UUID?
+
+    init(
+        printerId: UUID,
+        performedBy: String,
+        taskId: UUID? = nil,
+        taskName: String? = nil,
+        componentName: String? = nil,
+        performedAt: Date? = nil,
+        notes: String? = nil,
+        durationMinutes: Int? = nil,
+        cost: Decimal? = nil,
+        partsReplaced: String? = nil,
+        toolheadId: UUID? = nil
+    ) {
+        self.printerId = printerId
+        self.performedBy = performedBy
+        self.taskId = taskId
+        self.taskName = taskName
+        self.componentName = componentName
+        self.performedAt = performedAt
+        self.notes = notes
+        self.durationMinutes = durationMinutes
+        self.cost = cost
+        self.partsReplaced = partsReplaced
+        self.toolheadId = toolheadId
+    }
+}
+
+// MARK: - Printer Maintenance Statistics (matches PrinterStatistics domain)
+//
+// Returned by `GET /api/maintenance/printers/{id}/statistics`. Supplies the
+// cumulative odometer reading (`totalPrintHours`) for the Printer Detail v2
+// maintenance section (issue #712). Decoded defensively so a freshly seeded
+// printer with a zeroed/never-synced snapshot never fails to decode.
+
+struct PrinterMaintenanceStatistics: Codable, Sendable, Identifiable {
+    let printerId: UUID
+    let totalPrintHours: Double
+    let totalJobsCompleted: Int
+    let totalJobsFailed: Int
+    let totalFilamentUsedGrams: Double?
+    let lastSyncTime: Date?
+
+    var id: UUID { printerId }
+
+    private enum CodingKeys: String, CodingKey {
+        case printerId
+        case totalPrintHours
+        case totalJobsCompleted
+        case totalJobsFailed
+        case totalFilamentUsedGrams
+        case lastSyncTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        printerId = try c.decode(UUID.self, forKey: .printerId)
+        totalPrintHours = try c.decodeIfPresent(Double.self, forKey: .totalPrintHours) ?? 0
+        totalJobsCompleted = try c.decodeIfPresent(Int.self, forKey: .totalJobsCompleted) ?? 0
+        totalJobsFailed = try c.decodeIfPresent(Int.self, forKey: .totalJobsFailed) ?? 0
+        totalFilamentUsedGrams = try c.decodeIfPresent(Double.self, forKey: .totalFilamentUsedGrams)
+        lastSyncTime = try c.decodeIfPresent(Date.self, forKey: .lastSyncTime)
+    }
+
+    init(
+        printerId: UUID,
+        totalPrintHours: Double,
+        totalJobsCompleted: Int = 0,
+        totalJobsFailed: Int = 0,
+        totalFilamentUsedGrams: Double? = nil,
+        lastSyncTime: Date? = nil
+    ) {
+        self.printerId = printerId
+        self.totalPrintHours = totalPrintHours
+        self.totalJobsCompleted = totalJobsCompleted
+        self.totalJobsFailed = totalJobsFailed
+        self.totalFilamentUsedGrams = totalFilamentUsedGrams
+        self.lastSyncTime = lastSyncTime
+    }
+}
+
 // MARK: - Resolve Alert Response
 
 struct ResolveAlertResponse: Codable, Sendable {

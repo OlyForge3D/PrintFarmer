@@ -12,7 +12,10 @@ struct DeepLinkHandler {
     /// Supported routes:
     /// - `printfarmer://printer/{UUID}` → printer detail
     /// - `printfarmer://printer/{UUID}/ready` → printer detail + mark ready
-    /// - `printfarmer://spool/{id}` → spool detail (scroll-to in inventory)
+    /// - `printfarmer://spool/{id}` → spool detail (scroll-to in inventory);
+    ///   `{id}` must be a positive integer — zero/negative values are
+    ///   rejected (`nil`) rather than treated as a valid spool ID (#714
+    ///   Item C).
     static func parse(url: URL) -> DeepLinkDestination? {
         guard url.scheme == "printfarmer" else { return nil }
 
@@ -30,7 +33,8 @@ struct DeepLinkHandler {
 
         case "spool":
             guard let first = pathComponents.first,
-                  let spoolId = Int(first) else { return nil }
+                  let spoolId = Int(first),
+                  spoolId > 0 else { return nil }
             return .spoolDetail(id: spoolId)
 
         default:

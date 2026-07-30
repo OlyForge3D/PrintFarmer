@@ -14,7 +14,7 @@ import type {
   ResolveAlertRequest,
   ResolveAlertResponse,
   CreateMaintenanceLogRequest,
-  UpdateMaintenanceModeRequest
+  UpdateMaintenanceModeRequest,
 } from '@/types/maintenance';
 
 // Analytics response types
@@ -50,6 +50,21 @@ export interface UpcomingMaintenanceTaskDto {
   taskId: string;
   printerId: string;
   printerName: string;
+  /**
+   * Optional physical toolhead scope carried through the upcoming feed on the
+   * per-toolhead maintenance backend (#711 stable contract at `1b696b954`).
+   * `null`/omitted means the task is printer-wide. Physical-only: the backend
+   * never emits a scope pointing at an MMU/AMS gate.
+   *
+   * NOTE: the backend `UpcomingMaintenanceTaskDto` record has exactly one
+   * toolhead field — `ToolheadId`. There is no `ToolheadName` on the wire
+   * (verified against `src/api/Controllers/Responses/UpcomingMaintenanceTaskDto.cs`
+   * at feature head `1b696b954`). Callers that need a display name must
+   * resolve it from `PrinterDetailsDto.toolheads[]` — the authoritative
+   * source. Mirroring a synthetic `toolheadName` field here would create a
+   * permanently-null property that lies about the wire shape.
+   */
+  toolheadId?: string | null;
   taskName: string;
   component?: string | null;
   description?: string | null;

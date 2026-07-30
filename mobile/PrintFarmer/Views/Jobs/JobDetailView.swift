@@ -1,10 +1,19 @@
 import Foundation
 import SwiftUI
 
+/// Dispute C (#714): a completed job may be harvested at most once. Kept as
+/// a free function (mirrored 1:1 in `actionSection` below) so the gating
+/// rule has deterministic unit coverage independent of view rendering.
+func canHarvestToInventory(job: PrintJob, partsInventoryEnabled: Bool) -> Bool {
+    job.status == .completed && partsInventoryEnabled && job.harvestedAt == nil
+}
+
 struct JobDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel: JobDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var partsInventoryEnabled = true
+    @State private var showingHarvestSheet = false
 
     init(jobId: UUID) {
         _viewModel = State(initialValue: JobDetailViewModel(jobId: jobId))
@@ -68,6 +77,16 @@ struct JobDetailView: View {
             viewModel.isViewActive = true
             viewModel.configure(jobService: services.jobService)
             await viewModel.loadJob()
+            await services.capabilitiesService.refresh()
+            partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
+        }
+        .sheet(isPresented: $showingHarvestSheet) {
+            if let job = viewModel.job {
+                HarvestSheetView(job: job) {
+                    let task = Task { await viewModel.loadJob() }
+                    activeTasks.append(task)
+                }
+            }
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -181,6 +200,10 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Details")
                 .font(.headline)
+                .accessibilityLabel("\(job.name), job detail. Details")
+                .accessibilityIdentifier(
+                    "job.detail.destination.\(job.id.uuidString.lowercased())"
+                )
 
             VStack(spacing: 0) {
                 infoRow(label: "File", value: job.gcodeFileName, icon: "doc")
@@ -383,6 +406,34 @@ struct JobDetailView: View {
                         .fullWidthActionButton()
                 }
                 .buttonStyle(.bordered)
+            }
+
+            // Completed: offer to harvest printed parts into inventory
+            // (#714, F9). Gated on the shared feature flag (#725) so the
+            // action disappears cleanly if printed-parts inventory is
+            // disabled for this deployment, and (Dispute C) on
+            // `harvestedAt == nil` so an already-harvested job shows its
+            // harvested state instead of a stale action.
+            if canHarvestToInventory(job: job, partsInventoryEnabled: partsInventoryEnabled) {
+                Button {
+                    showingHarvestSheet = true
+                } label: {
+                    Label("Harvest to Inventory", systemImage: "shippingbox.fill")
+                        .fullWidthActionButton(prominence: .prominent)
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.pfSuccess)
+                .accessibilityIdentifier("jobDetail.harvestToInventory")
+            } else if let harvestedAt = job.harvestedAt {
+                Label {
+                    Text("Harvested \(harvestedAt.formatted(date: .abbreviated, time: .shortened))")
+                } icon: {
+                    Image(systemName: "checkmark.seal.fill")
+                }
+                .font(.subheadline)
+                .foregroundStyle(Color.pfSuccess)
+                .accessibilityIdentifier("jobDetail.harvestedState")
             }
         }
         .disabled(viewModel.isPerformingAction)

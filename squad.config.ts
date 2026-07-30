@@ -11,9 +11,9 @@ const config: SquadConfig = {
     defaultModel: 'claude-sonnet-4.5',
     defaultTier: 'standard',
     fallbackChains: {
-      premium: ['claude-opus-4.6', 'claude-opus-4.6-fast', 'claude-opus-4.5', 'claude-sonnet-4.5'],
-      standard: ['claude-sonnet-4.5', 'gpt-5.2-codex', 'claude-sonnet-4', 'gpt-5.2'],
-      fast: ['claude-haiku-4.5', 'gpt-5.1-codex-mini', 'gpt-4.1', 'gpt-5-mini']
+      premium: ['gpt-5.6-sol', 'claude-opus-4.8', 'claude-opus-4.7', 'claude-sonnet-5'],
+      standard: ['claude-sonnet-5', 'gpt-5.6-terra', 'gpt-5.5', 'claude-sonnet-4.6'],
+      fast: ['gpt-5.6-luna', 'gemini-3.5-flash', 'claude-haiku-4.5', 'gpt-5.4-mini']
     },
     preferSameProvider: true,
     respectTierCeiling: true,

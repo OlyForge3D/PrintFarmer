@@ -141,6 +141,9 @@ public class DistributedSlicingJob : SlicingJobDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    /// <summary>Opaque identifier for the active worker claim incarnation.</summary>
+    public Guid ClaimToken { get; set; }
+
     public Uri ModelFileUrl { get; set; } = new("about:blank", UriKind.RelativeOrAbsolute);
 
     public string ModelFileName { get; set; } = string.Empty;

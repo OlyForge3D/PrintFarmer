@@ -7,6 +7,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Infrastructure.Repositories.Printers;
 
@@ -118,29 +119,122 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             return;
         }
 
-        // Clean up dependent records that have NoAction delete behavior to prevent FK constraint violations
-        // EF Core 10: Use ExecuteDeleteAsync for efficient bulk deletes without loading entities into memory
+        // F4 — Wrap all compensating deletes + the parent removal in a single transaction so
+        // a failure late in the sequence rolls back the earlier ExecuteDeleteAsync writes.
+        // Cooperate with an existing outer transaction: only own the transaction if we
+        // opened it. If a caller (e.g. DataImport Replace mode) has already begun a
+        // transaction, we ride on theirs and let them decide commit/rollback.
+        IDbContextTransaction? ownedTransaction = await BeginOwnedTransactionAsync(ct);
+        try
+        {
+            // F2 + Dallas Fix 4 — Clear direct PartOutputMappings whose GcodeFileId points to
+            // any GcodeFile SourcePrinter'd by this printer, BEFORE bulk-deleting those
+            // GcodeFiles. The direct PartOutputMappings.GcodeFileId FK is Restrict (not
+            // Cascade) after Dallas's full-chain adjudication for #953, so the bulk GcodeFile
+            // delete below would otherwise FK-fail on any mapping still referencing a doomed
+            // source GcodeFile. Mappings that reach the GcodeFile indirectly via
+            // PrintProjectFileId are NOT touched here — they cascade normally when the
+            // PrintProjectFile is deleted.
+            await _db.PartOutputMappings
+                .Where(m => m.GcodeFileId != null
+                    && _db.GcodeFiles.Any(gf => gf.Id == m.GcodeFileId!.Value && gf.SourcePrinterId == trackedPrinter.Id))
+                .ExecuteDeleteAsync(ct);
 
-        // Remove GcodeFile records that reference this printer as source
-        await _db.GcodeFiles
-            .Where(gf => gf.SourcePrinterId == trackedPrinter.Id)
-            .ExecuteDeleteAsync(ct);
+            // Clean up dependent records that have NoAction delete behavior to prevent FK
+            // constraint violations. EF Core 10: use ExecuteDeleteAsync for efficient bulk
+            // deletes without loading entities into memory.
 
-        // Remove PrintJob records assigned to this printer
-        await _db.PrintJobs
-            .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
-            .ExecuteDeleteAsync(ct);
+            // Remove GcodeFile records that reference this printer as source
+            await _db.GcodeFiles
+                .Where(gf => gf.SourcePrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
 
-        // Remove GcodeHarvestOperation records for this printer
-        await _db.GcodeHarvestOperations
-            .Where(h => h.PrinterId == trackedPrinter.Id)
-            .ExecuteDeleteAsync(ct);
+            // Remove PrintJob records assigned to this printer
+            await _db.PrintJobs
+                .Where(j => j.AssignedPrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
 
-        // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
+            // Remove GcodeHarvestOperation records for this printer
+            await _db.GcodeHarvestOperations
+                .Where(h => h.PrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
 
-        // Now remove the tracked printer
-        _ = _db.Printers.Remove(trackedPrinter);
-        _ = await _db.SaveChangesAsync(ct);
+            // Remove MaintenanceLog records for this printer BEFORE alerts and schedules.
+            // MaintenanceLog.PrinterId is Restrict (not Cascade), so logs must be deleted
+            // explicitly before removing the printer. Logs are deleted first because they can
+            // reference alerts via ResolvedAlertId (also Restrict).
+            await _db.MaintenanceLogs
+                .Where(l => l.PrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
+
+            // Remove MaintenanceAlert records for this printer BEFORE schedules and printer.
+            // MaintenanceAlert.PrinterId is Restrict (not Cascade), so alerts must be deleted
+            // explicitly before removing the printer.
+            await _db.MaintenanceAlerts
+                .Where(a => a.PrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
+
+            // Remove PrinterMaintenanceSchedule records for this printer BEFORE Printers.Remove.
+            // The Schedule.PrinterId FK is Restrict (not Cascade) to break the SQL Server
+            // multi-cascading-path graph Printers ⇒ Schedules ⇒ MaintenanceAlerts (SetNull)
+            // that triggered error 1785 on fresh SQL Server InitialV1 (#953). Deleting schedules
+            // here matches the surrounding cleanup pattern.
+            await _db.PrinterMaintenanceSchedules
+                .Where(s => s.PrinterId == trackedPrinter.Id)
+                .ExecuteDeleteAsync(ct);
+
+            // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
+
+            // Now remove the tracked printer
+            _ = _db.Printers.Remove(trackedPrinter);
+            _ = await _db.SaveChangesAsync(ct);
+
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
+        }
+        catch
+        {
+            if (ownedTransaction is not null)
+            {
+                try
+                {
+                    await ownedTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Rollback best-effort; original exception propagates.
+                }
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Begins a new database transaction if the provider is relational AND no outer
+    /// transaction is already in progress; otherwise returns null so we ride on the
+    /// existing outer transaction (owned by the caller — e.g. DataImport Replace mode).
+    /// SQLite in-memory tests that don't set up transactions return null and rely on the
+    /// implicit per-SaveChanges transaction semantics of SQLite. Modeled on the
+    /// <c>EfUserTaskRepository.BeginOwnedTransactionAsync</c> pattern already in this repo.
+    /// </summary>
+    private async Task<IDbContextTransaction?> BeginOwnedTransactionAsync(CancellationToken ct)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+        {
+            return null;
+        }
+
+        return await _db.Database.BeginTransactionAsync(ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
@@ -187,6 +281,17 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
     {
         List<Printer> printers = await _db.Printers
             .AsNoTracking()
+            .Where(p => p.Backend == (int)backend)
+            .ToListAsync(ct);
+        printers.ForEach(PopulateCredential);
+        return printers;
+    }
+
+    public async Task<List<Printer>> GetByBackendWithToolheadsAsync(PrinterBackend backend, CancellationToken ct)
+    {
+        List<Printer> printers = await _db.Printers
+            .AsNoTracking()
+            .Include(p => p.Toolheads)
             .Where(p => p.Backend == (int)backend)
             .ToListAsync(ct);
         printers.ForEach(PopulateCredential);

@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.PartsInventory;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -46,6 +47,8 @@ public class PrintJobManagementService(
     ICameraSnapshotService? cameraSnapshotService = null,
     IServiceScopeFactory? serviceScopeFactory = null,
     ISettingsService? settingsService = null,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IPartOutputSnapshotService? partOutputSnapshotService = null,
     IDispatchClaimService? dispatchClaimService = null,
     AppDbContext? appDbContext = null,
     IDbOutboxSequenceAllocator? outboxSequenceAllocator = null,
@@ -75,6 +78,8 @@ public class PrintJobManagementService(
     private readonly ICameraSnapshotService? _cameraSnapshotService = cameraSnapshotService;
     private readonly IServiceScopeFactory? _serviceScopeFactory = serviceScopeFactory;
     private readonly ISettingsService? _settingsService = settingsService;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly IPartOutputSnapshotService? _partOutputSnapshotService = partOutputSnapshotService;
     private readonly IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private readonly AppDbContext? _appDbContext = appDbContext;
     private readonly IDbOutboxSequenceAllocator? _outboxSequenceAllocator = outboxSequenceAllocator;
@@ -512,7 +517,8 @@ public class PrintJobManagementService(
                             Color = t.Color,
                             Description = t.Description
                         })
-                        .ToList()
+                        .ToList(),
+                    HarvestedAt = pj.HarvestedAt
                 })
                 .ToList();
 
@@ -612,7 +618,8 @@ public class PrintJobManagementService(
                 Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
                 Priority = request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
-                RequiredMaterialType = request.RequiredMaterialType,
+                RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
+                    .ResolveEffectiveMaterial(request.RequiredMaterialType, gcodeFile),
                 DeadlineAtUtc = resolvedDeadlineAtUtc,
                 EstimatedPrintTime = gcodeFile.EstimatedPrintTimeMinutes.HasValue
                     ? TimeSpan.FromMinutes(gcodeFile.EstimatedPrintTimeMinutes.Value)
@@ -640,9 +647,45 @@ public class PrintJobManagementService(
                     cancellationToken);
             }
 
-            _ = await _repository.AddAsync(job, cancellationToken);
+            // Project per-extruder G-code metadata into per-tool material requirements
+            // via the shared PrintJobRequirementsMapper so every enqueue path (this
+            // service, JobQueueService, rerun) uses identical projection semantics.
+            // Preserves RequiredMaterialType for legacy dispatch / reporting.
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
+
+            if (_partOutputSnapshotService is null)
+            {
+                _ = await _repository.AddAsync(job, cancellationToken);
+            }
+            else
+            {
+                await _repository.AddWithoutSaveAsync(job, cancellationToken);
+                if (assignedPrinterId.HasValue)
+                {
+                    await PrepareFirstAssignmentAsync(
+                        job,
+                        assignedPrinterId.Value,
+                        userId,
+                        "Assigned during enqueue.",
+                        cancellationToken);
+                }
+
+                await _repository.SaveChangesAsync(cancellationToken);
+            }
 
             _logger.LogInformation("Print job {JobId} enqueued by user {UserId}", job.Id.ToString(), userId);
+
+            // #709 item 5: queue mutation may change coverage (new assigned
+            // demand added). Broadcast per-printer only when the job is bound;
+            // unassigned shared-queue jobs affect no printer until assignment.
+            if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
@@ -650,6 +693,20 @@ public class PrintJobManagementService(
             _logger.LogError(ex, "Error enqueueing print job from gcode file {GcodeFileId}", request.GcodeFileId);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Thin wrapper around
+    /// <see cref="Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode"/>
+    /// kept for backward-compatible unit tests. New callers should invoke the shared
+    /// mapper directly so every production entry point projects per-extruder metadata
+    /// identically.
+    /// </summary>
+    /// <param name="job">The newly constructed print job to mutate.</param>
+    /// <param name="gcodeFile">The G-code file supplying slicer metadata.</param>
+    internal static void PopulatePerToolRequirementsFromGcode(PrintJob job, GcodeFile gcodeFile)
+    {
+        Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
     }
 
     /// <summary>
@@ -672,6 +729,11 @@ public class PrintJobManagementService(
             {
                 throw new InvalidOperationException($"Print job {jobId} not found");
             }
+
+            // Capture prior assignment/status so we can decide whether coverage
+            // needs a rebroadcast after the update (#709 item 5).
+            Guid? priorAssignedPrinterId = job.AssignedPrinterId;
+            PrintJobStatus priorStatus = job.Status;
 
             await EnsureActorCanAccessJobAsync(userId, job.Id, cancellationToken);
 
@@ -708,7 +770,7 @@ public class PrintJobManagementService(
                     userId,
                     destinationPrinterId,
                     cancellationToken);
-                if (job.AssignedPrinterId != destinationPrinterId)
+                if (priorAssignedPrinterId != destinationPrinterId)
                 {
                     job.QueuePosition = await AllocateQueuePositionAsync(
                         destinationPrinterId,
@@ -716,6 +778,15 @@ public class PrintJobManagementService(
                 }
 
                 job.AssignedPrinterId = destinationPrinterId;
+                if (priorAssignedPrinterId != job.AssignedPrinterId)
+                {
+                    await PrepareFirstAssignmentAsync(
+                        job,
+                        job.AssignedPrinterId.Value,
+                        userId,
+                        "Assigned during queue update.",
+                        cancellationToken);
+                }
             }
 
             if (!string.IsNullOrEmpty(request.Status))
@@ -751,6 +822,35 @@ public class PrintJobManagementService(
 
             _ = await _repository.UpdateAsync(job, cancellationToken);
             _logger.LogInformation("Print job {JobId} updated by user {UserId}", jobId, userId);
+
+            // #709 item 5: coverage changes when assignment moves or the
+            // job's contribution to queued demand changes (status transitions
+            // Queued/Assigned ↔ Printing/Completed/Cancelled). Broadcast on
+            // any of these changes; the coalescer swallows repeated bursts.
+            if (_coverageBroadcaster is not null)
+            {
+                bool assignmentChanged = job.AssignedPrinterId != priorAssignedPrinterId;
+                bool statusChanged = job.Status != priorStatus;
+
+                if (assignmentChanged || statusChanged)
+                {
+                    string reason = assignmentChanged
+                        ? Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment
+                        : Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged;
+
+                    if (priorAssignedPrinterId.HasValue && priorAssignedPrinterId != job.AssignedPrinterId)
+                    {
+                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                            priorAssignedPrinterId.Value, reason, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    if (job.AssignedPrinterId.HasValue)
+                    {
+                        await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                            job.AssignedPrinterId.Value, reason, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
 
             return MapToQueuedPrintJobDto(job);
         }
@@ -1113,6 +1213,17 @@ public class PrintJobManagementService(
                         claimResult.Attempt.DispatchStateRowVersionAtClaim)
                     : null;
 
+            // Preserve Epic #705 harvest provenance now that the shared atomic claim has
+            // performed the durable Starting transition: capture the idempotent part-output
+            // snapshot and record the manual dispatch intent. These changes are tracked on
+            // the shared context and persisted by the terminal SaveChangesAsync below.
+            await PrepareFirstAssignmentAsync(
+                job,
+                job.AssignedPrinterId.Value,
+                userId,
+                "Dispatched to start printing.",
+                cancellationToken);
+
             // Use original filename for the printer (not the GUID-based storage filename)
             string printerFileName = claimResult.Attempt.BackendFileName
                 ?? throw new InvalidOperationException("Dispatch claim did not persist a backend file identity.");
@@ -1423,6 +1534,16 @@ public class PrintJobManagementService(
             job.UpdatedAt = DateTime.UtcNow;
             await _repository.SaveChangesAsync(cancellationToken);
 
+            if (job.Status == PrintJobStatus.Printing
+                && job.AssignedPrinterId.HasValue
+                && _coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             // Send notification for job start
             if (job.Status == PrintJobStatus.Printing)
             {
@@ -1497,6 +1618,36 @@ public class PrintJobManagementService(
 
             throw;
         }
+    }
+
+    private async Task PrepareFirstAssignmentAsync(
+        PrintJob job,
+        Guid printerId,
+        string? userId,
+        string reason,
+        CancellationToken ct)
+    {
+        if (_partOutputSnapshotService is null)
+        {
+            return;
+        }
+
+        DateTime now = DateTime.UtcNow;
+        job.DispatchedAt ??= now;
+        job.DispatchMode ??= (int)Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual;
+        _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
+        _repository.AddDispatchLog(new DispatchLog
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = job.Id,
+            PrinterId = printerId,
+            Action = Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched,
+            DispatchMode = Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual,
+            DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
+            DispatchedByUserId = userId,
+            Reason = reason,
+            CreatedAtUtc = now,
+        });
     }
 
     /// <summary>
@@ -2019,6 +2170,14 @@ public class PrintJobManagementService(
                 await lifecycleTransaction.CommitAsync(cancellationToken);
             }
 
+            if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
 
             // Send notification
@@ -2140,6 +2299,14 @@ public class PrintJobManagementService(
         if (lifecycleTransaction is not null)
         {
             await lifecycleTransaction.CommitAsync(cancellationToken);
+        }
+
+        if (_coverageBroadcaster is not null && job.AssignedPrinterId.HasValue)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                job.AssignedPrinterId.Value,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                cancellationToken).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Print aborted for job {JobId} by user {UserId}, job returned to queue", jobId, userId);
@@ -2420,11 +2587,13 @@ public class PrintJobManagementService(
 
             // Prefer a user-friendly name (original filename) when the linked G-code file still exists.
             string newJobName = originalJob.Name;
+            GcodeFile? rerunGcodeFile = null;
             if (originalJob.GcodeFileId.HasValue)
             {
-                if (sourceGcode != null)
+                rerunGcodeFile = sourceGcode;
+                if (rerunGcodeFile != null)
                 {
-                    newJobName = sourceGcode.Name;
+                    newJobName = rerunGcodeFile.Name;
                 }
             }
 
@@ -2450,6 +2619,11 @@ public class PrintJobManagementService(
                 QueuedAt = DateTime.UtcNow
             };
 
+            // Carry per-tool requirements across the rerun. Prefer verbatim copy of the
+            // original job's JSON (already normalised); rederive from the G-code file if
+            // the source lacks the projection (e.g., pre-#710 jobs).
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.CopyFrom(newJob, originalJob, rerunGcodeFile);
+
             // Calculate queue position
             newJob.QueuePosition = await AllocateQueuePositionAsync(
                 newJob.AssignedPrinterId,
@@ -2464,6 +2638,13 @@ public class PrintJobManagementService(
             }
 
             await _repository.AddAsync(newJob, cancellationToken);
+            if (_coverageBroadcaster is not null && newJob.AssignedPrinterId.HasValue)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    newJob.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.JobAssignment,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             _logger.LogInformation(
                 "Job {JobId} rerun as {NewJobId} by user {UserId}",
@@ -3069,7 +3250,11 @@ public class PrintJobManagementService(
         TimeSpan? estimatedPrintTime = ExtractEstimatedPrintTimeFromMetadata(historyJob.Metadata);
         double? estimatedFilamentUsage = ExtractEstimatedFilamentUsageFromMetadata(historyJob.Metadata);
 
-        return new PrintJob
+        // Try to find matching G-code file by filename so history-seeded jobs that map to an
+        // in-progress external print can still be swap-validated authoritatively.
+        Guid? gcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken);
+
+        var job = new PrintJob
         {
             Id = Guid.NewGuid(),
             Name = Path.GetFileNameWithoutExtension(historyJob.Filename) ?? "Unknown",
@@ -3098,9 +3283,19 @@ public class PrintJobManagementService(
             // Associate with printer
             AssignedPrinterId = printerId,
 
-            // Try to find matching G-code file by filename
-            GcodeFileId = await FindGcodeFileIdByFilenameAsync(historyJob.Filename, cancellationToken)
+            // Matching G-code file resolved above (may be null when no library match exists)
+            GcodeFileId = gcodeFileId
         };
+
+        // Project per-extruder G-code metadata onto the seeded job through the same shared
+        // mapper every other creation path uses. No-op when the file has no per-extruder data.
+        if (gcodeFileId.HasValue)
+        {
+            GcodeFile? gcodeFile = await _repository.GetGcodeFileAsync(gcodeFileId.Value, cancellationToken);
+            Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.PopulateFromGcode(job, gcodeFile);
+        }
+
+        return job;
     }
 
     /// <summary>
@@ -4249,6 +4444,7 @@ public class PrintJobManagementService(
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             RequiredCapabilities = job.RequiredCapabilities,
             EstimatedPrintTimeSeconds = (int?)job.EstimatedPrintTime?.TotalSeconds,
             EstimatedFilamentUsageGrams = job.EstimatedFilamentUsage,
@@ -4288,7 +4484,8 @@ public class PrintJobManagementService(
                     tu.FilamentName,
                     tu.FilamentColor,
                     tu.MaterialCostUsd))
-                .ToList()
+                .ToList(),
+            HarvestedAt = job.HarvestedAt
         };
     }
 
@@ -4535,6 +4732,9 @@ public class PrintJobManagementService(
                 return null;
             }
 
+            int priorCopies = job.Copies;
+            string? priorRequiredMaterialType = job.RequiredMaterialType;
+
             // Validate and update fields
             if (!string.IsNullOrEmpty(updates.Name))
             {
@@ -4632,6 +4832,22 @@ public class PrintJobManagementService(
             _logger.LogInformation(
                 "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
                 jobId, job.Name, job.Priority, job.Notes?.Length ?? 0);
+
+            if (_coverageBroadcaster is not null
+                && (priorCopies != job.Copies
+                    || !string.Equals(priorRequiredMaterialType, job.RequiredMaterialType, StringComparison.OrdinalIgnoreCase))
+                && job.AssignedPrinterId.HasValue
+                && job.Status is PrintJobStatus.Queued
+                    or PrintJobStatus.Assigned
+                    or PrintJobStatus.Starting
+                    or PrintJobStatus.Printing
+                    or PrintJobStatus.Paused)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    job.AssignedPrinterId.Value,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             return MapToQueuedPrintJobDto(job);
         }
@@ -5328,7 +5544,11 @@ public class PrintJobManagementService(
                 continue; // Skip extruders with zero or negative estimates
             }
 
-            var toolhead = toolheads.FirstOrDefault(t => t.Index == i);
+            // perExtruderWeights is 0-based G-code T-index; translate each stored toolhead through
+            // the mapper so MMU gates (stored 1-based) bind to the correct extruder estimate
+            // instead of being shifted by one gate (issue #711 round-10 Finding 2).
+            var toolhead = toolheads.FirstOrDefault(t =>
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(t, toolheads) == i);
             var usage = new PrintJobToolheadUsage
             {
                 Id = Guid.NewGuid(),

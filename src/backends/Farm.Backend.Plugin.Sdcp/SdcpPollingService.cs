@@ -3,8 +3,10 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,12 +23,15 @@ public sealed class SdcpPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<SdcpPollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -198,6 +203,9 @@ public sealed class SdcpPollingService(
 
                     // SDCP uses BackendUrl which combines ServerUrl with BackendPort
                     // The GetCompositeStatusAsync expects the base URL (which it converts to WebSocket URL internally)
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "SDCP status", ct)
+                        .ConfigureAwait(false);
                     PrinterCompositeStatus status = await sdcpClient.GetCompositeStatusAsync(
                         printer.BackendUrl,
                         ct);
@@ -277,7 +285,7 @@ public sealed class SdcpPollingService(
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         SpoolInfo: null);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,
@@ -301,6 +309,9 @@ public sealed class SdcpPollingService(
                     await _hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                         .SendAsync("printerupdated", signalRUpdate, ct);
+                    await _coverageBroadcaster
+                        .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                        .ConfigureAwait(false);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -347,7 +358,7 @@ public sealed class SdcpPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             SpoolInfo: null);
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,
