@@ -10,19 +10,26 @@ public partial class BackfillLegacyHarvestedAt : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        // "HarvestedAt" shipped as a nullable column with no backfill, so every job completed
-        // before printed-parts inventory reads as "never harvested". Those plates left the bed
-        // long ago and carry no part-output mappings, so the harvest action advertised on them
+        // "HarvestedAt" shipped as a nullable column in AddPrintedPartsInventory (20260710210946)
+        // with no backfill, so every job completed before that point reads as "never harvested"
+        // and floods the harvest attention feed. Those plates left the bed before the feature
+        // existed and cannot carry part-output mappings, so the harvest action advertised on them
         // can never succeed. Stamp them with their completion time to record the state operators
-        // already observed physically. Jobs completed inside the attention window are left
-        // untouched so genuinely pending plates stay actionable. Status 5 is PrintJobStatus.Completed.
+        // already observed physically. Status 5 is PrintJobStatus.Completed.
+        //
+        // The cutoff is the feature's fixed ship timestamp, deliberately NOT a deployment-relative
+        // "now - 7 days" window. On a delayed upgrade a moving window would also stamp jobs
+        // completed after the feature shipped: those are genuinely pending, can hold valid
+        // mappings, and stay harvestable from Job History. Stamping them would make
+        // POST /api/job-queue/{id}/harvest silently replay as already-harvested and create no
+        // inventory, with no way to recover.
         migrationBuilder.Sql(
             """
             UPDATE [PrintJobs]
             SET [HarvestedAt] = COALESCE([ActualEndTime], [UpdatedAt])
             WHERE [HarvestedAt] IS NULL
               AND [Status] = 5
-              AND COALESCE([ActualEndTime], [UpdatedAt]) < DATEADD(day, -7, GETUTCDATE());
+              AND COALESCE([ActualEndTime], [UpdatedAt]) < CONVERT(datetime2(7), '2026-07-10T21:09:46', 126);
             """);
     }
 

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
@@ -135,6 +136,76 @@ public sealed class DatabaseMigrationTests
             && token.RegistrationVersion == 2
             && token.IsActive);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_LegacyHarvestBackfill_StampsPreFeatureJobsAndPreservesLaterOnes()
+    {
+        // AddPrintedPartsInventory (20260710210946) introduced "HarvestedAt". Only completions that
+        // predate it are provably legacy. A job completed after it is genuinely pending even on a
+        // delayed upgrade, stays harvestable from Job History, and must not be stamped (issue #1000).
+        const string beforeBackfill = "20260729191406_EnforceGlobalDeviceTokenInstallationOwner";
+        Guid printerId = Guid.NewGuid();
+        Guid legacyJobId = Guid.NewGuid();
+        Guid pendingJobId = Guid.NewGuid();
+        DateTime preFeatureCompletion = new(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+        DateTime postFeatureCompletion = new(2026, 7, 15, 12, 0, 0, DateTimeKind.Utc);
+
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(beforeBackfill);
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        _ = context.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Backfill Manufacturer" });
+        _ = context.PrinterModels.Add(new PrinterModel
+        {
+            Id = modelId,
+            Name = "Backfill Model",
+            ManufacturerId = manufacturerId,
+        });
+        _ = context.Printers.Add(new Printer
+        {
+            Id = printerId,
+            Name = "Backfill Printer",
+            ServerUrl = "http://backfill-printer",
+            BackendPort = 7125,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+        });
+        context.PrintJobs.AddRange(
+            new PrintJob
+            {
+                Id = legacyJobId,
+                Name = "legacy.gcode",
+                Status = PrintJobStatus.Completed,
+                AssignedPrinterId = printerId,
+                ActualEndTime = preFeatureCompletion,
+                UpdatedAt = preFeatureCompletion,
+            },
+            new PrintJob
+            {
+                Id = pendingJobId,
+                Name = "pending.gcode",
+                Status = PrintJobStatus.Completed,
+                AssignedPrinterId = printerId,
+                ActualEndTime = postFeatureCompletion,
+                UpdatedAt = postFeatureCompletion,
+            });
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        await migrator.MigrateAsync();
+
+        PrintJob legacy = await context.PrintJobs.AsNoTracking().SingleAsync(job => job.Id == legacyJobId);
+        PrintJob pending = await context.PrintJobs.AsNoTracking().SingleAsync(job => job.Id == pendingJobId);
+
+        legacy.HarvestedAt.Should().Be(
+            preFeatureCompletion,
+            "completions predating printed-parts inventory were physically harvested long ago");
+        pending.HarvestedAt.Should().BeNull(
+            "a job completed after the feature shipped is still genuinely harvestable on a delayed upgrade");
     }
 
     [Fact]
