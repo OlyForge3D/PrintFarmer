@@ -71,6 +71,13 @@ public class QueuedPrintJobDto
 
     public string? RequiredMaterialType { get; set; }
 
+    /// <summary>
+    /// Authoritative per-tool material requirements for multi-material / MMU jobs
+    /// (issue #710). Empty for single-material jobs; the legacy scalar
+    /// <see cref="RequiredMaterialType"/> is always preserved alongside this array.
+    /// </summary>
+    public List<PrintJobToolRequirementDto> ToolRequirements { get; set; } = [];
+
     public string[]? RequiredCapabilities { get; set; }
 
     public int? EstimatedPrintTimeSeconds { get; set; }
@@ -183,6 +190,16 @@ public class QueuedPrintJobDto
     /// Empty for single-extruder jobs.
     /// </summary>
     public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
+
+    /// <summary>
+    /// UTC timestamp when this completed job was harvested into printed-part
+    /// stock (#714). Null when the job has not been harvested yet. Harvest is
+    /// orthogonal to lifecycle: harvested jobs remain <c>Completed</c>, and
+    /// this timestamp is the durable discriminator used by mobile clients to
+    /// gate the Harvest action and filter already-harvested jobs from the
+    /// scan-station picker.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 
     /// <summary>Typed result of the most recent physical dispatch invocation.</summary>
     public DispatchAttemptResultDto? DispatchResult { get; set; }
@@ -624,6 +641,14 @@ public class QueueHistoryEntryDto
     /// Tags associated with the print job (auto-generated and manual).
     /// </summary>
     public List<TagDto> Tags { get; set; } = [];
+
+    /// <summary>
+    /// UTC timestamp when the completed print job was harvested into
+    /// printed-part stock (#722/#741). Null when the job has not been
+    /// harvested. Used by the web UI to gate the Harvest action and
+    /// show an "already harvested" indicator without a follow-up call.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 }
 
 // ============= REQUEST DTOs (Phase 3) =============

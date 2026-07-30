@@ -64,6 +64,7 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
         WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
         _ = claimed.Should().NotBeNull();
+        _ = claimed!.ClaimToken.Should().NotBe(Guid.Empty);
         _ = claimed!.LeaseToken.Should().NotBe(Guid.Empty);
         _ = claimed.LeaseFence.Should().BeGreaterThan(0);
 
@@ -77,6 +78,7 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         {
             Content = JsonContent.Create(progressReq),
         };
+        progressMessage.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
         progressMessage.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
         progressMessage.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,

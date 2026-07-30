@@ -42,6 +42,68 @@ struct JobQueueUpdateEntry: Codable, Identifiable, Sendable {
     let actualEndTime: Date?
 }
 
+/// Kind of change carried by an `attentionchanged` invalidation event
+/// (issue #707). Wire values are lowercase (`created`, `updated`,
+/// `resolved`). Unknown values decode to ``AttentionChangeKind/unknown`` so
+/// a rolling backend update never breaks the SignalR consumer.
+enum AttentionChangeKind: String, Codable, Sendable, Equatable {
+    case created
+    case updated
+    case resolved
+    /// Forward-compatibility bucket for change kinds the client does not
+    /// recognise. Callers must still treat it as an invalidation signal.
+    case unknown
+
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = AttentionChangeKind(rawValue: raw) ?? .unknown
+    }
+}
+
+/// Invalidation payload for the lowercase `attentionchanged` SignalR event.
+///
+/// This is an invalidation hint, not a second source of item truth: the
+/// client always refetches `GET /api/attention`. The typed payload lets
+/// consumers coalesce per-item, log deterministic timings, and drop
+/// obviously malformed frames.
+///
+/// - `itemId` is the stable computed attention id (for example
+///   `"failure:{incidentId}"`).
+/// - `changeKind` is exactly `created`, `updated`, or `resolved`.
+/// - `occurredAt` is the authoritative source-transition/commit timestamp
+///   used by the 1s dispatch / 5s visible-refresh SLOs.
+struct AttentionChangedEvent: Codable, Sendable, Equatable {
+    let itemId: String
+    let changeKind: AttentionChangeKind
+    let occurredAt: Date
+}
+
+// MARK: - Filament Coverage Invalidation (F4-M / issue #778)
+
+/// Invalidation payload for the lowercase `filamentcoveragechanged`
+/// SignalR event emitted by the backend broadcaster shipped in PR #732.
+///
+/// This is an **invalidation hint only**. The client refetches the
+/// canonical `/api/printers/*` coverage endpoints and never persists any
+/// field of this payload as the coverage truth — the wire event was
+/// designed as a debounced "something changed" ping, not a
+/// consistency-preserving delta.
+///
+/// - `printerId` scopes the invalidation. When `nil`, the event covers
+///   the whole fleet (e.g. Spoolman reindex) and every open list/detail
+///   view must invalidate. Detail view models filter by matching id or
+///   this nil scope.
+/// - `reason` is a machine-readable tag (e.g. `printer-status-change`,
+///   `job-lifecycle`, `spool-loaded`). Callers may log it but MUST NOT
+///   branch coverage rendering on it.
+/// - `occurredAt` is the server-side commit timestamp; used for
+///   deterministic logging only.
+struct FilamentCoverageChangedEvent: Codable, Sendable, Equatable {
+    let printerId: UUID?
+    let reason: String
+    let occurredAt: Date
+}
+
 // MARK: - SignalR Connection State
 
 enum SignalRConnectionState: String, Sendable {

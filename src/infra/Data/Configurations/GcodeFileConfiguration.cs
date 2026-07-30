@@ -48,10 +48,15 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
         builder.Property(g => g.IsImmutable).HasDefaultValue(false);
 
         // Foreign Keys
+        // StoredFile.FolderId is required (comment on StoredFile.cs says REQUIRED). Deleting a
+        // folder that still has files is prohibited (Restrict). Callers must move files to a
+        // different folder or soft-delete via FolderNode.DeletedAt before removing the folder.
+        // Previous SetNull was incompatible with the required column on SQL Server
+        // (fails CREATE TABLE with error 1761).
         builder.HasOne(g => g.Folder)
             .WithMany(f => f.Files)
             .HasForeignKey(g => g.FolderId)
-            .OnDelete(DeleteBehavior.SetNull);
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(g => g.SourcePrinter)
             .WithMany()

@@ -2,8 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -19,12 +21,15 @@ public sealed class FlashForgePollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<FlashForgePollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<FlashForgePollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -197,6 +202,9 @@ public sealed class FlashForgePollingService(
                     IFlashForgeClient flashForgeClient = scope.ServiceProvider.GetRequiredService<IFlashForgeClient>();
                     ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "FlashForge status", ct)
+                        .ConfigureAwait(false);
                     PrinterCompositeStatus status = await flashForgeClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
                         ct);
@@ -209,6 +217,11 @@ public sealed class FlashForgePollingService(
                     string? previousState = state.LastKnownState;
                     string? previousJobName = state.LastKnownJobName;
                     bool stateChanged = status.State != previousState;
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+                    bool progressChanged = state.LastKnownProgress is null || status.Progress is null
+                        ? state.LastKnownProgress != status.Progress
+                        : Math.Abs(state.LastKnownProgress.Value - status.Progress.Value) > 0.01;
+#pragma warning restore S1244
 
                     // Update state tracking
                     state.PreviousState = previousState;
@@ -269,7 +282,7 @@ public sealed class FlashForgePollingService(
                         ExtruderTemperatures: status.ExtruderTemperatures,
                         DetectedExtruderCount: status.DetectedExtruderCount,
                         PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
-                    _statusCacheWriter.UpdateStatus(cacheUpdate);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
                     var signalRUpdate = new PrinterStatusUpdate(
                         Id: printerId,
@@ -293,6 +306,9 @@ public sealed class FlashForgePollingService(
                     await _hub.Clients.Group(
                             Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                         .SendAsync("printerupdated", signalRUpdate, ct);
+                    await _coverageBroadcaster
+                        .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                        .ConfigureAwait(false);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -326,7 +342,7 @@ public sealed class FlashForgePollingService(
                             ExtruderTemperatures: null,
                             DetectedExtruderCount: null,
                             PrintTimeLeftSeconds: null);
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
                             Id: printerId,

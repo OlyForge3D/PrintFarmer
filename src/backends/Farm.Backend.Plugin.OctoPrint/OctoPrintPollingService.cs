@@ -2,8 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,12 +24,15 @@ public sealed class OctoPrintPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<OctoPrintPollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<OctoPrintPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
@@ -222,7 +227,9 @@ public sealed class OctoPrintPollingService(
                                     _logger,
                                     octoPrintClient,
                                     _hub,
-                                    _statusCacheWriter);
+                                    _statusCacheWriter,
+                                    _coverageBroadcaster,
+                                    watermarkReader);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
                                 PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
@@ -357,6 +364,11 @@ public sealed class OctoPrintPollingService(
                         string? previousState = state.LastKnownState;
                         string? previousJobName = state.LastKnownJobName;
                         bool stateChanged = statusData.State != previousState;
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+                        bool progressChanged = state.LastKnownProgress is null || statusData.Progress is null
+                            ? state.LastKnownProgress != statusData.Progress
+                            : Math.Abs(state.LastKnownProgress.Value - statusData.Progress.Value) > 0.01;
+#pragma warning restore S1244
 
                         // Update state tracking (including PreviousState for transition detection)
                         state.PreviousState = previousState;
@@ -429,7 +441,7 @@ public sealed class OctoPrintPollingService(
                             PrintTimeLeftSeconds: statusData.PrintTimeLeftSeconds);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(cacheUpdate);
+                        _statusCacheWriter.UpdateStatus(cacheUpdate, statusData.OriginWatermark);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var signalRUpdate = new PrinterStatusUpdate(
@@ -454,6 +466,9 @@ public sealed class OctoPrintPollingService(
                         await _hub.Clients.Group(
                                 Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                             .SendAsync("printerupdated", signalRUpdate, ct);
+                        await _coverageBroadcaster
+                            .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                            .ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -492,7 +507,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var offlineSignalRUpdate = new PrinterStatusUpdate(

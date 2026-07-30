@@ -12,8 +12,9 @@ import { SlicerUIProvider } from '@/contexts/SlicerUIContext';
 import { SlicerProvider } from '@/contexts/SlicerContext';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 
-import { Alert } from '@/common/components/ui';
+import { Alert, Spinner } from '@/common/components/ui';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 
 // Hooks & Utils
 import { useUnifiedLogging } from '@/common/hooks/useUnifiedLogging';
@@ -34,8 +35,9 @@ import { RegistrationPendingPage } from '@/features/auth/pages/RegistrationPendi
 // Observability/FileHealth/Tags admin pages may be missing in this branch.
 
 // External packages
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { queryClient } from '@/services/queryClient';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Route, BrowserRouter as Router, Routes, Navigate, useLocation, Outlet } from 'react-router';
 import { Toaster, toast } from 'sonner';
@@ -115,6 +117,12 @@ const LazyAdminControlCenterPage = lazy(() =>
   import('@/features/admin/pages/AdminControlCenterPage').then(mod => ({ default: mod.AdminControlCenterPage }))
 );
 
+const LazyPartsInventoryPage = lazy(() =>
+  import('@/features/parts-inventory/pages/PartsInventoryPage').then(mod => ({
+    default: mod.PartsInventoryPage,
+  }))
+);
+
 function RouteLoader() {
   return (
     <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading">
@@ -185,14 +193,30 @@ function SystemSettingsRoute() {
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
- * While the capabilities query is loading the children render normally
- * so there is no layout flash on x64.
  */
 function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing'; children: React.ReactNode }) {
-  const { data: capabilities } = useSystemCapabilities();
+  const { data: capabilities, error } = useSystemCapabilities();
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-3xl">
+        <Alert type="error" title="Unable to Check Feature Availability">
+          Platform capabilities could not be loaded.
+        </Alert>
+      </div>
+    );
+  }
+
+  if (!hasResolvedQueryData(capabilities)) {
+    return (
+      <div className="flex items-center justify-center min-h-[40vh]" role="status" aria-label="Loading platform capabilities">
+        <Spinner size="lg" />
+      </div>
+    );
+  }
 
   const enabledKey = `${feature}Enabled` as const;
-  if (capabilities && !capabilities[enabledKey]) {
+  if (!capabilities[enabledKey]) {
     return (
       <div className="p-6 max-w-3xl">
         <Alert type="warning" title="Feature Not Available">
@@ -210,33 +234,52 @@ function FeatureGate({ feature, children }: { feature: 'modelFiles' | 'slicing';
   return <>{children}</>;
 }
 
-// Create a query client for React Query
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (failureCount, error: unknown) => {
-        // Don't retry client (4xx) errors
-        const statusCode = typeof error === 'object' && error && 'statusCode' in error
-          ? (error as { statusCode?: number }).statusCode
-          : undefined;
-        if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
-          return false;
-        }
-        return failureCount < 3; // retry other errors up to 3 times
-      },
-      staleTime: 30000, // 30 seconds
-      gcTime: 300000, // 5 minutes
-    },
-    mutations: {
-      retry: false, // Don't retry mutations by default
-    },
-  },
-});
-
 function AuthenticatedAppRoutes() {
   // Custom global ProtectedRoute logic for redirecting guests and unapproved users
   const { isAuthenticated, isLoading, user } = useAuth();
   const location = useLocation();
+  const { logger } = useUnifiedLogging({
+    component: 'AuthenticatedAppRoutes',
+    logLifecycle: false,
+  });
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    harvestSignalRService.connect().catch(err => {
+      logger.warn('Failed to establish authenticated SignalR connection', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    const unsubscribe = printerSignalRService.onFailureDetected((event) => {
+      const confidencePercent = Math.round(event.confidence * 100);
+      const action = event.snapshotUrl
+        ? {
+            label: 'View',
+            onClick: () => window.open(event.snapshotUrl, '_blank', 'noopener,noreferrer'),
+          }
+        : undefined;
+
+      if (event.autoPaused) {
+        toast.error(
+          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
+          { duration: 10_000, action },
+        );
+        return;
+      }
+
+      toast.warning(
+        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
+        { duration: 10_000, action },
+      );
+    });
+
+    return unsubscribe;
+  }, [isAuthenticated, logger, user?.id]);
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -287,6 +330,8 @@ function AuthenticatedAppRoutes() {
         <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
         <Route path="nfc-bindings" element={lazyRoute(<LazyNfcBindingsPage />)} />
         <Route path="maintenance" element={lazyRoute(<LazyMaintenanceDashboardPage />)} />
+        <Route path="parts-inventory" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
+        <Route path="parts-inventory/:tabId" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
         <Route path="auto-dispatch" element={lazyRoute(<LazyAutoDispatchDashboardPage />)} />
         <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
         <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
@@ -358,45 +403,6 @@ function App() {
         error: err instanceof Error ? err.message : String(err)
       });
     });
-  }, [logger]);
-
-  // Eagerly establish SignalR connections on app startup for faster realtime updates
-  useEffect(() => {
-    // Connect both SignalR services in the background
-    // These will establish connections and start receiving updates immediately
-    harvestSignalRService.connect().catch(err => {
-      logger.warn('Failed to establish SignalR connections', {
-        error: err instanceof Error ? err.message : String(err)
-      });
-    });
-
-    // Listen for Obico ML failure detection events
-    const unsubscribe = printerSignalRService.onFailureDetected((event) => {
-      const confidencePercent = Math.round(event.confidence * 100);
-      const action = event.snapshotUrl
-        ? {
-            label: 'View',
-            onClick: () => window.open(event.snapshotUrl, '_blank', 'noopener,noreferrer'),
-          }
-        : undefined;
-
-      if (event.autoPaused) {
-        toast.error(
-          `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Print auto-paused.`,
-          { duration: 10_000, action }
-        );
-        return;
-      }
-
-      toast.warning(
-        `Failure detected on ${event.printerName} (${confidencePercent}% confidence). Review the printer now.`,
-        { duration: 10_000, action }
-      );
-    });
-
-    return () => {
-      unsubscribe();
-    };
   }, [logger]);
 
   useEffect(() => {

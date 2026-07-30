@@ -39,6 +39,9 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         SliceJobMetrics metrics = new SliceJobMetrics();
         IWorkerAuthService workerAuth = scope.ServiceProvider.GetRequiredService<IWorkerAuthService>();
         IWorkerRepository workerRepository = scope.ServiceProvider.GetRequiredService<IWorkerRepository>();
+        Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry slicerRegistry =
+            scope.ServiceProvider.GetService<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>()
+            ?? new Moq.Mock<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>().Object;
         Guid serviceId = Guid.NewGuid();
         var worker = new Worker
         {
@@ -60,12 +63,23 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         Guid leaseToken = Guid.NewGuid();
         httpContext.Request.Headers[WorkerLeaseHeaders.LeaseToken] = leaseToken.ToString();
         httpContext.Request.Headers[WorkerLeaseHeaders.LeaseFence] = "1";
-        SliceJobController controller = new SliceJobController(repo, evtSvc, logger, artifactsService, rateLimit, metrics, workerAuth, workerRepository)
+        SliceJobController controller = new SliceJobController(
+            repo,
+            evtSvc,
+            logger,
+            artifactsService,
+            rateLimit,
+            metrics,
+            workerAuth,
+            workerRepository,
+            slicerRegistry)
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };
 
-        // Create job in Processing state under an active, fenced lease
+        // Create job in Processing state under an active, fenced lease.
+        Guid claimToken = Guid.NewGuid();
+        httpContext.Request.Headers[WorkerClaimHeaders.ClaimToken] = claimToken.ToString();
         SliceJob job = new SliceJob
         {
             Id = Guid.NewGuid(),
@@ -77,6 +91,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             ModelFileName = "model.stl",
             ModelFileUrl = "http://example/model.stl",
             WorkerId = worker.Id,
+            ClaimToken = claimToken,
             ClaimedAt = DateTime.UtcNow.AddMinutes(-2),
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             LeaseToken = leaseToken,
@@ -88,7 +103,13 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
         // Upload primary gcode artifact
         byte[] bytes = Encoding.UTF8.GetBytes("; gcode content");
         TestFormFile formFile = new TestFormFile(bytes, "primary.gcode", "application/gcode");
-        Artifact primary = await artifactsService.UploadAsync(formFile, job.Id, worker.Id, "gcode", default);
+        Artifact primary = (await artifactsService.UploadForActiveLeaseAsync(
+            formFile,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "gcode",
+            default))!;
 
         // Complete with log text
         CompleteSliceJobRequest request = new CompleteSliceJobRequest
@@ -96,7 +117,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
             PrimaryArtifactId = primary.Id,
             LogText = "Layer 1 OK\nLayer 2 OK"
         };
-        IActionResult result = await controller.CompleteAsync(job.Id, request, default);
+        IActionResult result = await controller.CompleteAsync(job.Id, request, claimToken, default);
 
         // Validate response
         OkObjectResult? ok = result as OkObjectResult;

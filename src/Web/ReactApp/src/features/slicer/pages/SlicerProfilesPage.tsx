@@ -2,8 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
-import * as signalR from '@microsoft/signalr';
-import { getHubUrl } from '@/common/utils/apiUrlHelpers';
+import { createSlicerRegistryConnection } from '@/services/slicerRegistryHubConnection';
 import {
   slicerProfilesService,
   SlicerProfileListItem,
@@ -872,19 +871,8 @@ export const SlicerProfilesPage: React.FC = () => {
   // SignalR event listener for profile import progress
   useEffect(() => {
     try {
-      if (!signalR || typeof signalR.HubConnectionBuilder !== 'function') {
-        return;
-      }
-
-      const builder = new signalR.HubConnectionBuilder();
-      if (!builder || typeof builder.withUrl !== 'function') {
-        return;
-      }
-
-      const hubConnection = builder
-        .withUrl(getHubUrl('/hubs/slicer-registry'))
-        .withAutomaticReconnect()
-        .build();
+      const { connection: hubConnection, dispose } =
+        createSlicerRegistryConnection('slicer-registry-profiles-page');
 
       // Listen for profile import events
       hubConnection.on('profileimportstarted', (data: { message: string }) => {
@@ -924,7 +912,7 @@ export const SlicerProfilesPage: React.FC = () => {
         });
 
       return () => {
-        hubConnection.stop();
+        void dispose();
       };
     } catch {
       return;

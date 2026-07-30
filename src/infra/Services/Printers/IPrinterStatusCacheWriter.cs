@@ -15,13 +15,15 @@ public interface IPrinterStatusCacheWriter
     /// Called by backend polling services after receiving status updates.
     /// </summary>
     /// <param name="status">The printer status data to cache.</param>
-    void UpdateStatus(PrinterStatusDto status);
+    /// <param name="originWatermark">Committed watermark captured before observing the status.</param>
+    void UpdateStatus(PrinterStatusDto status, long? originWatermark = null);
 
     /// <summary>
     /// Update multiple printer statuses at once.
     /// </summary>
     /// <param name="statuses">The collection of printer status data to cache.</param>
-    void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses);
+    /// <param name="originWatermark">Committed watermark captured before observing the batch.</param>
+    void UpdateStatuses(IEnumerable<PrinterStatusDto> statuses, long? originWatermark = null);
 
     /// <summary>
     /// Atomically update only the SpoolInfo field for a cached printer status.

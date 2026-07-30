@@ -8,6 +8,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.Webhooks;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
@@ -157,10 +158,19 @@ public sealed class AutoDispatchServiceTests : IDisposable
         PrintJob secondJob = await CreateQueuedJobAsync(printer, "queued-job-2", queuePosition: 2);
 
         var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
+        Mock<IFilamentCoverageBroadcaster> coverageBroadcaster = new(MockBehavior.Strict);
+        coverageBroadcaster.Setup(b => b.BroadcastPrinterChangedAsync(
+                printer.Id,
+                FilamentCoverageChangeReasons.QueueChanged,
+                It.IsAny<CancellationToken>()))
+            .Callback(() => _db.PrintJobs.Single(job => job.Id == firstJob.Id).Status
+                .Should().Be(PrintJobStatus.Cancelled))
+            .Returns(Task.CompletedTask);
         AutoDispatchService service = new(
             _db,
             hubContext.Object,
-            NullLogger<AutoDispatchService>.Instance);
+            NullLogger<AutoDispatchService>.Instance,
+            coverageBroadcaster: coverageBroadcaster.Object);
 
         AutoDispatchStatusDto status = await service.SkipNextJobAsync(printer.Id);
 
@@ -189,6 +199,24 @@ public sealed class AutoDispatchServiceTests : IDisposable
                     1)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
+        coverageBroadcaster.VerifyAll();
+    }
+
+    [Fact]
+    public async Task SkipNextJobAsync_WhenNoQueuedJob_DoesNotBroadcastCoverage()
+    {
+        Printer printer = await CreatePrinterAsync();
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IFilamentCoverageBroadcaster> coverageBroadcaster = new(MockBehavior.Strict);
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            coverageBroadcaster: coverageBroadcaster.Object);
+
+        _ = await service.SkipNextJobAsync(printer.Id);
+
+        coverageBroadcaster.VerifyNoOtherCalls();
     }
 
     [Fact]

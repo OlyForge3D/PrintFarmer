@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Diagnostics.CodeAnalysis;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Annotations;
 using Farm.Infrastructure.Domain;
@@ -45,6 +46,50 @@ public class PrintJob
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// JSON-serialized array of per-tool material requirements extracted from slicer / G-code
+    /// metadata at queue time. Each element is a <see cref="PrintJobToolMaterialRequirement"/>
+    /// with <c>tool</c>, nullable <c>materialType</c>, optional <c>colorHint</c>, and optional
+    /// <c>estimatedGrams</c>. Entry presence means the slicer reported that tool as used; a null
+    /// material preserves the distinction between used-but-unresolved and unused. The column is
+    /// null when the source G-code lacks authoritative per-extruder usage metadata; in that case
+    /// validation falls back to <see cref="RequiredMaterialType"/>.
+    /// </summary>
+    public string? RequiredMaterialsPerToolJson { get; set; }
+
+    /// <summary>
+    /// Typed accessor for <see cref="RequiredMaterialsPerToolJson"/>. Setting a non-null value
+    /// serializes the list; setting null clears the column. Not mapped by EF Core.
+    /// </summary>
+    [NotMapped]
+    public IReadOnlyList<PrintJobToolMaterialRequirement>? RequiredMaterialsPerTool
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(RequiredMaterialsPerToolJson))
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<PrintJobToolMaterialRequirement>>(
+                    RequiredMaterialsPerToolJson);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        set
+        {
+            RequiredMaterialsPerToolJson = value is null
+                ? null
+                : JsonSerializer.Serialize(value);
+        }
+    }
 
     public string[]? RequiredCapabilities { get; set; } // JSON array of required capabilities
 
@@ -294,6 +339,34 @@ public class PrintJob
     /// (material, color, nozzle) and user-applied manual tags.
     /// </summary>
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
+
+    // Printed-part harvest metadata (see #714).
+    // Harvested jobs remain PrintJobStatus.Completed — harvest is orthogonal to lifecycle.
+
+    /// <summary>
+    /// UTC timestamp when this job was harvested into printed-part stock.
+    /// A non-null value marks the job as already harvested; subsequent harvest
+    /// requests are treated as idempotent replays.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
+
+    /// <summary>
+    /// Unique key used to serialize concurrent/duplicate harvest requests for
+    /// this job. Persisted so a retried harvest returns the original response
+    /// without creating additional ledger entries.
+    /// </summary>
+    [MaxLength(128)]
+    public string? HarvestOperationKey { get; set; }
+
+    /// <summary>User who initiated the successful harvest, if authenticated.</summary>
+    [MaxLength(450)]
+    public string? HarvestedByUserId { get; set; }
+
+    /// <summary>
+    /// Bin the harvested parts were placed into. Denormalized for read paths;
+    /// authoritative per-adjustment bins live on <see cref="PartInventoryAdjustment"/>.
+    /// </summary>
+    public Guid? HarvestedIntoBinId { get; set; }
 
     // =========================================================================
     // Calibration dispatch fields (issue #900)

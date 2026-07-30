@@ -12,10 +12,23 @@ struct PFarmApp: App {
     @State private var themeManager = ThemeManager()
 
     init() {
+        if UITestBootstrap.isEnabled {
+            // Deterministic UI-test bootstrap (#706): seed an ephemeral
+            // registry with an active server and wire demo services. The
+            // launch mode decides auth state — `.authenticated` renders the
+            // operator shell; `.unauthenticated` (login-flow tests) renders
+            // LoginView on a fresh simulator without touching the network.
+            let bundle = UITestBootstrap.makeBundle(mode: UITestBootstrap.mode)
+            _serverRegistry = State(initialValue: bundle.serverRegistry)
+            _services = State(initialValue: bundle.services)
+            _authViewModel = State(initialValue: bundle.authViewModel)
+            return
+        }
+
         let registry = ServerRegistry()
         _serverRegistry = State(initialValue: registry)
         if DemoMode.shared.isActive {
-            let container = ServiceContainer.demo()
+            let container = ServiceContainer.demo(serverRegistry: registry)
             _services = State(initialValue: container)
             _authViewModel = State(initialValue: AuthViewModel(services: container))
         } else {
@@ -61,17 +74,21 @@ struct PFarmApp: App {
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(to: .printerReady(id: printerId))
                     } else {
-                        router.selectedTab = .printers
+                        // F1 (#706): notification-tap without a printer ID lands
+                        // on Attention where the notification itself lives.
+                        router.selectedTab = .attention
                     }
                 }
                 #endif
                 .task {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
-                    PushNotificationManager.shared.configure(notificationService: services.notificationService)
-                    await PushNotificationManager.shared.refreshPermissionStatus()
-                    if PushNotificationManager.shared.pushEnabled {
-                        await PushNotificationManager.shared.requestPermissionAndRegister()
+                    if !UITestBootstrap.isEnabled {
+                        PushNotificationManager.shared.configure(notificationService: services.notificationService)
+                        await PushNotificationManager.shared.refreshPermissionStatus()
+                        if PushNotificationManager.shared.pushEnabled {
+                            await PushNotificationManager.shared.requestPermissionAndRegister()
+                        }
                     }
                     #endif
                 }

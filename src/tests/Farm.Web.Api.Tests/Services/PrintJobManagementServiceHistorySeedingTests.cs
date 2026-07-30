@@ -2260,7 +2260,8 @@ public class PrintJobManagementServiceHistorySeedingTests
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<ISpoolmanService>(),
             Mock.Of<IGo2RtcService>(),
-            Mock.Of<IStoragePathService>());
+            Mock.Of<IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 
     private static int ReadQueryInt(HttpRequestMessage request, string name)

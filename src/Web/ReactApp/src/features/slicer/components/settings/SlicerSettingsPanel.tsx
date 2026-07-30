@@ -26,11 +26,14 @@ interface SlicerSettingsPanelProps {
   onAdvancedSettingsChange?: (settings: Record<string, unknown>) => void;
   /** Original settings snapshot for change tracking (orange labels + reset buttons) */
   originalSettings?: Record<string, unknown>;
+  /** Pinned OrcaSlicer engine version for this slice job. */
+  engineVersion?: string;
 }
 
 /**
  * SlicerSettingsPanel — delegates entirely to MetadataProfileEditor.
- * All 344 process settings rendered from orcaSettingsMetadata.json.
+ * All 344 process settings rendered from orcaSettingsMetadata.json,
+ * scoped to the pinned engine version when provided (issue #578).
  */
 export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   settings,
@@ -38,6 +41,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
   disabled = false,
   className = '',
   originalSettings,
+  engineVersion,
 }) => {
   // Adapt MetadataProfileEditor's per-field onUpdate to the batch onChange API
   const handleUpdate = useCallback(
@@ -55,6 +59,7 @@ export const SlicerSettingsPanel: React.FC<SlicerSettingsPanelProps> = ({
       disabled={disabled}
       className={className}
       originalSettings={originalSettings}
+      engineVersion={engineVersion}
     />
   );
 };

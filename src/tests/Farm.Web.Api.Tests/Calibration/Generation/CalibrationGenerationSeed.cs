@@ -280,8 +280,12 @@ internal static class CalibrationGenerationSeed
         JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["capabilities"] = new[] { "orcaslicer", CalibrationContractConstants.UpstreamSlicerCapability },
+            ["engineVersion"] = CalibrationContractConstants.SlicerVersion,
+            ["slicerDistribution"] = CalibrationContractConstants.SlicerDistribution,
+            ["slicerVersion"] = CalibrationContractConstants.SlicerVersion,
             [CalibrationSlicerAttestation.ContainerDigestProperty] = containerDigest,
             [CalibrationSlicerAttestation.BinaryDigestProperty] = binaryDigest,
+            ["realBinary"] = true,
         });
 
     private static async Task<CalibrationSpecification> CompileSpecificationAsync(

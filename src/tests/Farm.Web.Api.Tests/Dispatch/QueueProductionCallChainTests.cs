@@ -2216,7 +2216,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<IPrintJobManagementService>(),
             Mock.Of<ISpoolmanService>(),
             context,
-            NullLogger<JobDispatchService>.Instance);
+            NullLogger<JobDispatchService>.Instance,
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster>(),
+            Mock.Of<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService>());
         JobQueueController controller = CreateJobQueueController(
             Mock.Of<IPrintJobManagementService>(),
             Mock.Of<IBedClearAcknowledgementService>(),
@@ -2314,13 +2316,17 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             management.Object,
             winnerSpoolman.Object,
             winnerContext,
-            NullLogger<JobDispatchService>.Instance);
+            NullLogger<JobDispatchService>.Instance,
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster>(),
+            Mock.Of<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService>());
         var loserDispatch = new JobDispatchService(
             scorer.Object,
             management.Object,
             loserSpoolman.Object,
             loserContext,
-            NullLogger<JobDispatchService>.Instance);
+            NullLogger<JobDispatchService>.Instance,
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster>(),
+            Mock.Of<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService>());
         JobQueueController winnerController = CreateJobQueueController(
             management.Object,
             Mock.Of<IBedClearAcknowledgementService>(),
@@ -5463,7 +5469,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
-            Mock.Of<IStoragePathService>());
+            Mock.Of<IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 
     private static PrintersService CreateConcreteUploadPrintersService(
@@ -5501,7 +5508,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
             Mock.Of<ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
-            Mock.Of<IStoragePathService>());
+            Mock.Of<IStoragePathService>(),
+            Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
     }
 
     private static HttpResponseMessage JsonResponse(string payload) =>
@@ -5786,6 +5794,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             acknowledgement,
             Mock.Of<IPrinterStatusCacheReader>(),
             Mock.Of<IPrintFarmerTelemetryService>(),
+            Mock.Of<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService>(),
+            Mock.Of<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(),
             NullLogger<JobQueueController>.Instance,
             db);
         controller.ControllerContext = new ControllerContext

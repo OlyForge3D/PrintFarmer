@@ -20,6 +20,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly IWorkerStateService _workerState;
     private readonly string _workingDirectory;
     private readonly string _orcaSlicerBinaryPath;
+    private readonly Uri _apiBaseUri;
 
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
     {
@@ -32,6 +33,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
+        string apiBaseUrl = configuration["SlicerApi:BaseUrl"]
+            ?? configuration["Worker:ApiBaseUrl"]
+            ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
+            ?? "http://localhost:5245";
+        if (!Uri.TryCreate(apiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? apiBaseUri))
+        {
+            throw new InvalidOperationException($"The slicer API base URL '{apiBaseUrl}' is not a valid absolute URI.");
+        }
+
+        _apiBaseUri = apiBaseUri;
         if (!Directory.Exists(_workingDirectory))
         {
             _ = Directory.CreateDirectory(_workingDirectory);
@@ -52,29 +63,35 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             List<string> modelFilePaths;
             if (job.ModelFileUrls is { Count: > 0 })
             {
-                await _progressReporter.ReportProgressAsync(job.Id, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
-                modelFilePaths = await FetchMultipleModelsAsync(job.ModelFileUrls, jobWorkDir, cancellationToken);
+                await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
+                modelFilePaths = await FetchMultipleModelsAsync(
+                    job.ModelFileUrls,
+                    job.ClaimToken,
+                    job.LeaseToken,
+                    job.LeaseFence,
+                    jobWorkDir,
+                    cancellationToken);
                 job.InputFileSizeBytes = modelFilePaths.Sum(p => new FileInfo(p).Length);
                 _logger.LogInformation("Downloaded {Count} model files for job {JobId}", modelFilePaths.Count, job.Id);
             }
             else
             {
-                await _progressReporter.ReportProgressAsync(job.Id, 10, "Downloading STL file", cancellationToken);
+                await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 10, "Downloading STL file", cancellationToken);
                 string singlePath = await FetchStlFileAsync(job, jobWorkDir, cancellationToken);
                 modelFilePaths = [singlePath];
             }
 
-            await _progressReporter.ReportProgressAsync(job.Id, 20, "Preparing slicer configuration", cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 30, "Running OrcaSlicer", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 20, "Preparing slicer configuration", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 30, "Running OrcaSlicer", cancellationToken);
             string gcodeFilePath = await RunOrcaSlicerAsync(modelFilePaths, jobWorkDir, job, cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 80, "Analyzing G-code", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 80, "Analyzing G-code", cancellationToken);
             GcodeMetadata metadata = await ExtractGcodeMetadataAsync(gcodeFilePath, cancellationToken);
 
             // Rename gcode to descriptive filename: {model}_{printer}_{material}_{time}.gcode
             gcodeFilePath = RenameGcodeFile(gcodeFilePath, job, metadata);
 
-            await _progressReporter.ReportProgressAsync(job.Id, 90, "Preparing G-code artifact", cancellationToken);
-            await _progressReporter.ReportProgressAsync(job.Id, 100, "Slicing completed", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 90, "Preparing G-code artifact", cancellationToken);
+            await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 100, "Slicing completed", cancellationToken);
             SlicingResult result = new SlicingResult
             {
                 // A bare UriBuilder defaults its host to "localhost", which yields a UNC-style
@@ -118,20 +135,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task<string> FetchStlFileAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
     {
-        WorkerState workerState = _workerState.GetWorkerState();
-        Guid? serviceId = workerState.RegisteredServiceId;
-        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
-        {
-            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
-        }
-
-        using HttpRequestMessage request = new(HttpMethod.Get, job.ModelFileUrl);
-        request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
-        request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
-        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken.ToString());
-        request.Headers.Add(
-            WorkerLeaseHeaders.LeaseFence,
-            job.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        using HttpRequestMessage request =
+            CreateModelDownloadRequest(
+                job.ModelFileUrl.ToString(),
+                job.ClaimToken,
+                job.LeaseToken,
+                job.LeaseFence);
         HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
         _ = response.EnsureSuccessStatusCode();
         string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
@@ -178,15 +187,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return string.IsNullOrWhiteSpace(sanitized) ? "model.stl" : sanitized;
     }
 
-    private async Task<List<string>> FetchMultipleModelsAsync(List<string> modelUrls, string workDir, CancellationToken cancellationToken)
+    private async Task<List<string>> FetchMultipleModelsAsync(
+        List<string> modelUrls,
+        Guid claimToken,
+        Guid leaseToken,
+        long leaseFence,
+        string workDir,
+        CancellationToken cancellationToken)
     {
-        WorkerState workerState = _workerState.GetWorkerState();
-        Guid? serviceId = workerState.RegisteredServiceId;
-        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
-        {
-            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
-        }
-
         List<string> downloadedPaths = new(modelUrls.Count);
         for (int i = 0; i < modelUrls.Count; i++)
         {
@@ -219,9 +227,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
             }
 
-            using HttpRequestMessage request = new(HttpMethod.Get, url);
-            request.Headers.Add("X-Worker-Key", workerState.RegisteredServiceApiKey);
-            request.Headers.Add("X-Worker-Id", serviceId.Value.ToString());
+            using HttpRequestMessage request =
+                CreateModelDownloadRequest(url, claimToken, leaseToken, leaseFence);
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
             _ = response.EnsureSuccessStatusCode();
             await using FileStream fileStream = File.Create(destPath);
@@ -231,6 +238,56 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         return downloadedPaths;
+    }
+
+    internal HttpRequestMessage CreateModelDownloadRequest(
+        string modelUrl,
+        Guid claimToken,
+        Guid leaseToken,
+        long leaseFence)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelUrl);
+        if (claimToken == Guid.Empty || leaseToken == Guid.Empty || leaseFence <= 0)
+        {
+            throw new InvalidOperationException("Active claim and lease credentials are required to download a model.");
+        }
+
+        WorkerState workerState = _workerState.GetWorkerState();
+        Guid? serviceId = workerState.RegisteredServiceId;
+        if (serviceId is null || string.IsNullOrWhiteSpace(workerState.RegisteredServiceApiKey))
+        {
+            throw new InvalidOperationException("Authenticated worker identity is unavailable.");
+        }
+
+        Uri requestUri;
+        if (modelUrl.StartsWith("//", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Protocol-relative model download URLs are not supported.");
+        }
+
+        if (modelUrl.StartsWith('/')
+            || !Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri))
+        {
+            requestUri = new Uri(_apiBaseUri, modelUrl);
+        }
+        else if (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps)
+        {
+            requestUri = absoluteUri;
+        }
+        else
+        {
+            throw new InvalidOperationException("Model download URLs must use HTTP or HTTPS.");
+        }
+
+        var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
+        request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, claimToken.ToString());
+        request.Headers.Add(WorkerLeaseHeaders.LeaseToken, leaseToken.ToString());
+        request.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            leaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        return request;
     }
 
     /// <summary>
@@ -486,8 +543,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _ = process.Start();
 #pragma warning disable CA2025 // progressTask references process but completes before disposal (awaited explicitly)
         Task progressTask = pipeCreated
-            ? MonitorSlicingProgressViaPipeAsync(job.Id, pipePath, process, cancellationToken)
-            : MonitorSlicingProgressAsync(job.Id, process, cancellationToken);
+            ? MonitorSlicingProgressViaPipeAsync(job.Id, job.ClaimToken, pipePath, process, cancellationToken)
+            : MonitorSlicingProgressAsync(job.Id, job.ClaimToken, process, cancellationToken);
 #pragma warning restore CA2025
         Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
         Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
@@ -629,6 +686,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task MonitorSlicingProgressViaPipeAsync(
         Guid jobId,
+        Guid claimToken,
         string pipePath,
         Process process,
         CancellationToken cancellationToken)
@@ -652,13 +710,13 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Pipe open timed out for job {JobId}, falling back to time-based progress", jobId);
-                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
                 return;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to open progress pipe for job {JobId}, falling back to time-based progress", jobId);
-                await MonitorSlicingProgressAsync(jobId, process, cancellationToken);
+                await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
                 return;
             }
 
@@ -696,7 +754,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                             // Map OrcaSlicer's 0-100 to our 30-70 range
                             int mapped = 30 + (int)(totalPercent * 0.4);
                             mapped = Math.Clamp(mapped, 30, 70);
-                            await _progressReporter.ReportProgressAsync(jobId, mapped, message, cancellationToken);
+                            await _progressReporter.ReportProgressAsync(jobId, claimToken, mapped, message, cancellationToken);
                         }
                     }
                     catch (JsonException)
@@ -715,7 +773,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    private async Task MonitorSlicingProgressAsync(Guid jobId, Process process, CancellationToken cancellationToken)
+    private async Task MonitorSlicingProgressAsync(
+        Guid jobId,
+        Guid claimToken,
+        Process process,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -729,12 +791,12 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 if (elapsed.TotalSeconds > 10 && currentProgress < 70)
                 {
                     currentProgress = Math.Min(70, 30 + (int)(elapsed.TotalSeconds * 2));
-                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    await _progressReporter.ReportProgressAsync(jobId, claimToken, currentProgress, "Slicing in progress...", cancellationToken);
                     lastProgressReport = DateTime.UtcNow;
                 }
                 else if (DateTime.UtcNow - lastProgressReport > TimeSpan.FromSeconds(10))
                 {
-                    await _progressReporter.ReportProgressAsync(jobId, currentProgress, "Slicing in progress...", cancellationToken);
+                    await _progressReporter.ReportProgressAsync(jobId, claimToken, currentProgress, "Slicing in progress...", cancellationToken);
                     lastProgressReport = DateTime.UtcNow;
                 }
             }

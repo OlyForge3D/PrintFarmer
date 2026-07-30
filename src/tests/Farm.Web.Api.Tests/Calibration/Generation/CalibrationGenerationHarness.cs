@@ -123,6 +123,11 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         IArtifactsService artifacts = CreateArtifactsService(artifactsRepository);
         ISliceJobRepository sliceJobs = new EfSliceJobRepository(CreateSlicerContext());
         IModel3DFileRepository models = new EfModel3DFileRepository(CreateSlicerContext());
+        if (resolved.ModelRepositoryDecorator is not null)
+        {
+            models = resolved.ModelRepositoryDecorator(models);
+        }
+
         IStoragePathService storagePaths = CreateStoragePaths();
         IModelStorageResolver modelStorage = new Model3DStorageResolver(
             models,
@@ -281,8 +286,11 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         await using SlicerDbContext slicer = CreateSlicerContext();
         SliceJob job = await slicer.SliceJobs.SingleAsync(
             candidate => candidate.CalibrationOrchestrationId == orchestrationId);
+        Guid claimToken = job.ClaimToken ?? Guid.NewGuid();
         job.Status = status;
         job.WorkerId = workerId;
+        job.ClaimToken = claimToken;
+        job.LeaseToken = claimToken;
         job.CompletedAt = DateTime.UtcNow;
         job.UpdatedAt = DateTime.UtcNow;
 
@@ -299,6 +307,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
                 Id = artifactId.Value,
                 JobId = job.Id,
                 WorkerId = workerId,
+                ClaimToken = claimToken,
                 Kind = SlicerArtifactKinds.Gcode,
                 FileName = "sliced.gcode",
                 RelativePath = relativePath,
@@ -308,10 +317,84 @@ internal sealed class CalibrationGenerationHarness : IDisposable
                 DeclaredSha256 = digest,
                 CreatedAt = DateTime.UtcNow,
             });
+            job.ArtifactIdsCsv = artifactId.Value.ToString("D");
         }
 
         _ = await slicer.SaveChangesAsync();
         return artifactId;
+    }
+
+    /// <summary>
+    /// Completes a reclaimed job with one stale upload and one accepted upload from the current claim.
+    /// </summary>
+    public async Task<(Guid StaleArtifactId, Guid AcceptedArtifactId)> CompleteReclaimedWorkerJobAsync(
+        Guid orchestrationId,
+        Guid staleWorkerId,
+        Guid currentWorkerId)
+    {
+        await using SlicerDbContext slicer = CreateSlicerContext();
+        SliceJob job = await slicer.SliceJobs.SingleAsync(
+            candidate => candidate.CalibrationOrchestrationId == orchestrationId);
+        Guid staleClaimToken = Guid.NewGuid();
+        Guid currentClaimToken = Guid.NewGuid();
+        Guid staleArtifactId = Guid.NewGuid();
+        Guid acceptedArtifactId = Guid.NewGuid();
+        DateTime nowUtc = DateTime.UtcNow;
+
+        Artifact stale = await WriteWorkerArtifactAsync(
+            job.Id,
+            staleArtifactId,
+            staleWorkerId,
+            staleClaimToken,
+            ";stale claimant output\nG28\nG1 X1 Y1 F1200\n",
+            nowUtc.AddMinutes(-1));
+        Artifact accepted = await WriteWorkerArtifactAsync(
+            job.Id,
+            acceptedArtifactId,
+            currentWorkerId,
+            currentClaimToken,
+            ";accepted claimant output\nG28\nG1 X10 Y10 F1200\n",
+            nowUtc);
+        slicer.Artifacts.AddRange(stale, accepted);
+
+        job.Status = SliceJobStatus.Completed;
+        job.WorkerId = currentWorkerId;
+        job.ClaimToken = currentClaimToken;
+        job.LeaseToken = currentClaimToken;
+        job.ArtifactIdsCsv = acceptedArtifactId.ToString("D");
+        job.CompletedAt = nowUtc;
+        job.UpdatedAt = nowUtc;
+        _ = await slicer.SaveChangesAsync();
+        return (staleArtifactId, acceptedArtifactId);
+    }
+
+    private async Task<Artifact> WriteWorkerArtifactAsync(
+        Guid jobId,
+        Guid artifactId,
+        Guid workerId,
+        Guid claimToken,
+        string gcode,
+        DateTime createdAt)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(gcode);
+        string relativePath = $"{artifactId:N}.gcode";
+        await File.WriteAllBytesAsync(Path.Combine(ArtifactRoot, relativePath), bytes);
+        string digest = Convert.ToHexString(SHA256.HashData(bytes));
+        return new Artifact
+        {
+            Id = artifactId,
+            JobId = jobId,
+            WorkerId = workerId,
+            ClaimToken = claimToken,
+            Kind = SlicerArtifactKinds.Gcode,
+            FileName = "sliced.gcode",
+            RelativePath = relativePath,
+            ContentType = "text/x.gcode",
+            SizeBytes = bytes.LongLength,
+            Sha256 = digest,
+            DeclaredSha256 = digest,
+            CreatedAt = createdAt,
+        };
     }
 
     /// <summary>Reads the durable orchestration row.</summary>
@@ -625,6 +708,9 @@ internal sealed record CalibrationGenerationHarnessOptions
     /// a real pass compiled without changing what the saga does with it.
     /// </remarks>
     public IOrcaCalibrationPlanCompiler? PlanCompiler { get; init; }
+
+    /// <summary>Optional test-only decorator around the production model repository.</summary>
+    public Func<IModel3DFileRepository, IModel3DFileRepository>? ModelRepositoryDecorator { get; init; }
 }
 
 // CalibrationGenerationFixture lives in CalibrationGenerationFixture.cs so the pinned-worker smoke

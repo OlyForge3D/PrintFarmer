@@ -1,4 +1,7 @@
-﻿namespace Farm.Slicer.Module.Contracts;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Slicer.Module.Domain;
+
+namespace Farm.Slicer.Module.Contracts;
 
 /// <summary>
 /// Request sent by a worker to claim the next available slice job (pull model).
@@ -15,5 +18,6 @@ public class ClaimJobRequest
     /// <summary>
     /// Lease duration in seconds (default 300 = 5 minutes).
     /// </summary>
+    [Range(SliceJob.MinimumLeaseDurationSeconds, SliceJob.MaximumLeaseDurationSeconds)]
     public int LeaseDurationSeconds { get; set; } = 300;
 }

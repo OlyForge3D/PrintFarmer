@@ -8,14 +8,14 @@ final class ConnectionMonitorTests: XCTestCase {
 
     nonisolated(unsafe) private var mockAPIClient: MockAPIClient!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockAPIClient = MockAPIClient()
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         mockAPIClient = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - resolve() matrix

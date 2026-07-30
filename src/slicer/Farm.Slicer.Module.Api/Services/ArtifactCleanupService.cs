@@ -36,7 +36,8 @@ public class ArtifactCleanupService(
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
-        List<Artifact> candidatesForDeletion = [];
+        List<Artifact> candidatesForDeletion =
+            (await _artifactsRepo.GetCleanupInProgressAsync(ct)).ToList();
 
         // Age-based cleanup: find artifacts older than MaxAgeDays
         if (_settings.MaxAgeDays.HasValue && _settings.MaxAgeDays.Value > 0)
@@ -78,18 +79,9 @@ public class ArtifactCleanupService(
         }
 
         // Deduplicate candidates
-        candidatesForDeletion = candidatesForDeletion.Distinct().ToList();
-
-        // A promotion that has not produced a durable result yet owns its source bytes: deleting them
-        // would strand an unknown outcome that nothing could reconcile.
-        int pinnedCount = candidatesForDeletion.Count(artifact => !artifact.IsCleanupEligible());
-        if (pinnedCount > 0)
-        {
-            candidatesForDeletion = candidatesForDeletion.Where(artifact => artifact.IsCleanupEligible()).ToList();
-            _logger.LogInformation(
-                "Skipped {Count} artifacts pinned by an unresolved promotion",
-                pinnedCount);
-        }
+        candidatesForDeletion = candidatesForDeletion
+            .DistinctBy(artifact => artifact.Id)
+            .ToList();
 
         if (candidatesForDeletion.Count == 0)
         {
@@ -104,7 +96,10 @@ public class ArtifactCleanupService(
         if (_settings.EnableCleanupDryRun)
         {
             // Dry-run mode: log what would be deleted
-            foreach (Artifact artifact in candidatesForDeletion)
+            List<Artifact> eligibleCandidates = candidatesForDeletion
+                .Where(artifact => artifact.IsCleanupEligible())
+                .ToList();
+            foreach (Artifact artifact in eligibleCandidates)
             {
                 _logger.LogInformation(
                     "[DRY RUN] Would delete artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
@@ -114,31 +109,93 @@ public class ArtifactCleanupService(
                     artifact.CreatedAt);
             }
 
-            return candidatesForDeletion.Count;
+            return eligibleCandidates.Count;
         }
 
         // Actual deletion
         int deletedCount = 0;
         foreach (Artifact artifact in candidatesForDeletion)
         {
+            Guid reservationToken;
+            if (artifact.CleanupReservationToken is Guid inProgressToken &&
+                artifact.CleanupDeletionStartedAtUtc.HasValue)
+            {
+                reservationToken = inProgressToken;
+            }
+            else
+            {
+                DateTime reservedAtUtc = DateTime.UtcNow;
+                DateTime staleBeforeUtc = reservedAtUtc.AddMinutes(
+                    -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
+                reservationToken = Guid.NewGuid();
+                bool reserved = await _artifactsRepo.TryReserveForCleanupAsync(
+                    artifact.Id,
+                    artifact.CleanupReservationToken,
+                    artifact.CleanupReservedAtUtc,
+                    reservationToken,
+                    reservedAtUtc,
+                    staleBeforeUtc,
+                    ct);
+                if (!reserved)
+                {
+                    _logger.LogDebug(
+                        "Skipped artifact {Id} because cleanup or promotion already owns it",
+                        artifact.Id);
+                    continue;
+                }
+
+                bool deletionStarted = await _artifactsRepo.TryBeginCleanupDeletionAsync(
+                    artifact.Id,
+                    reservationToken,
+                    DateTime.UtcNow,
+                    ct);
+                if (!deletionStarted)
+                {
+                    await _artifactsRepo.ReleaseCleanupReservationAsync(
+                        artifact.Id,
+                        reservationToken,
+                        CancellationToken.None);
+                    _logger.LogWarning(
+                        "Cleanup reservation for artifact {Id} was lost before byte deletion began",
+                        artifact.Id);
+                    continue;
+                }
+            }
+
             try
             {
-                // Delete file from filesystem
                 string rootPath = Path.IsPathRooted(_settings.RootPath)
                     ? _settings.RootPath
                     : Path.Combine(_env.ContentRootPath, _settings.RootPath);
                 string fullPath = Path.Combine(rootPath, artifact.RelativePath);
 
-                if (File.Exists(fullPath))
+                // File.Delete is idempotent for a missing path and throws for access or filesystem
+                // failures. File.Exists cannot distinguish those failures from absence.
+                try
                 {
-                    File.Delete(fullPath);
+                    DeleteArtifactFile(fullPath);
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
                 }
+                catch (Exception ex) when (
+                    ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    _logger.LogDebug(
+                        "Artifact file {Path} was already absent during cleanup",
+                        fullPath);
+                }
 
-                // Remove from database
-                _ = await _artifactsRepo.DeleteByIdAsync(artifact.Id, ct);
+                if (!await _artifactsRepo.FinalizeCleanupAsync(
+                        artifact.Id,
+                        reservationToken,
+                        ct))
+                {
+                    _logger.LogDebug(
+                        "Cleanup metadata for artifact {Id} was already finalized by another pass",
+                        artifact.Id);
+                    continue;
+                }
+
                 deletedCount++;
-
                 _logger.LogInformation(
                     "Deleted artifact {Id} ({Kind}, {SizeBytes} bytes, uploaded {CreatedAt})",
                     artifact.Id,
@@ -146,13 +203,20 @@ public class ArtifactCleanupService(
                     artifact.SizeBytes,
                     artifact.CreatedAt);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogError(ex, "Failed to delete artifact {Id}", artifact.Id);
+                _logger.LogError(
+                    ex,
+                    "Failed to delete artifact {Id}; durable cleanup state will be retried",
+                    artifact.Id);
             }
         }
 
         _logger.LogInformation("Successfully deleted {Count} artifacts", deletedCount);
         return deletedCount;
     }
+
+    protected virtual bool ArtifactFileExists(string path) => File.Exists(path);
+
+    protected virtual void DeleteArtifactFile(string path) => File.Delete(path);
 }

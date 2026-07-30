@@ -19,6 +19,8 @@ import { FailureDetectionMonitoringSummary } from '@/features/printers/component
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
+import { PrinterCoverageSummary } from '@/features/filament-coverage/components/FilamentCoverageBadge';
+import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
@@ -38,6 +40,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
+import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
 
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
@@ -135,6 +138,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
+  const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   // Per-printer job queue for "X of Y" indicator
@@ -417,7 +421,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                 </>
               );
             }
-
             if (printer.spoolInfo?.hasActiveSpool) {
               const color = printer.spoolInfo.colorHex ?? '#888';
               const remaining = printer.spoolInfo.remainingWeightG;
@@ -484,6 +487,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
+          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" />
         </div>
         <div className="relative shrink-0 ml-2">
           <Button
@@ -589,4 +593,4 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
       {/* end card body */}
     </article>
   );
-});
+}, areCompactPrinterCardPropsEqual);

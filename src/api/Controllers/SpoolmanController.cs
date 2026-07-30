@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -25,7 +26,9 @@ public class SpoolmanController(
     ISpoolmanService spoolman,
     ISettingsService settingsService,
     IBarcodeScanLogService barcodeScanLogService,
-    ILogger<SpoolmanController> logger) : ControllerBase
+    ILogger<SpoolmanController> logger,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    ISpoolBurnRateProjectionService? burnRateProjectionService = null) : ControllerBase
 {
     private readonly ISettingsService _settingsService = settingsService;
     private readonly ILogger<SpoolmanController> _logger = logger;
@@ -65,9 +68,58 @@ public class SpoolmanController(
     public ActionResult<SpoolmanConfigDto?> GetConfig() => spoolman.GetConfig();
 
     /// <summary>
+    /// Projects authoritative burn rate for one source-qualified spool.
+    /// </summary>
+    /// <param name="spoolId">Positive numeric spool ID within the source.</param>
+    /// <param name="sourceKind">Owning source namespace.</param>
+    /// <param name="sourceIdentity">Owning source URL; equivalent URLs are normalized.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpGet("spools/{spoolId:int}/burn-rate")]
+    [ProducesResponseType(typeof(SpoolBurnRateProjectionDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<SpoolBurnRateProjectionDto>> GetBurnRateAsync(
+        int spoolId,
+        [FromQuery] SpoolSourceKind? sourceKind,
+        [FromQuery] string? sourceIdentity,
+        CancellationToken ct)
+    {
+        if (spoolId <= 0 || sourceKind is null || string.IsNullOrWhiteSpace(sourceIdentity))
+        {
+            return BadRequest(new
+            {
+                message = "A positive spoolId, sourceKind, and sourceIdentity are required.",
+            });
+        }
+
+        if (burnRateProjectionService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { message = "Spool burn-rate projection is unavailable." });
+        }
+
+        CanonicalSpoolIdentity identity;
+        try
+        {
+            identity = new CanonicalSpoolIdentity(
+                sourceKind.Value,
+                sourceIdentity,
+                spoolId);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        return Ok(await burnRateProjectionService.ProjectAsync(identity, ct));
+    }
+
+    /// <summary>
     /// Updates the Spoolman integration configuration.
     /// </summary>
     /// <param name="config">New Spoolman configuration settings</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>No content if successful</returns>
     /// <response code="204">If the configuration was successfully updated</response>
     /// <response code="400">If the configuration data is invalid</response>
@@ -75,7 +127,9 @@ public class SpoolmanController(
     [Authorize(Policy = "RequireAdmin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public IActionResult SetConfig([FromBody] SpoolmanConfigDto? config)
+    public async Task<IActionResult> SetConfigAsync(
+        [FromBody] SpoolmanConfigDto? config,
+        CancellationToken ct = default)
     {
         // Extra logging for 401 diagnostics
         System.Security.Claims.ClaimsPrincipal user = HttpContext.User;
@@ -95,6 +149,13 @@ public class SpoolmanController(
         }
 
         spoolman.SetConfig(config);
+        if (coverageBroadcaster is not null)
+        {
+            await coverageBroadcaster.BroadcastFleetChangedAsync(
+                FilamentCoverageChangeReasons.SpoolWeight,
+                ct).ConfigureAwait(false);
+        }
+
         return NoContent();
     }
 
@@ -287,6 +348,13 @@ public class SpoolmanController(
         try
         {
             SpoolmanSpoolDto result = await spoolman.UpdateSpoolInSpoolmanAsync(id, request, ct);
+            if (coverageBroadcaster is not null)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -312,6 +380,13 @@ public class SpoolmanController(
         try
         {
             await spoolman.DeleteSpoolFromSpoolmanAsync(id, ct);
+            if (coverageBroadcaster is not null)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+
             return NoContent();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -356,6 +431,13 @@ public class SpoolmanController(
         try
         {
             SpoolmanBulkUpdateResult result = await spoolman.BulkUpdateSpoolsAsync(request, ct);
+            if (coverageBroadcaster is not null && result.UpdatedCount > 0)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -394,6 +476,13 @@ public class SpoolmanController(
         try
         {
             SpoolmanBulkUpdateResult result = await spoolman.BulkDeleteSpoolsAsync(request.SpoolIds, ct);
+            if (coverageBroadcaster is not null && result.UpdatedCount > 0)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+
             return Ok(result);
         }
         catch (Exception ex)
@@ -449,6 +538,7 @@ public class SpoolmanController(
 
             int imported = 0;
             int errorCount = 0;
+            bool existingSpoolChanged = false;
             List<string> errors = [];
             int rowNum = 0;
 
@@ -490,6 +580,7 @@ public class SpoolmanController(
                     if (int.TryParse(idStr, out int existingId) && existingId > 0)
                     {
                         await spoolman.UpdateSpoolInSpoolmanAsync(existingId, req, ct);
+                        existingSpoolChanged = true;
                     }
                     else
                     {
@@ -510,6 +601,13 @@ public class SpoolmanController(
                     errors.Add($"Row {rowNum}: {ex.Message}");
                     errorCount++;
                 }
+            }
+
+            if (coverageBroadcaster is not null && existingSpoolChanged)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
             }
 
             return Ok(new SpoolmanBulkUpdateResult(imported, errorCount, [.. errors]));
@@ -804,14 +902,22 @@ public class SpoolmanController(
     /// <summary>
     /// Clears the Spoolman configuration.
     /// </summary>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>No content</returns>
     [HttpDelete("config")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
-    public IActionResult ClearConfig()
+    public async Task<IActionResult> ClearConfigAsync(CancellationToken ct = default)
     {
         try
         {
             spoolman.ClearConfig();
+            if (coverageBroadcaster is not null)
+            {
+                await coverageBroadcaster.BroadcastFleetChangedAsync(
+                    FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+
             return NoContent();
         }
         catch (Exception ex)
@@ -1246,6 +1352,8 @@ public class SpoolmanController(
             log.HttpStatus,
             log.MatchedFilamentId,
             log.CreatedSpoolId,
+            log.BinId,
+            log.PartInventoryId,
             log.UserId,
             log.Message);
 

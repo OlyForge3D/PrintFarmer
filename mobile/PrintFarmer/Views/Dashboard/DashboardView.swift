@@ -13,19 +13,29 @@ struct DashboardView: View {
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.dashboardPath) {
+        NavigationStack(path: $router.dashboardSheetPath) {
             Group {
-                if viewModel.isLoading && viewModel.printers.isEmpty {
+                if viewModel.isReadOnly {
+                    // Cold-offline / degraded: render the active exact-owner cached
+                    // snapshot as a read-only farm shell. No mutation or command
+                    // affordances are mounted while stale.
+                    coldOfflineShell
+                } else if viewModel.hasNoCachedData {
+                    // Authoritative session but a snapshot was never written while
+                    // online — distinct from a present-but-empty fleet.
+                    absentFleetState
+                } else if viewModel.isLoading && viewModel.printers.isEmpty {
                     loadingState
                 } else if let error = viewModel.errorMessage, viewModel.printers.isEmpty {
                     errorState(error)
                 } else if viewModel.printers.isEmpty {
-                    // Empty fleet state
+                    // Present-but-empty fleet state (confirmed online, zero printers).
                     EmptyStateView(
                         icon: "printer",
                         title: "No Printers",
                         message: "No printers are registered. Add printers in PrintFarmer to see your fleet here."
                     )
+                    .accessibilityIdentifier("farm-empty-state")
                 } else {
                     // iPhone: swipeable pages
                     if sizeClass == .compact {
@@ -81,7 +91,16 @@ struct DashboardView: View {
                 statisticsService: services.statisticsService,
                 jobAnalyticsService: services.jobAnalyticsService
             )
+            // Wire the published #816 snapshot store + auto-dispatch source, then
+            // hydrate the active exact-owner cached snapshot BEFORE the canonical
+            // load so a cold/offline launch shows last-confirmed fleet immediately
+            // (no prior-namespace flash, no empty flash).
+            viewModel.configureSnapshot(
+                store: services.farmSnapshotStore,
+                autoPrintService: services.autoPrintService
+            )
             viewModel.configureSignalR(services.signalRService)
+            await viewModel.hydrateFromCache()
             await viewModel.loadDashboard()
         }
         .onDisappear {
@@ -277,7 +296,7 @@ struct DashboardView: View {
 
                 if !topPrinters.isEmpty {
                     Button {
-                        router.selectedTab = .jobs
+                        router.selectedTab = .tasks
                     } label: {
                         Text("See All")
                             .font(.subheadline)
@@ -300,7 +319,7 @@ struct DashboardView: View {
                 }
             } else if sizeClass == .regular {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-                    ForEach(topPrinters) { printer in
+                    ForEach(Array(topPrinters.enumerated()), id: \.element.id) { index, printer in
                         NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
                             ActiveJobRow(
                                 printer: printer,
@@ -308,10 +327,11 @@ struct DashboardView: View {
                             )
                         }
                         .buttonStyle(.plain)
+                        .accessibilityIdentifier("dashboard.activeJob.\(index)")
                     }
                 }
             } else {
-                ForEach(topPrinters) { printer in
+                ForEach(Array(topPrinters.enumerated()), id: \.element.id) { index, printer in
                     NavigationLink(value: AppDestination.printerDetail(id: printer.id)) {
                         ActiveJobRow(
                             printer: printer,
@@ -319,6 +339,7 @@ struct DashboardView: View {
                         )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("dashboard.activeJob.\(index)")
                 }
             }
 
@@ -879,7 +900,92 @@ struct DashboardView: View {
             }
         }
     }
-    
+
+    // MARK: - Cold-offline read-only farm shell (#817)
+
+    /// Read-only shell shown while the on-screen fleet is unconfirmed cached data
+    /// (cold/offline launch). Carries the stale banner + last-confirmed timestamp
+    /// and renders the cached fleet through the SAME card views as live (online
+    /// parity), but mounts NO mutation or command affordances.
+    private var coldOfflineShell: some View {
+        VStack(spacing: 0) {
+            ConnectionStatusBar(
+                status: .offline,
+                lastConfirmedAt: viewModel.lastUpdatedAt,
+                hasCache: true
+            )
+            Group {
+                if viewModel.printers.isEmpty {
+                    // Present-but-empty cached snapshot: the last confirmed fleet had
+                    // zero printers. Distinct from `absentFleetState` (never cached).
+                    EmptyStateView(
+                        icon: "printer",
+                        title: "No Printers",
+                        message: "The last saved snapshot for this server had no printers."
+                    )
+                    .accessibilityIdentifier("farm-cached-empty-state")
+                } else {
+                    farmCardsGrid
+                }
+            }
+            // Scope the shell anchor to the CONTENT only. Applying it to the whole
+            // VStack propagates the identifier onto the combined `ConnectionStatusBar`
+            // element and clobbers its own `connection-status-bar-stale` id, so the
+            // banner must stay outside this wrapper.
+            .accessibilityIdentifier("cold-offline-shell")
+        }
+    }
+
+    /// The active session is authoritative but no snapshot was ever written while
+    /// online (e.g. first launch offline). Distinct, non-mutating dead-end.
+    private var absentFleetState: some View {
+        VStack(spacing: 0) {
+            ConnectionStatusBar(status: .offline, lastConfirmedAt: nil, hasCache: false)
+            ContentUnavailableView {
+                Label("No Cached Fleet", systemImage: "wifi.slash")
+            } description: {
+                Text("You haven't loaded this server's fleet while online yet. Reconnect to see your printers.")
+            } actions: {
+                Button("Retry") {
+                    retryTask = Task { await viewModel.loadDashboard() }
+                }
+            }
+        }
+        .accessibilityIdentifier("farm-absent-state")
+    }
+
+    /// Adaptive read-only card grid reused for the cached shell. Uses the iPhone
+    /// (`PrinterCardView`) or iPad (`iPadPrinterCardView`) card exactly as the
+    /// live Farm tab does, so cached status projection matches online.
+    private var farmCardsGrid: some View {
+        let columns: [GridItem] = sizeClass == .compact
+            ? [GridItem(.flexible())]
+            : [GridItem(.adaptive(minimum: 320), spacing: 16)]
+        return ScrollView {
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(viewModel.printers.sorted { sortPriority($0) < sortPriority($1) }) { printer in
+                    Group {
+                        if sizeClass == .compact {
+                            PrinterCardView(
+                                printer: printer,
+                                isPendingReady: viewModel.isPendingReady(printer),
+                                isReadOnly: true
+                            )
+                        } else {
+                            iPadPrinterCardView(
+                                printer: printer,
+                                isPendingReady: viewModel.isPendingReady(printer),
+                                isReadOnly: true
+                            )
+                        }
+                    }
+                    .accessibilityIdentifier("farm-card-\(printer.id.uuidString)")
+                }
+            }
+            .padding()
+        }
+    }
+
     // MARK: - Helpers
     
     private func sortPriority(_ printer: Printer) -> Int {
@@ -965,6 +1071,68 @@ func destinationView(for destination: AppDestination) -> some View {
         JobTimelineView()
     case .dispatchDashboard:
         DispatchDashboardView()
+    case .advancedPrinterControls(let printerId):
+        AdvancedPrinterControlsDestination(printerId: printerId)
+    }
+}
+
+/// Loads the printer for the given ID and hosts `AdvancedPrinterControlsView`.
+///
+/// F1 (#706): AppDestination cases must be `Hashable` on a value type, so
+/// the printer is not passed directly. This wrapper reuses
+/// `PrinterDetailViewModel` to fetch the current printer state before
+/// rendering the advanced controls surface.
+@MainActor
+private struct AdvancedPrinterControlsDestination: View {
+    let printerId: UUID
+    @Environment(ServiceContainer.self) private var services
+    @State private var viewModel: PrinterDetailViewModel
+    @State private var activeTasks: [Task<Void, Never>] = []
+
+    init(printerId: UUID) {
+        self.printerId = printerId
+        _viewModel = State(initialValue: PrinterDetailViewModel(printerId: printerId))
+    }
+
+    var body: some View {
+        Group {
+            if let printer = viewModel.printer {
+                AdvancedPrinterControlsView(printer: printer)
+            } else if let error = viewModel.errorMessage {
+                ContentUnavailableView {
+                    Label("Error", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Retry") {
+                        let task = Task { await viewModel.loadPrinter() }
+                        activeTasks.append(task)
+                    }
+                }
+            } else {
+                ProgressView("Loading printer…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task {
+            viewModel.isViewActive = true
+            viewModel.configure(printerService: services.printerService)
+            // F1 (#706) — reviewer fix: without a SignalR subscription
+            // the Advanced screen renders a stale snapshot forever.
+            // Pending-command state (jog/preheat/home) never clears
+            // because `PrinterControlsViewModel.handlePrinterUpdate(_:)`
+            // is only invoked when the parent view forwards a fresh
+            // `Printer` after `printerupdated` fires. Mirror
+            // `PrinterDetailView.task` and wire the same SignalR handle
+            // so state transitions and per-command lockouts refresh
+            // live while the operator is on Advanced.
+            viewModel.configureSignalR(services.signalRService)
+            await viewModel.loadPrinter()
+        }
+        .onDisappear {
+            viewModel.isViewActive = false
+            activeTasks.forEach { $0.cancel() }
+        }
     }
 }
 

@@ -2,6 +2,36 @@
 
 How to decide who handles what.
 
+## 🍏 Host Capability Gating — iOS build/test requires macOS
+
+This repo is shared across dev machines with different operating systems. iOS
+work has a hard platform dependency: **anything that builds, tests, signs, or
+runs the iOS app requires a macOS (Darwin) host with Xcode.** This rule is
+universal — it applies identically on every machine.
+
+**Before running any iOS build/test/sign step, preflight the host OS**
+(`uname -s` must be `Darwin`). Commands that are gated: `xcodebuild`, iOS
+Simulator, `xcrun`, `swift build/test`, `fastlane`, `PrintFarmerTests` /
+`PrintFarmerUITests`, TestFlight/APNs signing — anything under `mobile/`.
+
+**On a non-macOS host:**
+- Do **not** attempt iOS build/test/sign — they will fail and are not valid there.
+- Pure source edits to `mobile/` *may* proceed, but the change is **not
+  validated** until a macOS host builds/tests it. Mark such work
+  `needs-macos-validation` and hand verification to a macOS machine (or defer).
+  Never claim an iOS task complete without a macOS build/test pass.
+- `area:ios` acceptance gates (XCTest/XCUI green, simulator screenshots) must be
+  satisfied on macOS.
+
+**On a macOS host:** iOS build/test/sign run normally.
+
+### Per-machine scope overrides (machine-local, not committed)
+
+A machine may narrow its own focus (e.g. "this Mac works iOS-only") in
+**`.squad/machine-local.md`** — a **gitignored** file that never ships to other
+machines. If that file exists, honor it in addition to the capability rule above.
+If it is absent, follow the normal routing tables below.
+
 ## Routing Table
 
 | Work Type | Route To | Examples |
@@ -9,7 +39,7 @@ How to decide who handles what.
 | Architecture, design, scope | Dallas | System design, technical decisions, cross-domain concerns |
 | React, TypeScript, UI, frontend | Ripley | Components, pages, styling, frontend state, SignalR client |
 | C#, .NET, API, database, backend | Lambert | Controllers, EF Core, migrations, backend plugins, SignalR hubs |
-| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: GPT-5.4, Gemini 3 Pro, Opus 4.6 — all three review in parallel |
+| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: Claude Opus 4.8, GPT-5.6 Sol, Gemini 3.1 Pro Preview — all three review in parallel; must achieve consensus APPROVE before PR creation |
 | Testing, QA, coverage | Kane | Write tests, find edge cases, run test suites, coverage analysis |
 | Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
@@ -86,3 +116,4 @@ When work is repo-specific, pass the correct repo path as `WORKTREE_PATH` in the
 6. **Anticipate downstream work.** If a feature is being built, spawn the tester to write test cases from requirements simultaneously.
 7. **Issue-labeled work** — when a `squad:{member}` label is applied to an issue, route to that member. The Lead handles all `squad` (base label) triage.
 8. **@copilot routing** — when evaluating issues, check @copilot's capability profile in `team.md`. Route 🟢 good-fit tasks to `squad:copilot`. Flag 🟡 needs-review tasks for PR review. Keep 🔴 not-suitable tasks with squad members.
+9. **Machine-Local Policy (Jeff Papiez's current machine)** — Implementation agents (Lambert, Ripley, Hudson, Gorman, Parker) and code reviewers (Bishop, Hicks, Vasquez) use maximum reasoning effort (max for all except Vasquez, who uses high) with no self-imposed time, tool-call, review-round, or iteration budgets. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.

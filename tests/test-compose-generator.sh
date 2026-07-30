@@ -473,11 +473,12 @@ test_monitoring_inclusion() {
     assert_contains "$compose_content" "image: prom/prometheus:latest" "Should use Prometheus image"
     assert_contains "$compose_content" "image: grafana/grafana:latest" "Should use Grafana image"
     
-    # Validate monitoring ports
+    # Prometheus remains directly exposed; Grafana is routed through nginx at /grafana/.
     assert_contains "$compose_content" "9090:9090" "Should expose Prometheus port"
+    assert_contains "$compose_content" 'GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"' "Should route Grafana through the nginx subpath"
     assert_contains "$compose_content" "expose:" "Should expose Grafana only inside the deployment network"
-    assert_contains "$compose_content" '- "3000"' "Should expose Grafana's internal port"
-    assert_not_contains "$compose_content" "3001:3000" "Should not bind Grafana directly on the host"
+    assert_contains "$compose_content" '- "3000"' "Should expose Grafana port only to the compose network"
+    assert_not_contains "$compose_content" "3001:3000" "Should not publish Grafana directly on the host"
     
     # Validate monitoring volumes
     assert_contains "$compose_content" "prometheus_data:" "Should have Prometheus volume"
@@ -753,8 +754,8 @@ test_generated_compose_file_is_valid_yaml() {
         return 0
     fi
     
-    # Generate for all database providers
-    # This ensures database service YAML is properly formatted for all combinations
+    # Generate for all supported database providers
+    # This ensures database service YAML is properly formatted for all supported combinations
     local providers=("postgres" "sqlserver")
     
     for provider in "${providers[@]}"; do
@@ -820,7 +821,7 @@ test_database_volume_mount_correctness() {
     local compose_file="$test_dir/docker-compose.yml"
     local yaml_content=$(cat "$compose_file")
     
-    # Extract database service name (postgres, sqlserver, or mysql based on DB_PROVIDER)
+    # Extract database service name (postgres or sqlserver based on DB_PROVIDER)
     # Default is postgres
     local db_provider="${DB_PROVIDER:-postgres}"
     local db_service="$db_provider"
@@ -885,7 +886,15 @@ test_invalid_database_provider() {
     
     # Should reject unknown database providers
     assert_exit_code 1 "$COMPOSE_GENERATOR --db-provider nosuchdb --output-dir $TEST_TEMP_DIR"
-    assert_exit_code 1 "$COMPOSE_GENERATOR --db-provider mysql --output-dir $TEST_TEMP_DIR"
+
+    # MySQL is intentionally outside the migration-safe provider contract for this release.
+    local mysql_output_dir="$TEST_TEMP_DIR/test-unsupported-mysql"
+    local mysql_output
+    local mysql_exit_code=0
+    mysql_output=$("$COMPOSE_GENERATOR" --db-provider mysql --output-dir "$mysql_output_dir" 2>&1) || mysql_exit_code=$?
+    assert_equals "1" "$mysql_exit_code" "MySQL should be rejected as an unsupported database provider"
+    assert_contains "$mysql_output" "Invalid database provider: mysql" "MySQL rejection should explain the unsupported provider"
+    assert_file_not_exists "$mysql_output_dir/docker-compose.yml" "Rejected MySQL generation must not create a compose file"
     
     pass_test
 }
@@ -1003,7 +1012,7 @@ test_no_unresolved_environment_variables() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Test with all database providers
+    # Test with all supported database providers
     for provider in postgres sqlserver; do
         assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
         
@@ -1145,6 +1154,22 @@ test_read_only_output_directory() {
         return 0
     fi
     
+    # Capability probe: some environments (notably Windows Git Bash / MSYS, and
+    # any run as root) accept chmod 444 on a directory but do not actually
+    # enforce write denial. Replicate the exact operation the generator performs
+    # (mkdir inside the read-only parent). If it succeeds, this filesystem
+    # cannot enforce the test premise -- report INCONCLUSIVE and skip, using
+    # the same pattern as test_generated_compose_file_is_valid_yaml. Real POSIX
+    # filesystems as an unprivileged user still exercise the assertion below.
+    if mkdir "$readonly_dir/.capability-probe" 2>/dev/null; then
+        rmdir "$readonly_dir/.capability-probe" 2>/dev/null || true
+        chmod 755 "$readonly_dir" 2>/dev/null || true
+        test_info "INCONCLUSIVE: filesystem does not enforce chmod 444 on directories in this environment"
+        test_info "To fix: run on a POSIX filesystem as an unprivileged user (Linux CI still exercises this path)"
+        pass_test  # Skip rather than fail -- do not weaken Linux permission coverage
+        return 0
+    fi
+
     # Should fail due to write permission
     assert_command_failure "$COMPOSE_GENERATOR --output-dir $readonly_dir/subdir" "Should fail with read-only parent directory"
     
@@ -1280,9 +1305,13 @@ test_concurrent_generation_safety() {
     "$COMPOSE_GENERATOR" --output-dir "$output_dir" 2>/dev/null &
     local pid2=$!
     
-    # Wait for both to complete
-    wait $pid1 2>/dev/null
-    wait $pid2 2>/dev/null
+    # Wait for both to complete. Use `|| true` so a nonzero child exit (which
+    # can happen legitimately when two generators race for the same output
+    # directory) does not trip `set -e` in the test suite. The real assertion
+    # is the post-hoc file check below: any surviving valid docker-compose.yml
+    # proves the compose generator handled overlapping writes safely.
+    wait $pid1 2>/dev/null || true
+    wait $pid2 2>/dev/null || true
     
     # Check that a valid compose file exists (latest should win)
     if [[ -f "$output_dir/docker-compose.yml" ]]; then
@@ -2136,8 +2165,8 @@ test_pgadmin_template_structure() {
     # Validate volume configuration (may use variable reference)
     assert_contains "$template_content" "/var/lib/pgadmin" "Should persist pgAdmin data"
     
-    # Validate health check endpoint
-    assert_contains "$template_content" "/pgadmin/misc/ping" "Should health check the configured pgAdmin endpoint"
+    # Validate health check endpoint (matches SCRIPT_NAME=/pgadmin remap)
+    assert_contains "$template_content" "/pgadmin/misc/ping" "Should health check pgAdmin endpoint"
     
     pass_test
 }
@@ -2145,12 +2174,12 @@ test_pgadmin_template_structure() {
 # Test dynamic pgAdmin initialization JSON generation
 test_pgadmin_init_json() {
     start_test "pgAdmin dynamic initialization JSON validation"
-    
+
     local deploy_script="$SCRIPT_DIR/../scripts/deploy-docker.sh"
     assert_file_exists "$deploy_script"
     local init_content
     init_content=$(sed -n '/^generate_pgadmin_servers_config()/,/^}/p' "$deploy_script")
-    
+
     # Validate required structure
     assert_contains "$init_content" "Servers" "Should define Servers section"
     assert_contains "$init_content" "PrintFarmer PostgreSQL" "Should name the server 'PrintFarmer PostgreSQL'"
@@ -2158,7 +2187,7 @@ test_pgadmin_init_json() {
     assert_contains "$init_content" "5432" "Should use PostgreSQL default port"
     assert_contains "$init_content" "POSTGRES_USER" "Should use the configured PostgreSQL user"
     assert_not_contains "$init_content" "POSTGRES_PASSWORD" "Should never persist the database password"
-    
+
     pass_test
 }
 
@@ -2169,8 +2198,10 @@ test_pgadmin_compose_generation() {
     local outdir="$TEST_TEMP_DIR/pgadmin-compose"
     mkdir -p "$outdir"
     
-    # Generate with pgAdmin enabled
-    assert_command_success "$COMPOSE_GENERATOR --db-provider postgres --enable-pgadmin --output-dir $outdir"
+    # Generate with pgAdmin enabled. Explicit --db-provider postgres pins the
+    # test's intent (pgAdmin only merges under postgres) and isolates it from
+    # DB_PROVIDER environment leaked by earlier scenario tests.
+    assert_command_success "$COMPOSE_GENERATOR --enable-pgadmin --db-provider postgres --output-dir $outdir"
     
     local compose_file="$outdir/docker-compose.yml"
     assert_file_exists "$compose_file"

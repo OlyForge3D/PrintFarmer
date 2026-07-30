@@ -14,7 +14,11 @@ public class OrcaSlicerLibrary_v2_4_0 : ISlicerLibrary, IDisposable
 
     public string SlicerName => "OrcaSlicer";
 
-    public string SlicerVersion => "2.4.0";
+    // Routing/capability version — must match the runtime binary version so that
+    // version-pinned jobs ("orcaslicer:2.4.1") reach a worker that can claim them.
+    // Kept intentionally decoupled from GetProfilesVersion() (issue #577), which
+    // reports the profile-bundle "generation" (2.4.0 in this plugin folder).
+    public string SlicerVersion => "2.4.1";
 
     public string SlicerType => "OrcaSlicer";
 

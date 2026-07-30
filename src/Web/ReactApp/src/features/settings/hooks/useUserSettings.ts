@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
+import { getAuthEpoch } from '@/common/auth/authEpoch';
 import { toast } from 'sonner';
 import type { UserSettingsResponse, UpdateUserSettingsRequest } from '@/features/settings/types';
 
@@ -19,12 +20,20 @@ export function useUserSettings() {
 export function useUpdateUserSettings() {
   const queryClient = useQueryClient();
 
-  return useMutation<UserSettingsResponse, Error, UpdateUserSettingsRequest>({
+  return useMutation<UserSettingsResponse, Error, UpdateUserSettingsRequest, { epochAtStart: number }>({
     mutationFn: async (body) => {
       const res = await apiClient.put<UserSettingsResponse>('/settings/user', body);
       return res.data;
     },
-    onSuccess: (data) => {
+    onMutate: () => ({ epochAtStart: getAuthEpoch() }),
+    onSuccess: (data, _variables, context) => {
+      // If the authenticated identity changed while this save was in
+      // flight (e.g. the user logged out mid-save), the response belongs
+      // to a previous identity — discard it instead of writing it back
+      // into the (already-cleared) shared cache key. See #762.
+      if (context.epochAtStart !== getAuthEpoch()) {
+        return;
+      }
       queryClient.setQueryData(USER_SETTINGS_KEY, data);
     },
     onError: (error) => {

@@ -63,6 +63,14 @@ actor MaintenanceService: MaintenanceServiceProtocol {
         try await apiClient.get("/api/maintenance/statistics/fleet")
     }
 
+    func getPrinterStatistics(printerId: UUID) async throws -> PrinterMaintenanceStatistics {
+        try await apiClient.get("/api/maintenance/printers/\(printerId)/statistics")
+    }
+
+    func createLog(_ request: CreateMaintenanceLogRequest) async throws -> MaintenanceLog {
+        try await apiClient.post("/api/maintenance/logs", body: request)
+    }
+
     private static func iso8601String(_ date: Date) -> String {
         APIClient.iso8601Plain.string(from: date)
     }

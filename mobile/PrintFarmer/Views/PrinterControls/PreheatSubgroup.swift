@@ -94,7 +94,12 @@ struct PreheatSubgroup: View {
 
     @ViewBuilder
     private func button(for preset: PreheatPreset) -> some View {
-        let isPending = viewModel.pendingCommand?.kind == .preheat(preset)
+        let isPending: Bool = {
+            if case let .preheat(pendingPreset, _, _) = viewModel.pendingCommand?.kind {
+                return pendingPreset == preset
+            }
+            return false
+        }()
         let canControl = viewModel.canControl
         // Per spec §3.1 single-flight queue: if any preheat command is in
         // flight, *all* preheat siblings disable so the user can't stack
@@ -220,7 +225,7 @@ struct PreheatSubgroup: View {
 
     private func isErrored(preset: PreheatPreset) -> Bool {
         guard let last = viewModel.lastError else { return false }
-        if case let .preheat(errPreset) = last.command.kind, errPreset == preset { return true }
+        if case let .preheat(errPreset, _, _) = last.command.kind, errPreset == preset { return true }
         return false
     }
 }
@@ -484,6 +489,7 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func getCameraUrl(id: UUID) async throws -> PrinterCameraUrl { throw NetworkError.notFound }
     func getSnapshot(id: UUID) async throws -> Data { Data() }
     func getCurrentJob(id: UUID) async throws -> PrintJobStatusInfo? { nil }
+    func getHistory(id: UUID, limit: Int?) async throws -> PrinterHistoryList { PrinterHistoryList(count: 0, jobs: []) }
     func pause(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func resume(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func cancel(id: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
@@ -504,6 +510,7 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     ) async throws -> CommandResult {
         CommandResult(success: true, message: nil)
     }
+    func bindToolheadSpool(printerId: UUID, toolheadIndex: Int, request: ToolheadSpoolBindRequest, idempotencyKey: String) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func listAvailableSpools(printerId: UUID) async throws -> [SpoolmanSpool] { [] }
     func loadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
     func unloadFilament(printerId: UUID) async throws -> CommandResult { CommandResult(success: true, message: nil) }
@@ -519,6 +526,24 @@ private final class PreheatSubgroupPreviewService: PrinterServiceProtocol, @unch
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {}
 
     func getBackendCapabilities(printerId: UUID) async throws -> PrinterBackendCapabilities { capabilities }
+
+    // MARK: - #711 F6 preview stubs
+
+    func getDetails(id: UUID) async throws -> PrinterDetails {
+        throw NetworkError.notFound
+    }
+    func listFallbackGroups(printerId: UUID) async throws -> [FilamentFallbackGroup] { [] }
+    func getFallbackGroup(printerId: UUID, groupId: UUID) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func createFallbackGroup(printerId: UUID, _ request: CreateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func updateFallbackGroup(printerId: UUID, groupId: UUID, _ request: UpdateFilamentFallbackGroupRequest) async throws -> FilamentFallbackGroup {
+        throw NetworkError.notFound
+    }
+    func deleteFallbackGroup(printerId: UUID, groupId: UUID) async throws {}
+    func getAvailableFallback(printerId: UUID, sourceToolheadId: UUID, material: String) async throws -> AvailableFallbackMember? { nil }
 }
 
 // MARK: - Preview seam on the ViewModel

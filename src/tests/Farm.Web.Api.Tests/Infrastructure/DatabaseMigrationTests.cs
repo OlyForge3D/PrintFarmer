@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain.Notifications;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using FluentAssertions;
@@ -31,9 +32,107 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         first.LegacySchemaBaselined.Should().BeFalse();
-        first.AppliedMigrations.Should().NotBeEmpty();
+        first.AppliedMigrations.Should().Equal(
+            "20260725032040_InitialV1",
+            "20260725085243_AddCalibrationPrinterContext",
+            "20260725144853_AddGcodePromotionLineage",
+            "20260725173426_AlignDevelopmentAppSchema",
+            "20260725184947_AddOwnerScopedPromotionOperationKey",
+            "20260725203646_AddCalibrationPersistenceSync",
+            "20260725204532_AddCalibrationGenerationOrchestration",
+            "20260726090013_ReconcileEpic705AppSchema",
+            "20260726131553_AddCalibrationQueueDispatch",
+            "20260726190525_AddOutboxDbSequenceAndRowVersion",
+            "20260726215806_AddQueueAuditAndBackendIdentity",
+            "20260727052250_HardenCalibrationDispatchFencing",
+            "20260727103118_AlignMaintenanceHistoryDeleteBehavior",
+            "20260727170353_CompleteCalibrationDispatchFencing",
+            "20260727215428_RequireScheduleOperatorReauthorization",
+            "20260728023427_AddScheduledOccurrenceIdentity",
+            "20260728063711_AddCalibrationAttemptToQueueEvents",
+            "20260729191406_EnforceGlobalDeviceTokenInstallationOwner");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
+        (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_ExistingShippedEpic705History_UpgradesWithoutRenamingAppliedMigration()
+    {
+        const string shippedMigration = "20260726090013_ReconcileEpic705AppSchema";
+        const string rejectedRenamedMigration = "20260729155050_ReconcileEpic705AppSchema";
+        const string installationId = "existing-history-installation";
+        Guid userA = Guid.NewGuid();
+        Guid userB = Guid.NewGuid();
+        DateTime older = DateTime.UtcNow.AddMinutes(-5);
+        DateTime newer = DateTime.UtcNow;
+
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(shippedMigration);
+
+        context.Users.AddRange(
+            new User
+            {
+                Id = userA,
+                Username = $"existing-history-a-{userA:N}",
+                Email = $"existing-history-a-{userA:N}@example.com",
+                PasswordHash = "x",
+            },
+            new User
+            {
+                Id = userB,
+                Username = $"existing-history-b-{userB:N}",
+                Email = $"existing-history-b-{userB:N}@example.com",
+                PasswordHash = "x",
+            });
+        context.DeviceTokens.AddRange(
+            new DeviceToken
+            {
+                UserId = userA,
+                RegistrationVersion = 1,
+                InstallationId = installationId,
+                Token = new string('a', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = older,
+                LastUsedAt = older,
+                IsActive = true,
+            },
+            new DeviceToken
+            {
+                UserId = userB,
+                RegistrationVersion = 2,
+                InstallationId = installationId,
+                Token = new string('b', 64),
+                Platform = "ios",
+                Environment = "production",
+                CreatedAt = newer,
+                LastUsedAt = newer,
+                IsActive = true,
+            });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        await migrator.MigrateAsync();
+
+        string[] history = [.. await context.Database.GetAppliedMigrationsAsync()];
+        history.Should().Contain(shippedMigration);
+        history.Should().NotContain(rejectedRenamedMigration);
+        DeviceToken[] retained = await context.DeviceTokens
+            .AsNoTracking()
+            .Where(token => token.InstallationId == installationId)
+            .ToArrayAsync();
+        retained.Should().HaveCount(2, "inactive registration history must survive ownership repair");
+        retained.Should().ContainSingle(token =>
+            token.UserId == userA
+            && token.RegistrationVersion == 1
+            && !token.IsActive);
+        retained.Should().ContainSingle(token =>
+            token.UserId == userB
+            && token.RegistrationVersion == 2
+            && token.IsActive);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -103,6 +202,157 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithMissingIndexWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """DROP INDEX "IX_UserTasks_SourceKind_SourceId";""",
+            "UserTasks (unique index: SOURCEKIND|SOURCEID)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexNameWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_FileHealthAudits_AuditType";
+            CREATE INDEX "IX_FileHealthAudits_AuditType_Wrong"
+                ON "FileHealthAudits" ("AuditType");
+            """,
+            "FileHealthAudits (index: AUDITTYPE) " +
+            "(name: IX_FILEHEALTHAUDITS_AUDITTYPE; sort: ASC; collation: BINARY; source: explicit)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexDirectionWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_FileHealthAudits_AuditType_AuditDate";
+            CREATE INDEX "IX_FileHealthAudits_AuditType_AuditDate"
+                ON "FileHealthAudits" ("AuditType" ASC, "AuditDate" ASC);
+            """,
+            "FileHealthAudits (index: AUDITTYPE|AUDITDATE) " +
+            "(name: IX_FILEHEALTHAUDITS_AUDITTYPE_AUDITDATE; sort: ASC|DESC; " +
+            "collation: BINARY|BINARY; source: explicit)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongIndexCollationWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            DROP INDEX "IX_Bins_Code";
+            CREATE UNIQUE INDEX "IX_Bins_Code" ON "Bins" ("Code" COLLATE NOCASE);
+            """,
+            "Bins (unique index: CODE) " +
+            "(name: IX_BINS_CODE; sort: ASC; collation: BINARY; source: explicit)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongPrimaryKeyDirectionWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY DESC"""),
+            "RetryPolicies (unique index: ID) " +
+            "(name: <sqlite-autoindex>; sort: ASC; collation: BINARY; source: primary key)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongPrimaryKeyCollationWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT COLLATE NOCASE NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY"""),
+            "RetryPolicies (unique index: ID) " +
+            "(name: <sqlite-autoindex>; sort: ASC; collation: BINARY; source: primary key)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongColumnTypeWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql("""TEXT NOT NULL DEFAULT 3"""),
+            "RetryPolicies.MaxRetries (store type)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongNullabilityWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql("""INTEGER NULL DEFAULT 3"""),
+            "RetryPolicies.MaxRetries (nullability)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithoutAutoIncrementWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            PRAGMA writable_schema = ON;
+            UPDATE sqlite_schema
+            SET sql = replace(sql, ' AUTOINCREMENT', '')
+            WHERE type = 'table' AND name = 'AppSettingsEntities';
+            PRAGMA writable_schema = OFF;
+            """,
+            "AppSettingsEntities.Id (autoincrement)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsNullableTextPrimaryKeyWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildRetryPoliciesReplacementSql(
+                """INTEGER NOT NULL DEFAULT 3""",
+                """TEXT CONSTRAINT "PK_RetryPolicies" PRIMARY KEY"""),
+            "RetryPolicies.Id (nullability)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildUserRolesReplacementSql("ON DELETE NO ACTION"),
+            "UserRoles (foreign key: ROLEID -> ROLES.ID)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithWrongForeignKeyUpdateWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            BuildUserRolesReplacementSql("ON UPDATE CASCADE ON DELETE CASCADE"),
+            "UserRoles (foreign key: ROLEID -> ROLES.ID)");
+    }
+
+    [Fact]
+    public Task CoreMigration_RejectsLegacySchemaWithMissingCheckConstraintWithoutRecordingHistory()
+    {
+        return AssertCorruptedLegacySchemaRejectedAsync(
+            """
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "Bins_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_Bins" PRIMARY KEY,
+                "Code" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "Location" TEXT NULL,
+                "Notes" TEXT NULL,
+                "IsActive" INTEGER NOT NULL,
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+                /* CHECK ("Code" = UPPER("Code")) */
+            );
+            DROP TABLE "Bins";
+            ALTER TABLE "Bins_replacement" RENAME TO "Bins";
+            CREATE UNIQUE INDEX "IX_Bins_Code" ON "Bins" ("Code");
+            CREATE INDEX "IX_Bins_IsActive" ON "Bins" ("IsActive");
+            PRAGMA foreign_keys = ON;
+            """,
+            """Bins (check constraint: "Code" = UPPER("Code"))""");
+    }
+
+    [Fact]
     public async Task SlicerMigration_UsesIndependentSqliteMigrationSet()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
@@ -121,7 +371,11 @@ public sealed class DatabaseMigrationTests
             "20260725144915_AddArtifactPromotionCoordination",
             "20260725173232_AlignDevelopmentSlicerSchema",
             "20260725185010_AddOwnerScopedPromotionOperationKey",
-            "20260727103155_FilterSliceJobIdempotencyToCalibration");
+            "20260726084205_AddSliceJobSlicerEngineVersion",
+            "20260726170804_AddSliceJobClaimIncarnation",
+            "20260727103155_FilterSliceJobIdempotencyToCalibration",
+            "20260728212624_AddWorkerAttestationAndCleanupReservation",
+            "20260728230034_AddArtifactCleanupDeletionState");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 
@@ -724,6 +978,58 @@ public sealed class DatabaseMigrationTests
         _ = migration.UpOperations.OfType<CreateTableOperation>().Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("sqlite", "Farm.Slicer.Migrations.Sqlite", "TEXT")]
+    [InlineData("postgres", "Farm.Slicer.Migrations.PostgreSQL", "timestamp with time zone")]
+    [InlineData("sqlserver", "Farm.Slicer.Migrations.SqlServer", "datetime2")]
+    public void ArtifactCleanupDeletionStateMigration_ForEveryProvider_AddsRecoverableTombstone(
+        string provider,
+        string migrationAssembly,
+        string expectedColumnType)
+    {
+        DbContextOptionsBuilder<SlicerDbContext> options = new();
+        switch (provider)
+        {
+            case "sqlite":
+                _ = options.UseSqlite(
+                    "Data Source=:memory:",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            case "postgres":
+                _ = options.UseNpgsql(
+                    "Host=localhost;Database=printfarmer;Username=test;******",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+            default:
+                _ = options.UseSqlServer(
+                    "Server=localhost;Database=printfarmer;User Id=test;******;TrustServerCertificate=true",
+                    builder => builder.MigrationsAssembly(migrationAssembly));
+                break;
+        }
+
+        using SlicerDbContext context = new(options.Options);
+        Migration migration = CreateMigration(
+            context.GetService<IMigrationsAssembly>(),
+            context,
+            "_AddArtifactCleanupDeletionState");
+
+        AddColumnOperation added = migration.UpOperations
+            .OfType<AddColumnOperation>()
+            .Should().ContainSingle()
+            .Which;
+        _ = added.Table.Should().Be("Artifacts");
+        _ = added.Name.Should().Be(nameof(Artifact.CleanupDeletionStartedAtUtc));
+        _ = added.ColumnType.Should().Be(expectedColumnType);
+        _ = added.IsNullable.Should().BeTrue();
+
+        DropColumnOperation removed = migration.DownOperations
+            .OfType<DropColumnOperation>()
+            .Should().ContainSingle()
+            .Which;
+        _ = removed.Table.Should().Be("Artifacts");
+        _ = removed.Name.Should().Be(nameof(Artifact.CleanupDeletionStartedAtUtc));
+    }
+
     private static Migration CreateMigration(
         IMigrationsAssembly migrationsAssembly,
         DbContext context,
@@ -772,5 +1078,79 @@ public sealed class DatabaseMigrationTests
         _ = command.Parameters.AddWithValue("@tableName", tableName);
         object? result = await command.ExecuteScalarAsync();
         return Convert.ToBoolean(result);
+    }
+
+    private static async Task AssertCorruptedLegacySchemaRejectedAsync(
+        string corruptionSql,
+        string expectedDetail)
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        _ = await context.Database.EnsureCreatedAsync();
+        await using (SqliteCommand corruptCommand = connection.CreateCommand())
+        {
+            corruptCommand.CommandText = corruptionSql;
+            _ = await corruptCommand.ExecuteNonQueryAsync();
+        }
+
+        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        DatabaseMigrationContractException exception =
+            (await migrate.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
+        exception.Code.Should().Be("schema_validation_failed");
+        exception.Message.Should().Contain(expectedDetail);
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    private static string BuildRetryPoliciesReplacementSql(
+        string maxRetriesDefinition,
+        string idDefinition = """TEXT NOT NULL CONSTRAINT "PK_RetryPolicies" PRIMARY KEY""")
+    {
+        return $"""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "RetryPolicies_replacement" (
+                "Id" {idDefinition},
+                "IsEnabled" INTEGER NOT NULL DEFAULT 1,
+                "MaxRetries" {maxRetriesDefinition},
+                "InitialDelaySeconds" INTEGER NOT NULL DEFAULT 60,
+                "ExponentialBase" REAL NOT NULL DEFAULT 2.0,
+                "MaxDelaySeconds" INTEGER NOT NULL DEFAULT 3600,
+                "RetryOnErrorCategories" TEXT NOT NULL DEFAULT 'Recoverable',
+                "CreatedAt" TEXT NOT NULL,
+                "UpdatedAt" TEXT NOT NULL
+            );
+            DROP TABLE "RetryPolicies";
+            ALTER TABLE "RetryPolicies_replacement" RENAME TO "RetryPolicies";
+            PRAGMA foreign_keys = ON;
+            """;
+    }
+
+    private static string BuildUserRolesReplacementSql(string roleForeignKeyActions)
+    {
+        return $"""
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE "UserRoles_replacement" (
+                "Id" TEXT NOT NULL CONSTRAINT "PK_UserRoles" PRIMARY KEY,
+                "UserId" TEXT NOT NULL,
+                "RoleId" TEXT NOT NULL,
+                "AssignedAt" TEXT NOT NULL,
+                "ExpiresAt" TEXT NULL,
+                "IsActive" INTEGER NOT NULL,
+                CONSTRAINT "FK_UserRoles_Roles_RoleId"
+                    FOREIGN KEY ("RoleId") REFERENCES "Roles" ("Id") {roleForeignKeyActions},
+                CONSTRAINT "FK_UserRoles_Users_UserId"
+                    FOREIGN KEY ("UserId") REFERENCES "Users" ("Id") ON DELETE CASCADE
+            );
+            DROP TABLE "UserRoles";
+            ALTER TABLE "UserRoles_replacement" RENAME TO "UserRoles";
+            CREATE INDEX "IX_UserRoles_ExpiresAt" ON "UserRoles" ("ExpiresAt");
+            CREATE INDEX "IX_UserRoles_IsActive" ON "UserRoles" ("IsActive");
+            CREATE INDEX "IX_UserRoles_RoleId" ON "UserRoles" ("RoleId");
+            CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
+            PRAGMA foreign_keys = ON;
+            """;
     }
 }

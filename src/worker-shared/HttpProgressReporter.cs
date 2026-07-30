@@ -37,22 +37,27 @@ public class HttpProgressReporter : IProgressReporter
     }
 
     /// <summary>
-    /// Attaches the lease token and fencing counter this worker holds for the job.
+    /// Attaches the claim-incarnation token, lease token, and fencing counter held for the job.
     /// </summary>
     /// <param name="request">The outgoing worker request.</param>
     /// <param name="jobId">The claimed job.</param>
+    /// <param name="claimToken">The durable claim incarnation held by this worker.</param>
     /// <returns>
     /// <see langword="false"/> when no lease is held, in which case the caller must not send the
     /// request: an unfenced worker mutation is rejected by the API and must never be attempted.
     /// </returns>
-    private bool TryAddLeaseHeaders(HttpRequestMessage request, Guid jobId)
+    private bool TryAddLeaseHeaders(HttpRequestMessage request, Guid jobId, Guid claimToken)
     {
-        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) || lease.Token == Guid.Empty)
+        if (!_workerState.TryGetJobLease(jobId, out WorkerJobLease lease) ||
+            lease.Token == Guid.Empty ||
+            lease.ClaimToken == Guid.Empty ||
+            lease.ClaimToken != claimToken)
         {
             _logger.LogWarning("Worker request skipped because no lease is held for job {JobId}", jobId);
             return false;
         }
 
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, lease.ClaimToken.ToString());
         request.Headers.Add(WorkerLeaseHeaders.LeaseToken, lease.Token.ToString());
         request.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,
@@ -60,7 +65,12 @@ public class HttpProgressReporter : IProgressReporter
         return true;
     }
 
-    public async Task ReportProgressAsync(Guid jobId, int progress, string message, CancellationToken cancellationToken = default)
+    public async Task ReportProgressAsync(
+        Guid jobId,
+        Guid claimToken,
+        int progress,
+        string message,
+        CancellationToken cancellationToken = default)
     {
         try
         {
@@ -85,7 +95,7 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
             request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
-            if (!TryAddLeaseHeaders(request, jobId))
+            if (!TryAddLeaseHeaders(request, jobId, claimToken))
             {
                 return;
             }
@@ -112,7 +122,11 @@ public class HttpProgressReporter : IProgressReporter
             job.Id);
     }
 
-    public async Task ReportFailureAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default)
+    public async Task ReportFailureAsync(
+        Guid jobId,
+        Guid claimToken,
+        string errorMessage,
+        CancellationToken cancellationToken = default)
     {
         _ = errorMessage;
         try
@@ -133,7 +147,7 @@ public class HttpProgressReporter : IProgressReporter
             };
             request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
             request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
-            if (!TryAddLeaseHeaders(request, jobId))
+            if (!TryAddLeaseHeaders(request, jobId, claimToken))
             {
                 return;
             }

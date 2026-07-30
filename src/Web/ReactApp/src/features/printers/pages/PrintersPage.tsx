@@ -36,6 +36,7 @@ import PrinterBulkControls from '@/features/printers/components/admin/PrinterBul
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { printersTour } from '@/features/printers/tours/printers.tour';
 import { HelpButton } from '@/common/components/HelpButton';
+import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
@@ -62,6 +63,10 @@ function getBackendName(backend: PrinterBackend | string | number): string {
 
 export function PrintersPage() {
   const { hasPermission } = useAuth();
+  // Prime the fleet filament coverage cache for all compact-card slots so
+  // per-printer hooks dedupe via the fleet snapshot instead of each issuing
+  // a separate request (N+1 guard, issue #717).
+  useFleetFilamentCoverage();
   const queryClient = useQueryClient();
   
   const { 

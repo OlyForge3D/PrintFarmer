@@ -1251,6 +1251,14 @@ export interface ToolheadDto {
   supportedMaterials?: string[];
   isPrimary: boolean;
   lastUpdated?: Date;
+  /**
+   * Cumulative print hours accrued while this toolhead was the active tool,
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours` on the #711
+   * backend (`0bfa50343`). Null on older backends and on new toolheads that
+   * have not yet observed a print, or on printers with
+   * `supportsPerToolAttribution === false`.
+   */
+  cumulativePrintHours?: number | null;
   // Multi-toolhead filament tracking
   toolheadType?: ToolheadType | string;
   currentSpoolId?: number;
@@ -1302,6 +1310,15 @@ export interface PrinterDetails {
   buddyCameraIp?: string;
   capabilities?: PrinterCapabilitiesDto;
   toolheads?: ToolheadDto[];
+  /**
+   * True only for Moonraker printers with a supported multi-physical-tool
+   * topology (#711, `0bfa50343`). When false, the backend rejects hour-based
+   * maintenance schedules that carry a non-null `toolheadId` with HTTP 400,
+   * and per-tool odometers/scoped alerts are not populated. Omitted on
+   * older backends — the frontend defaults to treating omission as
+   * "unsupported" for the odometer surface but tolerant everywhere else.
+   */
+  supportsPerToolAttribution?: boolean;
 }
 
 // Temperature targets
@@ -2005,11 +2022,15 @@ export interface ApiError {
   details?: string;
   statusCode: number;
   /**
-   * Raw response body from the server, when available. Used to recover structured
-   * conflict payloads (e.g. `{ expectedRevision, actualRevision }` on HTTP 409) so callers
-   * can build revision-aware conflict UI instead of showing a generic error message.
+   * Raw response body preserved from `AxiosError.response.data`. Carries
+   * canonical `application/problem+json` and structured conflict payloads
+   * (for example, `{ code, detail }` or revision details) that the flattened
+   * `message`/`details` fields cannot represent. Optional so existing
+   * consumers are unaffected.
    */
   data?: unknown;
+  /** True when the underlying error was an axios error. */
+  isAxiosError?: boolean;
 }
 
 // Authentication types
@@ -2560,6 +2581,11 @@ export interface QueueHistoryEntryDto {
   actualPrintTimeSeconds: number;
   failureReason?: string;
   toolheadUsages?: PrintJobToolheadUsage[];
+  /**
+   * UTC timestamp when the completed job was harvested into printed-part stock
+   * (#722/#741). Null when unharvested.
+   */
+  harvestedAt?: string | null;
 }
 
 export interface TimelineEventDto {
@@ -3659,6 +3685,38 @@ export interface UpdateBedTypeRequest {
  * System platform capabilities — reports which features are available
  * on the current hardware (e.g. ARM/Raspberry Pi may disable slicing).
  */
+/**
+ * Operator feature flags returned by `GET /api/system/capabilities` under
+ * `operatorFeatures`. Backend contract (#725) is that clients MUST tolerate
+ * missing flags in older/newer server responses and fall back to the
+ * documented defaults, so every field here is optional. When a flag is
+ * omitted the frontend should behave as if the feature is enabled unless
+ * the feature-specific default says otherwise.
+ *
+ * The `multiSlotFallbackEnabled` flag is the gate #711 uses to hide
+ * per-toolhead maintenance data (scoped alerts, scoped deployments, and the
+ * per-tool analytics slice). When it is `false` the per-tool maintenance UI
+ * should collapse to a printer-wide view even for multi-hotend printers.
+ */
+export interface OperatorFeatureFlags {
+  /** Unified attention/exception feed and typed action endpoints (#707). Default true. */
+  attentionEnabled?: boolean;
+  /** APNs registration and delivery for operator alerts (#708). Default false. */
+  nativePushEnabled?: boolean;
+  /** Coverage/runout calculations exposed to clients (#709). Default true. */
+  filamentCoverageEnabled?: boolean;
+  /** Per-tool requirements, swap validation, and guided swap flow (#710). Default true. */
+  guidedSwapEnabled?: boolean;
+  /** Fallback groups, per-tool maintenance, and dispatch loadout (#711). Default true. */
+  multiSlotFallbackEnabled?: boolean;
+  /** Shift compiler and Tasks feed (#713). Default true. */
+  shiftPlanEnabled?: boolean;
+  /** Printed-part stock, bins, harvest, and scan/inventory API (#714). Default true. */
+  printedPartsInventoryEnabled?: boolean;
+  /** Idempotent write queue and offline replay (#715). Default true. */
+  offlineWriteReplayEnabled?: boolean;
+}
+
 export interface SystemCapabilities {
   architecture: string;
   slicingEnabled: boolean;
@@ -3669,6 +3727,12 @@ export interface SystemCapabilities {
   idempotentModelUploadEnabled: boolean;
   modelThumbnailReplacementEnabled: boolean;
   platformNote?: string;
+  /**
+   * Operator feature flags — populated once #711/#725 ship. Older API builds
+   * omit this field entirely; the frontend must tolerate the absence and use
+   * per-flag defaults (see {@link OperatorFeatureFlags}).
+   */
+  operatorFeatures?: OperatorFeatureFlags;
 }
 
 export enum SystemServiceHealth {
@@ -3764,10 +3828,45 @@ export enum NotificationFrequency {
 }
 
 export enum NotificationPreferenceEventType {
+  // Wire tokens are PascalCase per #708 shared web preference contract.
+  // Backend uses `new JsonStringEnumConverter()` with NO naming policy
+  // override (src/api/Startup/ControllerStartup.cs), so enum members
+  // serialize as their raw C# names. Sending camelCase would 400.
+  // Adding new tokens requires updating operatorCategories.ts + the
+  // backend enum in NotificationsController.cs simultaneously — see #708.
   JobStarted = 'JobStarted',
   JobCompleted = 'JobCompleted',
   JobFailed = 'JobFailed',
-  JobPaused = 'JobPaused'
+  JobPaused = 'JobPaused',
+  // Operator alert categories introduced by F3 (#708). Legacy servers that do
+  // not advertise these tokens in
+  // GET /notifications/preferences/capabilities must never receive them —
+  // see features/notifications/preferencesAdapter.
+  //
+  // PrinterFailure is intentionally NOT rendered as a visible row in the
+  // #716 UI scope (see OPERATOR_EVENT_ROWS in operatorCategories.ts), but is
+  // enumerated here so hydrate can pass its server-returned row through
+  // opaquely and buildSavePayload will forward it back verbatim when the
+  // server advertises support.
+  PrinterFailure = 'PrinterFailure',
+  FilamentRunout = 'FilamentRunout',
+  HarvestReady = 'HarvestReady',
+  MaintenanceDue = 'MaintenanceDue',
+  PrinterOffline = 'PrinterOffline'
+}
+
+/**
+ * Capability probe response from `GET /notifications/preferences/capabilities` (introduced
+ * by #708). Legacy servers respond 404, which the client treats as
+ * "supportedEventTypes = the classic four job tokens only" so that unknown
+ * operator strings are never sent back on `PUT /notifications/preferences`.
+ *
+ * The `supportedEventTypes` array is a bag of raw enum strings so a
+ * forward-compatible client that has not yet updated its
+ * `NotificationPreferenceEventType` union does not lose values.
+ */
+export interface NotificationCapabilitiesResponse {
+  supportedEventTypes: string[];
 }
 
 export interface NotificationEventChannelPreferenceDto {
@@ -4234,6 +4333,11 @@ export interface ProfileFieldMetadata {
   unit?: string;
   options?: EnumOption[];
   isAdvanced: boolean;
+  // Engine-version awareness (issue #578). All optional — legacy backends may omit them.
+  minEngineVersion?: string;
+  maxEngineVersion?: string;
+  renamedFromKey?: string;
+  renamedInVersion?: string;
 }
 
 export interface EnumOption {

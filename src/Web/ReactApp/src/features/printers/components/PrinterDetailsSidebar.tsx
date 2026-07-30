@@ -71,6 +71,8 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
+import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
 import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
@@ -1412,19 +1414,29 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             >
               {hasMultipleSpoolSources && effectiveToolheads ? (
                 // Multi-toolhead or MMU spool picker
-                <ToolheadSpoolPicker
-                  printerId={printer.id}
-                  toolheads={effectiveToolheads}
-                  reviewedRowVersion={
-                    displayPrinter?.rowVersion ?? printer.rowVersion
-                  }
-                  onSpoolChange={() => {
-                    queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                  }}
-                />
+                <>
+                  <FilamentCoverageBreakdown printerId={printer.id} />
+                  <ToolheadSpoolPicker
+                    printerId={printer.id}
+                    toolheads={effectiveToolheads}
+                    reviewedRowVersion={
+                      displayPrinter?.rowVersion ?? printer.rowVersion
+                    }
+                    onSpoolChange={() => {
+                      queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+                    }}
+                  />
+                  <FallbackGroupsPanel
+                    printerId={printer.id}
+                    toolheads={effectiveToolheads}
+                  />
+                </>
               ) : (
                 // Single spool display
-                <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
+                <>
+                  <FilamentCoverageBreakdown printerId={printer.id} />
+                  <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
+                </>
               )}
             </CollapsibleSection>
           );

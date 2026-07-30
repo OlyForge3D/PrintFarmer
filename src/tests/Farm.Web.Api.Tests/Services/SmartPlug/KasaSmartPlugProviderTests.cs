@@ -91,24 +91,72 @@ public class KasaSmartPlugProviderTests : IDisposable
     [Fact]
     public async Task TestConnection_ReadTimeout_ReturnsNull()
     {
-        // Arrange: server accepts connection but never sends a response.
-        Task serverTask = Task.Run(async () =>
-        {
-            using TcpClient client = await _listener.AcceptTcpClientAsync();
-            await using NetworkStream stream = client.GetStream();
+        // Deterministic: no real socket, no wall-clock wait. A blocking stream never yields a
+        // response; a zero read timeout makes the internal linked-token CancelAfter fire
+        // immediately, so the read observes cancellation and TestConnection returns false.
+        KasaSmartPlugProvider provider = new(
+            NullLogger<KasaSmartPlugProvider>.Instance,
+            new BlockingConnector(),
+            TimeSpan.Zero);
 
-            byte[] requestHeader = new byte[4];
-            await stream.ReadExactlyAsync(requestHeader);
-            int reqLen = IPAddress.NetworkToHostOrder(BitConverter.ToInt32(requestHeader, 0));
-            byte[] reqBody = new byte[reqLen];
-            await stream.ReadExactlyAsync(reqBody);
+        bool result = await provider.TestConnectionAsync("device.local", CancellationToken.None);
 
-            // Never respond — let the read timeout kick in.
-            await Task.Delay(TimeSpan.FromSeconds(10));
-        });
-
-        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(8));
-        bool result = await _provider.TestConnectionAsync($"127.0.0.1:{_port}", cts.Token);
         Assert.False(result);
+    }
+
+    /// <summary>Connector that hands back a stream which never completes a read.</summary>
+    private sealed class BlockingConnector : KasaSmartPlugProvider.IKasaConnector
+    {
+        public Task<Stream> ConnectAsync(string host, int port, CancellationToken ct)
+            => Task.FromResult<Stream>(new BlockingStream());
+
+        /// <summary>
+        /// A stream whose writes are no-ops and whose reads block until the supplied token is
+        /// canceled (then throw <see cref="OperationCanceledException"/>). Models a device that
+        /// accepted the connection but never sent a response.
+        /// </summary>
+        private sealed class BlockingStream : Stream
+        {
+            public override bool CanRead => true;
+
+            public override bool CanSeek => false;
+
+            public override bool CanWrite => true;
+
+            public override long Length => throw new NotSupportedException();
+
+            public override long Position
+            {
+                get => 0;
+                set { }
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override async ValueTask<int> ReadAsync(
+                Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return 0;
+            }
+
+            public override ValueTask WriteAsync(
+                ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+                => ValueTask.CompletedTask;
+
+            public override int Read(byte[] buffer, int offset, int count)
+                => throw new NotSupportedException();
+
+            public override void Write(byte[] buffer, int offset, int count)
+            {
+            }
+
+            public override long Seek(long offset, SeekOrigin origin)
+                => throw new NotSupportedException();
+
+            public override void SetLength(long value) => throw new NotSupportedException();
+        }
     }
 }

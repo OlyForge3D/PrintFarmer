@@ -35,7 +35,7 @@ public class ProfilesControllerMachineProfilesTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains(modelId.ToString(), Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
         profilesService.Verify(
-            s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
+            s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Never);
     }
 
@@ -61,7 +61,7 @@ public class ProfilesControllerMachineProfilesTests
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains("No OrcaSlicer alias configured", Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
         profilesService.Verify(
-            s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()),
+            s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()),
             Times.Never);
     }
 
@@ -82,8 +82,8 @@ public class ProfilesControllerMachineProfilesTests
                 new SlicerModelAliasDto(Guid.NewGuid(), modelId, "Alias One", "OrcaSlicer")
             ]);
         _ = profilesService
-            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpClient, IEnumerable<string>, CancellationToken>((_, aliases, _) => capturedAliases = aliases.ToList())
+            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
+            .Callback<HttpClient, IEnumerable<string>, CancellationToken, string?>((_, aliases, _, _) => capturedAliases = aliases.ToList())
             .ReturnsAsync(profiles);
 
         ProfilesController controller = CreateController(profilesService, catalogService);
@@ -112,7 +112,7 @@ public class ProfilesControllerMachineProfilesTests
                 new SlicerModelAliasDto(Guid.NewGuid(), modelId, "Alias One", "OrcaSlicer")
             ]);
         _ = profilesService
-            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ReturnsAsync([]);
 
         ProfilesController controller = CreateController(profilesService, catalogService);
@@ -140,7 +140,7 @@ public class ProfilesControllerMachineProfilesTests
                 new SlicerModelAliasDto(Guid.NewGuid(), modelId, "Alias One", "OrcaSlicer")
             ]);
         _ = profilesService
-            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetMachineProfilesForCatalogModelAsync(It.IsAny<HttpClient>(), It.IsAny<IEnumerable<string>>(), It.IsAny<CancellationToken>(), It.IsAny<string?>()))
             .ThrowsAsync(new HttpRequestException(rawExceptionMessage));
 
         ProfilesController controller = CreateController(profilesService, catalogService);

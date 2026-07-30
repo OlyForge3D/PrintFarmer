@@ -61,8 +61,17 @@ public sealed class SliceJobIdempotencyIndexTests
 
         Guid owner = Guid.NewGuid();
         const string checksum = "upgrade-standard-checksum";
-        context.SliceJobs.Add(CreateJob(owner, Guid.Empty, checksum));
-        await context.SaveChangesAsync();
+
+        // Use raw SQL to insert at predecessor schema to avoid EF model/schema mismatch:
+        // the current EF model includes columns (e.g. ClaimToken) added by later migrations.
+        var jobId = Guid.NewGuid();
+        var now = DateTime.UtcNow;
+        await context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO SliceJobs
+                (Id, UserId, ModelFileUrl, ModelFileName, SlicerEngine, Status, Priority, ProgressPercent, RetryCount, QueuedAt, CreatedAt, UpdatedAt, Checksum)
+            VALUES
+                ({jobId}, {owner}, {"stored-model.stl"}, {"stored-model.stl"}, {1}, {"Queued"}, {1}, {0}, {0}, {now}, {now}, {now}, {checksum})
+            """);
 
         await migrator.MigrateAsync();
         context.SliceJobs.Add(CreateJob(owner, Guid.Empty, checksum));

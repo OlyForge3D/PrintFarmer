@@ -50,6 +50,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         Worker worker = await db.Workers.SingleAsync();
+        Guid claimToken = Guid.NewGuid();
 
         SliceJob job = new SliceJob
         {
@@ -62,6 +63,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             ModelFileName = "test-model.stl",
             ModelFileUrl = "http://example/test-model.stl",
             WorkerId = worker.Id,
+            ClaimToken = claimToken,
             ClaimedAt = DateTime.UtcNow,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             LeaseToken = Guid.NewGuid(),
@@ -73,13 +75,25 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload G-code artifact (primary) using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Generated G-code\nG28 ; Home\nG1 X10 Y10 Z0.2 F3000\n; End");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "output.gcode", "application/gcode");
-        Artifact primaryArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
+        Artifact primaryArtifact = (await artifactsService.UploadForActiveLeaseAsync(
+            gcodeForm,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "gcode",
+            default))!;
         _ = primaryArtifact.Should().NotBeNull();
 
         // Upload thumbnail artifact (additional) using service
         byte[] thumbnailBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }; // PNG header stub
         TestFormFile thumbnailForm = new TestFormFile(thumbnailBytes, "thumbnail.png", "image/png");
-        Artifact thumbnailArtifact = await artifactsService.UploadAsync(thumbnailForm, job.Id, worker.Id, "thumbnail", default);
+        Artifact thumbnailArtifact = (await artifactsService.UploadForActiveLeaseAsync(
+            thumbnailForm,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "thumbnail",
+            default))!;
         _ = thumbnailArtifact.Should().NotBeNull();
 
         // Complete job with primary, additional artifact, and inline log text
@@ -97,7 +111,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             Content = JsonContent.Create(completeRequest)
         };
         AddLeaseHeaders(completeRequestMessage, job);
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -149,6 +162,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         Worker worker = await db.Workers.SingleAsync();
+        Guid claimToken = Guid.NewGuid();
 
         SliceJob job = new SliceJob
         {
@@ -161,6 +175,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             ModelFileName = "minimal.stl",
             ModelFileUrl = "http://example/minimal.stl",
             WorkerId = worker.Id,
+            ClaimToken = claimToken,
             ClaimedAt = DateTime.UtcNow,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             LeaseToken = Guid.NewGuid(),
@@ -172,7 +187,13 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload only G-code using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Minimal G-code\nG28\n");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "minimal.gcode", "application/gcode");
-        Artifact artifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
+        Artifact artifact = (await artifactsService.UploadForActiveLeaseAsync(
+            gcodeForm,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "gcode",
+            default))!;
 
         // Complete with minimal request (no log, no additional artifacts, no metrics)
         CompleteSliceJobRequest completeRequest = new CompleteSliceJobRequest
@@ -185,7 +206,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             Content = JsonContent.Create(completeRequest)
         };
         AddLeaseHeaders(completeRequestMessage, job);
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -272,6 +292,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         Worker worker = await db.Workers.SingleAsync();
+        Guid claimToken = Guid.NewGuid();
 
         SliceJob job = new SliceJob
         {
@@ -284,6 +305,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             ModelFileName = "complex-model.3mf",
             ModelFileUrl = "http://example/complex-model.3mf",
             WorkerId = worker.Id,
+            ClaimToken = claimToken,
             ClaimedAt = DateTime.UtcNow,
             LeaseExpiresAt = DateTime.UtcNow.AddMinutes(5),
             LeaseToken = Guid.NewGuid(),
@@ -295,17 +317,35 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
         // Upload G-code using service
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; Complex G-code\nG28\nG1 X100 Y100\n");
         TestFormFile gcodeForm = new TestFormFile(gcodeBytes, "complex.gcode", "application/gcode");
-        Artifact gcodeArtifact = await artifactsService.UploadAsync(gcodeForm, job.Id, worker.Id, "gcode", default);
+        Artifact gcodeArtifact = (await artifactsService.UploadForActiveLeaseAsync(
+            gcodeForm,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "gcode",
+            default))!;
 
         // Upload thumbnail 1 (preview) using service
         byte[] thumb1Bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x01 };
         TestFormFile thumb1Form = new TestFormFile(thumb1Bytes, "preview-small.png", "image/png");
-        Artifact thumb1Artifact = await artifactsService.UploadAsync(thumb1Form, job.Id, worker.Id, "thumbnail", default);
+        Artifact thumb1Artifact = (await artifactsService.UploadForActiveLeaseAsync(
+            thumb1Form,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "thumbnail",
+            default))!;
 
         // Upload thumbnail 2 (large preview) using service
         byte[] thumb2Bytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x02 };
         TestFormFile thumb2Form = new TestFormFile(thumb2Bytes, "preview-large.png", "image/png");
-        Artifact thumb2Artifact = await artifactsService.UploadAsync(thumb2Form, job.Id, worker.Id, "thumbnail", default);
+        Artifact thumb2Artifact = (await artifactsService.UploadForActiveLeaseAsync(
+            thumb2Form,
+            job.Id,
+            worker.Id,
+            claimToken,
+            "thumbnail",
+            default))!;
 
         // Generate large log text (simulate verbose slicer output)
         StringBuilder logBuilder = new StringBuilder();
@@ -332,7 +372,6 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             Content = JsonContent.Create(completeRequest)
         };
         AddLeaseHeaders(completeRequestMessage, job);
-
         // Act
         HttpResponseMessage completeResponse = await _client.SendAsync(completeRequestMessage);
 
@@ -364,6 +403,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
     /// <param name="job">The claimed job.</param>
     private static void AddLeaseHeaders(HttpRequestMessage request, SliceJob job)
     {
+        request.Headers.Add(WorkerClaimHeaders.ClaimToken, job.ClaimToken!.Value.ToString());
         request.Headers.Add(WorkerLeaseHeaders.LeaseToken, job.LeaseToken!.Value.ToString());
         request.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,

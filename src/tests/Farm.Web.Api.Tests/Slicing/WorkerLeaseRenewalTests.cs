@@ -226,7 +226,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
     }
 
     /// <summary>
-    /// Asserts the four-header worker mutation contract: each header present exactly once, with the
+    /// Asserts the five-header worker mutation contract: each header present exactly once, with the
     /// expected value.
     /// </summary>
     /// <param name="request">The captured outgoing request.</param>
@@ -243,6 +243,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
     {
         AssertSingleHeaderValue(request, WorkerLeaseHeaders.WorkerKey, apiKey);
         AssertSingleHeaderValue(request, WorkerLeaseHeaders.WorkerId, serviceId.ToString());
+        AssertSingleHeaderValue(request, WorkerClaimHeaders.ClaimToken, leaseToken.ToString());
         AssertSingleHeaderValue(request, WorkerLeaseHeaders.LeaseToken, leaseToken.ToString());
         AssertSingleHeaderValue(
             request,
@@ -342,6 +343,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
                 Id = jobId,
                 ModelFileName = "model.stl",
                 EngineType = SlicerEngineType.OrcaSlicer,
+                ClaimToken = leaseToken,
                 LeaseToken = leaseToken,
                 LeaseFence = leaseFence,
             };

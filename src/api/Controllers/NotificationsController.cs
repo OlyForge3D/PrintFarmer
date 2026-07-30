@@ -1,12 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Notifications.NativePush;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -21,6 +29,25 @@ namespace Farm.Web.Api.Controllers;
 public class NotificationsController(INotificationService notificationService) : ControllerBase
 {
     /// <summary>
+    /// Cached JSON options used by <see cref="GetPreferencesCapabilities"/>
+    /// to round-trip enum values through the SAME converter production
+    /// controllers use. Production JSON is configured in
+    /// <c>ControllerStartup</c> with <c>new JsonStringEnumConverter()</c> —
+    /// no naming policy override — so enum members serialize as their raw
+    /// PascalCase names (<c>"JobStarted"</c>, <c>"FilamentRunout"</c>, …).
+    /// Hicks v3 blocker 5: this endpoint MUST publish the exact tokens the
+    /// preference DTO round-trips, otherwise clients that echo the
+    /// capabilities list will submit unrecognised values.
+    /// </summary>
+    private static readonly System.Text.Json.JsonSerializerOptions CapabilitiesJsonOptions = new()
+    {
+        Converters =
+        {
+            new System.Text.Json.Serialization.JsonStringEnumConverter(),
+        },
+    };
+
+    /// <summary>
     /// Get all notifications for the current user with optional filtering and pagination
     /// </summary>
     /// <param name="limit">Maximum number of notifications to return (default: 50)</param>
@@ -28,24 +55,25 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>List of user notifications</returns>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IEnumerable<NotificationDto>>> GetNotificationsAsync(
         [FromQuery] int? limit = 50,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-            IEnumerable<Notification> notifications = await notificationService.GetUserNotificationsAsync(userId, limit, cancellationToken);
-            return Ok(notifications);
-        }
-        catch (InvalidOperationException)
+        // Hicks #4: no broad catch. TryGetUserIdFromClaims maps a missing /
+        // malformed claim to a typed 401 without using exceptions for
+        // control flow — the previous InvalidOperationException filter
+        // could silently swallow unrelated InvalidOperationException from
+        // the service and misreport as 401. Every other exception (OCE,
+        // provider errors) propagates unchanged so the framework's
+        // sanitized problem-details middleware handles them.
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+
+        IEnumerable<Notification> notifications = await notificationService.GetUserNotificationsAsync(userId, limit, cancellationToken);
+        return Ok(notifications);
     }
 
     /// <summary>
@@ -55,23 +83,17 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>List of unread notifications</returns>
     [HttpGet("unread")]
     [ProducesResponseType(typeof(IEnumerable<NotificationDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<IEnumerable<NotificationDto>>> GetUnreadNotificationsAsync(
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-            IEnumerable<Notification> notifications = await notificationService.GetUserUnreadNotificationsAsync(userId, cancellationToken);
-            return Ok(notifications);
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+
+        IEnumerable<Notification> notifications = await notificationService.GetUserUnreadNotificationsAsync(userId, cancellationToken);
+        return Ok(notifications);
     }
 
     /// <summary>
@@ -81,23 +103,17 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>Count of unread notifications</returns>
     [HttpGet("unread/count")]
     [ProducesResponseType(typeof(UnreadCountResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<UnreadCountResponse>> GetUnreadCountAsync(
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-            int count = await notificationService.GetUnreadCountAsync(userId, cancellationToken);
-            return Ok(new UnreadCountResponse { UnreadCount = count });
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+
+        int count = await notificationService.GetUnreadCountAsync(userId, cancellationToken);
+        return Ok(new UnreadCountResponse { UnreadCount = count });
     }
 
     /// <summary>
@@ -113,15 +129,11 @@ public class NotificationsController(INotificationService notificationService) :
         string notificationId,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await notificationService.MarkAsReadAsync(notificationId, cancellationToken);
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        // Hicks #4: no broad catch — routing binder already enforces {guid}
+        // shape, and any downstream provider exception surfaces through the
+        // standard problem-details middleware with no raw provider message.
+        await notificationService.MarkAsReadAsync(notificationId, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -132,24 +144,20 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>Success response</returns>
     [HttpPut("mark-read-batch")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> MarkMultipleAsReadAsync(
         [FromBody] MarkMultipleAsReadRequest request,
         CancellationToken cancellationToken = default)
     {
-        try
+        if (request?.NotificationIds == null || request.NotificationIds.Count == 0)
         {
-            if (request?.NotificationIds == null || request.NotificationIds.Count == 0)
-            {
-                return BadRequest(new { error = "NotificationIds list cannot be empty" });
-            }
+            return BadRequest(new { error = "NotificationIds list cannot be empty" });
+        }
 
-            await notificationService.MarkMultipleAsReadAsync(request.NotificationIds, cancellationToken);
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        // Hicks #4: no broad catch — only the shape validation above maps to
+        // 400. Provider errors flow to middleware.
+        await notificationService.MarkMultipleAsReadAsync(request.NotificationIds, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -165,15 +173,11 @@ public class NotificationsController(INotificationService notificationService) :
         string notificationId,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await notificationService.DeleteAsync(notificationId, cancellationToken);
-            return NoContent();
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
+        // Hicks #4: no broad catch. Route binder enforces {guid} and provider
+        // errors flow to problem-details middleware without leaking raw
+        // messages.
+        await notificationService.DeleteAsync(notificationId, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -183,76 +187,106 @@ public class NotificationsController(INotificationService notificationService) :
     /// <returns>User notification preferences</returns>
     [HttpGet("preferences")]
     [ProducesResponseType(typeof(NotificationPreferencesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<NotificationPreferencesDto>> GetPreferencesAsync(
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-
-            NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
-            NotificationPreferences effective = preferences ?? CreateDefaultPreferences(userId);
-            return Ok(ToDto(effective));
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
+
+        NotificationPreferences? preferences = await notificationService.GetPreferencesAsync(userId, cancellationToken);
+        NotificationPreferences effective = preferences ?? CreateDefaultPreferences(userId);
+        return Ok(ToDto(effective));
+    }
+
+    /// <summary>
+    /// Get the notification-preference contract capabilities this server supports.
+    /// Issue #708: allows browser/mobile clients (e.g. #716 preference matrix UI)
+    /// to enumerate the exact set of <see cref="NotificationPreferenceEventType"/>
+    /// tokens the server will accept in a preference update, so old clients on a
+    /// new server (or new clients on an old server) can degrade cleanly.
+    ///
+    /// A client that receives HTTP 404 from this endpoint MUST treat the server as
+    /// legacy-only (i.e. only <c>jobStarted / jobCompleted / jobFailed / jobPaused</c>
+    /// are supported) and MUST NOT send any extended tokens in a preference update.
+    /// </summary>
+    [HttpGet("preferences/capabilities")]
+    [ProducesResponseType(typeof(NotificationPreferencesCapabilitiesDto), StatusCodes.Status200OK)]
+    [AllowAnonymous]
+    public ActionResult<NotificationPreferencesCapabilitiesDto> GetPreferencesCapabilities()
+    {
+        // Enum members are converted to the same PascalCase value tokens the
+        // JsonStringEnumConverter emits everywhere else in the DTO, via the
+        // pre-built CapabilitiesJsonOptions singleton, so the two paths stay
+        // in lock-step even if the naming policy ever changes.
+        NotificationPreferenceEventType[] values = Enum
+            .GetValues<NotificationPreferenceEventType>();
+
+        List<string> supported = new(values.Length);
+        foreach (NotificationPreferenceEventType v in values)
         {
-            return BadRequest(new { error = ex.Message });
+            string token = System.Text.Json.JsonSerializer.Serialize(v, CapabilitiesJsonOptions).Trim('"');
+            supported.Add(token);
         }
+
+        return Ok(new NotificationPreferencesCapabilitiesDto
+        {
+            SupportedEventTypes = supported,
+        });
     }
 
     /// <summary>
     /// Update notification preferences for the current user.
     /// </summary>
     /// <param name="request">The preferences to update.</param>
+    /// <param name="dbContext">DB context accepted for backward-compatible parameter binding; the notification service owns the tracked read/write.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated notification preferences.</returns>
     [HttpPut("preferences")]
     [ProducesResponseType(typeof(NotificationPreferencesDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<NotificationPreferencesDto>> UpdatePreferencesAsync(
         [FromBody] UpdateNotificationPreferencesRequest request,
+        [FromServices] AppDbContext dbContext,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
+        _ = dbContext;
 
-            if (request == null)
-            {
-                return BadRequest(new { error = "Request body cannot be empty" });
-            }
-
-            var preferences = new NotificationPreferences
-            {
-                UserId = userId,
-                EnableEmailNotifications = request.EnableEmailNotifications,
-                EnablePushNotifications = request.EnablePushNotifications,
-                EnableInAppNotifications = request.EnableInAppNotifications,
-                EnableTelegramNotifications = request.EnableTelegramNotifications,
-                NotifyOnCompletion = request.NotifyOnCompletion,
-                NotifyOnFailure = request.NotifyOnFailure,
-                NotifyOnStart = request.NotifyOnStart,
-                NotifyOnPause = request.NotifyOnPause,
-                Frequency = request.Frequency,
-                RetentionDays = request.RetentionDays ?? 30
-            };
-
-            ApplyEventChannelPreferences(preferences, request);
-            await notificationService.UpdatePreferencesAsync(userId, preferences, cancellationToken);
-            return Ok(ToDto(preferences));
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
+
+        if (request == null)
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = "Request body cannot be empty" });
         }
+
+        // Issue #708 H3-v6 (Vasquez v6 B3): matrix application is now
+        // service-owned patch semantics. The controller builds a patch
+        // object (nullable scalars + optional row list) and hands it to the
+        // service, which applies it over the single tracked persisted
+        // row. Omitted rows are preserved.
+        //
+        // Hicks #4: no broad catch. `ArgumentOutOfRangeException` from
+        // MapEventType is the only typed validation we still map to 400 —
+        // provider errors, retry-exhaustion, and OCE flow through the
+        // sanitized problem-details middleware unchanged.
+        NotificationPreferencesUpdate patch;
+        try
+        {
+            patch = BuildPreferencesPatch(request);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return BadRequest(new { error = "Unknown notification preference event type." });
+        }
+
+        NotificationPreferences persisted = await notificationService.UpdatePreferencesAsync(userId, patch, cancellationToken);
+        return Ok(ToDto(persisted));
     }
 
     /// <summary>
@@ -280,35 +314,28 @@ public class NotificationsController(INotificationService notificationService) :
     [HttpPost("push-subscription")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> SubscribePushAsync(
         [FromBody] PushSubscriptionRequest request,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-
-            if (string.IsNullOrWhiteSpace(request?.Endpoint))
-            {
-                return BadRequest(new { error = "Endpoint is required" });
-            }
-
-            if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
-            {
-                return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
-            }
-
-            await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys.P256dh, request.Keys.Auth, cancellationToken);
-            return NoContent();
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
+
+        if (string.IsNullOrWhiteSpace(request?.Endpoint))
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = "Endpoint is required" });
         }
+
+        if (string.IsNullOrWhiteSpace(request.Keys?.P256dh) || string.IsNullOrWhiteSpace(request.Keys?.Auth))
+        {
+            return BadRequest(new { error = "Subscription keys p256dh and auth are required" });
+        }
+
+        await notificationService.SavePushSubscriptionAsync(userId, request.Endpoint, request.Keys.P256dh, request.Keys.Auth, cancellationToken);
+        return NoContent();
     }
 
     /// <summary>
@@ -319,31 +346,340 @@ public class NotificationsController(INotificationService notificationService) :
     [HttpDelete("push-subscription")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> UnsubscribePushAsync(
         [FromBody] UnsubscribePushRequest request,
         CancellationToken cancellationToken = default)
     {
-        try
-        {
-            Guid userId = GetUserIdFromClaims();
-
-            if (string.IsNullOrWhiteSpace(request?.Endpoint))
-            {
-                return BadRequest(new { error = "Endpoint is required" });
-            }
-
-            await notificationService.DeletePushSubscriptionAsync(userId, request.Endpoint, cancellationToken);
-            return NoContent();
-        }
-        catch (InvalidOperationException)
+        if (!TryGetUserIdFromClaims(out Guid userId))
         {
             return Unauthorized(new { error = "User ID not found in claims" });
         }
-        catch (Exception ex)
+
+        if (string.IsNullOrWhiteSpace(request?.Endpoint))
         {
-            return BadRequest(new { error = ex.Message });
+            return BadRequest(new { error = "Endpoint is required" });
         }
+
+        await notificationService.DeletePushSubscriptionAsync(userId, request.Endpoint, cancellationToken);
+        return NoContent();
     }
+
+    /// <summary>
+    /// Registers or updates the native-push device token for the current installation.
+    /// Feature-gated by <c>OperatorFeatures.NativePushEnabled</c>; when disabled, returns
+    /// 404 <c>ProblemDetails</c> with <c>code=featureDisabled</c> per issue #708 / #725.
+    /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
+    /// </summary>
+    [HttpPost("device-tokens")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RegisterDeviceTokenAsync(
+        [FromBody] DeviceTokenRegistrationRequest request,
+        [FromServices] IOperatorFeatureGate operatorFeatures,
+        [FromServices] IDeviceTokenRepository deviceTokens,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operatorFeatures);
+        ArgumentNullException.ThrowIfNull(deviceTokens);
+
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+        {
+            return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
+        }
+
+        if (!TryGetUserIdFromClaims(out Guid userId))
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+
+        if (request is null
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId)
+            || !NativePushRegistrationContract.IsCanonicalApnsToken(request.Token)
+            || !NativePushRegistrationContract.IsCanonicalPlatform(request.Platform)
+            || !NativePushRegistrationContract.IsCanonicalEnvironment(request.Environment)
+            || !NativePushRegistrationContract.IsCanonicalAppBundleId(request.AppBundleId))
+        {
+            return BadRequest(new { error = "Native-push registration values are not in canonical form." });
+        }
+
+        _ = await deviceTokens.UpsertAsync(
+            userId,
+            request.InstallationId,
+            request.Token,
+            request.Platform,
+            request.Environment,
+            request.AppBundleId,
+            cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Unregisters the native-push device token for a specific installation.
+    /// Feature-gated by <c>OperatorFeatures.NativePushEnabled</c>.
+    /// </summary>
+    [HttpDelete("device-tokens")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> UnregisterDeviceTokenAsync(
+        [FromBody] DeviceTokenUnregistrationRequest request,
+        [FromServices] IOperatorFeatureGate operatorFeatures,
+        [FromServices] IDeviceTokenRepository deviceTokens,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operatorFeatures);
+        ArgumentNullException.ThrowIfNull(deviceTokens);
+
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+        {
+            return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
+        }
+
+        if (!TryGetUserIdFromClaims(out Guid userId))
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+
+        if (request is null
+            || !NativePushRegistrationContract.IsCanonicalInstallationId(request.InstallationId))
+        {
+            return BadRequest(new { error = "installationId must be in canonical form" });
+        }
+
+        _ = await deviceTokens.DeleteByInstallationAsync(userId, request.InstallationId, cancellationToken);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Returns the fixed catalog of native-push attention categories and the actions each
+    /// declares. This is the stable contract mobile clients (and #716) consume so that
+    /// category registration on the device matches server payloads exactly.
+    /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
+    /// </summary>
+    [HttpGet("attention-categories")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AttentionCategoryCatalogDto), StatusCodes.Status200OK)]
+    public ActionResult<AttentionCategoryCatalogDto> GetAttentionCategories()
+    {
+        AttentionKind[] kinds =
+        {
+            AttentionKind.Failure,
+            AttentionKind.Offline,
+            AttentionKind.Maintenance,
+            AttentionKind.Harvest,
+            AttentionKind.Runout,
+        };
+        List<AttentionCategoryDto> items = new(kinds.Length);
+        foreach (AttentionKind kind in kinds)
+        {
+            string? category = AttentionPushCategories.CategoryFor(kind);
+            if (category is null)
+            {
+                continue;
+            }
+
+            items.Add(new AttentionCategoryDto
+            {
+                Kind = kind,
+                Category = category,
+                Actions = AttentionPushCategories.ActionsFor(kind).ToList(),
+                DeepLinkScheme = AttentionDeepLinks.Scheme,
+            });
+        }
+
+        return Ok(new AttentionCategoryCatalogDto { Categories = items });
+    }
+
+    /// <summary>
+    /// Returns the current user's per-category native-push opt-in map. Missing keys mean
+    /// enabled — new categories light up automatically.
+    /// </summary>
+    [HttpGet("attention-push-preferences")]
+    [ProducesResponseType(typeof(AttentionPushPreferencesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<AttentionPushPreferencesDto>> GetAttentionPushPreferencesAsync(
+        [FromServices] IOperatorFeatureGate operatorFeatures,
+        [FromServices] AppDbContext dbContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operatorFeatures);
+        ArgumentNullException.ThrowIfNull(dbContext);
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+        {
+            return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
+        }
+
+        if (!TryGetUserIdFromClaims(out Guid userId))
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+
+        NotificationPreferences? prefs = await dbContext.NotificationPreferences
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId, cancellationToken);
+        AttentionPushCategoryPreferences catPrefs = AttentionPushCategoryPreferences.FromJson(prefs?.AttentionPushCategoryPreferencesJson);
+        return Ok(new AttentionPushPreferencesDto { Categories = catPrefs.Categories });
+    }
+
+    /// <summary>
+    /// Updates the current user's per-category native-push opt-in map. Absent keys are
+    /// left untouched; explicit <c>true</c> / <c>false</c> updates the setting.
+    /// </summary>
+    [HttpPut("attention-push-preferences")]
+    [ProducesResponseType(typeof(AttentionPushPreferencesDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AttentionPushPreferencesDto>> UpdateAttentionPushPreferencesAsync(
+        [FromBody] AttentionPushPreferencesDto request,
+        [FromServices] IOperatorFeatureGate operatorFeatures,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(operatorFeatures);
+        if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
+        {
+            return OperatorFeatureProblemDetails.NotFound(operatorFeatures, OperatorFeature.NativePush);
+        }
+
+        // Hicks #4 + Bishop v6 hardening: attention category keys are
+        // attacker-controlled free-form strings persisted verbatim into a
+        // JSON column. The controller enforces per-request shape (cardinality
+        // + key length) BEFORE delegating to the service, so a malformed
+        // request never enters a database transaction.
+        //
+        // The cumulative caps (total keys persisted and total UTF-8 byte
+        // budget) are enforced by the service INSIDE its serializable
+        // transaction so a concurrent burst of one-key requests cannot slip
+        // past the per-request bound.
+        //
+        // Legitimate clients are never rejected: any real AttentionKind key
+        // is well under 64 characters and the finalized #708 category
+        // universe has fewer than 20 kinds.
+        if (request?.Categories is { Count: > 0 } incoming)
+        {
+            if (incoming.Count > MaxAttentionCategoryKeysPerRequest)
+            {
+                return Problem(
+                    detail: $"At most {MaxAttentionCategoryKeysPerRequest} attention category keys may be updated per request.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category batch too large");
+            }
+
+            int requestBytes = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(request).Length;
+            if (requestBytes > MaxAttentionCategoryJsonBytes)
+            {
+                return Problem(
+                    detail: $"Serialized attention category request must not exceed {MaxAttentionCategoryJsonBytes} UTF-8 bytes.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category batch too large");
+            }
+
+            foreach (string key in incoming.Keys)
+            {
+                if (string.IsNullOrEmpty(key))
+                {
+                    return Problem(
+                        detail: "Attention category keys must not be empty.",
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Invalid attention category key");
+                }
+
+                if (key.Length > MaxAttentionCategoryKeyLength)
+                {
+                    return Problem(
+                        detail: $"Attention category keys must be {MaxAttentionCategoryKeyLength} characters or fewer.",
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Invalid attention category key");
+                }
+            }
+        }
+
+        if (!TryGetUserIdFromClaims(out Guid userId))
+        {
+            return Unauthorized(new { error = "User ID not found in claims" });
+        }
+
+        var updates = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (request?.Categories is not null)
+        {
+            // System.Text.Json preserves object-property order in Dictionary.
+            // Assign through the indexer so raw case variants collapse
+            // deterministically with ordered last-write-wins rather than the
+            // comparer-changing Dictionary constructor throwing a 500.
+            foreach (KeyValuePair<string, bool> update in request.Categories)
+            {
+                updates[update.Key] = update.Value;
+            }
+        }
+
+        // Hicks #6: the merge/read/save is service-owned so a serializable
+        // transaction + retry can guarantee concurrent first-creates converge
+        // on a single row and concurrent disjoint-key updates both persist.
+        // The controller no longer touches DbContext for this endpoint.
+        AttentionCategoryUpdateResult result = await notificationService
+            .UpdateAttentionCategoryPreferencesAsync(userId, updates, cancellationToken);
+
+        if (result.Status == AttentionCategoryUpdateStatus.Rejected)
+        {
+            return result.Rejection switch
+            {
+                AttentionCategoryUpdateRejection.CumulativeKeyLimitExceeded => Problem(
+                    detail: $"At most {MaxAttentionCategoryKeysPersisted} attention category keys may be persisted per user.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category storage full"),
+                AttentionCategoryUpdateRejection.JsonByteLimitExceeded => Problem(
+                    detail: $"Persisted attention category JSON would exceed {MaxAttentionCategoryJsonBytes} bytes.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category storage full"),
+                _ => Problem(
+                    detail: "Attention category update was rejected.",
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Attention category rejected"),
+            };
+        }
+
+        return Ok(new AttentionPushPreferencesDto
+        {
+            Categories = result.Categories is null
+                ? new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, bool>(result.Categories, StringComparer.OrdinalIgnoreCase),
+        });
+    }
+
+    /// <summary>
+    /// Maximum number of attention-category keys accepted in a single
+    /// <c>PUT /api/notifications/attention-push-preferences</c> request. The
+    /// bound protects against unbounded attacker-controlled growth of the
+    /// persisted JSON column while comfortably exceeding the count of real
+    /// AttentionKind categories in the finalized #708 contract (Bishop v6).
+    /// </summary>
+    private const int MaxAttentionCategoryKeysPerRequest = AttentionPushCategoryPreferences.MaxKeysPerRequest;
+
+    /// <summary>
+    /// Maximum length in characters of each attention-category key in a single
+    /// update request. Real AttentionKind enum names are well under this bound.
+    /// </summary>
+    private const int MaxAttentionCategoryKeyLength = AttentionPushCategoryPreferences.MaxKeyLength;
+
+    /// <summary>
+    /// Cumulative bound (Hicks #4): the maximum number of category keys that
+    /// may be persisted for a single user across the entire lifetime of that
+    /// user's preferences row. Enforced against the PROSPECTIVE merged map
+    /// so repeated single-key requests cannot slip past the per-request
+    /// bound. Exceeding the bound returns 400 and leaves persisted JSON
+    /// byte-for-byte unchanged.
+    /// </summary>
+    private const int MaxAttentionCategoryKeysPersisted = AttentionPushCategoryPreferences.MaxPersistedKeys;
+
+    /// <summary>
+    /// Cumulative bound (Hicks #4): the maximum UTF-8 encoded byte size of
+    /// the merged category JSON payload persisted to the row. Enforced
+    /// against the PROSPECTIVE merged map so a burst of long-valued keys
+    /// cannot silently blow past reasonable row storage.
+    /// </summary>
+    private const int MaxAttentionCategoryJsonBytes = AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes;
 
     private static NotificationPreferencesDto ToDto(NotificationPreferences preferences)
     {
@@ -366,12 +702,12 @@ public class NotificationsController(INotificationService notificationService) :
 
     private static NotificationPreferences CreateDefaultPreferences(Guid userId)
     {
-        var defaults = new NotificationPreferences
-        {
-            UserId = userId
-        };
-        ApplyEventChannelPreferences(defaults, new UpdateNotificationPreferencesRequest());
-        return defaults;
+        // Hicks #3 canonical defaults: the fresh-GET response and the
+        // service's new-user persistence MUST produce the same nine-row
+        // shape so a first partial modern PUT preserves omitted rows exactly
+        // as the client just observed them on GET. Delegates to the shared
+        // helper so any future default change lands in one place.
+        return Farm.Infrastructure.Services.Notifications.NotificationPreferencesDefaults.Create(userId);
     }
 
     private static List<NotificationEventChannelPreferenceDto> BuildEventChannelPreferences(NotificationPreferences preferences)
@@ -409,126 +745,144 @@ public class NotificationsController(INotificationService notificationService) :
                 Email = preferences.EmailOnJobPaused,
                 Push = preferences.PushOnJobPaused,
                 Telegram = preferences.TelegramOnJobPaused
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.PrinterFailure,
+                InApp = preferences.InAppOnPrinterFailure,
+                Email = preferences.EmailOnPrinterFailure,
+                Push = preferences.PushOnPrinterFailure,
+                Telegram = preferences.TelegramOnPrinterFailure
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.FilamentRunout,
+                InApp = preferences.InAppOnFilamentRunout,
+                Email = preferences.EmailOnFilamentRunout,
+                Push = preferences.PushOnFilamentRunout,
+                Telegram = preferences.TelegramOnFilamentRunout
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.HarvestReady,
+                InApp = preferences.InAppOnHarvestReady,
+                Email = preferences.EmailOnHarvestReady,
+                Push = preferences.PushOnHarvestReady,
+                Telegram = preferences.TelegramOnHarvestReady
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.MaintenanceDue,
+                InApp = preferences.InAppOnMaintenanceDue,
+                Email = preferences.EmailOnMaintenanceDue,
+                Push = preferences.PushOnMaintenanceDue,
+                Telegram = preferences.TelegramOnMaintenanceDue
+            },
+            new()
+            {
+                EventType = NotificationPreferenceEventType.PrinterOffline,
+                InApp = preferences.InAppOnPrinterOffline,
+                Email = preferences.EmailOnPrinterOffline,
+                Push = preferences.PushOnPrinterOffline,
+                Telegram = preferences.TelegramOnPrinterOffline
             }
         };
     }
 
-    private static void ApplyEventChannelPreferences(NotificationPreferences preferences, UpdateNotificationPreferencesRequest request)
+    private static NotificationPreferencesUpdate BuildPreferencesPatch(UpdateNotificationPreferencesRequest request)
     {
         List<NotificationEventChannelPreferenceDto>? matrix = request.EventChannelPreferences;
-        if (matrix is null || matrix.Count == 0)
-        {
-            preferences.InAppOnJobStarted = request.EnableInAppNotifications && request.NotifyOnStart;
-            preferences.InAppOnJobCompleted = request.EnableInAppNotifications && request.NotifyOnCompletion;
-            preferences.InAppOnJobFailed = true;
-            preferences.InAppOnJobPaused = request.EnableInAppNotifications && request.NotifyOnPause;
-            preferences.EmailOnJobStarted = request.EnableEmailNotifications && request.NotifyOnStart;
-            preferences.EmailOnJobCompleted = request.EnableEmailNotifications && request.NotifyOnCompletion;
-            preferences.EmailOnJobFailed = request.EnableEmailNotifications && request.NotifyOnFailure;
-            preferences.EmailOnJobPaused = request.EnableEmailNotifications && request.NotifyOnPause;
-            preferences.PushOnJobStarted = request.EnablePushNotifications && request.NotifyOnStart;
-            preferences.PushOnJobCompleted = request.EnablePushNotifications && request.NotifyOnCompletion;
-            preferences.PushOnJobFailed = request.EnablePushNotifications && request.NotifyOnFailure;
-            preferences.PushOnJobPaused = request.EnablePushNotifications && request.NotifyOnPause;
-            preferences.TelegramOnJobStarted = request.EnableTelegramNotifications && request.NotifyOnStart;
-            preferences.TelegramOnJobCompleted = request.EnableTelegramNotifications && request.NotifyOnCompletion;
-            preferences.TelegramOnJobFailed = request.EnableTelegramNotifications && request.NotifyOnFailure;
-            preferences.TelegramOnJobPaused = request.EnableTelegramNotifications && request.NotifyOnPause;
-            return;
-        }
+        IReadOnlyList<NotificationPreferencesRowPatch>? rows = null;
 
-        preferences.InAppOnJobStarted = false;
-        preferences.InAppOnJobCompleted = true;
-        preferences.InAppOnJobFailed = true;
-        preferences.InAppOnJobPaused = true;
-        preferences.EmailOnJobStarted = false;
-        preferences.EmailOnJobCompleted = true;
-        preferences.EmailOnJobFailed = true;
-        preferences.EmailOnJobPaused = true;
-        preferences.PushOnJobStarted = false;
-        preferences.PushOnJobCompleted = true;
-        preferences.PushOnJobFailed = true;
-        preferences.PushOnJobPaused = true;
-        preferences.TelegramOnJobStarted = false;
-        preferences.TelegramOnJobCompleted = false;
-        preferences.TelegramOnJobFailed = false;
-        preferences.TelegramOnJobPaused = false;
-
-        foreach (NotificationEventChannelPreferenceDto item in matrix)
+        // Hicks #3: preserve a non-null but empty modern matrix as an empty
+        // modern patch (rows = []) so the service takes the modern branch and
+        // treats every row as "omitted" — omitted rows are preserved. Prior
+        // behaviour collapsed an empty matrix to null which forced the legacy
+        // branch, deriving job rows from top-level scalars and silently
+        // reshaping any modern client that submitted an empty matrix to
+        // re-affirm "no per-event opinion".
+        if (matrix is not null)
         {
-            if (item is null)
+            // Vasquez v6 B3: translate the wire matrix rows into service-layer
+            // patch rows without ever synthesizing rows for events the caller
+            // did not send. Null entries in the list are ignored — this
+            // matches the previous controller behavior and avoids reflecting
+            // JSON parser artifacts into the service.
+            var buffered = new List<NotificationPreferencesRowPatch>(matrix.Count);
+            foreach (NotificationEventChannelPreferenceDto? item in matrix)
             {
-                continue;
+                if (item is null)
+                {
+                    continue;
+                }
+
+                buffered.Add(new NotificationPreferencesRowPatch(
+                    MapEventType(item.EventType),
+                    item.InApp,
+                    item.Email,
+                    item.Push,
+                    item.Telegram));
             }
 
-            switch (item.EventType)
-            {
-                case NotificationPreferenceEventType.JobStarted:
-                    preferences.InAppOnJobStarted = item.InApp;
-                    preferences.EmailOnJobStarted = item.Email;
-                    preferences.PushOnJobStarted = item.Push;
-                    preferences.TelegramOnJobStarted = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobCompleted:
-                    preferences.InAppOnJobCompleted = item.InApp;
-                    preferences.EmailOnJobCompleted = item.Email;
-                    preferences.PushOnJobCompleted = item.Push;
-                    preferences.TelegramOnJobCompleted = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobFailed:
-                    preferences.InAppOnJobFailed = true;
-                    preferences.EmailOnJobFailed = item.Email;
-                    preferences.PushOnJobFailed = item.Push;
-                    preferences.TelegramOnJobFailed = item.Telegram;
-                    break;
-                case NotificationPreferenceEventType.JobPaused:
-                    preferences.InAppOnJobPaused = item.InApp;
-                    preferences.EmailOnJobPaused = item.Email;
-                    preferences.PushOnJobPaused = item.Push;
-                    preferences.TelegramOnJobPaused = item.Telegram;
-                    break;
-            }
+            rows = buffered;
         }
 
-        preferences.EnableInAppNotifications =
-            preferences.InAppOnJobStarted
-            || preferences.InAppOnJobCompleted
-            || preferences.InAppOnJobFailed
-            || preferences.InAppOnJobPaused;
-        preferences.EnableEmailNotifications =
-            preferences.EmailOnJobStarted
-            || preferences.EmailOnJobCompleted
-            || preferences.EmailOnJobFailed
-            || preferences.EmailOnJobPaused;
-        preferences.EnablePushNotifications =
-            preferences.PushOnJobStarted
-            || preferences.PushOnJobCompleted
-            || preferences.PushOnJobFailed
-            || preferences.PushOnJobPaused;
-        preferences.EnableTelegramNotifications =
-            preferences.TelegramOnJobStarted
-            || preferences.TelegramOnJobCompleted
-            || preferences.TelegramOnJobFailed
-            || preferences.TelegramOnJobPaused;
+        return new NotificationPreferencesUpdate(
+            request.EnableEmailNotifications,
+            request.EnablePushNotifications,
+            request.EnableInAppNotifications,
+            request.EnableTelegramNotifications,
+            request.NotifyOnStart,
+            request.NotifyOnCompletion,
+            request.NotifyOnFailure,
+            request.NotifyOnPause,
+            request.Frequency,
+            request.RetentionDays,
+            rows);
+    }
 
-        preferences.NotifyOnStart = preferences.InAppOnJobStarted || preferences.EmailOnJobStarted || preferences.PushOnJobStarted || preferences.TelegramOnJobStarted;
-        preferences.NotifyOnCompletion = preferences.InAppOnJobCompleted || preferences.EmailOnJobCompleted || preferences.PushOnJobCompleted || preferences.TelegramOnJobCompleted;
-        preferences.NotifyOnFailure = true;
-        preferences.NotifyOnPause = preferences.InAppOnJobPaused || preferences.EmailOnJobPaused || preferences.PushOnJobPaused || preferences.TelegramOnJobPaused;
+    private static NotificationPreferenceEvent MapEventType(NotificationPreferenceEventType wireEvent)
+    {
+        // Kept as an explicit switch so the compiler catches any future wire
+        // enum addition — an unmapped value must not silently degrade into a
+        // default row.
+        return wireEvent switch
+        {
+            NotificationPreferenceEventType.JobStarted => NotificationPreferenceEvent.JobStarted,
+            NotificationPreferenceEventType.JobCompleted => NotificationPreferenceEvent.JobCompleted,
+            NotificationPreferenceEventType.JobFailed => NotificationPreferenceEvent.JobFailed,
+            NotificationPreferenceEventType.JobPaused => NotificationPreferenceEvent.JobPaused,
+            NotificationPreferenceEventType.PrinterFailure => NotificationPreferenceEvent.PrinterFailure,
+            NotificationPreferenceEventType.FilamentRunout => NotificationPreferenceEvent.FilamentRunout,
+            NotificationPreferenceEventType.HarvestReady => NotificationPreferenceEvent.HarvestReady,
+            NotificationPreferenceEventType.MaintenanceDue => NotificationPreferenceEvent.MaintenanceDue,
+            NotificationPreferenceEventType.PrinterOffline => NotificationPreferenceEvent.PrinterOffline,
+            _ => throw new ArgumentOutOfRangeException(nameof(wireEvent), wireEvent, "Unknown notification preference event type."),
+        };
     }
 
     /// <summary>
-    /// Helper: Extract user ID from JWT claims
+    /// Hicks #4: non-throwing extraction of the request's user identifier
+    /// from the ambient JWT claims. Returns <see langword="false"/> and the
+    /// default guid when the request carries no usable identity claim so the
+    /// action can respond with a typed 401 without catching
+    /// InvalidOperationException from a helper that used exceptions for
+    /// control flow. The throwing legacy helper was removed once all call
+    /// sites migrated.
     /// </summary>
-    private Guid GetUserIdFromClaims()
+    private bool TryGetUserIdFromClaims(out Guid userId)
     {
         string? userIdString = User?.FindFirst("sub")?.Value ??
                User?.FindFirst("http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value ??
                User?.FindFirst("oid")?.Value;
 
-        return string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out Guid userId)
-            ? throw new InvalidOperationException("User ID not found or invalid in claims")
-            : userId;
+        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out userId))
+        {
+            userId = Guid.Empty;
+            return false;
+        }
+
+        return true;
     }
 }
 
@@ -542,41 +896,46 @@ public class MarkMultipleAsReadRequest
 }
 
 /// <summary>
-/// Request model for updating notification preferences
+/// Request model for updating notification preferences.
+/// Hicks #5: every scalar field is nullable so a bare <c>{}</c> PUT does not
+/// clobber persisted values with binder defaults. <c>null</c> means "omitted;
+/// preserve the persisted value"; a value means "apply this value verbatim".
+/// The service layer <see cref="NotificationPreferencesUpdate"/> carries the
+/// same nullable semantics end-to-end.
 /// </summary>
 public class UpdateNotificationPreferencesRequest
 {
-    /// <summary>Enable email notifications</summary>
-    public bool EnableEmailNotifications { get; set; } = true;
+    /// <summary>Nullable legacy master opt-in for the email channel. <c>null</c> = omitted (preserve persisted).</summary>
+    public bool? EnableEmailNotifications { get; set; }
 
-    /// <summary>Enable push notifications</summary>
-    public bool EnablePushNotifications { get; set; } = true;
+    /// <summary>Nullable legacy master opt-in for the push channel. <c>null</c> = omitted.</summary>
+    public bool? EnablePushNotifications { get; set; }
 
-    /// <summary>Enable in-app notifications</summary>
-    public bool EnableInAppNotifications { get; set; } = true;
+    /// <summary>Nullable legacy master opt-in for the in-app channel. <c>null</c> = omitted.</summary>
+    public bool? EnableInAppNotifications { get; set; }
 
-    /// <summary>Enable Telegram notifications</summary>
-    public bool EnableTelegramNotifications { get; set; } = false;
+    /// <summary>Nullable legacy master opt-in for the telegram channel. <c>null</c> = omitted.</summary>
+    public bool? EnableTelegramNotifications { get; set; }
 
-    /// <summary>Notify on job completion</summary>
-    public bool NotifyOnCompletion { get; set; } = true;
+    /// <summary>Nullable legacy per-event toggle for job completion. <c>null</c> = omitted.</summary>
+    public bool? NotifyOnCompletion { get; set; }
 
-    /// <summary>Notify on job failure</summary>
-    public bool NotifyOnFailure { get; set; } = true;
+    /// <summary>Nullable legacy per-event toggle for job failure. <c>null</c> = omitted.</summary>
+    public bool? NotifyOnFailure { get; set; }
 
-    /// <summary>Notify on job start</summary>
-    public bool NotifyOnStart { get; set; } = false;
+    /// <summary>Nullable legacy per-event toggle for job start. <c>null</c> = omitted.</summary>
+    public bool? NotifyOnStart { get; set; }
 
-    /// <summary>Notify on job pause</summary>
-    public bool NotifyOnPause { get; set; } = true;
+    /// <summary>Nullable legacy per-event toggle for job pause. <c>null</c> = omitted.</summary>
+    public bool? NotifyOnPause { get; set; }
 
-    /// <summary>Notification frequency (RealTime, Hourly, Daily, Weekly, Never)</summary>
-    public NotificationFrequency Frequency { get; set; } = NotificationFrequency.RealTime;
+    /// <summary>Nullable notification frequency. <c>null</c> = omitted.</summary>
+    public NotificationFrequency? Frequency { get; set; }
 
-    /// <summary>Retention days for notification history</summary>
-    public int? RetentionDays { get; set; } = 30;
+    /// <summary>Nullable retention window in days. <c>null</c> = omitted.</summary>
+    public int? RetentionDays { get; set; }
 
-    /// <summary>Per-event by channel notification matrix.</summary>
+    /// <summary>Per-event by channel notification matrix; <c>null</c> triggers legacy branch.</summary>
     public List<NotificationEventChannelPreferenceDto>? EventChannelPreferences { get; set; }
 }
 
@@ -672,7 +1031,19 @@ public enum NotificationPreferenceEventType
     JobStarted,
     JobCompleted,
     JobFailed,
-    JobPaused
+    JobPaused,
+
+    // Issue #708 shared preference contract — attention-row events extend the
+    // existing four job events without changing the DTO shape or JSON casing.
+    // The DTO uses PascalCase JSON casing for enum tokens (the JsonStringEnumConverter
+    // in production has no naming policy override), so tokens serialize as:
+    // "PrinterFailure", "FilamentRunout", "HarvestReady", "MaintenanceDue",
+    // "PrinterOffline". A separate contract test locks the exact tokens.
+    PrinterFailure,
+    FilamentRunout,
+    HarvestReady,
+    MaintenanceDue,
+    PrinterOffline
 }
 
 public class NotificationEventChannelPreferenceDto
@@ -686,6 +1057,21 @@ public class NotificationEventChannelPreferenceDto
     public bool Push { get; set; }
 
     public bool Telegram { get; set; }
+}
+
+/// <summary>
+/// Server capabilities for the notification preference contract (issue #708).
+/// Clients read this before rendering the preference matrix so they can adapt
+/// to old servers that only support the four legacy job event types.
+/// </summary>
+public class NotificationPreferencesCapabilitiesDto
+{
+    /// <summary>
+    /// Ordered set of <see cref="NotificationPreferenceEventType"/> tokens the
+    /// server accepts, using the same PascalCase enum-value tokens the update
+    /// endpoint accepts (e.g. <c>"JobStarted"</c>, <c>"PrinterFailure"</c>).
+    /// </summary>
+    public List<string> SupportedEventTypes { get; set; } = new();
 }
 
 /// <summary>
@@ -728,4 +1114,98 @@ public class UnsubscribePushRequest
 {
     /// <summary>The push subscription endpoint URL to remove</summary>
     public string Endpoint { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Request model for registering / updating a native-push device token (iOS APNs today).
+/// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
+/// </summary>
+public class DeviceTokenRegistrationRequest
+{
+    /// <summary>Per-server installation identifier supplied by the mobile app.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
+    public string InstallationId { get; set; } = string.Empty;
+
+    /// <summary>Provider-issued device token (APNs hex).</summary>
+    [Required]
+    [StringLength(
+        NativePushRegistrationContract.TokenMaxLength,
+        MinimumLength = NativePushRegistrationContract.TokenMinLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.ApnsTokenPattern,
+        ErrorMessage = "Token must be a byte-aligned lowercase hexadecimal APNs token.")]
+    public string Token { get; set; } = string.Empty;
+
+    /// <summary>Client platform: <c>ios</c> today; <c>android</c> reserved.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.PlatformMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.PlatformPattern)]
+    public string Platform { get; set; } = "ios";
+
+    /// <summary>APNs environment: <c>development</c> or <c>production</c>.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.EnvironmentMaxLength)]
+    [RegularExpression(NativePushRegistrationContract.EnvironmentPattern)]
+    public string Environment { get; set; } = "production";
+
+    /// <summary>App bundle identifier reported by the mobile app (diagnostics only).</summary>
+    [StringLength(NativePushRegistrationContract.AppBundleIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.AppBundleIdPattern,
+        ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
+    public string? AppBundleId { get; set; }
+}
+
+/// <summary>Request model for unregistering a native-push device token.</summary>
+public class DeviceTokenUnregistrationRequest
+{
+    /// <summary>Per-server installation identifier to remove.</summary>
+    [Required]
+    [StringLength(NativePushRegistrationContract.InstallationIdMaxLength)]
+    [RegularExpression(
+        NativePushRegistrationContract.InstallationIdPattern,
+        ErrorMessage = "InstallationId must use canonical ASCII identifier syntax.")]
+    public string InstallationId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Catalog entry describing an attention-push category. Serialized as camelCase; the
+/// <see cref="Kind"/> field is emitted using the shared <see cref="AttentionKind"/>
+/// converter so the wire value stays in sync with the SignalR contract (issue #707/#716).
+/// </summary>
+public class AttentionCategoryDto
+{
+    /// <summary>The <see cref="AttentionKind"/> the category corresponds to.</summary>
+    public AttentionKind Kind { get; set; }
+
+    /// <summary>APNs category identifier the mobile app registers at launch.</summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>Ordered action ids the category advertises.</summary>
+    public List<string> Actions { get; set; } = new();
+
+    /// <summary>Deep-link scheme the mobile app is expected to handle.</summary>
+    public string DeepLinkScheme { get; set; } = "printfarmer";
+}
+
+/// <summary>Response body of <c>GET /api/notifications/attention-categories</c>.</summary>
+public class AttentionCategoryCatalogDto
+{
+    /// <summary>Ordered list of category entries.</summary>
+    public List<AttentionCategoryDto> Categories { get; set; } = new();
+}
+
+/// <summary>
+/// Per-user opt-in map for native-push attention categories. Keys are the camelCase
+/// <see cref="AttentionKind"/> wire values (<c>failure</c>, <c>offline</c>,
+/// <c>maintenance</c>, <c>harvest</c>, <c>runout</c>). Missing keys mean enabled.
+/// </summary>
+public class AttentionPushPreferencesDto
+{
+    /// <summary>Category → enabled map. Missing keys default to enabled.</summary>
+    public Dictionary<string, bool> Categories { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }

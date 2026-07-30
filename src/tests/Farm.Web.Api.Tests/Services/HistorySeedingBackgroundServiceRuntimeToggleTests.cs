@@ -24,8 +24,13 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
             ActiveSyncInitialDelaySeconds = 3600,
         });
 
+        // Signaled deterministically by the mock callback the moment the service invokes it,
+        // so the test reacts to the real event instead of guessing how long the service's
+        // internal disabled-settings poll (a fixed 5s cadence) takes to notice the toggle.
+        TaskCompletionSource<bool> seedInvoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<IPrintJobManagementService> jobService = new();
         jobService.Setup(s => s.SeedHistoryFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => seedInvoked.TrySetResult(true))
             .Returns(Task.CompletedTask);
 
         using ServiceProvider provider = BuildServiceProvider(jobService.Object);
@@ -38,7 +43,12 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
 
         await service.StartAsync(CancellationToken.None);
 
-        await Task.Delay(TimeSpan.FromSeconds(6));
+        // The service is disabled and stays disabled until we toggle it below, so no wall-clock
+        // race is involved here: this window only needs to be long enough to let the initial
+        // disabled iteration run, not to detect a change.
+        Task settleWindow = Task.Delay(TimeSpan.FromSeconds(2));
+        Task firstSignal = await Task.WhenAny(seedInvoked.Task, settleWindow);
+        Assert.NotSame(seedInvoked.Task, firstSignal);
         jobService.Verify(s => s.SeedHistoryFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
 
         monitor.Update(new HistorySeedingSettings
@@ -51,7 +61,12 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
             ActiveSyncInitialDelaySeconds = 3600,
         });
 
-        await Task.Delay(TimeSpan.FromSeconds(6));
+        // Wait for the actual resumed-seeding signal rather than a fixed delay: the service's
+        // disabled-settings poll runs on a 5s cadence unaligned with the test clock, so a fixed
+        // sleep here left only ~1s of margin under CI scheduler jitter. The safety timeout below
+        // is only an upper-bound guard against a genuine hang, not a guess at the exact latency.
+        Task resumedSignal = await Task.WhenAny(seedInvoked.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.Same(seedInvoked.Task, resumedSignal);
 
         jobService.Verify(s => s.SeedHistoryFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
 
@@ -75,8 +90,12 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
             ActiveSyncInitialDelaySeconds = 0,
         });
 
+        // Same deterministic-signal rationale as the history-seeding test above: this service's
+        // disabled-settings poll also runs on a fixed 5s cadence unaligned with the test clock.
+        TaskCompletionSource<bool> syncInvoked = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Mock<IPrintJobManagementService> jobService = new();
         jobService.Setup(s => s.SyncActiveExternalJobsFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()))
+            .Callback(() => syncInvoked.TrySetResult(true))
             .Returns(Task.CompletedTask);
 
         using ServiceProvider provider = BuildServiceProvider(jobService.Object);
@@ -89,7 +108,9 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
 
         await service.StartAsync(CancellationToken.None);
 
-        await Task.Delay(TimeSpan.FromSeconds(6));
+        Task settleWindow = Task.Delay(TimeSpan.FromSeconds(2));
+        Task firstSignal = await Task.WhenAny(syncInvoked.Task, settleWindow);
+        Assert.NotSame(syncInvoked.Task, firstSignal);
         jobService.Verify(s => s.SyncActiveExternalJobsFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()), Times.Never);
 
         monitor.Update(new HistorySeedingSettings
@@ -102,7 +123,8 @@ public class HistorySeedingBackgroundServiceRuntimeToggleTests
             ActiveSyncInitialDelaySeconds = 0,
         });
 
-        await Task.Delay(TimeSpan.FromSeconds(6));
+        Task resumedSignal = await Task.WhenAny(syncInvoked.Task, Task.Delay(TimeSpan.FromSeconds(30)));
+        Assert.Same(syncInvoked.Task, resumedSignal);
 
         jobService.Verify(s => s.SyncActiveExternalJobsFromPrintersAsync(It.IsAny<List<string>?>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce);
 

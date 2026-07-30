@@ -15,11 +15,13 @@ namespace Farm.Web.Api.Controllers;
 public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
     DiscoveryHeartbeatMonitorService discoveryMonitor,
-    ILogger<UnifiedSettingsController> logger) : ControllerBase
+    ILogger<UnifiedSettingsController> logger,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
 
     // Keys for settings types that own their own secret fields (encrypted tokens, etc.) and must
     // not be exposed or mutated through the generic settings surface.  Each such type has a
@@ -92,8 +94,12 @@ public class UnifiedSettingsController(
     /// <returns>Result of save operation, including validation errors if any.</returns>
     [Authorize(Roles = "farm_admin")]
     [HttpPost]
-    public ActionResult Update([FromBody] Dictionary<string, object> settingsSections)
+    public async Task<ActionResult> UpdateAsync([FromBody] Dictionary<string, object> settingsSections)
     {
+        // Track whether SpoolCoverage settings changed so we can broadcast a
+        // coverage-invalidation event after all sections persist (#709 item 5).
+        bool spoolCoverageChanged = false;
+
         // Tracks the section being processed so the outer catch can attribute a memberless
         // ValidationException (thrown from Save via reflection) to a real section key rather than
         // an empty string. See the outer catch and BuildValidationErrorResponse for the shape.
@@ -169,6 +175,12 @@ public class UnifiedSettingsController(
                                     _logger.LogDebug("Settings POST: Invoking Save for section '{Key}'", key);
                                     _ = genericSaveMethod.Invoke(_modularSettingsService, new object[] { typedSettings });
                                     _logger.LogDebug("Settings POST: Save completed for section '{Key}'", key);
+
+                                    // #709 item 5: coverage thresholds changed.
+                                    if (string.Equals(key, SpoolCoverageSettings.SectionName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        spoolCoverageChanged = true;
+                                    }
                                 }
                                 catch (System.Reflection.TargetInvocationException tie)
                                 {
@@ -198,6 +210,13 @@ public class UnifiedSettingsController(
 
             // No need to reload - Save() already updated the in-memory _settings dictionary
             // and cleared the change tracker to ensure fresh data on next query
+            if (spoolCoverageChanged && _coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastFleetChangedAsync(
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.ThresholdChanged,
+                    HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             return Ok();
         }
         catch (Exception ex)
@@ -398,6 +417,16 @@ public class UnifiedSettingsController(
         {
             // Use the modular settings service to save the individual settings
             await UpdateAppSettingsPropertyAsync(keyName, settingsValues);
+
+            // #709 item 5: coverage thresholds changed → fleet-wide invalidation.
+            if (_coverageBroadcaster is not null
+                && string.Equals(keyName, SpoolCoverageSettings.SectionName, StringComparison.OrdinalIgnoreCase))
+            {
+                await _coverageBroadcaster.BroadcastFleetChangedAsync(
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.ThresholdChanged,
+                    HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             return Ok();
         }
         catch (ValidationException vex)

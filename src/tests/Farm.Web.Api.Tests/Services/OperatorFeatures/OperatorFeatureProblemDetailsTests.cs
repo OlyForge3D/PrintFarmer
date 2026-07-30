@@ -123,7 +123,7 @@ public class OperatorFeatureProblemDetailsTests
     public void OperatorFeatureSettings_JsonPropertyNames_MatchGateFlagNames()
     {
         Mock<IAppSettingsRepository> repo = new();
-        repo.Setup(r => r.GetAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
+        repo.Setup(r => r.GetReadOnlyAsync(OperatorFeatureSettings.SectionName, It.IsAny<CancellationToken>()))
             .ReturnsAsync((AppSettingsEntity?)null);
         IConfiguration config = new ConfigurationBuilder().AddInMemoryCollection([]).Build();
         IOperatorFeatureGate gate = new OperatorFeatureGate(

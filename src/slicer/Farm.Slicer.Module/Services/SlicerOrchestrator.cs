@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Dtos;
+﻿using Farm.Slicer.Module.Contracts.Libraries;
+using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Messaging;
 using Farm.Slicer.Module.Models;
 using Microsoft.Extensions.Logging;
@@ -12,11 +13,13 @@ public class SlicerOrchestrator(
     ISlicerJobQueue jobQueue,
     ISlicerFileStorage fileStorage,
     ISlicerProgressNotifier progressNotifier,
+    ISlicerRegistry slicerRegistry,
     ILogger<SlicerOrchestrator> logger) : ISlicerOrchestrator
 {
     private readonly ISlicerJobQueue _jobQueue = jobQueue ?? throw new ArgumentNullException(nameof(jobQueue));
     private readonly ISlicerFileStorage _fileStorage = fileStorage ?? throw new ArgumentNullException(nameof(fileStorage));
     private readonly ISlicerProgressNotifier _progressNotifier = progressNotifier ?? throw new ArgumentNullException(nameof(progressNotifier));
+    private readonly ISlicerRegistry _slicerRegistry = slicerRegistry ?? throw new ArgumentNullException(nameof(slicerRegistry));
     private readonly ILogger<SlicerOrchestrator> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly Dictionary<SlicerEngineType, EngineMetadata> _engineCatalog = BuildStaticCatalog();
 
@@ -229,11 +232,12 @@ public class SlicerOrchestrator(
                 engineInfos.Add(new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
-                    Version = meta.Version,
+                    Version = ResolveEngineDisplayVersion(meta),
                     IsHealthy = true,
                     ActiveWorkers = queueStats.ActiveWorkers,
                     QueueDepth = queueStats.QueuedJobs,
                     SupportedExtensions = meta.SupportedExtensions,
+                    AvailableVersions = GetAvailableVersionsFromRegistry(meta),
                     EstimatedWaitTime = queueStats.EstimatedWaitTime
                 });
             }
@@ -246,11 +250,12 @@ public class SlicerOrchestrator(
                 engineInfos.Add(new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
-                    Version = meta.Version,
+                    Version = ResolveEngineDisplayVersion(meta),
                     IsHealthy = false,
                     ActiveWorkers = 0,
                     QueueDepth = 0,
                     SupportedExtensions = meta.SupportedExtensions,
+                    AvailableVersions = GetAvailableVersionsFromRegistry(meta),
                     EstimatedWaitTime = null
                 });
             }
@@ -360,11 +365,12 @@ public class SlicerOrchestrator(
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
-                    Version = meta.Version,
+                    Version = ResolveEngineDisplayVersion(meta),
                     IsHealthy = true,
                     ActiveWorkers = queueStats.ActiveWorkers,
                     QueueDepth = queueStats.QueuedJobs,
                     SupportedExtensions = meta.SupportedExtensions,
+                    AvailableVersions = GetAvailableVersionsFromRegistry(meta),
                     EstimatedWaitTime = queueStats.EstimatedWaitTime
                 };
                 health.TotalActiveJobs += queueStats.ActiveWorkers;
@@ -377,11 +383,12 @@ public class SlicerOrchestrator(
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
-                    Version = meta.Version,
+                    Version = ResolveEngineDisplayVersion(meta),
                     IsHealthy = false,
                     ActiveWorkers = 0,
                     QueueDepth = 0,
                     SupportedExtensions = meta.SupportedExtensions,
+                    AvailableVersions = GetAvailableVersionsFromRegistry(meta),
                     EstimatedWaitTime = null
                 };
                 health.IsHealthy = false; // degraded
@@ -487,15 +494,37 @@ public class SlicerOrchestrator(
     private static Dictionary<SlicerEngineType, EngineMetadata> BuildStaticCatalog() =>
         new()
         {
-            // The advertised OrcaSlicer version must match the pinned upstream build the workers run.
+            // Registry metadata overrides this fallback when a matching library is loaded.
             [SlicerEngineType.OrcaSlicer] = new EngineMetadata(
                 SlicerEngineType.OrcaSlicer,
                 Farm.Infrastructure.PrinterCalibration.CalibrationContractConstants.SlicerVersion,
+                "OrcaSlicer",
                 s_orcaSupportedExtensions),
-            [SlicerEngineType.PrusaSlicer] = new EngineMetadata(SlicerEngineType.PrusaSlicer, "2.8.0", s_prusaSupportedExtensions)
+            [SlicerEngineType.PrusaSlicer] = new EngineMetadata(SlicerEngineType.PrusaSlicer, "2.8.0", "PrusaSlicer", s_prusaSupportedExtensions)
         };
 
-    private sealed record EngineMetadata(SlicerEngineType EngineType, string Version, IReadOnlyList<string> SupportedExtensions);
+    private sealed record EngineMetadata(SlicerEngineType EngineType, string Version, string RegistryName, IReadOnlyList<string> SupportedExtensions);
+
+    private string[] GetAvailableVersionsFromRegistry(EngineMetadata meta)
+    {
+        try
+        {
+            return _slicerRegistry.GetLibraries(meta.RegistryName)
+                .Select(l => l.SlicerVersion)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to enumerate versions for engine {Engine}", meta.RegistryName);
+            return Array.Empty<string>();
+        }
+    }
+
+    private string ResolveEngineDisplayVersion(EngineMetadata meta)
+    {
+        string[] versions = GetAvailableVersionsFromRegistry(meta);
+        return versions.Length > 0 ? versions[0] : meta.Version;
+    }
 
     private static string GetSlicerWorkerUrl(SlicerEngineType engineType)
     {

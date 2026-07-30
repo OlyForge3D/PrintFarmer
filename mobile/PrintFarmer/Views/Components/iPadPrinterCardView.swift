@@ -6,6 +6,14 @@ import SwiftUI
 struct iPadPrinterCardView: View {
     let printer: Printer
     var isPendingReady: Bool = false
+    /// Optional filament coverage snapshot for the badge overlay
+    /// (#778). Hidden entirely when status is `.unknown` per the
+    /// frozen contract.
+    var coverage: PrinterFilamentCoverage? = nil
+    /// True when rendering a cached, unconfirmed snapshot in the cold-offline
+    /// shell. Visuals stay identical to a live card (online parity); staleness is
+    /// conveyed via the accessibility hint and the shell's stale banner only.
+    var isReadOnly: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,6 +41,17 @@ struct iPadPrinterCardView: View {
                 if isPendingReady {
                     bedClearBanner
                 }
+
+                // Filament coverage badge (#778) — hidden for .unknown.
+                if let coverage, coverage.status != .unknown {
+                    HStack {
+                        FilamentCoverageBadge(
+                            status: coverage.status,
+                            earliestPredictedRunoutAt: coverage.earliestPredictedRunoutAt
+                        )
+                        Spacer()
+                    }
+                }
             }
             .padding(14)
         }
@@ -42,13 +61,15 @@ struct iPadPrinterCardView: View {
                 .strokeBorder(statusAccentColor.opacity(0.4), lineWidth: 1.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        // Do NOT combine children: the filament-coverage badge must remain an
+        // independently queryable descendant (see FilamentCoverageUITests).
+        .accessibilityHint(isReadOnly ? "Read-only cached status. Reconnect to control this printer." : "")
     }
 
     // MARK: - Header
 
     private var headerSection: some View {
-        let _ = print("DEBUG headerBaseColor: printer=\(printer.name), state='\(printer.state ?? "nil")', isOnline=\(printer.isOnline)")
-        return HStack {
+        HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(printer.name)
                     .font(.headline)

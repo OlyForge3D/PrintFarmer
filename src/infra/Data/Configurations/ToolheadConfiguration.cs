@@ -74,6 +74,9 @@ public class ToolheadConfiguration : IEntityTypeConfiguration<Toolhead>
         // Indexes
         builder.HasIndex(t => t.PrinterId);
         builder.HasIndex(t => t.Index);
+        builder.HasIndex(t => new { t.PrinterId, t.Index })
+            .IsUnique()
+            .HasDatabaseName("UX_Toolheads_PrinterId_Index");
         builder.HasIndex(t => t.CurrentSpoolId);
     }
 }

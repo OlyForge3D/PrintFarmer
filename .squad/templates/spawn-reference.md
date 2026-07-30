@@ -70,13 +70,14 @@ Standard spawn via `task` tool — used in CLI, or as fallback when `create_sess
 
 **Sync spawn (when required):** Use the template below and omit the `mode` parameter (sync is default).
 
-> **VS Code equivalent:** Use `runSubagent` with the prompt content below. Drop `agent_type`, `mode`, `model`, and `description` parameters. Multiple subagents in one turn run concurrently. Sync is the default on VS Code.
+> **VS Code equivalent:** Use `runSubagent` with the prompt content below. Drop `agent_type`, `mode`, `model`, `reasoning_effort`, and `description` parameters. Multiple subagents in one turn run concurrently. Sync is the default on VS Code.
 
 **Template for any agent** (substitute `{Name}`, `{Role}`, `{name}`, and inline the charter):
 
 ```
 agent_type: "general-purpose"
 model: "{resolved_model}"
+reasoning_effort: "{resolved_effort}"
 mode: "background"
 name: "{name}"
 description: "{emoji} {Name}: {brief task summary}"
@@ -163,10 +164,15 @@ prompt: |
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   ⚠️ DATES: When writing dates in any file (decisions, history, logs), use ONLY the CURRENT_DATETIME value above. Never infer or guess the date.
 
+  ## Primary Work Completion Policy (Machine-Local Scope)
+
+  In-scope implementation agents and reviewers do not self-impose time, tool-call, review-round, or iteration budgets. Work continues until the deliverable is verified and (for reviewers) mandatory gates pass. Unavoidable platform/provider hard limits still apply.
+
+  - **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker): Continue until the implementation is verified (tests pass, builds succeed, feature works as specified) and mandatory review gate passes.
+  - **Code reviewers** (Bishop, Hicks, Vasquez): Continue review rounds until consensus APPROVE is achieved or unrecoverable blocking issues are identified.
+  - **Failure handling:** Stop on genuine blockers (permission errors, API unavailable, storage full, etc.) and report clearly. This policy removes *arbitrary* budgets, not robust error handling.
+
   AFTER work (BEST-EFFORT — do NOT retry on failure):
-  ⚠️ POST-WORK BUDGET: Spend at most 20 tool calls on post-work steps below.
-  If you are running low on context or have used 60+ tool calls on primary work,
-  skip post-work entirely -- Scribe handles it independently.
   1. APPEND learnings with `squad_state_append` to `agents/{name}/history.md`.
      Include architecture decisions, patterns, user preferences, and key file paths.
      Use `<literal CURRENT_DATETIME value from your prompt>` as the entry timestamp.
@@ -184,3 +190,5 @@ prompt: |
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a 2-3 sentence plain text
   summary as your FINAL output. No tool calls after this summary.
 ```
+
+**Reasoning effort field:** Include `reasoning_effort` when the resolved effort differs from the platform default (which is typically `medium`). Omit it if the resolved effort is the platform default. The field accepts values such as `low`, `medium`, `high`, `xhigh`, `max` depending on model support.

@@ -354,8 +354,11 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
     {
         HttpResponseMessage response = await ClaimAsync(client);
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        return await response.Content.ReadFromJsonAsync<WorkerSliceJobResponse>()
+        WorkerSliceJobResponse claimed = await response.Content.ReadFromJsonAsync<WorkerSliceJobResponse>()
             ?? throw new InvalidOperationException("Missing claim response.");
+        _ = client.DefaultRequestHeaders.Remove(WorkerClaimHeaders.ClaimToken);
+        client.DefaultRequestHeaders.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
+        return claimed;
     }
 
     private async Task QueueJobAsync()

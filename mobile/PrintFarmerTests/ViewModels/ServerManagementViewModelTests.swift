@@ -6,18 +6,18 @@ final class ServerManagementViewModelTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var suiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         suiteName = "ServerManagementViewModelTests-\(UUID().uuidString)"
         userDefaults = UserDefaults(suiteName: suiteName)!
         userDefaults.removePersistentDomain(forName: suiteName)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         userDefaults.removePersistentDomain(forName: suiteName)
         userDefaults = nil
         suiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testAddServerNormalizesURLChecksHealthAndPersistsStatus() async throws {
@@ -200,14 +200,15 @@ final class ServerManagementViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.healthState, .notChecked)
     }
 
-    func testDeleteActiveServerHandsOffToAnotherServer() throws {
+    func testDeleteActiveServerHandsOffToAnotherServer() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let first = try registry.add(displayName: "One", baseURL: URL(string: "https://one.example.com")!)
         let second = try registry.add(displayName: "Two", baseURL: URL(string: "https://two.example.com")!)
         try registry.setActive(id: first.id)
         let viewModel = ServerManagementViewModel(registry: registry, healthChecker: StubHealthChecker(result: .reachable()))
 
-        viewModel.delete(first)
+        await viewModel.delete(first)
 
         XCTAssertEqual(registry.servers.map(\.id), [second.id])
         XCTAssertEqual(registry.activeServerID, second.id)
@@ -216,6 +217,7 @@ final class ServerManagementViewModelTests: XCTestCase {
 
     func testDeletingOnlyServerWhileAuthenticatedClearsSessionAndRegistry() async throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
         let server = try registry.add(displayName: "Only", baseURL: URL(string: "https://only.example.com")!)
         let serverViewModel = ServerManagementViewModel(
             registry: registry,
@@ -240,7 +242,7 @@ final class ServerManagementViewModelTests: XCTestCase {
             permissions: []
         )
 
-        serverViewModel.delete(server)
+        await serverViewModel.delete(server)
         await authViewModel.logoutIfServerRegistryUnavailable(registry)
 
         XCTAssertTrue(registry.servers.isEmpty)

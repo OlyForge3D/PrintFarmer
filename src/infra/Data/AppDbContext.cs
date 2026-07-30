@@ -94,6 +94,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public DbSet<UserTask> UserTasks => Set<UserTask>();
 
+    public DbSet<MutationCounter> MutationCounters => Set<MutationCounter>();
+
     // Print approvals (pending Upload+Print approvals)
     public DbSet<PrintApproval> PrintApprovals => Set<PrintApproval>();
 
@@ -106,6 +108,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
 
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+
+    // Native push device tokens (iOS APNs today; Android/FCM reserved) — see #708.
+    public DbSet<DeviceToken> DeviceTokens => Set<DeviceToken>();
 
     // User Management & Authentication
     public DbSet<User> Users => Set<User>();
@@ -233,6 +238,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     // Per-user settings (theme, locale, slicer defaults, etc.)
     public DbSet<UserSettings> UserSettings => Set<UserSettings>();
 
+    // Printed-part inventory (see #714). Distinct from MaintenanceComponents which
+    // are consumed by printer maintenance, not produced by prints.
+    public DbSet<PartInventory> PartInventories => Set<PartInventory>();
+
+    public DbSet<Bin> Bins => Set<Bin>();
+
+    public DbSet<PartInventoryAdjustment> PartInventoryAdjustments => Set<PartInventoryAdjustment>();
+
+    public DbSet<PartOutputMapping> PartOutputMappings => Set<PartOutputMapping>();
+
+    public DbSet<PrintJobPartOutputSnapshot> PrintJobPartOutputSnapshots => Set<PrintJobPartOutputSnapshot>();
+
+    public DbSet<PartHarvestOutputSnapshot> PartHarvestOutputSnapshots => Set<PartHarvestOutputSnapshot>();
+
+    // Per-user snoozes for the unified attention feed (issue #707).
+    public DbSet<AttentionSnooze> AttentionSnoozes => Set<AttentionSnooze>();
+
+    // Durable audit of guided filament-swap material-mismatch overrides (issue #710).
+    public DbSet<FilamentSwapOverride> FilamentSwapOverrides => Set<FilamentSwapOverride>();
+
+    // Persistent Idempotency-Key records for offline write-replay (issue #715).
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+
+    // Ordered same-material fallback chains over existing Toolheads (issue #711, F6).
+    public DbSet<FilamentFallbackGroup> FilamentFallbackGroups => Set<FilamentFallbackGroup>();
+
+    public DbSet<FilamentFallbackGroupMember> FilamentFallbackGroupMembers => Set<FilamentFallbackGroupMember>();
+
     // Calibration is an AppDbContext bounded context. Soft identifiers are used for
     // separately deployed slicer and storage services; no cross-context FK is modeled.
     public DbSet<CalibrationProject> CalibrationProjects => Set<CalibrationProject>();
@@ -318,7 +351,85 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
         ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
+        ConfigureDeviceTokenProviderSpecificIndexes(modelBuilder);
         ConfigureQueueDispatchIndexes(modelBuilder);
+
+        // Fix E/I (issue #713): the shift-plan compiler dedupe index. A UNIQUE
+        // filtered index on (SourceKind, SourceId) restricted to OPEN rows
+        // (SourceId IS NOT NULL AND Status IN (Pending=0, InProgress=1)) guarantees
+        // at most one open compiler task per source even if two compiler ticks race,
+        // and covers GetOpenBySourceAsync's (SourceKind, SourceId, Status) lookup.
+        // The filter SQL is provider-specific, so it must be declared here rather
+        // than in UserTaskConfiguration. Providers that don't support filtered
+        // indexes fall back to a plain non-unique index (best-effort dedupe).
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<UserTask> sourceDedupeIndex =
+            modelBuilder.Entity<UserTask>()
+                .HasIndex(t => new { t.SourceKind, t.SourceId })
+                .HasDatabaseName("IX_UserTasks_SourceKind_SourceId");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = sourceDedupeIndex.IsUnique().HasFilter("\"SourceId\" IS NOT NULL AND \"Status\" IN (0, 1)");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = sourceDedupeIndex.IsUnique().HasFilter("[SourceId] IS NOT NULL AND [Status] IN (0, 1)");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
+
+        // Profile-import tasks are globally aggregated by printer model; UserTask has no
+        // per-task UserId. This filtered unique index prevents concurrent recovery of the
+        // same open PrinterModel ProfileImport task while retaining terminal task history
+        // and leaving legacy/generic ProfileImport rows unaffected.
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<UserTask> profileImportRecoveryIndex =
+            modelBuilder.Entity<UserTask>()
+                .HasIndex(t => new { t.TaskType, t.EntityType, t.EntityId })
+                .HasDatabaseName("IX_UserTasks_OpenProfileImport");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = profileImportRecoveryIndex.IsUnique().HasFilter(
+                    "\"TaskType\" = 1 AND \"EntityType\" = 'PrinterModel' AND \"Status\" IN (0, 1)");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = profileImportRecoveryIndex.IsUnique().HasFilter(
+                    "[TaskType] = 1 AND [EntityType] = 'PrinterModel' AND [Status] IN (0, 1)");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
+
+        // Finding H7 (issue #711): one completion log per resolved maintenance alert. A UNIQUE
+        // filtered index on ResolvedAlertId restricted to non-null values makes a duplicate
+        // completion insert impossible even under a concurrent retry race, while leaving legacy
+        // logs (ResolvedAlertId IS NULL) unconstrained. The filter SQL is provider-specific, so it
+        // must be declared here rather than in MaintenanceLogConfiguration. Providers without
+        // filtered-index support fall back to a plain non-unique index (best-effort).
+        Microsoft.EntityFrameworkCore.Metadata.Builders.IndexBuilder<MaintenanceLog> resolvedAlertIndex =
+            modelBuilder.Entity<MaintenanceLog>()
+                .HasIndex(l => l.ResolvedAlertId)
+                .HasDatabaseName("IX_MaintenanceLogs_ResolvedAlertId");
+
+        switch (Database.ProviderName)
+        {
+            case "Npgsql.EntityFrameworkCore.PostgreSQL":
+            case "Microsoft.EntityFrameworkCore.Sqlite":
+                _ = resolvedAlertIndex.IsUnique().HasFilter("\"ResolvedAlertId\" IS NOT NULL");
+                break;
+            case "Microsoft.EntityFrameworkCore.SqlServer":
+                _ = resolvedAlertIndex.IsUnique().HasFilter("[ResolvedAlertId] IS NOT NULL");
+                break;
+            default:
+                // MySQL / InMemory / others: no filtered-index support — leave non-unique.
+                break;
+        }
 
         // SQLite does not support DateTimeOffset natively in ORDER BY / WHERE clauses.
         // Apply a transparent UTC DateTime conversion so all DateTimeOffset properties
@@ -333,6 +444,77 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 .HasConversion(
                     v => v.UtcDateTime,
                     v => new DateTimeOffset(v, TimeSpan.Zero));
+        }
+
+        // Fix (#715): SQL Server's default catalog collation
+        // (SQL_Latin1_General_CP1_CI_AS) is a LINGUISTIC collation whose equivalence
+        // classes diverge from BOTH ordinal .NET comparison AND Unicode NFKC folding.
+        // It is case-INSENSITIVE ("ABC" == "abc"), width-INSENSITIVE (fullwidth ＡＢＣ ==
+        // ABC), Kana-type-INSENSITIVE (Hiragana か U+304B == Katakana カ U+30AB), and
+        // folds assorted Latin phonetic letters onto their ASCII base (small-capital I
+        // U+026A == "i"; dotless ı U+0131 == "i"). PostgreSQL and SQLite compare these
+        // columns byte-exact (deterministic collation), so on SQL Server ALONE a value
+        // whose identity is DISTINCT to the application (ordinal, post-NFKC) can collapse
+        // onto the SAME physical row — double-applying a stock delta, or false-deduping a
+        // genuinely distinct operation, under a single Idempotency-Key.
+        //
+        // NFKC (Apone r5) plus the ordinal reserved-prefix guard align the app with SOME
+        // of those classes, but not all: NFKC does not fold Kana か/カ (Hicks r5 blocker 1)
+        // nor small-capital I U+026A (Hicks r5 blocker 2). Chasing each linguistic
+        // equivalence in application code is a losing game. Instead we converge at the
+        // storage layer: every client-controlled identity/idempotency column that backs a
+        // unique index is forced to a binary, culture-invariant, case-sensitive collation.
+        // Byte-exact SQL comparison then matches the app's ordinal comparison exactly,
+        // closing ALL SQL-vs-app mismatch classes at once. Kane r1 established this for
+        // IdempotencyRecords; r6 extends it to the printed-part identity columns. NFKC is
+        // retained as advisory defense-in-depth for any non-DB code path.
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
+        {
+            const string caseSensitiveCollation = "Latin1_General_100_BIN2";
+
+            // Native-push installation identifiers are opaque client identities. PostgreSQL
+            // and SQLite compare their ASCII wire form case-sensitively; pin SQL Server to
+            // the same bytewise semantic before applying the composite unique index.
+            _ = modelBuilder.Entity<DeviceToken>(entity =>
+                entity.Property(token => token.InstallationId).UseCollation(caseSensitiveCollation));
+
+            _ = modelBuilder.Entity<IdempotencyRecord>(entity =>
+            {
+                _ = entity.Property(r => r.UserId).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.RouteKey).UseCollation(caseSensitiveCollation);
+                _ = entity.Property(r => r.IdempotencyKey).UseCollation(caseSensitiveCollation);
+            });
+
+            // Printed-part SKU catalog: Sku is the client-owned identity behind the unique
+            // index IX_PartInventories_Sku (Hicks r5 blocker 1 — Hiragana vs Katakana SKUs
+            // resolving to one physical row under Kana-insensitive collation).
+            _ = modelBuilder.Entity<PartInventory>(entity =>
+                entity.Property(p => p.Sku).UseCollation(caseSensitiveCollation));
+
+            // Bin barcodes share the SKU normalization pathway (PartInventoryIdentity
+            // .NormalizeBinCode) and back the unique index IX_Bins_Code; identical class.
+            _ = modelBuilder.Entity<Bin>(entity =>
+                entity.Property(b => b.Code).UseCollation(caseSensitiveCollation));
+
+            // Natural idempotency backstop: (PartInventoryId, OperationKey) unique index.
+            // OperationKey is persisted client-verbatim (trimmed only — never NFKC-folded),
+            // so the store MUST compare it byte-exact (Hicks r5 blocker 2 — small-capital I
+            // U+026A false-deduping against a server-synthesized "idem:" key).
+            _ = modelBuilder.Entity<PartInventoryAdjustment>(entity =>
+                entity.Property(a => a.OperationKey).UseCollation(caseSensitiveCollation));
+
+            // Harvest idempotency key: the client-verbatim (trimmed) value behind the
+            // unique index IX_PrintJobs_HarvestOperationKey. This is the harvest-path twin
+            // of PartInventoryAdjustment.OperationKey and is exposed to the identical
+            // collation-mismatch class, so it converges to BIN2 alongside it.
+            _ = modelBuilder.Entity<PrintJob>(entity =>
+                entity.Property(pj => pj.HarvestOperationKey).UseCollation(caseSensitiveCollation));
+
+            // Canonical spool identities preserve path case. Keep SQL Server comparisons
+            // aligned with the application's ordinal source-identity semantics.
+            _ = modelBuilder.Entity<PrintJobToolheadUsage>(entity =>
+                entity.Property(usage => usage.SpoolSourceIdentity)
+                    .UseCollation(caseSensitiveCollation));
         }
 
         // For SQLite and PostgreSQL, row-version columns are application-managed (the DB does not
@@ -439,6 +621,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasFilter(filter);
     }
 
+    private void ConfigureDeviceTokenProviderSpecificIndexes(ModelBuilder modelBuilder)
+    {
+        string? filter = Database.ProviderName switch
+        {
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "\"IsActive\"",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "[IsActive] = 1",
+            "Microsoft.EntityFrameworkCore.Sqlite" => "\"IsActive\" = 1",
+            _ => null,
+        };
+        if (filter is null)
+        {
+            return;
+        }
+
+        _ = modelBuilder.Entity<DeviceToken>()
+            .HasIndex(token => token.InstallationId)
+            .IsUnique()
+            .HasFilter(filter)
+            .HasDatabaseName("IX_DeviceTokens_InstallationId");
+    }
+
     /// <summary>
     /// Configures provider-specific filtered unique indexes for calibration queue dispatch.
     /// The idempotency index only covers active (non-terminal) calibration jobs so that a
@@ -531,6 +734,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         EnsureCalibrationHistoryIsImmutable();
         EnsureCalibrationJobFieldsAreImmutable();
         EnsureCalibrationPrintersTracked();
@@ -544,6 +749,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     public override async Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
+        EnsurePartInventoryLedgerIsAppendOnly();
+        EnsureInventoryIdentitiesAreImmutable();
         EnsureCalibrationHistoryIsImmutable();
         EnsureCalibrationJobFieldsAreImmutable();
         await EnsureCalibrationPrintersTrackedAsync(cancellationToken);
@@ -841,6 +1048,48 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         entry.Entity.CalibrationConfigurationUpdatedAtUtc = changedAtUtc;
         entry.Property(p => p.CalibrationConfigurationUpdatedAtUtc).IsModified = true;
+    }
+
+    private void EnsurePartInventoryLedgerIsAppendOnly()
+    {
+        bool mutationRequested = ChangeTracker.Entries<PartInventoryAdjustment>()
+            .Any(entry => entry.State is EntityState.Modified or EntityState.Deleted);
+        if (mutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part inventory adjustments are immutable; append a correcting adjustment instead.");
+        }
+
+        bool outputSnapshotMutationRequested = ChangeTracker.Entries<PrintJobPartOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        bool harvestSnapshotMutationRequested = ChangeTracker.Entries<PartHarvestOutputSnapshot>()
+            .Any(entry => entry.State == EntityState.Modified
+                || (entry.State == EntityState.Deleted && !IsParentJobDeleted(entry.Entity.PrintJobId)));
+        if (outputSnapshotMutationRequested || harvestSnapshotMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part output snapshots are immutable; append a new harvest instead.");
+        }
+    }
+
+    private bool IsParentJobDeleted(Guid printJobId)
+        => ChangeTracker.Entries<PrintJob>()
+            .Any(entry => entry.Entity.Id == printJobId && entry.State == EntityState.Deleted);
+
+    private void EnsureInventoryIdentitiesAreImmutable()
+    {
+        bool skuMutationRequested = ChangeTracker.Entries<PartInventory>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(part => part.Sku).IsModified);
+        bool binCodeMutationRequested = ChangeTracker.Entries<Bin>()
+            .Any(entry => entry.State == EntityState.Modified
+                && entry.Property(bin => bin.Code).IsModified);
+        if (skuMutationRequested || binCodeMutationRequested)
+        {
+            throw new InvalidOperationException(
+                "Printed-part SKU and bin-code identities are immutable; create a new identity instead.");
+        }
     }
 
     private void PopulateCaseInsensitiveShadowColumns()

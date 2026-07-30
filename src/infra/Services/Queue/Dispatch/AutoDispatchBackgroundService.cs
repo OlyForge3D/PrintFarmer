@@ -13,8 +13,11 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
 /// <summary>
 /// Background service that reacts to printer-idle events and orchestrates
-/// automatic job dispatch. In-memory events are wake-up hints; a periodic database scan
-/// is the durable source of eligible work after dropped events or process restarts.
+/// automatic job dispatch. Event-driven via <see cref="IAutoDispatchTrigger"/>
+/// in-memory events act as wake-up hints; a periodic database scan is the durable
+/// source of eligible work after dropped events or process restarts. Selection and
+/// in-memory job claims are serialized while independent printer dispatches run under
+/// the configured async capacity limit.
 /// </summary>
 public sealed class AutoDispatchBackgroundService(
     AutoDispatchTrigger trigger,
@@ -22,58 +25,177 @@ public sealed class AutoDispatchBackgroundService(
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger) : BackgroundService
 {
+    private readonly SemaphoreSlim _selectionLock = new(1, 1);
+    private readonly ResizableDispatchSemaphore _dispatchCapacity = new();
+    private readonly object _workerSync = new();
+    private readonly object _claimSync = new();
+    private readonly HashSet<Task> _workers = [];
+    private readonly HashSet<Guid> _claimedJobs = [];
     private static readonly TimeSpan DurableScanInterval = TimeSpan.FromSeconds(30);
-    private int _inFlightCount;
+
+    /// <inheritdoc />
+    public override void Dispose()
+    {
+        _selectionLock.Dispose();
+        _dispatchCapacity.Dispose();
+        base.Dispose();
+    }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[AutoDispatch] Background service started");
 
-        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
-
-        while (!stoppingToken.IsCancellationRequested)
+        try
         {
-            DispatchTriggerEvent triggerEvent;
-            using (CancellationTokenSource readCts =
-                CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
-            {
-                Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
-                Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
-                Task completed = await Task.WhenAny(readTask, scanDelay);
+            await ReconcileStartupEligiblePrintersAsync(stoppingToken);
 
-                if (completed == scanDelay)
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                // In-memory events are wake-up hints; a periodic database scan is the durable
+                // source of eligible work after dropped events or process restarts (#900).
+                DispatchTriggerEvent triggerEvent;
+                using (CancellationTokenSource readCts =
+                    CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
                 {
-                    await readCts.CancelAsync();
+                    Task<DispatchTriggerEvent> readTask = trigger.ReadAsync(readCts.Token).AsTask();
+                    Task scanDelay = Task.Delay(DurableScanInterval, stoppingToken);
+                    Task completed = await Task.WhenAny(readTask, scanDelay);
+
+                    if (completed == scanDelay)
+                    {
+                        await readCts.CancelAsync();
+                        try
+                        {
+                            _ = await readTask;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Expected: the periodic durable scan won this wait.
+                        }
+
+                        await ReconcileStartupEligiblePrintersAsync(stoppingToken);
+                        continue;
+                    }
+
                     try
                     {
-                        _ = await readTask;
+                        triggerEvent = await readTask;
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                     {
-                        // Expected: the periodic durable scan won this wait.
+                        break;
                     }
-
-                    await ReconcileStartupEligiblePrintersAsync(stoppingToken);
-                    continue;
                 }
 
-                try
-                {
-                    triggerEvent = await readTask;
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
+                // Dispatch via a tracked worker so idle printers run concurrently under the
+                // configured capacity limit, with rerun coalescing and graceful drain on
+                // shutdown. The cross-process database claim prevents duplicates.
+                StartTrackedWorker(triggerEvent, stoppingToken);
             }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Host shutdown cancels the reader and every linked worker operation.
+        }
+        finally
+        {
+            trigger.StopAccepting();
+            await DrainWorkersAsync();
+            logger.LogInformation("[AutoDispatch] Background service stopped");
+        }
+    }
 
-            // Fire-and-forget the dispatch cycle for this printer. Each cycle
-            // runs on its own Task so multiple idle printers are handled concurrently.
-            // The cross-process database claim, not this lossy wake channel, prevents duplicates.
-            _ = Task.Run(() => ProcessPrinterIdleAsync(triggerEvent.PrinterId, triggerEvent.SkipIdleThreshold, stoppingToken), stoppingToken);
+    private void StartTrackedWorker(
+        DispatchTriggerEvent triggerEvent,
+        CancellationToken stoppingToken)
+    {
+        Task worker = Task.Run(
+            () => ProcessOwnedPrinterAsync(triggerEvent, stoppingToken),
+            CancellationToken.None);
+        lock (_workerSync)
+        {
+            _workers.Add(worker);
         }
 
-        logger.LogInformation("[AutoDispatch] Background service stopping");
+        _ = worker.ContinueWith(
+            completed =>
+            {
+                lock (_workerSync)
+                {
+                    _ = _workers.Remove(completed);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    internal int TrackedWorkerCount
+    {
+        get
+        {
+            lock (_workerSync)
+            {
+                return _workers.Count;
+            }
+        }
+    }
+
+    private async Task ProcessOwnedPrinterAsync(
+        DispatchTriggerEvent triggerEvent,
+        CancellationToken stoppingToken)
+    {
+        DispatchTriggerEvent current = triggerEvent;
+        bool ownsIntent = true;
+        try
+        {
+            while (true)
+            {
+                await ProcessPrinterIdleAsync(
+                    current.PrinterId,
+                    current.SkipIdleThreshold,
+                    stoppingToken);
+                if (!trigger.TryCompleteProcessing(
+                        current,
+                        allowRerun: !stoppingToken.IsCancellationRequested,
+                        out DispatchTriggerEvent rerun))
+                {
+                    ownsIntent = false;
+                    return;
+                }
+
+                current = rerun;
+            }
+        }
+        finally
+        {
+            if (ownsIntent)
+            {
+                _ = trigger.TryCompleteProcessing(
+                    current,
+                    allowRerun: false,
+                    out _);
+            }
+        }
+    }
+
+    private async Task DrainWorkersAsync()
+    {
+        while (true)
+        {
+            Task[] activeWorkers;
+            lock (_workerSync)
+            {
+                activeWorkers = _workers.ToArray();
+            }
+
+            if (activeWorkers.Length == 0)
+            {
+                return;
+            }
+
+            await Task.WhenAll(activeWorkers);
+        }
     }
 
     internal async Task ReconcileStartupEligiblePrintersAsync(CancellationToken ct)
@@ -118,11 +240,38 @@ public sealed class AutoDispatchBackgroundService(
         }
     }
 
-    internal async Task ProcessPrinterIdleAsync(Guid printerId, bool skipIdleThreshold, CancellationToken serviceCt)
+    internal async Task ProcessPrinterIdleAsync(
+        Guid printerId,
+        bool skipIdleThreshold,
+        CancellationToken serviceCt)
     {
+        // Hosted-loop callers already hold trigger ownership for this printer. Keeping
+        // ownership outside the dispatch body avoids one waiting task per notification;
+        // direct test callers use this method only for independent printers.
         try
         {
-            // Read settings first (scoped)
+            await ProcessPrinterIdleOwnedAsync(printerId, skipIdleThreshold, serviceCt);
+        }
+        catch (OperationCanceledException) when (serviceCt.IsCancellationRequested)
+        {
+            // Host shutdown is expected control flow.
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "[AutoDispatch] Unhandled error for printer {PrinterId}", printerId);
+        }
+    }
+
+    private async Task ProcessPrinterIdleOwnedAsync(
+        Guid printerId,
+        bool skipIdleThreshold,
+        CancellationToken serviceCt)
+    {
+        PendingDispatchLease? pendingLease = skipIdleThreshold
+            ? null
+            : trigger.CreatePendingLease(printerId, serviceCt);
+        try
+        {
             DispatchSettings settings;
             await using (AsyncServiceScope scope = scopeFactory.CreateAsyncScope())
             {
@@ -134,34 +283,35 @@ public sealed class AutoDispatchBackgroundService(
             {
                 logger.LogDebug(
                     "[AutoDispatch] Skipping printer {PrinterId}: enabled={Enabled}, mode={Mode}",
-                    printerId, settings.AutoDispatchEnabled, settings.AutoDispatchMode);
+                    printerId,
+                    settings.AutoDispatchEnabled,
+                    settings.AutoDispatchMode);
                 return;
             }
 
-            // Skip idle threshold for job-queued triggers (upload-and-print should dispatch immediately)
-            if (!skipIdleThreshold)
+            if (pendingLease is not null)
             {
-                // Wait the idle threshold with per-printer cancellation support
-                using CancellationTokenSource linkedCts = trigger.CreateLinkedCts(printerId, serviceCt);
                 try
                 {
                     logger.LogDebug(
                         "[AutoDispatch] Printer {PrinterId} idle — waiting {Seconds}s threshold",
-                        printerId, settings.IdleThresholdSeconds);
-
-                    await Task.Delay(TimeSpan.FromSeconds(settings.IdleThresholdSeconds), linkedCts.Token);
+                        printerId,
+                        settings.IdleThresholdSeconds);
+                    await Task.Delay(
+                        TimeSpan.FromSeconds(settings.IdleThresholdSeconds),
+                        pendingLease.Token);
                 }
-                catch (OperationCanceledException)
+                catch (OperationCanceledException) when (!serviceCt.IsCancellationRequested)
                 {
                     logger.LogInformation(
-                        "[AutoDispatch] Idle wait cancelled for printer {PrinterId} (went offline or new event)",
+                        "[AutoDispatch] Idle wait cancelled for printer {PrinterId}",
                         printerId);
                     return;
                 }
-                finally
-                {
-                    trigger.ClearPending(printerId);
-                }
+
+                trigger.ClearPending(printerId, pendingLease);
+                pendingLease.Dispose();
+                pendingLease = null;
             }
             else
             {
@@ -170,193 +320,262 @@ public sealed class AutoDispatchBackgroundService(
                     printerId);
             }
 
-            // Enforce MaxConcurrentDispatches
-            if (Interlocked.CompareExchange(ref _inFlightCount, 0, 0) >= settings.MaxConcurrentDispatches)
-            {
-                logger.LogWarning(
-                    "[AutoDispatch] MaxConcurrentDispatches ({Max}) reached — skipping printer {PrinterId}",
-                    settings.MaxConcurrentDispatches, printerId);
-                return;
-            }
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} waiting for dispatch capacity ({MaxConcurrentDispatches})",
+                printerId,
+                settings.MaxConcurrentDispatches);
+            using ResizableDispatchSemaphore.Lease capacityLease =
+                await _dispatchCapacity.AcquireAsync(
+                    Math.Max(1, settings.MaxConcurrentDispatches),
+                    serviceCt);
 
-            Interlocked.Increment(ref _inFlightCount);
+            DispatchPlan plan;
+            await _selectionLock.WaitAsync(serviceCt);
             try
             {
                 await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                await ExecuteDispatchCycleAsync(scope.ServiceProvider, printerId, settings, serviceCt);
+                plan = await SelectDispatchPlanAsync(
+                    scope.ServiceProvider,
+                    printerId,
+                    settings,
+                    serviceCt);
             }
             finally
             {
-                Interlocked.Decrement(ref _inFlightCount);
+                _selectionLock.Release();
+            }
+
+            try
+            {
+                await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
+            }
+            finally
+            {
+                if (plan.ClaimedJobId is Guid claimedJobId)
+                {
+                    ReleaseJobClaim(claimedJobId);
+                }
             }
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // Service shutting down — expected
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "[AutoDispatch] Unhandled error for printer {PrinterId}", printerId);
+            if (pendingLease is not null)
+            {
+                trigger.ClearPending(printerId, pendingLease);
+                pendingLease.Dispose();
+            }
         }
     }
 
-    private async Task ExecuteDispatchCycleAsync(
-        IServiceProvider sp, Guid printerId, DispatchSettings settings, CancellationToken ct)
+    private async Task<DispatchPlan> SelectDispatchPlanAsync(
+        IServiceProvider sp,
+        Guid printerId,
+        DispatchSettings settings,
+        CancellationToken ct)
     {
         AppDbContext db = sp.GetRequiredService<AppDbContext>();
         IDispatchScorer scorer = sp.GetRequiredService<IDispatchScorer>();
-
-        // Verify printer is still online and idle
-        Printer? printer = await db.Printers.Include(p => p.DispatchState).AsNoTracking().FirstOrDefaultAsync(p => p.Id == printerId, ct);
-        if (printer is null || !printer.IsEnabled)
+        Printer? printer = await db.Printers
+            .Include(value => value.DispatchState)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(value => value.Id == printerId, ct);
+        if (printer is null || !printer.IsEnabled || !printer.IsAvailable)
         {
-            logger.LogDebug("[AutoDispatch] Printer {PrinterId} not found or disabled — aborting", printerId);
-            return;
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} not found, disabled, or unavailable — aborting",
+                printerId);
+            return DispatchPlan.NoWork;
         }
 
-        // Check no job is currently active on this printer
         bool hasActiveJob = await db.PrintJobs.AnyAsync(
-            j => j.AssignedPrinterId == printerId
-                 && (j.Status == PrintJobStatus.Starting ||
-                     j.Status == PrintJobStatus.Printing ||
-                     j.Status == PrintJobStatus.Paused),
+            job => job.AssignedPrinterId == printerId
+                && (job.Status == PrintJobStatus.Starting ||
+                    job.Status == PrintJobStatus.Printing ||
+                    job.Status == PrintJobStatus.Paused),
             ct);
-
         if (hasActiveJob)
         {
-            logger.LogDebug("[AutoDispatch] Printer {PrinterId} has an active job — aborting", printerId);
-            return;
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} has an active job — aborting",
+                printerId);
+            return DispatchPlan.NoWork;
         }
 
-        // Per-printer auto-dispatch gate: skip printers that have auto-dispatch disabled
         if (!printer.AutoDispatchEnabled)
         {
             logger.LogDebug(
                 "[AutoDispatch] Printer {PrinterId} has per-printer auto-dispatch disabled — skipping",
                 printerId);
-            return;
+            return DispatchPlan.NoWork;
         }
 
-        // Ready-gate: only dispatch when the operator has confirmed the bed is clear (Ready state)
-        // OR when they've pre-confirmed the bed is clear (BedPreConfirmed = true).
         if ((printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) != AutoDispatchState.Ready
             && !(printer.DispatchState?.BedPreConfirmed ?? false))
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} state is {State} and bed not pre-confirmed — waiting for operator confirmation",
-                printerId, printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None);
-            return;
+                "[AutoDispatch] Printer {PrinterId} state is {State} and bed not pre-confirmed",
+                printerId,
+                printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None);
+            return DispatchPlan.NoWork;
         }
 
         // Find candidate jobs: unassigned queued jobs OR jobs assigned to this printer.
         // Uses the SINGLE shared ordering selector so readiness/skip and dispatch agree.
         List<PrintJob> candidateJobs = await db.PrintJobs
             .AsNoTracking()
-            .Where(j => j.Status == PrintJobStatus.Queued
-                        && (j.AssignedPrinterId == null || j.AssignedPrinterId == printerId))
+            .Where(job => job.Status == PrintJobStatus.Queued
+                && (job.AssignedPrinterId == null || job.AssignedPrinterId == printerId))
             .OrderByPriorityDescending()
             .Take(20) // reasonable batch to score
             .ToListAsync(ct);
-
         if (candidateJobs.Count == 0)
         {
-            logger.LogDebug("[AutoDispatch] No queued jobs available for printer {PrinterId}", printerId);
-            return;
+            logger.LogDebug(
+                "[AutoDispatch] No queued jobs available for printer {PrinterId}",
+                printerId);
+            return DispatchPlan.NoWork;
         }
-
-        // Score each candidate job against all printers, then check if our printer qualifies
-        DispatchScore? bestMatch = null;
-        PrintJob? bestJob = null;
 
         foreach (PrintJob job in candidateJobs)
         {
+            if (IsJobClaimed(job.Id))
+            {
+                continue;
+            }
+
             List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-            DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
-
-            if (printerScore is null || printerScore.Eliminated)
+            DispatchScore? printerScore = scores.FirstOrDefault(score => score.PrinterId == printerId);
+            if (printerScore is null
+                || printerScore.Eliminated
+                || printerScore.TotalScore < settings.MinimumScoreThreshold)
             {
                 continue;
             }
 
-            if (printerScore.TotalScore < settings.MinimumScoreThreshold)
+            string printerName = printer.Name ?? printerId.ToString();
+            string jobName = job.Name ?? "Unknown";
+            if (settings.AutoDispatchMode == AutoDispatchMode.Suggest)
+            {
+                return new DispatchPlan(
+                    DispatchPlanKind.Suggest,
+                    printerId,
+                    printerName,
+                    job.Id,
+                    jobName,
+                    printerScore,
+                    ClaimedJobId: null);
+            }
+
+            if (!TryClaimJob(job.Id))
             {
                 continue;
             }
 
-            // Take the first qualifying job (they're already in priority order)
-            bestMatch = printerScore;
-            bestJob = job;
-            break;
+            return new DispatchPlan(
+                DispatchPlanKind.Auto,
+                printerId,
+                printerName,
+                job.Id,
+                jobName,
+                printerScore,
+                ClaimedJobId: job.Id);
         }
 
-        if (bestMatch is null || bestJob is null)
+        return new DispatchPlan(
+            DispatchPlanKind.NoCompatibleJob,
+            printerId,
+            printer.Name ?? printerId.ToString(),
+            Guid.Empty,
+            string.Empty,
+            Score: null,
+            ClaimedJobId: null);
+    }
+
+    private async Task ExecuteDispatchPlanAsync(
+        DispatchPlan plan,
+        DispatchSettings settings,
+        CancellationToken ct)
+    {
+        switch (plan.Kind)
         {
-            logger.LogInformation(
-                "[AutoDispatch] No compatible jobs above threshold ({Threshold}) for printer {PrinterId}",
-                settings.MinimumScoreThreshold, printerId);
-
-            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchfailed", new DispatchFailedEvent
-            {
-                PrinterId = printerId,
-                PrinterName = printer.Name ?? printerId.ToString(),
-                Reason = "No compatible queued jobs found above minimum score threshold",
-            }, ct);
-
-            return;
+            case DispatchPlanKind.NoWork:
+                return;
+            case DispatchPlanKind.NoCompatibleJob:
+                logger.LogInformation(
+                    "[AutoDispatch] No compatible jobs above threshold ({Threshold}) for printer {PrinterId}",
+                    settings.MinimumScoreThreshold,
+                    plan.PrinterId);
+                await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
+                    "dispatchfailed",
+                    new DispatchFailedEvent
+                    {
+                        PrinterId = plan.PrinterId,
+                        PrinterName = plan.PrinterName,
+                        Reason = "No compatible queued jobs found above minimum score threshold",
+                    },
+                    ct);
+                return;
+            case DispatchPlanKind.Suggest:
+                await ExecuteSuggestionAsync(plan, ct);
+                return;
+            case DispatchPlanKind.Auto:
+                await ExecuteAutoDispatchAsync(plan, ct);
+                return;
+            default:
+                throw new InvalidOperationException($"Unknown dispatch plan kind {plan.Kind}.");
         }
+    }
 
-        // Mode: Suggest → notify but don't dispatch
-        if (settings.AutoDispatchMode == AutoDispatchMode.Suggest)
+    private async Task ExecuteSuggestionAsync(DispatchPlan plan, CancellationToken ct)
+    {
+        DispatchScore score = plan.Score!;
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        logger.LogInformation(
+            "[AutoDispatch] Suggesting job {JobId} for printer {PrinterName} (score: {Score:F1})",
+            plan.JobId,
+            plan.PrinterName,
+            score.TotalScore);
+        db.DispatchLogs.Add(new DispatchLog
         {
-            logger.LogInformation(
-                "[AutoDispatch] Suggesting job {JobId} for printer {PrinterName} (score: {Score:F1})",
-                bestJob.Id, printer.Name, bestMatch.TotalScore);
-
-            // Log suggestion
-            db.DispatchLogs.Add(new DispatchLog
+            Id = Guid.NewGuid(),
+            PrintJobId = plan.JobId,
+            PrinterId = plan.PrinterId,
+            Action = DispatchAction.Suggested,
+            Score = score.TotalScore,
+            ScoreBreakdown = JsonSerializer.Serialize(score.ScoreBreakdown),
+            Reason = "Auto-dispatch suggestion (Suggest mode)",
+            CreatedAtUtc = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync(ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
+            "dispatchsuggestion",
+            new DispatchSuggestionEvent
             {
-                Id = Guid.NewGuid(),
-                PrintJobId = bestJob.Id,
-                PrinterId = printerId,
-                Action = DispatchAction.Suggested,
-                Score = bestMatch.TotalScore,
-                ScoreBreakdown = JsonSerializer.Serialize(bestMatch.ScoreBreakdown),
-                Reason = "Auto-dispatch suggestion (Suggest mode)",
-                CreatedAtUtc = DateTime.UtcNow,
-            });
-            await db.SaveChangesAsync(ct);
+                JobId = plan.JobId,
+                JobName = plan.JobName,
+                PrinterId = plan.PrinterId,
+                PrinterName = plan.PrinterName,
+                Score = score.TotalScore,
+            },
+            ct);
+    }
 
-            await Task.WhenAll(
-                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
-                {
-                    JobId = bestJob.Id,
-                    JobName = bestJob.Name ?? "Unknown",
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Score = bestMatch.TotalScore,
-                }, ct),
-                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("dispatchsuggestion", new DispatchSuggestionEvent
-                {
-                    JobId = bestJob.Id,
-                    JobName = bestJob.Name ?? "Unknown",
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Score = bestMatch.TotalScore,
-                }, ct));
-
-            return;
-        }
-
-        // Mode: Auto → dispatch the job
+    private async Task ExecuteAutoDispatchAsync(DispatchPlan plan, CancellationToken ct)
+    {
+        DispatchScore score = plan.Score!;
         try
         {
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IServiceProvider sp = scope.ServiceProvider;
+            AppDbContext db = sp.GetRequiredService<AppDbContext>();
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
             Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
                 await dispatchService.DispatchJobAsync(
-                    bestJob.Id,
-                    printerId,
+                    plan.JobId,
+                    plan.PrinterId,
                     QueueActorIdentity.AutoDispatch,
-                    bestMatch,
+                    score,
                     ct);
             if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
             {
@@ -365,98 +584,249 @@ public sealed class AutoDispatchBackgroundService(
                     $"Auto-dispatch backend outcome was {outcome}; success was not confirmed.");
             }
 
-            // Batch the post-dispatch updates into a single save
-            PrintJob? jobToUpdate = await db.PrintJobs.FindAsync([bestJob.Id], ct);
+            PrintJob? jobToUpdate = await db.PrintJobs.FindAsync([plan.JobId], ct);
             if (jobToUpdate is not null)
             {
                 jobToUpdate.DispatchMode = (int)DispatchMode.Auto;
             }
 
-            if (printer.AutoDispatchEnabled)
+            Printer? printerToUpdate = await db.Printers
+                .Include(value => value.DispatchState)
+                .FirstOrDefaultAsync(value => value.Id == plan.PrinterId, ct);
+            if (printerToUpdate is not null)
             {
-                Printer? printerToUpdate = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
-                if (printerToUpdate is not null)
+                PrinterDispatchState dispatchState = printerToUpdate.DispatchState
+                    ?? new PrinterDispatchState { PrinterId = printerToUpdate.Id };
+                dispatchState.AutoDispatchState = AutoDispatchState.None;
+                dispatchState.BedPreConfirmed = false;
+                if (printerToUpdate.DispatchState is null)
                 {
-                    PrinterDispatchState ds = printerToUpdate.DispatchState
-                        ?? new PrinterDispatchState { PrinterId = printerToUpdate.Id };
-                    ds.AutoDispatchState = AutoDispatchState.None;
-                    ds.BedPreConfirmed = false; // Reset pre-clear flag after dispatch
-                    if (printerToUpdate.DispatchState is null)
-                    {
-                        printerToUpdate.DispatchState = ds;
-                    }
+                    printerToUpdate.DispatchState = dispatchState;
                 }
             }
 
             await db.SaveChangesAsync(ct);
-
             logger.LogInformation(
                 "[AutoDispatch] Dispatched job {JobId} ({JobName}) → printer {PrinterName} (score: {Score:F1})",
-                bestJob.Id, bestJob.Name, printer.Name, bestMatch.TotalScore);
-
-            await Task.WhenAll(
-                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
+                plan.JobId,
+                plan.JobName,
+                plan.PrinterName,
+                score.TotalScore);
+            await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
+                "jobautodispatched",
+                new JobAutoDispatchedEvent
                 {
-                    JobId = bestJob.Id,
-                    JobName = bestJob.Name ?? "Unknown",
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Score = bestMatch.TotalScore,
+                    JobId = plan.JobId,
+                    JobName = plan.JobName,
+                    PrinterId = plan.PrinterId,
+                    PrinterName = plan.PrinterName,
+                    Score = score.TotalScore,
                     Mode = AutoDispatchMode.Auto,
-                }, ct),
-                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("jobautodispatched", new JobAutoDispatchedEvent
-                {
-                    JobId = bestJob.Id,
-                    JobName = bestJob.Name ?? "Unknown",
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Score = bestMatch.TotalScore,
-                    Mode = AutoDispatchMode.Auto,
-                }, ct));
+                },
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             logger.LogError(
                 ex,
                 "[AutoDispatch] Failed to dispatch job {JobId} to printer {PrinterId}",
-                bestJob.Id, printerId);
+                plan.JobId,
+                plan.PrinterId);
+            await RecordDispatchFailureAsync(plan, score, ex, ct);
+        }
+    }
 
-            // Log failure
-            db.DispatchLogs.Add(new DispatchLog
-            {
-                Id = Guid.NewGuid(),
-                PrintJobId = bestJob.Id,
-                PrinterId = printerId,
-                Action = DispatchAction.Failed,
-                Score = bestMatch.TotalScore,
-                Reason = $"Auto-dispatch failed: {ex.Message}",
-                CreatedAtUtc = DateTime.UtcNow,
-            });
+    private async Task RecordDispatchFailureAsync(
+        DispatchPlan plan,
+        DispatchScore score,
+        Exception exception,
+        CancellationToken ct)
+    {
+        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.DispatchLogs.Add(new DispatchLog
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = plan.JobId,
+            PrinterId = plan.PrinterId,
+            Action = DispatchAction.Failed,
+            Score = score.TotalScore,
+            Reason = $"Auto-dispatch failed: {exception.Message}",
+            CreatedAtUtc = DateTime.UtcNow,
+        });
 
-            try
-            {
-                await db.SaveChangesAsync(ct);
-            }
-            catch (Exception saveEx)
-            {
-                logger.LogWarning(saveEx, "[AutoDispatch] Failed to save dispatch failure log");
-            }
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception saveException)
+        {
+            logger.LogWarning(
+                saveException,
+                "[AutoDispatch] Failed to save dispatch failure log");
+        }
 
-            await Task.WhenAll(
-                hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync("dispatchfailed", new DispatchFailedEvent
+        await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
+            "dispatchfailed",
+            new DispatchFailedEvent
+            {
+                JobId = plan.JobId,
+                PrinterId = plan.PrinterId,
+                PrinterName = plan.PrinterName,
+                Reason = exception.Message,
+            },
+            ct);
+    }
+
+    private bool IsJobClaimed(Guid jobId)
+    {
+        lock (_claimSync)
+        {
+            return _claimedJobs.Contains(jobId);
+        }
+    }
+
+    private bool TryClaimJob(Guid jobId)
+    {
+        lock (_claimSync)
+        {
+            return _claimedJobs.Add(jobId);
+        }
+    }
+
+    private void ReleaseJobClaim(Guid jobId)
+    {
+        lock (_claimSync)
+        {
+            _ = _claimedJobs.Remove(jobId);
+        }
+    }
+
+    private enum DispatchPlanKind
+    {
+        NoWork,
+        NoCompatibleJob,
+        Suggest,
+        Auto,
+    }
+
+    private sealed record DispatchPlan(
+        DispatchPlanKind Kind,
+        Guid PrinterId,
+        string PrinterName,
+        Guid JobId,
+        string JobName,
+        DispatchScore? Score,
+        Guid? ClaimedJobId)
+    {
+        public static DispatchPlan NoWork { get; } = new(
+            DispatchPlanKind.NoWork,
+            Guid.Empty,
+            string.Empty,
+            Guid.Empty,
+            string.Empty,
+            Score: null,
+            ClaimedJobId: null);
+    }
+
+    private sealed class ResizableDispatchSemaphore : IDisposable
+    {
+        private readonly SemaphoreSlim _semaphore = new(0, int.MaxValue);
+        private readonly object _sync = new();
+        private int _limit;
+        private int _withheldReturns;
+        private bool _initialized;
+        private bool _disposed;
+
+        public async Task<Lease> AcquireAsync(int limit, CancellationToken cancellationToken)
+        {
+            Configure(limit);
+            await _semaphore.WaitAsync(cancellationToken);
+            return new Lease(this);
+        }
+
+        public void Dispose()
+        {
+            lock (_sync)
+            {
+                if (_disposed)
                 {
-                    JobId = bestJob.Id,
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Reason = ex.Message,
-                }, ct),
-                hub.Clients.Group(AuthorizedHubGroups.QueueJob(bestJob.Id)).SendAsync("dispatchfailed", new DispatchFailedEvent
+                    return;
+                }
+
+                _disposed = true;
+                _semaphore.Dispose();
+            }
+        }
+
+        private void Configure(int requestedLimit)
+        {
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                int newLimit = Math.Max(1, requestedLimit);
+                if (!_initialized)
                 {
-                    JobId = bestJob.Id,
-                    PrinterId = printerId,
-                    PrinterName = printer.Name ?? printerId.ToString(),
-                    Reason = ex.Message,
-                }, ct));
+                    _initialized = true;
+                    _limit = newLimit;
+                    _semaphore.Release(newLimit);
+                    return;
+                }
+
+                if (newLimit > _limit)
+                {
+                    int increase = newLimit - _limit;
+                    int restoredReturns = Math.Min(increase, _withheldReturns);
+                    _withheldReturns -= restoredReturns;
+                    increase -= restoredReturns;
+                    if (increase > 0)
+                    {
+                        _semaphore.Release(increase);
+                    }
+                }
+                else if (newLimit < _limit)
+                {
+                    int reduction = _limit - newLimit;
+                    while (reduction > 0 && _semaphore.Wait(0))
+                    {
+                        reduction--;
+                    }
+
+                    _withheldReturns += reduction;
+                }
+
+                _limit = newLimit;
+            }
+        }
+
+        private void Release()
+        {
+            lock (_sync)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                if (_withheldReturns > 0)
+                {
+                    _withheldReturns--;
+                }
+                else
+                {
+                    _semaphore.Release();
+                }
+            }
+        }
+
+        public sealed class Lease(ResizableDispatchSemaphore owner) : IDisposable
+        {
+            private Action? _release = owner.Release;
+
+            public void Dispose()
+            {
+                Interlocked.Exchange(ref _release, null)?.Invoke();
+            }
         }
     }
 }

@@ -122,4 +122,15 @@ actor JobService: JobServiceProtocol {
     private func preconditionHeaders(_ rowVersion: String) -> [String: String] {
         return ["If-Match": "\"\(rowVersion)\""]
     }
+
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate] {
+        try await apiClient.get("/api/job-queue/\(jobId)/candidates")
+    }
+
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws {
+        try await apiClient.postVoid(
+            "/api/job-queue/\(jobId)/dispatch-to",
+            body: DispatchToRequest(printerId: printerId)
+        )
+    }
 }

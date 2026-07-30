@@ -51,6 +51,16 @@ public interface IArtifactsService
     /// <param name="ct">Cancellation token.</param>
     Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct);
 
+    /// <summary>Uploads a worker artifact only while the worker still owns an unexpired job lease.</summary>
+    Task<Artifact?> UploadForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        string kind,
+
+        CancellationToken ct);
+
     /// <summary>
     /// Uploads an artifact whose kind, MIME type, size and SHA-256 are verified before the row is
     /// persisted. Bytes that fail verification are discarded and no artifact is created.
@@ -76,6 +86,19 @@ public interface IArtifactsService
         IFormFile file,
         Guid jobId,
         Guid workerId,
+        string kind,
+        string? declaredSha256,
+        long? declaredSizeBytes,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Verifies and uploads a worker artifact only while the worker still owns an active lease.
+    /// </summary>
+    Task<Artifact?> UploadVerifiedForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
         string kind,
         string? declaredSha256,
         long? declaredSizeBytes,

@@ -9,17 +9,17 @@ final class AddSpoolViewModelTests: XCTestCase {
     private var mockService: MockSpoolService!
     private var viewModel: AddSpoolViewModel!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockService = MockSpoolService()
         viewModel = AddSpoolViewModel()
         viewModel.configure(spoolService: mockService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State

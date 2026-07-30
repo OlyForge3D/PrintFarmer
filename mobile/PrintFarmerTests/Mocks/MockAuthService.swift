@@ -15,7 +15,7 @@ final class MockAuthService: AuthServiceProtocol, @unchecked Sendable {
     var restoreSessionCalled = false
     var currentUserCalled = false
 
-    func login(serverURL: String, username: String, password: String) async throws -> AuthResponse {
+    func login(serverURL: String, username: String, password: String, operation: AuthOperationToken) async throws -> AuthLoginOutcome {
         loginCalledWithServerURL = serverURL
         loginCalledWithUsername = username
         loginCalledWithPassword = password
@@ -24,17 +24,20 @@ final class MockAuthService: AuthServiceProtocol, @unchecked Sendable {
             throw NetworkError.authFailed("No response configured")
         }
         if response.success { authenticated = true }
-        return response
+        return .applied(response)
     }
 
-    func logout() async {
+    func logout(operation: AuthOperationToken) async {
         logoutCalled = true
         authenticated = false
     }
 
-    func restoreSession() async -> UserDTO? {
+    func restoreSession(operation: AuthOperationToken) async -> AuthRestoreOutcome {
         restoreSessionCalled = true
-        return userToReturn
+        if let user = userToReturn {
+            return .restored(user)
+        }
+        return .noSession
     }
 
     func currentUser() async throws -> UserDTO {

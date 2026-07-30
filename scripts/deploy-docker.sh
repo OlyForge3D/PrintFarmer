@@ -3148,8 +3148,6 @@ configure_database() {
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${DB_PROVIDER:-}" ]; then
         case "$DB_PROVIDER" in
             postgres|sqlserver)
-                print_info "Using configured database: $DB_PROVIDER"
-                return 0
                 ;;
             *)
                 print_error "Unsupported database provider '$DB_PROVIDER'."
@@ -3157,6 +3155,29 @@ configure_database() {
                 return 1
                 ;;
         esac
+
+        print_info "Using configured database: $DB_PROVIDER"
+        # Derive downstream variables that save_deployment_config references so
+        # a stale .deploy-config (missing CONNECTION_STRING / INCLUDE_* flags)
+        # does not trip `set -u` in the config heredoc.
+        if [ -z "${CONNECTION_STRING:-}" ]; then
+            case "$DB_PROVIDER" in
+                postgres)
+                    CONNECTION_STRING="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};******"
+                    ;;
+                sqlserver)
+                    CONNECTION_STRING="Server=sqlserver;Database=${SQLSERVER_DB:-printfarmer};User Id=sa;******;TrustServerCertificate=True;"
+                    ;;
+                *)
+                    CONNECTION_STRING=""
+                    ;;
+            esac
+        fi
+        case "$DB_PROVIDER" in
+            postgres)  INCLUDE_POSTGRES="${INCLUDE_POSTGRES:-yes}"  ;;
+            sqlserver) INCLUDE_SQLSERVER="${INCLUDE_SQLSERVER:-yes}" ;;
+        esac
+        return 0
     fi
     
     print_header "💾 Database Configuration"
@@ -3274,6 +3295,12 @@ configure_networking() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${NETWORK_MODE:-}" ]; then
         print_info "Using configured network mode: $NETWORK_MODE"
+        # Derive port variables that save_deployment_config references so a
+        # stale .deploy-config (missing HTTP_PORT / HTTPS_PORT / API_PORT)
+        # does not trip `set -u` in the config heredoc.
+        HTTP_PORT="${HTTP_PORT:-8080}"
+        HTTPS_PORT="${HTTPS_PORT:-8443}"
+        API_PORT="${API_PORT:-5245}"
         return 0
     fi
     
@@ -3794,40 +3821,50 @@ configure_additional() {
     fi
     
 
-    echo
-    echo -e "${BLUE}Spoolman Integration${NC}"
-    echo "Spoolman provides centralized filament spool tracking."
-    echo "  1) Deploy Spoolman as a container alongside PrintFarmer"
-    echo "  2) Use an existing Spoolman instance (enter URL)"
-    echo "  3) Skip (you can configure later in the UI)"
-    prompt_with_default "Choose an option [1/2/3]:" "3" "SPOOLMAN_OPTION"
-    DEPLOY_SPOOLMAN_CONTAINER=no
-    case "$SPOOLMAN_OPTION" in
-        1)
-            ENABLE_SPOOLMAN=yes
-            DEPLOY_SPOOLMAN_CONTAINER=yes
-            prompt_with_default "Host port for Spoolman web UI:" "7912" "SPOOLMAN_PORT"
-            SPOOLMAN_BASE_URL="http://spoolman:8000"
-            prompt_with_default "Spoolman container image:" "ghcr.io/olyforge3d/spoolman:latest" "SPOOLMAN_IMAGE"
-            ;;
-        2)
-            ENABLE_SPOOLMAN=yes
-            prompt_with_default "Spoolman base URL (protocol + host[:port], no trailing slash):" "http://spoolman:7912" "SPOOLMAN_BASE_URL"
-            # Derive port from URL
-            _tmp=${SPOOLMAN_BASE_URL#*://}
-            _hostport=${_tmp%%/*}
-            if [[ "$_hostport" == *:* ]]; then
-                SPOOLMAN_PORT=${_hostport##*:}
-            else
-                if [[ $SPOOLMAN_BASE_URL == https://* ]]; then SPOOLMAN_PORT=443; else SPOOLMAN_PORT=80; fi
-            fi
-            ;;
-        *)
-            ENABLE_SPOOLMAN=no
-            SPOOLMAN_BASE_URL=""
-            SPOOLMAN_PORT=""
-            ;;
-    esac
+    if [ "${NON_INTERACTIVE:-false}" = "true" ] && [ -n "${ENABLE_SPOOLMAN:-}" ]; then
+        # Non-interactive: preserve pre-loaded Spoolman config from .deploy-config/env
+        # (mirrors configure_database / configure_networking short-circuit behavior)
+        DEPLOY_SPOOLMAN_CONTAINER="${DEPLOY_SPOOLMAN_CONTAINER:-no}"
+        SPOOLMAN_BASE_URL="${SPOOLMAN_BASE_URL:-}"
+        SPOOLMAN_PORT="${SPOOLMAN_PORT:-7912}"
+        SPOOLMAN_IMAGE="${SPOOLMAN_IMAGE:-ghcr.io/olyforge3d/spoolman:latest}"
+        print_info "Spoolman integration: ENABLE_SPOOLMAN=$ENABLE_SPOOLMAN, BASE_URL=${SPOOLMAN_BASE_URL:-<none>}"
+    else
+        echo
+        echo -e "${BLUE}Spoolman Integration${NC}"
+        echo "Spoolman provides centralized filament spool tracking."
+        echo "  1) Deploy Spoolman as a container alongside PrintFarmer"
+        echo "  2) Use an existing Spoolman instance (enter URL)"
+        echo "  3) Skip (you can configure later in the UI)"
+        prompt_with_default "Choose an option [1/2/3]:" "3" "SPOOLMAN_OPTION"
+        DEPLOY_SPOOLMAN_CONTAINER=no
+        case "$SPOOLMAN_OPTION" in
+            1)
+                ENABLE_SPOOLMAN=yes
+                DEPLOY_SPOOLMAN_CONTAINER=yes
+                prompt_with_default "Host port for Spoolman web UI:" "7912" "SPOOLMAN_PORT"
+                SPOOLMAN_BASE_URL="http://spoolman:8000"
+                prompt_with_default "Spoolman container image:" "ghcr.io/olyforge3d/spoolman:latest" "SPOOLMAN_IMAGE"
+                ;;
+            2)
+                ENABLE_SPOOLMAN=yes
+                prompt_with_default "Spoolman base URL (protocol + host[:port], no trailing slash):" "http://spoolman:7912" "SPOOLMAN_BASE_URL"
+                # Derive port from URL
+                _tmp=${SPOOLMAN_BASE_URL#*://}
+                _hostport=${_tmp%%/*}
+                if [[ "$_hostport" == *:* ]]; then
+                    SPOOLMAN_PORT=${_hostport##*:}
+                else
+                    if [[ $SPOOLMAN_BASE_URL == https://* ]]; then SPOOLMAN_PORT=443; else SPOOLMAN_PORT=80; fi
+                fi
+                ;;
+            *)
+                ENABLE_SPOOLMAN=no
+                SPOOLMAN_BASE_URL=""
+                SPOOLMAN_PORT=""
+                ;;
+        esac
+    fi
 
     # go2rtc RTSP-to-WebRTC bridge
     echo
@@ -3879,9 +3916,19 @@ generate_slicer_worker_api_keys() {
         fi
         
         if [ -z "$api_key" ]; then
-            # No existing key found, generate a new one
-            api_key=$(generate_slicer_api_key)
-            print_info "Generated new API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+            if [ "$i" -eq 1 ] && [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
+                # First worker reuses the WORKER_SHARED_API_KEY so slicer-host ↔
+                # worker auth (WORKER_SHARED_API_KEY) matches the primary
+                # SlicerRegistry__ApiKey the worker registers with. Without this
+                # alignment, the two ApiKey values in .env diverge and workers
+                # fail authenticated job-claim after registering.
+                api_key="$WORKER_SHARED_API_KEY"
+                print_info "Reusing WORKER_SHARED_API_KEY for primary worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+            else
+                # No existing key found, generate a new one
+                api_key=$(generate_slicer_api_key)
+                print_info "Generated new API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
+            fi
         else
             print_info "Reusing existing API key for worker replica $i: $(echo "$api_key" | cut -c1-8)..."
         fi

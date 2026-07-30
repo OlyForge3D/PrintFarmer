@@ -399,7 +399,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     /// </summary>
     public async Task<Guid> RegisterWorkerAsync(
         string workerKey = "test-worker-key",
-        string workerName = "Test Worker")
+        string workerName = "Test Worker",
+        string capabilitiesJson = "[\"orcaslicer\",\"orcaslicer-upstream\"]",
+        string? version = null)
     {
         using (AsyncServiceScope scope = Services.CreateAsyncScope())
         {
@@ -418,9 +420,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 ServiceId = serviceId.ToString(),
                 Name = workerName,
                 EndpointUrl = "http://localhost:8080",
-                CapabilitiesJson = "[\"orcaslicer\",\"orcaslicer-upstream\"]",
+                CapabilitiesJson = capabilitiesJson,
                 Status = WorkerStatus.Online,
                 ApiKey = workerKey,
+                Version = version,
                 TotalSlots = 4,
                 ActiveJobs = 0,
                 LastHeartbeat = DateTime.UtcNow

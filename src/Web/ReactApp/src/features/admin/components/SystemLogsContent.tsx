@@ -22,19 +22,25 @@ export function SystemLogsContent() {
   const [useAdvancedQuery, setUseAdvancedQuery] = useState(false);
   const [queryString, setQueryString] = useState("");
   const [visibleColumns, setVisibleColumns] = useState<Record<LogColumnKey, boolean>>(() => {
+    const defaults = Object.fromEntries(
+      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
+    ) as Record<LogColumnKey, boolean>;
     const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        // Merge over the defaults rather than returning the parsed value
+        // as-is: a saved preferences blob from an older column set (or a
+        // partial value, e.g. from a test seed) must not leave newer
+        // columns' `checked` prop as `undefined` on first render — that
+        // would make the checkbox start uncontrolled and then flip to
+        // controlled the moment any column toggles, which React warns
+        // about.
+        return { ...defaults, ...JSON.parse(saved) };
       } catch {
-        return Object.fromEntries(
-          Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-        ) as Record<LogColumnKey, boolean>;
+        return defaults;
       }
     }
-    return Object.fromEntries(
-      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-    ) as Record<LogColumnKey, boolean>;
+    return defaults;
   });
   const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
   const defaultDateRange = useMemo(() => {

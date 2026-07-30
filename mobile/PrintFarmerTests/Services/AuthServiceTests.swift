@@ -17,8 +17,8 @@ final class AuthServiceTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var userDefaultsSuiteName: String!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         let suiteName = "AuthServiceTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         let testKeychain = KeychainSwift(keyPrefix: "AuthServiceTests_\(UUID().uuidString)_")
@@ -41,7 +41,7 @@ final class AuthServiceTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         keychain.clear()
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         // Clean up any persisted server URL from tests
@@ -53,7 +53,7 @@ final class AuthServiceTests: XCTestCase {
         keychain = nil
         userDefaults = nil
         userDefaultsSuiteName = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Login
@@ -185,7 +185,7 @@ final class AuthServiceTests: XCTestCase {
         let sharedClient = APIClient(
             baseURL: firstServer.baseURL,
             session: mockAPIClient.urlSession,
-            accessToken: "first-token"
+            authenticated: AuthenticatedIdentity(accessToken: "first-token", serverID: firstServer.id)
         )
         authService = AuthService(
             apiClient: sharedClient,
@@ -319,7 +319,18 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
 
-    func testLogoutClearsServerThatWasActiveAtCallTime() async throws {
+    /// J4 (issue #816 reject, Hicks): a legacy `.unspecified` logout that runs
+    /// against a shared apiClient which was NEVER authenticated for any
+    /// server (test/legacy path — no login went through
+    /// applySessionIfCurrent, so currentServerID is nil) MUST NOT clear
+    /// arbitrary per-server credentials. The previous behavior re-read the
+    /// mutable ServerRegistry.activeServer as a "cleanup target" — the exact
+    /// A-request / B-cleanup bug the reviewer called out.
+    ///
+    /// This test proves the new invariant: BOTH servers' credentials are
+    /// preserved. (The /logout network request still goes out under the
+    /// snapshot's baseURL — that end of the invariant is proved elsewhere.)
+    func testLegacyUnspecifiedLogoutWithoutAuthenticatedIdentityPreservesAllCredentials() async throws {
         let firstServer = try addServer(displayName: "First", urlString: "https://first.example.com", active: true)
         let secondServer = try addServer(displayName: "Second", urlString: "https://second.example.com")
         credentialsStore.save(ServerCredentials(accessToken: "first-token", expiresAt: nil), serverId: firstServer.id)
@@ -346,8 +357,14 @@ final class AuthServiceTests: XCTestCase {
         allowResponse.signal()
         await logoutTask.value
 
-        XCTAssertNil(credentialsStore.load(serverId: firstServer.id))
-        XCTAssertEqual(credentialsStore.load(serverId: secondServer.id)?.accessToken, "second-token")
+        // J4: neither credential set is cleared — the apiClient never had a
+        // stable serverID bound (test bypasses login), so the logout snapshot
+        // has no target for local cleanup. The mutable-registry fallback that
+        // used to redirect cleanup to secondServer is gone.
+        XCTAssertEqual(credentialsStore.load(serverId: firstServer.id)?.accessToken, "first-token",
+                       "J4: first server's credentials MUST survive .unspecified logout without a bound identity")
+        XCTAssertEqual(credentialsStore.load(serverId: secondServer.id)?.accessToken, "second-token",
+                       "J4: second server's credentials MUST survive (no A-request/B-cleanup redirection)")
     }
 
     // MARK: - IsAuthenticated

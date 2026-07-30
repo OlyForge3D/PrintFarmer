@@ -88,6 +88,28 @@ Older entries archived to history-archive.md for size management.
 **Status:** Ready for code review trio (Bishop, Hicks, Vasquez)
 
 
+## 2026-07-14: Issue #715 F10 Offline Idempotency — Round 7 Remediation (.NET backend)
+
+**Role this round:** Remediation author (backend) — fresh r7 author; locked out from delegating to Lambert, Kane, Dallas, Hudson, Ripley, Apone, Frost.
+**Branch:** jpapiez-squad-715-idempotency-backend
+**Parent HEAD:** 8930b10af97f68d14b0f33b5a1a87e2c18a0f26b (Frost r6 BIN2 collation work + base de289394a from #578/#751)
+**Context:** r6 (Frost) applied `Latin1_General_100_BIN2` to Sku / Bins.Code / OperationKey / HarvestOperationKey. Bishop APPROVED; Vasquez + Hicks REQUEST_CHANGES (4 blockers).
+
+**Blockers fixed:**
+- **V1 (Vasquez) — CHECK constraints full-scan under Sch-M lock:** Recreated `CK_PartInventories_Sku_Normalized` and `CK_Bins_Code_Normalized` with `WITH NOCHECK` (metadata-only) in both Up() and Down() of `20260713235657_ExtendCaseSensitiveCollationToSkuAndOperationKey.cs`. Existing rows grandfathered; future DML still enforced. Safe: feature <1 week old; NormalizeSku/NormalizeBinCode always ToUpperInvariant.
+- **V2 (Vasquez) — offline ledger index rebuild:** Converted the two indexed ledger columns (`PrintJobs.HarvestOperationKey`, `PartInventoryAdjustments.OperationKey`) from EF AlterColumn to raw DROP INDEX → ALTER COLUMN COLLATE → CREATE UNIQUE NONCLUSTERED INDEX, with an **edition-aware** ONLINE choice via `SERVERPROPERTY('EngineEdition') IN (3,5,8)`. **Scope deviation (documented):** the task claimed ONLINE=ON is "silently ignored" on Standard — verified FALSE (Standard hard-errors), so I used runtime edition detection instead of hardcoding ONLINE=ON, avoiding a re-introduced deploy failure. Filtered predicates reproduced byte-exact so the model snapshot is unchanged. Sku/Code left on EF AlterColumn (offline, per V2 scope).
+- **H1 (Hicks) — Down() didn't restore collation:** Added explicit `collation: "SQL_Latin1_General_CP1_CI_AS"` to Down() AlterColumns in BOTH `20260713235657_Extend...` and `20260713163813_AddIdempotencyKeyCaseSensitiveCollation.cs` (UserId/RouteKey/IdempotencyKey), plus raw `COLLATE ...CI_AS` on ledger Down. EF's oldCollation: is metadata-only and emits no COLLATE. Added rollback-hazard doc comments (BIN2-distinct rows may collapse under CI_AS unique index).
+- **H2 (Hicks) — client could pre-occupy server `harvest:` keys:** Generalized `IdempotencyKeyUtilities.IsReservedOperationKey` to a `ReservedOperationKeyPrefixes` set `{ "idem:", "harvest:" }` (added `HarvestOperationKeyPrefix` const), preserving NFKC pre-normalization + Trim + OrdinalIgnoreCase loop. `ReservedOperationKeyPrefixAttribute` + `PartInventoryService` guard auto-pick-up the extended set (they delegate); generalized their messages while retaining the literal `idem:` (test contract). Did NOT touch PartHarvestService server-side `harvest:` generation (bypasses DTO validation). Added unit + service tests for harvest:/Harvest:/fullwidth ｈａｒｖｅｓｔ：ｆｏｏ (rejected) and harvestable-tote (accepted). Documented in XML that new server namespaces MUST be added to the reserved set.
+
+**Validation:**
+- `dotnet format` — my 8 files clean (verified via --include). Whole-solution format check fails on ~40 pre-existing unrelated files (OrcaSlicer worker tests, other migrations) — pre-dates r7, out of scope, not touched.
+- `dotnet build farm-web.sln -c Debug` — 0 warnings, 0 errors (warnings-as-errors).
+- Focused tests ×3 (Idempotency|PartInventory|PartsInventory|PartHarvest) — 211 passed, 0 failed, deterministic.
+- `ef migrations has-pending-model-changes` — clean for BOTH sqlserver and postgres (raw-SQL conversion left model/snapshot untouched).
+- Full suite — only the 4 pre-approved failures (3× OrcaSlicerAssetRegistryTests CRLF, 1× FilamentCoverageControllerTests perf budget). No other failures.
+
+**Files touched:** 2 migrations + 3 infra source (`IdempotencyKeyUtilities`, `ReservedOperationKeyPrefixAttribute`, `PartInventoryService`) + 3 test files. No push, no PR (per instructions).
+
 ### 2025 — #941 gate frontend fixes (rejected PR, six defects across new admin/settings surface)
 
 **Core lesson: bare property names are not identifiers.** In this epic the same

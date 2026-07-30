@@ -31,6 +31,18 @@ vi.mock('@/hooks/useSlicer', () => ({
   }),
 }));
 
+vi.mock('@/common/hooks/useSystemCapabilities', () => ({
+  useSystemCapabilities: () => ({
+    data: {
+      architecture: 'x64',
+      slicingEnabled: true,
+      modelFilesEnabled: true,
+      thumbnailGenerationEnabled: true,
+      gcodeUploadEnabled: true,
+    },
+  }),
+}));
+
 vi.mock('@/contexts/ThemeContext', () => ({
   useTheme: () => ({
     theme: 'light',
@@ -115,6 +127,7 @@ describe('Navigation rail sections', () => {
     const divider = desktopNav.querySelector('hr[aria-hidden="true"]');
     expect(divider?.nextElementSibling).toHaveAttribute('aria-label', 'Admin');
     expect(within(desktopNav).getByRole('link', { name: 'Maintenance' })).toHaveAttribute('href', '/maintenance');
+    expect(within(desktopNav).getByRole('link', { name: 'Printed Parts' })).toHaveAttribute('href', '/parts-inventory');
     expect(within(desktopNav).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
   });
 
@@ -123,7 +136,7 @@ describe('Navigation rail sections', () => {
     const desktopNav = getDesktopNav(container);
 
     await waitFor(() => {
-      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(14);
+      expect(desktopNav.querySelectorAll('a[href]')).toHaveLength(15);
     });
 
     const hrefs = Array.from(desktopNav.querySelectorAll<HTMLAnchorElement>('a[href]')).map((link) => link.getAttribute('href'));

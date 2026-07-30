@@ -46,7 +46,12 @@ struct JobListView: View {
                             }
                             .tabViewStyle(.page(indexDisplayMode: .never))
                             
-                            PageIndicator(currentPage: $currentPage, pageCount: 3, labels: ["Queue", "Printing", "Recent"])
+                            PageIndicator(
+                                currentPage: $currentPage,
+                                pageCount: 3,
+                                labels: ["Queue", "Printing", "Recent"],
+                                accessibilityIdentifierPrefix: "jobList.page"
+                            )
                                 .padding(.bottom, 8)
                         }
                     } else {
@@ -55,7 +60,7 @@ struct JobListView: View {
                     }
                 }
             }
-            .navigationTitle("Jobs")
+            .navigationTitle("Tasks")
             .refreshable {
                 await viewModel.loadJobs()
             }
@@ -141,6 +146,7 @@ struct JobListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .accessibilityIdentifier("jobList.recent.list")
                 .refreshable {
                     await viewModel.loadJobs()
                 }
@@ -173,7 +179,16 @@ struct JobListView: View {
             }
 
             if !viewModel.recentJobs.isEmpty {
-                Section(isExpanded: $viewModel.showRecentJobs) {
+                // Recent must render like the sibling In Queue / Printing
+                // sections. A collapsible `Section(isExpanded:)` under the
+                // `.plain` list style renders no disclosure control on iPad,
+                // so the section stayed permanently collapsed and completed
+                // jobs (and their harvest entry point) were unreachable in
+                // the regular size class (#794). A plain always-visible
+                // section keeps completed jobs reachable on iPad; the iPhone
+                // layout uses the separate paged `RecentPage()` and is
+                // unaffected.
+                Section {
                     ForEach(viewModel.recentJobs.prefix(10)) { item in
                         recentJobRow(item)
                     }
@@ -183,6 +198,7 @@ struct JobListView: View {
             }
         }
         .listStyle(.plain)
+        .accessibilityIdentifier("jobList.combined.list")
     }
 
     // MARK: - Active Job Row
@@ -362,6 +378,19 @@ struct JobListView: View {
             .padding(.vertical, 2)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(recentJobAccessibilityLabel(item))
+        .accessibilityIdentifier("job.row.\(item.job.jobUUID?.uuidString ?? "unknown")")
+    }
+
+    private func recentJobAccessibilityLabel(_ item: QueuedPrintJobResponse) -> String {
+        var components = [item.job.name, "\(item.job.status) status"]
+        if let printerName = item.job.printerName {
+            components.append(printerName)
+        }
+        if let failureReason = item.job.failureReason {
+            components.append(failureReason)
+        }
+        return components.joined(separator: ", ")
     }
 
     // MARK: - Helpers

@@ -100,26 +100,14 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                         _ => { });
             }
 
-            // Remove only the DbContext configuration, not the whole service
-            ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (dbContextDescriptor != null)
+            foreach (ServiceDescriptor descriptor in services
+                .Where(d => d.ServiceType == typeof(AppDbContext)
+                    || d.ServiceType == typeof(DbContextOptions<AppDbContext>)
+                    || d.ServiceType == typeof(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<AppDbContext>)
+                    || d.ServiceType == typeof(IDbContextFactory<AppDbContext>))
+                .ToList())
             {
-                services.Remove(dbContextDescriptor);
-            }
-
-            // Also remove DbContextFactory and its singleton options since it was registered with the original options
-            ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
-            if (dbContextFactoryDescriptor != null)
-            {
-                services.Remove(dbContextFactoryDescriptor);
-            }
-
-            // Remove singleton options that were registered for the factory
-            ServiceDescriptor? singletonOptionsDescriptor = services.FirstOrDefault(d =>
-                d.ServiceType == typeof(DbContextOptions<AppDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
-            if (singletonOptionsDescriptor != null)
-            {
-                services.Remove(singletonOptionsDescriptor);
+                services.Remove(descriptor);
             }
 
             // Register in-memory SQLite database

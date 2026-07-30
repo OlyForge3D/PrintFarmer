@@ -51,6 +51,18 @@ Admin-facing diagnostic entry for optional Spoolman barcode scan logging. Fields
 - Logging is disabled by default. Enable the Spoolman setting
   `barcodeScanDebugLoggingEnabled` to persist scan attempts and outcomes.
 
+## Spool Burn-Rate Projection
+
+- `GET /api/spoolman/spools/{spoolId}/burn-rate` requires `sourceKind` and
+  `sourceIdentity` query parameters. Source kinds are `Central` and
+  `MoonrakerNative`; source URLs are normalized before lookup.
+- The response includes the source-qualified identity, remaining grams,
+  authoritative grams consumed in the configured lookback, grams per day,
+  projected `spoolReorderThresholdGrams` crossing time, evaluation time,
+  sample count, and `Ready`, `InsufficientData`, or `SourceUnavailable` state.
+- Only positive backend-reported usage from completed jobs contributes.
+  Estimated, failed/cancelled, unqualified, and duplicate history is excluded.
+
 ## Notes
 - All timestamps are ISO 8601 UTC where possible.
 - Pagination: new endpoints adopt `page` & `pageSize` query parameters with maximum pageSize 500.

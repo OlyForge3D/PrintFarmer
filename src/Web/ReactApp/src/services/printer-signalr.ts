@@ -16,7 +16,19 @@ import {
   QueueEventEnvelope,
 } from "@/types/api";
 import { apiClient } from "@/services/api";
-import { getHubUrl } from "@/common/utils/apiUrlHelpers";
+import {
+  getHubUrl,
+  getSignalRAccessToken,
+} from "@/common/utils/apiUrlHelpers";
+import { registerAuthenticatedSignalRTransport } from "@/common/auth/authenticatedSignalRSession";
+import {
+  decodeFilamentCoverageChangedEvent,
+  type FilamentCoverageChangedEvent,
+} from "@/features/filament-coverage/types";
+import {
+  decodeFallbackGroupsUpdatedEvent,
+  type FallbackGroupsUpdatedEvent,
+} from "@/features/fallback-groups/types";
 import { AUTH_SESSION_ESTABLISHED_EVENT } from "@/services/authEvents";
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
@@ -29,6 +41,8 @@ type PrinterImportProgressCallback = (progress: unknown) => void;
 type DispatchUploadProgressCallback = (progress: DispatchUploadProgressDto) => void;
 type FailureDetectionCallback = (event: FailureDetectionEvent) => void;
 type AutoDispatchStatusCallback = (status: AutoDispatchStatus) => void;
+type FilamentCoverageChangedCallback = (event: FilamentCoverageChangedEvent) => void;
+type FallbackGroupsUpdatedCallback = (event: FallbackGroupsUpdatedEvent) => void;
 type QueueEventCallback = (event: QueueEventEnvelope) => void;
 type QueueResourcesChangedCallback = () => void;
 
@@ -54,6 +68,7 @@ export class PrinterSignalRService {
   private buildConnection(): void {
     if (this.disposed) return;
     const printersSignalrUrl = getHubUrl("/hubs/printers");
+    const configuredLogLevel = this.getLogLevel();
     // Only emit noisy connection debug when the developer debug flag is enabled
     if (
       (window as unknown as { PrintFarmerDebug?: Record<string, unknown> })
@@ -66,7 +81,7 @@ export class PrinterSignalRService {
     }
     const connection = new HubConnectionBuilder()
       .withUrl(printersSignalrUrl, {
-        accessTokenFactory: () => localStorage.getItem("auth-token") ?? "",
+        accessTokenFactory: getSignalRAccessToken,
         withCredentials: true,
       })
       .withAutomaticReconnect({
@@ -81,6 +96,9 @@ export class PrinterSignalRService {
       })
       .configureLogging({
         log: (logLevel: number, message: string) => {
+          if (logLevel < configuredLogLevel) {
+            return;
+          }
           // Suppress benign SignalR warnings about unregistered client methods
           // This happens during initialization before all handlers are attached
           // or when the server sends messages the client hasn't registered yet
@@ -286,6 +304,36 @@ export class PrinterSignalRService {
       }
     );
 
+    // Filament coverage invalidation cue (issue #709). Payload is only a
+    // hint — subscribers refetch the canonical filament-coverage queries.
+    // Only the lowercase event name is registered; do NOT add a PascalCase
+    // alias.
+    connection.on("filamentcoveragechanged", (raw: unknown) => {
+      const event = decodeFilamentCoverageChangedEvent(raw);
+      this.filamentCoverageChangedCallbacks.forEach((cb) => {
+        try {
+          cb(event);
+        } catch (e) {
+          console.error("Filament coverage callback error:", e);
+        }
+      });
+    });
+
+    // Fallback-group invalidation cue (issue #718 / #711). Payload is only a
+    // hint — subscribers refetch the canonical fallback-groups queries.
+    // Only the lowercase event name is registered; do NOT add a PascalCase
+    // alias.
+    connection.on("fallbackgroupsupdated", (raw: unknown) => {
+      const event = decodeFallbackGroupsUpdatedEvent(raw);
+      this.fallbackGroupsUpdatedCallbacks.forEach((cb) => {
+        try {
+          cb(event);
+        } catch (e) {
+          console.error("Fallback groups callback error:", e);
+        }
+      });
+    });
+
     connection.onclose(() => {
       if (connection !== this.connection) return;
       this.invalidateConnectionEpoch();
@@ -339,7 +387,9 @@ export class PrinterSignalRService {
     logLevel: string;
     consoleLoggingEnabled: boolean;
   } | null = null;
-  private isRefreshingSettings = false;
+  private settingsLoadGeneration = 0;
+  private settingsRefreshPromise: Promise<void> | null = null;
+  private settingsRefreshQueued = false;
   private authListener: (() => void) | null = null;
 
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
@@ -352,6 +402,8 @@ export class PrinterSignalRService {
   private dispatchUploadProgressCallbacks: DispatchUploadProgressCallback[] = [];
   private failureDetectionCallbacks: FailureDetectionCallback[] = [];
   private autoDispatchStatusCallbacks: AutoDispatchStatusCallback[] = [];
+  private filamentCoverageChangedCallbacks: FilamentCoverageChangedCallback[] = [];
+  private fallbackGroupsUpdatedCallbacks: FallbackGroupsUpdatedCallback[] = [];
   private queueEventCallbacks: QueueEventCallback[] = [];
   private queueResourcesChangedCallbacks: QueueResourcesChangedCallback[] = [];
   private subscribedPrinters = new Set<string>();
@@ -372,7 +424,9 @@ export class PrinterSignalRService {
 
   constructor() {
     this.loadSettings().then(() => {
-      if (!this.disposed) this.buildConnection();
+      if (!this.disposed && !this.connection) {
+        this.buildConnection();
+      }
     });
     // The initial load above runs at module-import time, before the user has
     // authenticated, so the anonymous GET /api/settings/SignalR fails closed
@@ -387,40 +441,62 @@ export class PrinterSignalRService {
     }
   }
 
-  private async loadSettings(): Promise<void> {
+  private async loadSettings(): Promise<boolean> {
+    const generation = ++this.settingsLoadGeneration;
+    let nextSettings: {
+      logLevel: string;
+      consoleLoggingEnabled: boolean;
+    };
     try {
       // UnifiedSettingsController exposes /api/settings/{keyName}
-      this.signalrSettings = await apiClient.getSettings<{
+      nextSettings = await apiClient.getSettings<{
         logLevel: string;
         consoleLoggingEnabled: boolean;
       }>("SignalR"); // calls /api/settings/SignalR
     } catch (error) {
       console.warn("Failed to load SignalR settings, using defaults:", error);
-      this.signalrSettings = {
+      nextSettings = {
         logLevel: "Information",
         consoleLoggingEnabled: true,
       };
     }
+
+    if (generation !== this.settingsLoadGeneration) {
+      return false;
+    }
+
+    this.signalrSettings = nextSettings;
+    return true;
   }
 
   /**
    * Re-fetch the SignalR settings section (e.g. after the user authenticates)
    * and, if the effective log level changed, rebuild the connection so the new
    * level takes effect — the level is only applied when the connection is built.
-   * Guarded against overlapping runs so it cannot race with itself, and it emits
-   * no events, so it cannot re-trigger its own auth listener.
+   * Authentication refreshes are queued, and newer loads supersede older ones,
+   * so a late anonymous response cannot overwrite authenticated settings.
    */
-  public async refreshSettings(): Promise<void> {
-    if (this.isRefreshingSettings) {
-      return;
+  public refreshSettings(): Promise<void> {
+    this.settingsRefreshQueued = true;
+    if (!this.settingsRefreshPromise) {
+      this.settingsRefreshPromise = this.runQueuedSettingsRefreshes().finally(() => {
+        this.settingsRefreshPromise = null;
+      });
     }
-    this.isRefreshingSettings = true;
-    try {
+
+    return this.settingsRefreshPromise;
+  }
+
+  private async runQueuedSettingsRefreshes(): Promise<void> {
+    while (this.settingsRefreshQueued) {
+      this.settingsRefreshQueued = false;
       const previousLevel = this.getLogLevel();
-      await this.loadSettings();
+      const settingsApplied = await this.loadSettings();
+      if (!settingsApplied) {
+        continue;
+      }
       if (this.getLogLevel() === previousLevel) {
-        // Nothing changed (or still on defaults) — no reconnect needed.
-        return;
+        continue;
       }
       const wasActive =
         this.connection?.state === HubConnectionState.Connected ||
@@ -448,8 +524,6 @@ export class PrinterSignalRService {
       if (!refreshWasSuperseded && shouldReconnect) {
         await this.connect();
       }
-    } finally {
-      this.isRefreshingSettings = false;
     }
   }
 
@@ -1123,6 +1197,13 @@ export class PrinterSignalRService {
         await this.connect();
       }
     }
+
+    for (const timer of this.offlineGraceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.offlineGraceTimers.clear();
+    this.lastStatuses.clear();
+    this.notifyConnectionState(false);
   }
 
   onPrinterStatusUpdate(callback: PrinterStatusCallback): () => void {
@@ -1181,6 +1262,35 @@ export class PrinterSignalRService {
     };
   }
 
+  /**
+   * Subscribe to the lowercase `filamentcoveragechanged` invalidation cue
+   * from the printer hub. The event is a hint that the coverage snapshot
+   * for `printerId` (or the entire fleet, when `printerId === null`) may
+   * have changed — subscribers must refetch canonical queries and treat
+   * the payload as opaque.
+   */
+  onFilamentCoverageChanged(callback: FilamentCoverageChangedCallback): () => void {
+    this.filamentCoverageChangedCallbacks.push(callback);
+    return () => {
+      const idx = this.filamentCoverageChangedCallbacks.indexOf(callback);
+      if (idx > -1) this.filamentCoverageChangedCallbacks.splice(idx, 1);
+    };
+  }
+
+  /**
+   * Subscribe to the lowercase `fallbackgroupsupdated` invalidation cue from
+   * the printer hub. Payload carries the affected `printerId` (or `null` for
+   * a fleet-wide invalidation). Subscribers must refetch canonical queries
+   * and treat the payload as opaque; do NOT infer group content from it.
+   */
+  onFallbackGroupsUpdated(callback: FallbackGroupsUpdatedCallback): () => void {
+    this.fallbackGroupsUpdatedCallbacks.push(callback);
+    return () => {
+      const idx = this.fallbackGroupsUpdatedCallbacks.indexOf(callback);
+      if (idx > -1) this.fallbackGroupsUpdatedCallbacks.splice(idx, 1);
+    };
+  }
+
   get connectionState(): HubConnectionState {
     return this.connection?.state ?? HubConnectionState.Disconnected;
   }
@@ -1191,6 +1301,8 @@ export class PrinterSignalRService {
     return this.connection?.connectionId ?? null;
   }
   dispose(): void {
+    this.settingsLoadGeneration++;
+    this.settingsRefreshQueued = false;
     this.disposed = true;
     this.connectionRequested = false;
     this.connectionIntentGeneration++;
@@ -1212,9 +1324,16 @@ export class PrinterSignalRService {
     this.dispatchUploadProgressCallbacks = [];
     this.failureDetectionCallbacks = [];
     this.autoDispatchStatusCallbacks = [];
+    this.filamentCoverageChangedCallbacks = [];
+    this.fallbackGroupsUpdatedCallbacks = [];
     this.queueEventCallbacks = [];
     this.queueResourcesChangedCallbacks = [];
     this.clearQueueSubscriptionState();
+    for (const timer of this.offlineGraceTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.offlineGraceTimers.clear();
+    this.lastStatuses.clear();
     const connection = this.connection;
     if (connection) {
       void this.stopConnection(connection);
@@ -1245,6 +1364,10 @@ export class PrinterSignalRService {
 }
 
 export const printerSignalRService = new PrinterSignalRService();
+registerAuthenticatedSignalRTransport(
+  'printer-status',
+  () => printerSignalRService.disconnect(),
+);
 
 // Debug helper: get a snapshot of last known statuses (populated by the service)
 export function getPrinterSignalRDebug(): {

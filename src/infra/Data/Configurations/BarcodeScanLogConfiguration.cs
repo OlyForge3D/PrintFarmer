@@ -24,5 +24,7 @@ public class BarcodeScanLogConfiguration : IEntityTypeConfiguration<BarcodeScanL
         _ = builder.HasIndex(l => l.Barcode);
         _ = builder.HasIndex(l => l.Action);
         _ = builder.HasIndex(l => l.Outcome);
+        _ = builder.HasIndex(l => l.BinId);
+        _ = builder.HasIndex(l => l.PartInventoryId);
     }
 }

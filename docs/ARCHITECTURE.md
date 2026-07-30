@@ -185,7 +185,7 @@ LibrarySyncChange (append-only sync journal + tombstones)
 **Timestamps**: All entities track `CreatedAt` and `ModifiedAt` in UTC  
 **Normalization**: Printer counts denormalized on Location for performance  
 **Encryption**: API keys encrypted at rest in database  
-**Cross-Context References**: Some entities (e.g. `ModelCollectionMembership.ModelId`, `OwnerUserId`) reference records owned by another bounded context/DbContext. These are stored as plain GUIDs with **no EF foreign key**; existence is validated at the service layer through the model query abstraction, following the tag/context-boundary precedent.  
+**Cross-Context References**: Some entities (e.g. `ModelCollectionMembership.ModelId`, `OwnerUserId`) reference records owned by another bounded context/DbContext. These are stored as plain GUIDs with **no EF foreign key**; existence is validated at the service layer through the model query abstraction, following the tag/context-boundary precedent.
 
 #### Library Sync Journal (issue #844)
 

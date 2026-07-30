@@ -13,6 +13,15 @@ public interface IArtifactsRepository
     /// <param name="ct">Cancellation token.</param>
     Task<Artifact> AddAsync(Artifact artifact, CancellationToken ct = default);
 
+    /// <summary>
+    /// Adds a worker artifact only after acquiring the job through its active lease fence.
+    /// </summary>
+    Task<bool> TryAddForActiveLeaseAsync(
+        Artifact artifact,
+        Guid workerId,
+        Guid claimToken,
+        CancellationToken ct = default);
+
     /// <summary>Gets an artifact by its unique identifier.</summary>
     /// <param name="id">The artifact identifier.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -31,6 +40,40 @@ public interface IArtifactsRepository
     /// <param name="cutoffDate">The cutoff date for filtering.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Artifact>> GetOlderThanAsync(DateTime cutoffDate, CancellationToken ct = default);
+
+    /// <summary>Gets cleanup operations whose byte-deletion phase must be resumed.</summary>
+    Task<IReadOnlyList<Artifact>> GetCleanupInProgressAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically reserves an eligible artifact for cleanup, excluding any concurrent promotion pin.
+    /// </summary>
+    Task<bool> TryReserveForCleanupAsync(
+        Guid artifactId,
+        Guid? expectedReservationToken,
+        DateTime? expectedReservedAtUtc,
+        Guid reservationToken,
+        DateTime reservedAtUtc,
+        DateTime staleBeforeUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Atomically enters the immutable, idempotent byte-deletion phase.</summary>
+    Task<bool> TryBeginCleanupDeletionAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        DateTime startedAtUtc,
+        CancellationToken ct = default);
+
+    /// <summary>Finalizes metadata only after byte deletion began under the exact operation token.</summary>
+    Task<bool> FinalizeCleanupAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default);
+
+    /// <summary>Releases a reservation only before its durable deletion phase begins.</summary>
+    Task ReleaseCleanupReservationAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Pins an artifact against cleanup while a promotion runs, or confirms an existing pin held by the

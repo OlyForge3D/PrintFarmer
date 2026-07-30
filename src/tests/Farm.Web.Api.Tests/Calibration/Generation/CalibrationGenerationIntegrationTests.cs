@@ -167,11 +167,48 @@ public sealed class CalibrationGenerationIntegrationTests : IAsyncLifetime
         _ = serialized.Should().NotContain("slicer exited");
     }
 
+    [Fact(DisplayName = "Two owners download identical generated geometry under the same real SHA-256")]
+    public async Task GenerateJob_ForTwoOwners_DownloadsIdenticalContentUnderRealSha256()
+    {
+        Guid secondOwnerId = Guid.NewGuid();
+        CalibrationGenerationFixture secondFixture = await CalibrationGenerationSeed.SeedAsync(
+            CreateCoreContext,
+            CalibrationMethodNames.Temperature,
+            secondOwnerId,
+            tamperSpecification: false);
+        using HttpClient firstCaller = CreateCallerClient(OwnerUserId);
+        using HttpClient secondCaller = CreateCallerClient(secondOwnerId);
+        using HttpClient worker = CreateWorkerClient();
+
+        _ = (await PostGenerateJobAsync(firstCaller, _fixture, "two-owner-first")).StatusCode
+            .Should().Be(HttpStatusCode.Accepted);
+        await AdvanceSagaAsync(_fixture.OrchestrationId);
+        SliceJob firstJob = await GetSliceJobAsync(_fixture.OrchestrationId);
+        WorkerSliceJobResponse firstClaim = await ClaimAsync(worker);
+        byte[] firstBytes = await DownloadModelAsync(worker, firstClaim);
+
+        _ = (await PostGenerateJobAsync(secondCaller, secondFixture, "two-owner-second")).StatusCode
+            .Should().Be(HttpStatusCode.Accepted);
+        await AdvanceSagaAsync(secondFixture.OrchestrationId);
+        SliceJob secondJob = await GetSliceJobAsync(secondFixture.OrchestrationId);
+        WorkerSliceJobResponse secondClaim = await ClaimAsync(worker);
+        byte[] secondBytes = await DownloadModelAsync(worker, secondClaim);
+
+        string actualSha256 = Convert.ToHexString(SHA256.HashData(firstBytes));
+        _ = firstJob.Model3DId.Should().NotBeNull();
+        _ = secondJob.Model3DId.Should().NotBeNull();
+        _ = secondJob.Model3DId.Value.Should().NotBe(firstJob.Model3DId.Value);
+        _ = firstBytes.Should().Equal(secondBytes);
+        _ = firstJob.ModelSha256.Should().MatchRegex("^[A-F0-9]{64}$").And.Be(actualSha256);
+        _ = secondJob.ModelSha256.Should().MatchRegex("^[A-F0-9]{64}$").And.Be(actualSha256);
+    }
+
     private const string SlicedOutput =
         ";pinned upstream orcaslicer output\nG28\nG1 X10 Y10 Z0.2 F1200 E1\n";
 
     private static void AddLease(HttpRequestMessage message, WorkerSliceJobResponse claimed)
     {
+        message.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
         message.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
         message.Headers.Add(
             WorkerLeaseHeaders.LeaseFence,
@@ -188,11 +225,13 @@ public sealed class CalibrationGenerationIntegrationTests : IAsyncLifetime
         return core;
     }
 
-    private HttpClient CreateCallerClient()
+    private HttpClient CreateCallerClient() => CreateCallerClient(OwnerUserId);
+
+    private HttpClient CreateCallerClient(Guid ownerUserId)
     {
         HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-Roles", "user");
-        client.DefaultRequestHeaders.Add("X-Test-User-Id", OwnerUserId.ToString());
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", ownerUserId.ToString());
         client.DefaultRequestHeaders.Add(
             "X-Test-Permissions",
             string.Join(
@@ -259,32 +298,42 @@ public sealed class CalibrationGenerationIntegrationTests : IAsyncLifetime
     }
 
     private async Task<HttpResponseMessage> PostGenerateJobAsync(HttpClient client, string operationId)
+        => await PostGenerateJobAsync(client, _fixture, operationId);
+
+    private async Task<HttpResponseMessage> PostGenerateJobAsync(
+        HttpClient client,
+        CalibrationGenerationFixture fixture,
+        string operationId)
     {
         using HttpRequestMessage message = new(
             HttpMethod.Post,
-            $"/api/calibration-projects/{_fixture.ProjectId}/attempts/{_fixture.AttemptId}/generate-job")
+            $"/api/calibration-projects/{fixture.ProjectId}/attempts/{fixture.AttemptId}/generate-job")
         {
-            Content = JsonContent.Create(_fixture.Request()),
+            Content = JsonContent.Create(fixture.Request()),
         };
         message.Headers.Add("Idempotency-Key", operationId);
         return await client.SendAsync(message);
     }
 
-    private async Task AdvanceSagaAsync()
+    private async Task AdvanceSagaAsync() => await AdvanceSagaAsync(_fixture.OrchestrationId);
+
+    private async Task AdvanceSagaAsync(Guid orchestrationId)
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         ICalibrationGenerationSaga saga = scope.ServiceProvider
             .GetRequiredService<ICalibrationGenerationSaga>();
-        _ = await saga.ResumeAsync(_fixture.OrchestrationId, CancellationToken.None);
+        _ = await saga.ResumeAsync(orchestrationId, CancellationToken.None);
     }
 
-    private async Task<SliceJob> GetSliceJobAsync()
+    private async Task<SliceJob> GetSliceJobAsync() => await GetSliceJobAsync(_fixture.OrchestrationId);
+
+    private async Task<SliceJob> GetSliceJobAsync(Guid orchestrationId)
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         SlicerDbContext slicer = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         return await slicer.SliceJobs
             .AsNoTracking()
-            .SingleAsync(job => job.CalibrationOrchestrationId == _fixture.OrchestrationId);
+            .SingleAsync(job => job.CalibrationOrchestrationId == orchestrationId);
     }
 
     private async Task<CalibrationOrchestrationStatusDto> GetStatusAsync(HttpClient caller)

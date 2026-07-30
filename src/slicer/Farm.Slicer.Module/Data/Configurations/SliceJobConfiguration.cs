@@ -25,6 +25,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.ModelFileUrl).IsRequired().HasMaxLength(2048);
         _ = builder.Property(j => j.ModelFileName).IsRequired().HasMaxLength(512);
         _ = builder.Property(j => j.SlicerEngine).IsRequired();
+        _ = builder.Property(j => j.SlicerEngineVersion).HasMaxLength(32);
         _ = builder.Property(j => j.SlicerEngineName).HasMaxLength(32);
         _ = builder.Property(j => j.ModelSha256).HasMaxLength(64);
         _ = builder.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
@@ -38,6 +39,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.ProgressMessage).HasMaxLength(512);
         _ = builder.Property(j => j.CreatedAt).IsRequired();
         _ = builder.Property(j => j.UpdatedAt).IsRequired();
+        _ = builder.Property(j => j.ClaimToken);
         _ = builder.Property(j => j.ExtruderFilamentProfileNamesJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.ModelFileUrlsJson).HasColumnType("TEXT");
 

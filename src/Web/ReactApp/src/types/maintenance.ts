@@ -24,6 +24,13 @@ export enum MaintenanceAlertStatus {
 export interface MaintenanceAlert {
   id: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope (see issue #711/#719). When present the
+   * alert applies to a single toolhead on the printer; when `null`/omitted the
+   * alert is printer-wide, which preserves legacy records. MMU/AMS gates are
+   * never a valid maintenance toolhead scope.
+   */
+  toolheadId?: string | null;
   printerMaintenanceScheduleId?: string | null;
   maintenanceTaskId?: string | null;
   title: string;
@@ -55,6 +62,11 @@ export interface MaintenanceAlert {
 export interface MaintenanceLog {
   id: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope. `null` (or omitted) means the log applies
+   * to the printer as a whole — legacy records preserve this behaviour.
+   */
+  toolheadId?: string | null;
   printerMaintenanceScheduleId?: string | null;
   maintenanceTaskId?: string | null;
   resolvedAlertId?: string | null;
@@ -138,6 +150,11 @@ export interface ResolveAlertRequest {
 
 export interface CreateMaintenanceLogRequest {
   printerId: string;
+  /**
+   * Optional physical toolhead scope. Omit or set `null` for printer-wide logs.
+   * MMU/AMS gate toolheads must never be sent as a scope.
+   */
+  toolheadId?: string | null;
   deploymentId?: string | null;
   taskId?: string | null;
   taskName?: string | null;
@@ -193,9 +210,80 @@ export interface AlertStatusChangedEvent {
 export interface MaintenanceCompletedEvent {
   logId: string;
   printerId: string;
+  /** Optional physical toolhead scope carried on lowercase realtime events. */
+  toolheadId?: string | null;
   scheduleId?: string | null;
   performedAt: string;
   performedBy?: string | null;
+}
+
+// ============================================================================
+// Per-toolhead odometers (#711/#719)
+// ============================================================================
+
+/**
+ * Due state for a single toolhead's maintenance load. Modelled as a closed
+ * string union so exhaustiveness checks catch the `'unknown'` case at build
+ * time and downstream UI cannot silently fall through to "OK" when the
+ * schedule feed is unavailable.
+ *
+ *  - `'unknown'`    — the upcoming-maintenance feed is loading or errored,
+ *                     so we cannot make any claim about this toolhead. UIs
+ *                     must render this as "No data" / loading, NOT "OK".
+ *  - `'overdue'`    — the schedule engine (#711 backend) reports at least
+ *                     one overdue task on this toolhead.
+ *  - `'due-today'`  — the schedule engine reports at least one task due
+ *                     today (and none overdue).
+ *  - `'ok'`         — the schedule engine returned successfully and has no
+ *                     overdue / due-today tasks for this toolhead.
+ */
+export type ToolheadDueState = 'unknown' | 'overdue' | 'due-today' | 'ok';
+
+/**
+ * Per-physical-toolhead odometer displayed on the printer maintenance page.
+ *
+ * There is no dedicated backend endpoint. The #711 stable contract at feature
+ * head `1b696b954` surfaces per-tool cumulative print hours directly on
+ * `PrinterDetailsDto.toolheads[]` as `cumulativePrintHours`. The client-side
+ * shape below is assembled by the printer maintenance page from that field
+ * plus the schedule engine's own verdict (joined by `toolheadId` on the
+ * `/maintenance/upcoming` feed — alert severity is priority, NOT timing,
+ * and must not be used for due-state).
+ *
+ * Every field is intentionally required (never `?:`). The type carries three
+ * pieces of information the odometer card needs and the maintenance page
+ * always knows:
+ *   - `cumulativePrintHours: number | null` — nullable but present, mirroring
+ *     the wire contract's `[JsonIgnore(Never)] double? CumulativePrintHours`
+ *     rule (zero renders "0.0 h"; null renders "—").
+ *   - `dueState: ToolheadDueState` — pre-computed by the page so the card is
+ *     a pure render and no derivation gap can regress into a false "OK".
+ *   - `nextDueTaskName: string | null` — soonest-due label from the feed, or
+ *     null when unknown / not applicable.
+ */
+export interface PrinterToolheadOdometer {
+  toolheadId: string;
+  toolheadName: string | null;
+  toolheadIndex: number | null;
+  /**
+   * Cumulative print hours accrued while this toolhead was the active tool,
+   * from `PrinterDetailsDto.toolheads[i].cumulativePrintHours`. `null` means
+   * unavailable (feature off or unattributable topology); numeric zero means
+   * supported but no accrued hours and must render as `"0.0 h"`, never as a
+   * dash placeholder.
+   */
+  cumulativePrintHours: number | null;
+  /**
+   * The schedule engine's verdict for this toolhead. Callers compute this
+   * once at the page level so the card cannot accidentally infer "OK" from
+   * a numeric hours count while the schedule feed is loading or failed.
+   */
+  dueState: ToolheadDueState;
+  /**
+   * Soonest-due task label for this toolhead, when known. `null` when the
+   * upcoming feed reports no upcoming tasks OR when `dueState === 'unknown'`.
+   */
+  nextDueTaskName: string | null;
 }
 
 // ============================================================================
@@ -309,6 +397,13 @@ export interface PrinterMaintenanceScheduleDto {
   planName: string;
   printerId: string;
   printerName?: string | null;
+  /**
+   * Optional physical toolhead scope. `null`/omitted means the plan is
+   * deployed printer-wide (legacy behaviour).
+   */
+  toolheadId?: string | null;
+  /** Human-readable name of the scoped toolhead when the API resolves it. */
+  toolheadName?: string | null;
   isActive: boolean;
   deployedAt: string;
   notes?: string | null;
@@ -399,6 +494,11 @@ export interface AddTaskComponentDto {
 export interface DeployMaintenancePlanDto {
   maintenancePlanId: string;
   printerId: string;
+  /**
+   * Optional physical toolhead scope. Omit for printer-wide deployment.
+   * See per-toolhead maintenance work (#711/#719).
+   */
+  toolheadId?: string | null;
   notes?: string | null;
 }
 

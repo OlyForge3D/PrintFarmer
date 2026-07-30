@@ -53,7 +53,7 @@ public class UnifiedSettingsBulkPostValidationTests
     /// processed rather than the empty string.
     /// </summary>
     [Fact]
-    public void Update_MemberlessValidationExceptionFromSave_SurfacesReasonAndAttributableKey()
+    public async Task UpdateAsync_MemberlessValidationExceptionFromSave_SurfacesReasonAndAttributableKey()
     {
         const string reason = "Persist rejected: SignalR realtime endpoint is unreachable";
 
@@ -73,7 +73,7 @@ public class UnifiedSettingsBulkPostValidationTests
             [SignalRSettings.SectionName] = sectionValue,
         };
 
-        ActionResult result = controller.Update(payload);
+        ActionResult result = await controller.UpdateAsync(payload);
 
         BadRequestObjectResult badRequest = result.Should().BeOfType<BadRequestObjectResult>().Subject;
 

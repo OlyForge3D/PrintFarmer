@@ -13,7 +13,10 @@ using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
 using Farm.Web.Api.Contracts;
 using Farm.Web.Api.Services.Gcode;
+using Microsoft.Data.SqlClient;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Farm.Web.Api.Services.Calibration.Generation;
 
@@ -632,7 +635,14 @@ public sealed class CalibrationGenerationSaga(
 
         if (orchestration.CurrentStep == CalibrationGenerationSteps.SubmittingSliceJob)
         {
-            await SubmitSliceJobAsync(project, orchestration, run, plan, pinned, cancellationToken);
+            await SubmitSliceJobAsync(
+                project,
+                orchestration,
+                run,
+                resolved.Value!,
+                plan,
+                pinned,
+                cancellationToken);
         }
 
         if (orchestration.CurrentStep == CalibrationGenerationSteps.AwaitingWorker)
@@ -945,47 +955,296 @@ public sealed class CalibrationGenerationSaga(
             return byHash.Id;
         }
 
+        string ownerScopedHash = ComputeOwnerScopedGeneratedModelHash(
+            project.OwnerUserId,
+            upperDigest);
+        Model3D? byOwnerHash = await _models.GetByHashAsync(
+            ownerScopedHash,
+            cancellationToken);
+        if (byOwnerHash is not null && byOwnerHash.UploadedByUserId == project.OwnerUserId)
+        {
+            return byOwnerHash.Id;
+        }
+
         string root = _storagePaths.GetModelUploadDirectory();
         _ = Directory.CreateDirectory(root);
-        Guid modelId = Guid.NewGuid();
-        string storedFileName = $"{modelId:N}.stl";
-        await File.WriteAllBytesAsync(
-            Path.Combine(root, storedFileName),
-            geometry.Content.ToArray(),
+        string stagingIdentity = ComputeGeneratedModelStagingIdentity(
+            project.OwnerUserId,
+            upperDigest,
+            orchestration.Id);
+        Guid modelId = await ResolveGeneratedModelIdAsync(
+            stagingIdentity,
             cancellationToken);
 
-        DateTime nowUtc = UtcNow();
-        Model3D model = new()
+        // The orchestration-scoped path is the filesystem ownership fence. Concurrent attempts for
+        // the same owner and content never share bytes, so one failed attempt can only delete its
+        // own deterministic staging file.
+        string storedFileName = $"{stagingIdentity}.stl";
+        string storedPath = Path.Combine(root, storedFileName);
+        bool persisted = false;
+        bool preserveStagedBytes = false;
+        try
         {
-            Id = modelId,
-            Name = CalibrationBodyGeometryFactory.BuildStoredModelName(orchestration.AttemptId),
-            FileName = storedFileName,
-            FilePath = string.Empty,
-            FileSizeBytes = geometry.Content.Length,
+            await File.WriteAllBytesAsync(
+                storedPath,
+                geometry.Content.ToArray(),
+                cancellationToken);
 
-            // FileHash carries a global unique index, so a hash already recorded against a
-            // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
-            // this new row even though the bytes match: doing so would violate the unique
-            // constraint. A per-model synthetic value keeps the insert unique. Worker delivery
-            // still verifies the bytes against SliceJob.ModelSha256, which records the real
-            // content digest and takes precedence over this legacy database key.
-            FileHash = byHash is null ? upperDigest : modelId.ToString("N"),
-            FileFormat = ModelFileFormat.STL,
-            UploadedByUserId = project.OwnerUserId,
-            UploadedAt = nowUtc,
-            CreatedAt = nowUtc,
-            UpdatedAt = nowUtc,
-            IsValid = true,
+            DateTime nowUtc = UtcNow();
+            Model3D model = new()
+            {
+                Id = modelId,
+                Name = CalibrationBodyGeometryFactory.BuildStoredModelName(orchestration.AttemptId),
+                FileName = storedFileName,
+                FilePath = string.Empty,
+                FileSizeBytes = geometry.Content.Length,
+
+                // FileHash carries a global unique index, so a hash already recorded against a
+                // foreign or unattributed row (byHash is not null here) cannot be reused verbatim for
+                // this new row even though the bytes match: doing so would violate the unique
+                // constraint. A deterministic owner-and-content key keeps the insert unique and
+                // makes a committed row discoverable after a restart before the saga checkpoint.
+                // Worker delivery still verifies the bytes against SliceJob.ModelSha256, which
+                // records the real content digest and takes precedence over this storage key.
+                FileHash = byHash is null ? upperDigest : ownerScopedHash,
+                FileFormat = ModelFileFormat.STL,
+                UploadedByUserId = project.OwnerUserId,
+                UploadedAt = nowUtc,
+                CreatedAt = nowUtc,
+                UpdatedAt = nowUtc,
+                IsValid = true,
+            };
+            await _models.AddAsync(model, cancellationToken);
+            try
+            {
+                try
+                {
+                    await _models.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException ex) when (
+                    byHash is null &&
+                    IsModelFileHashUniqueConflict(ex))
+                {
+                    // A competing generator inserted the same real digest after our lookup. Keep this
+                    // owner's staged bytes, but move the legacy unique key to the same synthetic
+                    // owner-and-content form used when the competing row was visible before the write.
+                    model.FileHash = ownerScopedHash;
+                    await _models.SaveChangesAsync(cancellationToken);
+                }
+            }
+            catch (DbUpdateException)
+            {
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
+            }
+            catch (DbException)
+            {
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                GeneratedModelSaveOutcome outcome =
+                    await ReconcileGeneratedModelSaveAsync(model);
+                if (outcome == GeneratedModelSaveOutcome.Committed)
+                {
+                    persisted = true;
+                    return modelId;
+                }
+
+                preserveStagedBytes = outcome == GeneratedModelSaveOutcome.Uncertain;
+                throw;
+            }
+
+            persisted = true;
+            return modelId;
+        }
+        finally
+        {
+            if (!persisted && !preserveStagedBytes)
+            {
+                DeleteUnpersistedGeneratedModel(storedPath, modelId);
+            }
+        }
+    }
+
+    private static bool IsModelFileHashUniqueConflict(DbUpdateException exception)
+    {
+        const string indexName = "IX_Models3D_FileHash";
+        return exception.InnerException switch
+        {
+            SqliteException sqlite =>
+                sqlite.SqliteErrorCode == 19
+                && sqlite.SqliteExtendedErrorCode == 2067
+                && sqlite.Message.Contains(
+                    "UNIQUE constraint failed: Models3D.FileHash",
+                    StringComparison.OrdinalIgnoreCase),
+            PostgresException postgres =>
+                postgres.SqlState == PostgresErrorCodes.UniqueViolation
+                && string.Equals(postgres.ConstraintName, indexName, StringComparison.Ordinal),
+            SqlException sqlServer =>
+                sqlServer.Number is 2601 or 2627
+                && NamesDelimitedIndex(sqlServer.Message, indexName),
+            _ => false,
         };
-        await _models.AddAsync(model, cancellationToken);
-        await _models.SaveChangesAsync(cancellationToken);
-        return modelId;
+    }
+
+    private static bool NamesDelimitedIndex(string message, string indexName) =>
+        message.Contains($"'{indexName}'", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"\"{indexName}\"", StringComparison.OrdinalIgnoreCase)
+        || message.Contains($"[{indexName}]", StringComparison.OrdinalIgnoreCase);
+
+    private static string ComputeOwnerScopedGeneratedModelHash(
+        Guid ownerUserId,
+        string contentSha256) =>
+        CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-storage",
+            ownerUserId,
+            contentSha256,
+        }).ToUpperInvariant();
+
+    private static string ComputeGeneratedModelStagingIdentity(
+        Guid ownerUserId,
+        string contentSha256,
+        Guid orchestrationId) =>
+        CalibrationCanonicalJson.ComputeSha256(new
+        {
+            purpose = "calibration-generated-model-staging",
+            ownerUserId,
+            contentSha256,
+            orchestrationId,
+        }).ToUpperInvariant();
+
+    private async Task<Guid> ResolveGeneratedModelIdAsync(
+        string stagingIdentity,
+        CancellationToken cancellationToken)
+    {
+        for (int collisionSlot = 0; collisionSlot < 16; collisionSlot++)
+        {
+            Guid modelId = DeterministicGuid(
+                $"calibration-generated-model:{stagingIdentity}:{collisionSlot}");
+            Model3D? occupied = await _models!.GetByIdUnfilteredAsync(
+                modelId,
+                cancellationToken);
+            if (occupied is null)
+            {
+                return modelId;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Could not allocate a deterministic generated-model storage identity.");
+    }
+
+    private async Task<GeneratedModelSaveOutcome> ReconcileGeneratedModelSaveAsync(Model3D expected)
+    {
+        try
+        {
+            Model3D? stored = await _models!.GetByIdForReconciliationAsync(
+                expected.Id,
+                CancellationToken.None);
+            if (stored is null)
+            {
+                return GeneratedModelSaveOutcome.Absent;
+            }
+
+            bool matches =
+                stored.UploadedByUserId == expected.UploadedByUserId &&
+                string.Equals(stored.FileName, expected.FileName, StringComparison.Ordinal) &&
+                string.Equals(stored.FilePath, expected.FilePath, StringComparison.Ordinal) &&
+                string.Equals(stored.FileHash, expected.FileHash, StringComparison.Ordinal) &&
+                stored.FileSizeBytes == expected.FileSizeBytes &&
+                stored.FileFormat == expected.FileFormat &&
+                stored.IsValid == expected.IsValid;
+            if (!matches)
+            {
+                _logger.LogWarning(
+                    "Generated model {ModelId} was found after an unknown save outcome but did not match the staged owner, hash, or path",
+                    expected.Id);
+            }
+
+            return matches
+                ? GeneratedModelSaveOutcome.Committed
+                : GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (DbException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not reconcile generated model {ModelId} after an unknown save outcome",
+                expected.Id);
+            return GeneratedModelSaveOutcome.Uncertain;
+        }
+    }
+
+    private void DeleteUnpersistedGeneratedModel(string storedPath, Guid modelId)
+    {
+        try
+        {
+            File.Delete(storedPath);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogError(
+                ex,
+                "Failed to remove unpersisted generated model bytes for {ModelId}",
+                modelId);
+        }
+    }
+
+    private enum GeneratedModelSaveOutcome
+    {
+        Absent,
+        Committed,
+        Uncertain,
     }
 
     private async Task SubmitSliceJobAsync(
         CalibrationProject project,
         CalibrationOrchestration orchestration,
         CalibrationRunContext run,
+        CalibrationValidatedModel validatedModel,
         OrcaCalibrationPlan plan,
         CalibrationPinnedSlicerIdentity pinned,
         CancellationToken cancellationToken)
@@ -1025,7 +1284,7 @@ public sealed class CalibrationGenerationSaga(
                 ModelFileUrl = $"/api/slice/{jobId}/model",
                 ModelFileName = string.IsNullOrWhiteSpace(model.Name) ? model.FileName : model.Name,
                 Model3DId = model.Id,
-                ModelSha256 = model.FileHash,
+                ModelSha256 = validatedModel.Sha256.ToUpperInvariant(),
                 SlicerEngine = (int)SlicerEngineType.OrcaSlicer,
                 SlicerEngineName = SlicerEngineType.OrcaSlicer.ToString(),
                 MachineProfileId = plan.MachineProfile.Id,
@@ -1044,6 +1303,8 @@ public sealed class CalibrationGenerationSaga(
                 SlicerDistribution = plan.Manifest.SlicerDistribution,
                 SlicerVersion = plan.Manifest.SlicerVersion,
                 SlicerContainerDigest = pinned.ContainerDigest,
+                PinnedWorkerId = pinned.WorkerId,
+                SlicerBinarySha256 = pinned.BinarySha256,
                 RequiredCapabilitiesJson = JsonSerializer.Serialize(
                     new[] { CalibrationContractConstants.UpstreamSlicerCapability }),
                 CalibrationProjectId = project.Id,
@@ -1149,14 +1410,25 @@ public sealed class CalibrationGenerationSaga(
         CalibrationOrchestration orchestration,
         CancellationToken cancellationToken)
     {
+        SliceJob? completedJob =
+            await _sliceJobs!.GetByIdAsync(orchestration.SliceJobId!.Value, cancellationToken);
+        IReadOnlyList<Guid> acceptedArtifactIds = ParseArtifactIds(completedJob?.ArtifactIdsCsv);
         IReadOnlyList<Artifact> produced =
             await _artifacts!.ListByJobAsync(orchestration.SliceJobId!.Value, cancellationToken);
-        Artifact? sliced = produced
-            .Where(artifact =>
-                string.Equals(artifact.Kind, SlicerArtifactKinds.Gcode, StringComparison.OrdinalIgnoreCase) &&
-                artifact.WorkerId is not null)
-            .OrderBy(artifact => artifact.CreatedAt)
-            .FirstOrDefault();
+        Dictionary<Guid, Artifact> producedById = produced.ToDictionary(artifact => artifact.Id);
+        Artifact? sliced = completedJob?.WorkerId is { } workerId &&
+            completedJob.ClaimToken is { } claimToken
+                ? acceptedArtifactIds
+                    .Select(id => producedById.GetValueOrDefault(id))
+                    .FirstOrDefault(artifact =>
+                        artifact is not null &&
+                        string.Equals(
+                            artifact.Kind,
+                            SlicerArtifactKinds.Gcode,
+                            StringComparison.OrdinalIgnoreCase) &&
+                        artifact.WorkerId == workerId &&
+                        artifact.ClaimToken == claimToken)
+                : null;
         if (sliced is null)
         {
             await FailTerminallyAsync(
@@ -1214,6 +1486,30 @@ public sealed class CalibrationGenerationSaga(
         await CheckpointAsync(orchestration, CalibrationGenerationSteps.ComposingGcode, cancellationToken);
         await AppendEventAsync(project, orchestration, "slice-artifact-verified", null, [], cancellationToken);
         return true;
+    }
+
+    private static List<Guid> ParseArtifactIds(string? artifactIdsCsv)
+    {
+        if (string.IsNullOrWhiteSpace(artifactIdsCsv))
+        {
+            return [];
+        }
+
+        string[] values = artifactIdsCsv.Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var artifactIds = new List<Guid>(values.Length);
+        foreach (string value in values)
+        {
+            if (!Guid.TryParse(value, out Guid artifactId))
+            {
+                return [];
+            }
+
+            artifactIds.Add(artifactId);
+        }
+
+        return artifactIds;
     }
 
     private async Task<bool> ComposeFinalGcodeAsync(

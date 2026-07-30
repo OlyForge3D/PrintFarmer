@@ -3,6 +3,8 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.PartsInventory;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +21,8 @@ public class JobDispatchService(
     ISpoolmanService spoolmanService,
     AppDbContext db,
     ILogger<JobDispatchService> logger,
+    IFilamentCoverageBroadcaster coverageBroadcaster,
+    IPartOutputSnapshotService partOutputSnapshotService,
     IQueueResourceAuthorizationService? resourceAuthorization = null,
     IQueuePositionAllocator? positionAllocator = null) : IJobDispatchService
 {
@@ -197,7 +201,7 @@ public class JobDispatchService(
         }
 
         job.AssignedPrinterId = printerId;
-        job.DispatchedAt = DateTime.UtcNow;
+        job.DispatchedAt ??= DateTime.UtcNow;
         job.DispatchScore = printerScore?.TotalScore;
         job.DispatchMode = (int)DispatchMode.Suggested;
 
@@ -236,6 +240,8 @@ public class JobDispatchService(
             Reason = $"Dispatched by {userId}",
             CreatedAtUtc = DateTime.UtcNow,
         });
+
+        _ = await partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
 
         foreach (Guid affectedPrinterId in new[] { originalPrinterId, (Guid?)printerId }
                      .Where(value => value.HasValue)
@@ -288,6 +294,11 @@ public class JobDispatchService(
                 currentJobRowVersion,
                 currentDispatchStateRowVersion);
         }
+
+        await coverageBroadcaster.BroadcastPrinterChangedAsync(
+            printerId,
+            FilamentCoverageChangeReasons.JobAssignment,
+            ct).ConfigureAwait(false);
 
         logger.LogInformation(
             "Dispatching job {JobId} to printer {PrinterName} (score: {Score})",

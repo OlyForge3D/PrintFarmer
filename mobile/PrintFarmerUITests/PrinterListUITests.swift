@@ -1,76 +1,75 @@
 import XCTest
 
-/// UI tests for printer list navigation and printer detail.
-///
-/// These tests verify the printer list loads and that tapping a printer
-/// navigates to its detail screen.
-///
-/// ## Prerequisites
-/// - `--uitesting` launch argument enables mock mode
-/// - Mock mode should provide at least one printer in the list
-/// - When Lambert's mock server is ready, configure the URL in setUp()
+/// UI tests for deterministic Farm list rendering and stable-ID printer navigation.
+@MainActor
 final class PrinterListUITests: PrintFarmerUITestCase {
+    private let printerID = "10000000-0001-0000-0000-000000000001"
 
-    override func setUp() {
-        super.setUp()
-        // Navigate to printer list if not already there.
-        // In mock mode, the app should auto-authenticate and show the dashboard.
-        // From dashboard, navigate to Printers tab.
-        let printersTab = app.tabBars.buttons["Printers"]
-        if printersTab.waitForExistence(timeout: 5) {
-            printersTab.tap()
-        }
-    }
-
-    // MARK: - Printer List
-
-    func testPrinterListDisplayed() {
-        // In mock mode, the printer list should show at least one printer
-        // Look for a navigation bar or list content
-        let printersList = app.collectionViews.firstMatch
-        let navBar = app.navigationBars["Printers"]
-
-        let hasListUI = printersList.waitForExistence(timeout: 5)
-            || navBar.waitForExistence(timeout: 5)
-
-        // Note: Without mock server, the list may be empty or show an error.
-        // This test validates the navigation flow works.
-        XCTAssertTrue(hasListUI || app.staticTexts["No printers found"].exists,
-                       "Printer list or empty state should be visible")
-    }
-
-    // MARK: - Navigation to Detail
-
-    func testTapPrinterNavigatesToDetail() {
-        // Wait for list content
-        let firstCell = app.collectionViews.cells.firstMatch
-        guard firstCell.waitForExistence(timeout: 5) else {
-            // No printers available in mock mode — skip gracefully
+    private func openFarm() {
+        let farmTab = app.tabBars.buttons["Farm"]
+        if farmTab.waitForExistence(timeout: 5) {
+            farmTab.tap()
             return
         }
 
-        firstCell.tap()
+        let sidebarFarm = app.buttons["sidebar.farm"]
+        if sidebarFarm.waitForExistence(timeout: 3) {
+            sidebarFarm.tap()
+            return
+        }
 
-        // Printer detail should appear with a back button
-        let backButton = app.navigationBars.buttons.firstMatch
-        let detailContent = app.scrollViews.firstMatch
+        for label in ["Sidebar", "Toggle Sidebar", "Show Sidebar"] {
+            let toggle = app.navigationBars.buttons[label]
+            if toggle.exists {
+                toggle.tap()
+                if sidebarFarm.waitForExistence(timeout: 3) {
+                    sidebarFarm.tap()
+                    return
+                }
+            }
+        }
 
-        let navigated = backButton.waitForExistence(timeout: 5)
-            || detailContent.waitForExistence(timeout: 5)
-
-        XCTAssertTrue(navigated, "Should navigate to printer detail view")
+        XCTFail("Farm destination should be reachable from the operator shell")
     }
 
-    // MARK: - Search
+    func testPrinterListDisplayed() {
+        openFarm()
+        XCTAssertTrue(app.navigationBars["Farm"].waitForExistence(timeout: 5))
+
+        let printerCard = app.buttons["farm-card-\(printerID)"]
+        XCTAssertTrue(
+            printerCard.waitForExistence(timeout: 5),
+            "The deterministic UI-test fleet should expose its first printer card"
+        )
+        XCTAssertTrue(printerCard.label.contains("Prusa MK4 #1"))
+    }
+
+    func testTapPrinterNavigatesToDetail() {
+        openFarm()
+        let printerCard = app.buttons["farm-card-\(printerID)"]
+        XCTAssertTrue(printerCard.waitForExistence(timeout: 5))
+        printerCard.tap()
+
+        let detail = app.scrollViews["printer.detail.root.\(printerID)"]
+        XCTAssertTrue(
+            detail.waitForExistence(timeout: 8),
+            "Tapping the stable printer card should open that printer's detail"
+        )
+
+        let destination = app.staticTexts["printer.detail.destination.\(printerID)"]
+        XCTAssertTrue(destination.exists)
+        XCTAssertEqual(destination.label, "Prusa MK4 #1, printer detail")
+    }
 
     func testSearchFieldExists() {
-        // The printer list should have a search bar
+        openFarm()
         let searchField = app.searchFields.firstMatch
-        if searchField.waitForExistence(timeout: 5) {
-            XCTAssertTrue(searchField.exists)
-            searchField.tap()
-            searchField.typeText("Prusa")
-        }
-        // Search may not be visible if list is empty — acceptable in mock mode
+        XCTAssertTrue(
+            searchField.waitForExistence(timeout: 5),
+            "Farm should expose printer search when the deterministic fleet is loaded"
+        )
+        searchField.tap()
+        searchField.typeText("Prusa")
+        XCTAssertTrue(app.buttons["farm-card-\(printerID)"].exists)
     }
 }

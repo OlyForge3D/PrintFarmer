@@ -1380,19 +1380,23 @@ test_postgres_password_authentication_integration() {
     
     cd "$TEST_TEMP_DIR"
     
-    # Run deploy script to generate compose and env files
+    # The deploy script's --dry-run mode intentionally short-circuits compose
+    # generation (compose-generator returns after show_dry_run). To validate
+    # that the init-postgres.sh reference is wired into the compose the deploy
+    # script would produce, invoke compose-generator directly against the test
+    # temp dir. This preserves the original test intent (init script must be
+    # referenced) without depending on --dry-run to leave files on disk.
+    local generator="$REPO_ROOT/scripts/docker/compose-generator.sh"
+    assert_file_exists "$generator" "compose-generator.sh should exist"
+    capture_output "'$generator' --architecture microservices --db-provider postgres --output-dir '$TEST_TEMP_DIR' 2>&1 || true"
+
+    # Also generate an env file via deploy dry-run so POSTGRES_PASSWORD is
+    # produced through the same code path a real deployment would use.
     capture_output "$(get_deploy_script_command --dry-run --batch)"
-    local output=$(get_output)
-    
-    # Find the generated compose file
+
     local compose_file="$TEST_TEMP_DIR/docker-compose.yml"
-    if [ ! -f "$compose_file" ]; then
-        # Try the repo root
-        compose_file="$REPO_ROOT/docker-compose.yml"
-    fi
-    
     assert_file_exists "$compose_file" "Generated compose file should exist"
-    
+
     local env_file="$TEST_TEMP_DIR/.env"
     if [ ! -f "$env_file" ]; then
         env_file="$REPO_ROOT/.env"
@@ -1500,7 +1504,8 @@ test_pgadmin_postgres_only() {
     
     # pgAdmin should only be supported with PostgreSQL
     # This is enforced in compose-generator.sh
-    assert_contains "$(grep -n 'postgres' $COMPOSE_GENERATOR | head -5)" "postgres" "compose-generator should reference PostgreSQL"
+    local compose_generator="$REPO_ROOT/scripts/docker/compose-generator.sh"
+    assert_contains "$(grep -n 'postgres' "$compose_generator" | head -5)" "postgres" "compose-generator should reference PostgreSQL"
     
     pass_test
 }

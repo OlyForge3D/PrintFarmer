@@ -64,6 +64,12 @@ export interface HistoryJob {
    */
   costIsEstimated?: boolean;
   tags?: JobTag[];
+  /**
+   * UTC timestamp when the completed job was harvested into printed-part stock
+   * (#722/#741). Null when the job has not been harvested yet. Used to gate the
+   * Harvest action and render an "already harvested" indicator.
+   */
+  harvestedAt?: string | null;
 }
 
 /**

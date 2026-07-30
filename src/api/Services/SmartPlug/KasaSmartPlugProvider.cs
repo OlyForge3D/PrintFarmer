@@ -8,12 +8,34 @@ namespace Farm.Web.Api.Services.SmartPlug;
 /// Targets the EM-enabled Kasa devices (KP115, EP25, etc.) that expose a JSON-over-TCP protocol
 /// on port 9999, wrapped in a simple XOR obfuscation layer.
 /// </summary>
-public sealed class KasaSmartPlugProvider(
-    ILogger<KasaSmartPlugProvider> logger) : ISmartPlugProvider
+public sealed class KasaSmartPlugProvider : ISmartPlugProvider
 {
     private const int KasaTcpPort = 9999;
     private const int MaxResponseBytes = 65_536; // 64 KB — no legitimate Kasa response is larger
-    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultReadTimeout = TimeSpan.FromSeconds(5);
+
+    private readonly ILogger<KasaSmartPlugProvider> _logger;
+    private readonly IKasaConnector _connector;
+    private readonly TimeSpan _readTimeout;
+
+    /// <summary>Production constructor: real TCP connections and the standard 5-second read timeout.</summary>
+    public KasaSmartPlugProvider(ILogger<KasaSmartPlugProvider> logger)
+        : this(logger, TcpKasaConnector.Instance, DefaultReadTimeout)
+    {
+    }
+
+    /// <summary>
+    /// Test seam: injects the connection factory and the read timeout so the timeout path can be
+    /// exercised deterministically (a blocking stream plus a zero read timeout cancels immediately)
+    /// without a real socket or wall-clock wait. Not used by production DI.
+    /// </summary>
+    internal KasaSmartPlugProvider(
+        ILogger<KasaSmartPlugProvider> logger, IKasaConnector connector, TimeSpan readTimeout)
+    {
+        _logger = logger;
+        _connector = connector;
+        _readTimeout = readTimeout;
+    }
 
     public string ProviderType => "Kasa";
 
@@ -27,12 +49,12 @@ public sealed class KasaSmartPlugProvider(
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            logger.LogWarning("Kasa GetCurrentReading timed out for {DeviceAddress}", deviceAddress);
+            _logger.LogWarning("Kasa GetCurrentReading timed out for {DeviceAddress}", deviceAddress);
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Kasa GetCurrentReading failed for {DeviceAddress}", deviceAddress);
+            _logger.LogWarning(ex, "Kasa GetCurrentReading failed for {DeviceAddress}", deviceAddress);
             return null;
         }
     }
@@ -48,25 +70,20 @@ public sealed class KasaSmartPlugProvider(
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // Internal read timeout expired — treat as connection failure.
-            logger.LogDebug("Kasa TestConnection timed out for {DeviceAddress}", deviceAddress);
+            _logger.LogDebug("Kasa TestConnection timed out for {DeviceAddress}", deviceAddress);
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "Kasa TestConnection failed for {DeviceAddress}", deviceAddress);
+            _logger.LogDebug(ex, "Kasa TestConnection failed for {DeviceAddress}", deviceAddress);
             return false;
         }
     }
 
-    internal static async Task<byte[]> SendKasaCommandAsync(string host, byte[] command, CancellationToken ct)
+    internal async Task<byte[]> SendKasaCommandAsync(string host, byte[] command, CancellationToken ct)
     {
-        using System.Net.Sockets.TcpClient tcp = new();
-        tcp.ReceiveTimeout = 5000;
-        tcp.SendTimeout = 5000;
-
         (string hostname, int port) = ParseHostPort(host, KasaTcpPort);
-        await tcp.ConnectAsync(hostname, port, ct);
-        System.Net.Sockets.NetworkStream stream = tcp.GetStream();
+        using System.IO.Stream stream = await _connector.ConnectAsync(hostname, port, ct);
 
         // Kasa protocol: 4-byte big-endian length prefix followed by XOR-obfuscated payload.
         byte[] encrypted = XorEncrypt(command);
@@ -76,7 +93,7 @@ public sealed class KasaSmartPlugProvider(
 
         // Apply a read timeout to prevent a hung socket from blocking the polling thread.
         using CancellationTokenSource readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        readCts.CancelAfter(ReadTimeout);
+        readCts.CancelAfter(_readTimeout);
         CancellationToken readCt = readCts.Token;
 
         byte[] lenBuf = new byte[4];
@@ -209,7 +226,7 @@ public sealed class KasaSmartPlugProvider(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to parse Kasa emeter response");
+            _logger.LogWarning(ex, "Failed to parse Kasa emeter response");
             return null;
         }
     }
@@ -223,5 +240,41 @@ public sealed class KasaSmartPlugProvider(
         // {"system":{"get_sysinfo":{}}}
         public static readonly byte[] SysInfo =
             """{"system":{"get_sysinfo":{}}}"""u8.ToArray();
+    }
+
+    /// <summary>
+    /// Establishes the byte stream to a Kasa device. The returned stream owns its transport and is
+    /// disposed by the caller. The production implementation (<see cref="TcpKasaConnector"/>) opens a
+    /// real TCP socket; tests inject a fake to exercise the read-timeout path without any wall-clock
+    /// dependency or real socket.
+    /// </summary>
+    internal interface IKasaConnector
+    {
+        Task<System.IO.Stream> ConnectAsync(string host, int port, CancellationToken ct);
+    }
+
+    /// <summary>Default connector: a real loopback/LAN TCP socket on the Kasa port.</summary>
+    private sealed class TcpKasaConnector : IKasaConnector
+    {
+        public static readonly TcpKasaConnector Instance = new();
+
+        public async Task<System.IO.Stream> ConnectAsync(string host, int port, CancellationToken ct)
+        {
+            System.Net.Sockets.Socket socket = new(
+                System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+
+            try
+            {
+                await socket.ConnectAsync(host, port, ct);
+
+                // The NetworkStream owns the socket, so disposing the stream closes the connection.
+                return new System.Net.Sockets.NetworkStream(socket, ownsSocket: true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
     }
 }

@@ -22,6 +22,11 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
     var pauseCalledWith: UUID?
     var resumeCalledWith: UUID?
 
+    // Dispatch (issue #712)
+    var candidatesToReturn: [DispatchCandidate] = []
+    var getCandidatesCalledWith: UUID?
+    var dispatchToCalledWith: (jobId: UUID, printerId: UUID)?
+
     func list() async throws -> [QueueOverview] {
         listJobsCalled = true
         if let error = errorToThrow { throw error }
@@ -129,6 +134,17 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         )
     }
 
+    func getCandidates(jobId: UUID) async throws -> [DispatchCandidate] {
+        getCandidatesCalledWith = jobId
+        if let error = errorToThrow { throw error }
+        return candidatesToReturn
+    }
+
+    func dispatchTo(jobId: UUID, printerId: UUID) async throws {
+        dispatchToCalledWith = (jobId, printerId)
+        if let error = errorToThrow { throw error }
+    }
+
     func reset() {
         queueOverviewsToReturn = []
         queuedJobResponsesToReturn = []
@@ -147,5 +163,8 @@ final class MockJobService: JobServiceProtocol, @unchecked Sendable {
         abortCalledWith = nil
         pauseCalledWith = nil
         resumeCalledWith = nil
+        candidatesToReturn = []
+        getCandidatesCalledWith = nil
+        dispatchToCalledWith = nil
     }
 }
