@@ -230,6 +230,29 @@ public class PredictiveAnalyticsServiceTests : IClassFixture<CustomWebApplicatio
         interceptor.PrintJobQueryCount.Should().BeLessThanOrEqualTo(3);
     }
 
+    [Theory]
+    [InlineData(0, 0, 0, 0, 1.0)]
+    [InlineData(4, 3, 0, 0, 0.75)]
+    [InlineData(4, 1, 4, 0, 1.5)]
+    [InlineData(4, 0, 4, 0, 1.0)]
+    [InlineData(4, 1, 4, 4, 0.5)]
+    [InlineData(4, 4, 4, 1, 1.5)]
+    public void CalculateRecentPrinterTrend_WithWindowCounts_PreservesExpectedBounds(
+        int recentTotal,
+        int recentCompleted,
+        int previousTotal,
+        int previousCompleted,
+        double expected)
+    {
+        double result = PredictiveAnalyticsService.CalculateRecentPrinterTrend(
+            recentTotal,
+            recentCompleted,
+            previousTotal,
+            previousCompleted);
+
+        result.Should().Be(expected);
+    }
+
     [Fact]
     public async Task PredictJobFailureLikelihoodAsync_ReturnsConfidenceScore()
     {

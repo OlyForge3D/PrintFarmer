@@ -287,7 +287,7 @@ public class PredictiveAnalyticsService(AppDbContext db) : IPredictiveAnalyticsS
                 count.PreviousCompleted));
     }
 
-    private static double CalculateRecentPrinterTrend(
+    internal static double CalculateRecentPrinterTrend(
         int recentTotal,
         int recentCompleted,
         int previousTotal,
