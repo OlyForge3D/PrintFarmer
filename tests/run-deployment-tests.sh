@@ -98,7 +98,10 @@ run_test_suite() {
     
     if [[ ! -f "$test_script" ]]; then
         log_warn "Test script not found: $test_script"
-        ((TESTS_SKIPPED++))
+        # NOTE: Use assignment form (VAR=$((VAR + 1))) instead of ((VAR++)) — the
+        # post-increment form returns exit code 1 when VAR is 0, which under
+        # `set -euo pipefail` aborts the orchestrator on the first counter bump.
+        TESTS_SKIPPED=$((TESTS_SKIPPED + 1))
         return 0
     fi
     
@@ -107,27 +110,27 @@ run_test_suite() {
     if [[ "$VERBOSE" == "true" ]]; then
         if bash "$test_script"; then
             log_success "$suite_name passed"
-            ((TESTS_PASSED++))
-            ((TESTS_RUN++))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+            TESTS_RUN=$((TESTS_RUN + 1))
             return 0
         else
             log_error "$suite_name failed"
             FAILED_TESTS+=("$suite_name")
-            ((TESTS_FAILED++))
-            ((TESTS_RUN++))
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            TESTS_RUN=$((TESTS_RUN + 1))
             return 1
         fi
     else
         if bash "$test_script" >/dev/null 2>&1; then
             log_success "$suite_name passed"
-            ((TESTS_PASSED++))
-            ((TESTS_RUN++))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
+            TESTS_RUN=$((TESTS_RUN + 1))
             return 0
         else
             log_error "$suite_name failed (run with --verbose for details)"
             FAILED_TESTS+=("$suite_name")
-            ((TESTS_FAILED++))
-            ((TESTS_RUN++))
+            TESTS_FAILED=$((TESTS_FAILED + 1))
+            TESTS_RUN=$((TESTS_RUN + 1))
             return 1
         fi
     fi
@@ -142,7 +145,7 @@ check_dependencies() {
     for cmd in bash grep awk sed; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             log_error "Required command not found: $cmd"
-            ((missing_deps++))
+            missing_deps=$((missing_deps + 1))
         fi
     done
     
@@ -154,12 +157,12 @@ check_dependencies() {
     # Check test scripts exist
     if [[ ! -f "$SCRIPT_DIR/test-compose-generator.sh" ]]; then
         log_error "Test script not found: $SCRIPT_DIR/test-compose-generator.sh"
-        ((missing_deps++))
+        missing_deps=$((missing_deps + 1))
     fi
     
     if [[ ! -f "$SCRIPT_DIR/test-deploy-docker.sh" ]]; then
         log_error "Test script not found: $SCRIPT_DIR/test-deploy-docker.sh"
-        ((missing_deps++))
+        missing_deps=$((missing_deps + 1))
     fi
     
     if [[ $missing_deps -gt 0 ]]; then
@@ -187,34 +190,34 @@ run_quick_tests() {
     # Test 1: Help output
     if bash "$REPO_ROOT/scripts/docker/compose-generator.sh" --help >/dev/null 2>&1; then
         log_success "Compose generator help works"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         log_error "Compose generator help failed"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
     
     # Test 2: Standard generation
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         --output-dir "$test_temp_dir/test1" >/dev/null 2>&1; then
         log_success "Standard compose generation works"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         log_error "Monolithic compose generation failed"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
     
     # Test 3: Generation with explicit options
     if DB_PROVIDER=postgres bash "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         --output-dir "$test_temp_dir/test2" >/dev/null 2>&1; then
         log_success "Compose generation with options works"
-        ((TESTS_PASSED++))
+        TESTS_PASSED=$((TESTS_PASSED + 1))
     else
         log_error "Microservices compose generation failed"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
     
     # Test 4: No duplicate volumes in generated files
     log_subsection "YAML Validation (No Duplicate Volumes)"
@@ -224,16 +227,16 @@ run_quick_tests() {
         local volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
         if [[ "$volumes_count" -eq 1 ]]; then
             log_success "No duplicate volumes in monolithic compose"
-            ((TESTS_PASSED++))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
         else
             log_error "Found $volumes_count 'volumes:' sections (expected 1)"
-            ((TESTS_FAILED++))
+            TESTS_FAILED=$((TESTS_FAILED + 1))
         fi
     else
         log_error "Compose file not generated"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
     
     # Test 5: No duplicate volumes in generated files
     log_subsection "YAML Validation (No Duplicate Volumes)"
@@ -243,16 +246,16 @@ run_quick_tests() {
         volumes_count=$(grep -c "^volumes:" "$compose_file" 2>/dev/null || echo "0")
         if [[ "$volumes_count" -eq 1 ]]; then
             log_success "No duplicate volumes in microservices compose"
-            ((TESTS_PASSED++))
+            TESTS_PASSED=$((TESTS_PASSED + 1))
         else
             log_error "Found $volumes_count 'volumes:' sections (expected 1)"
-            ((TESTS_FAILED++))
+            TESTS_FAILED=$((TESTS_FAILED + 1))
         fi
     else
         log_error "Microservices compose file not generated"
-        ((TESTS_FAILED++))
+        TESTS_FAILED=$((TESTS_FAILED + 1))
     fi
-    ((TESTS_RUN++))
+    TESTS_RUN=$((TESTS_RUN + 1))
 }
 
 ################################################################################
@@ -262,20 +265,26 @@ run_quick_tests() {
 run_full_tests() {
     log_section "Full Test Suite"
     
+    # NOTE: `|| true` on each run_test_suite call keeps the orchestrator from
+    # aborting under `set -euo pipefail` when a single suite fails. Failed
+    # suites are already recorded in FAILED_TESTS and reflected by
+    # print_summary's exit code, so continuing runs the remaining suites
+    # and surfaces the full pass/fail picture instead of stopping at the
+    # first failure.
     log_subsection "Test: Compose Generator"
-    run_test_suite "compose-generator tests" "$SCRIPT_DIR/test-compose-generator.sh"
+    run_test_suite "compose-generator tests" "$SCRIPT_DIR/test-compose-generator.sh" || true
     
     log_subsection "Test: Deploy Docker"
-    run_test_suite "deploy-docker tests" "$SCRIPT_DIR/test-deploy-docker.sh"
+    run_test_suite "deploy-docker tests" "$SCRIPT_DIR/test-deploy-docker.sh" || true
     
     log_subsection "Test: Configuration Persistence"
-    run_test_suite "configuration persistence tests" "$SCRIPT_DIR/test-config-persistence.sh"
+    run_test_suite "configuration persistence tests" "$SCRIPT_DIR/test-config-persistence.sh" || true
     
     log_subsection "Test: Integration Tests"
-    run_test_suite "integration tests" "$SCRIPT_DIR/test-integration.sh"
+    run_test_suite "integration tests" "$SCRIPT_DIR/test-integration.sh" || true
     
     log_subsection "Test: User Scenario"
-    run_test_suite "user scenario tests" "$SCRIPT_DIR/test-user-scenario-complete.sh"
+    run_test_suite "user scenario tests" "$SCRIPT_DIR/test-user-scenario-complete.sh" || true
 }
 
 ################################################################################

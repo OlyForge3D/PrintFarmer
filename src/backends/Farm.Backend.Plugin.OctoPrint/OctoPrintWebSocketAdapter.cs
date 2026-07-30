@@ -5,8 +5,10 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
@@ -24,12 +26,15 @@ public sealed class OctoPrintWebSocketAdapter(
     ILogger logger,
     IOctoPrintClient octoPrintClient,
     IHubContext<PrinterHub> hub,
-    IPrinterStatusCacheWriter statusCacheWriter) : IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IDisposable
 {
     private readonly ILogger _logger = logger;
     private readonly IOctoPrintClient _octoPrintClient = octoPrintClient;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly Guid _printerId = printerId;
     private readonly Printer _printer = printer;
     private readonly CancellationTokenSource _cts = new();
@@ -41,6 +46,7 @@ public sealed class OctoPrintWebSocketAdapter(
     private int _consecutiveFailures = 0;
     private bool _isAuthenticated = false;
     private string? _sessionToken;
+    private double? _lastBroadcastProgress;
 
     // API state tracking
     private string _apiState = "unset"; // "responding", "authFail", "noResponse"
@@ -65,7 +71,7 @@ public sealed class OctoPrintWebSocketAdapter(
     {
         try
         {
-            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Attempting connection to {ServerUrl}", _printerId, _printer.ServerUrl);
+            _logger.LogInformation("OctoPrint WebSocket {PrinterId}: Attempting connection", _printerId);
             _socketState = "connecting";
 
             // Get session token first via HTTP
@@ -122,6 +128,9 @@ public sealed class OctoPrintWebSocketAdapter(
             {
                 try
                 {
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "OctoPrint WebSocket status", ct)
+                        .ConfigureAwait(false);
                     WebSocketReceiveResult result = await _webSocket.ReceiveAsync(
                         new ArraySegment<byte>(buffer), ct);
 
@@ -137,7 +146,7 @@ public sealed class OctoPrintWebSocketAdapter(
                         string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
                         _logger.LogDebug("OctoPrint WebSocket {PrinterId}: Received message: {Value1}...", _printerId, message.Substring(0, Math.Min(100, message.Length)));
 
-                        await HandleWebSocketMessageAsync(message, ct);
+                        await HandleWebSocketMessageAsync(message, originWatermark, ct);
                         _lastSuccessfulUpdate = DateTime.UtcNow;
                         _consecutiveFailures = 0;
                     }
@@ -180,8 +189,12 @@ public sealed class OctoPrintWebSocketAdapter(
     /// Handles incoming WebSocket messages. Parses 'current' events containing printer status.
     /// </summary>
     /// <param name="message">The raw WebSocket message to handle.</param>
+    /// <param name="originWatermark">Watermark captured before receiving the message.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
-    private async Task HandleWebSocketMessageAsync(string message, CancellationToken ct)
+    private async Task HandleWebSocketMessageAsync(
+        string message,
+        long? originWatermark,
+        CancellationToken ct)
     {
         try
         {
@@ -195,7 +208,7 @@ public sealed class OctoPrintWebSocketAdapter(
                 OctoPrintStatusData? printerStatus = ParsePrinterStatus(currentObj);
                 if (printerStatus != null)
                 {
-                    await BroadcastStatusAsync(printerStatus, ct);
+                    await BroadcastStatusAsync(printerStatus, originWatermark, ct);
                 }
             }
             else if (root.TryGetProperty("reauthRequired", out _))
@@ -215,8 +228,12 @@ public sealed class OctoPrintWebSocketAdapter(
     /// Broadcasts printer status update via SignalR hub.
     /// </summary>
     /// <param name="status">The OctoPrint status data to broadcast.</param>
+    /// <param name="originWatermark">Watermark captured before observing the status.</param>
     /// <param name="ct">Cancellation token for the async operation.</param>
-    private async Task BroadcastStatusAsync(OctoPrintStatusData status, CancellationToken ct)
+    private async Task BroadcastStatusAsync(
+        OctoPrintStatusData status,
+        long? originWatermark,
+        CancellationToken ct)
     {
         try
         {
@@ -237,10 +254,11 @@ public sealed class OctoPrintWebSocketAdapter(
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
-                SpoolInfo: null);
+                SpoolInfo: null,
+                PrintTimeLeftSeconds: status.PrintTimeLeftSeconds);
 
             // Update cache before broadcasting to clients
-            _statusCacheWriter.UpdateStatus(cacheUpdate);
+            _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
             // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
             var signalRUpdate = new PrinterStatusUpdate(
@@ -262,7 +280,18 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-            await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
+            await _hub.Clients.Group(
+                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(_printerId))
+                .SendAsync("printerupdated", signalRUpdate, ct);
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+            bool progressChanged = _lastBroadcastProgress is null || status.Progress is null
+                ? _lastBroadcastProgress != status.Progress
+                : Math.Abs(_lastBroadcastProgress.Value - status.Progress.Value) > 0.01;
+#pragma warning restore S1244
+            _lastBroadcastProgress = status.Progress;
+            await _coverageBroadcaster
+                .BroadcastJobProgressIfChangedAsync(_printerId, progressChanged, ct)
+                .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -277,6 +306,8 @@ public sealed class OctoPrintWebSocketAdapter(
     /// <param name="ct">Cancellation token for the async operation.</param>
     public async Task<OctoPrintStatusData?> TryHttpPollingFallbackAsync(CancellationToken ct)
     {
+        _ = ct;
+
         // Only poll if enough time has passed since last poll
         if (DateTime.UtcNow - _lastHttpPoll < _pollingInterval)
         {
@@ -285,6 +316,9 @@ public sealed class OctoPrintWebSocketAdapter(
 
         try
         {
+            long? originWatermark = await OriginWatermark
+                .CaptureAsync(watermarkReader, _logger, "OctoPrint HTTP status", ct)
+                .ConfigureAwait(false);
             if (_printer.Credential == null || !_printer.Credential.HasApiKey)
             {
                 _logger.LogWarning("OctoPrint HTTP Fallback {PrinterId}: No API key configured", _printerId);
@@ -329,7 +363,9 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTarget = null,
                 BedTarget = null,
                 ThumbnailUrl = null,
-                CameraStreamUrl = null
+                CameraStreamUrl = null,
+                PrintTimeLeftSeconds = jobStatus.PrintTimeLeft,
+                OriginWatermark = originWatermark
             };
         }
         catch (Exception ex)
@@ -491,6 +527,14 @@ public sealed class OctoPrintWebSocketAdapter(
                 }
             }
 
+            double? printTimeLeft = null;
+            if (currentObj.TryGetProperty("progress", out JsonElement progObj2) &&
+                progObj2.TryGetProperty("printTimeLeft", out JsonElement ptl) &&
+                ptl.ValueKind != JsonValueKind.Null)
+            {
+                printTimeLeft = ptl.GetDouble();
+            }
+
             return new OctoPrintStatusData
             {
                 IsOnline = operational,
@@ -502,7 +546,8 @@ public sealed class OctoPrintWebSocketAdapter(
                 HotendTemp = hotendTemp,
                 BedTemp = bedTemp,
                 HotendTarget = hotendTarget,
-                BedTarget = bedTarget
+                BedTarget = bedTarget,
+                PrintTimeLeftSeconds = printTimeLeft
             };
         }
         catch (Exception ex)

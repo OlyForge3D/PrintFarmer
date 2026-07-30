@@ -16,10 +16,15 @@ export interface EnqueuePrintJobRequest {
   filamentVendor?: string;
   /** Filament color hex from Spoolman */
   filamentColor?: string;
+  /** Optional plate index for multi-plate 3MF models */
+  plateIndex?: number;
+  /** Optional plate name for multi-plate 3MF models */
+  plateName?: string;
 }
 
 export interface PrintJobDto {
   id: string;
+  rowVersion?: string | null;
   gcodeFileId: string;
   gcodeFileName: string;
   assignedPrinterId?: string;

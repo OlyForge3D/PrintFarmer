@@ -32,8 +32,8 @@ builder.Services.AddScoped<INetworkDiscoveryService, NetworkDiscoveryService>();
 // Session manager for tracking active discovery sessions (singleton for cross-request cancellation)
 builder.Services.AddSingleton<IDiscoverySessionManager, DiscoverySessionManager>();
 
-// SignalR progress broadcaster for streaming discovery
-builder.Services.AddSingleton<IDiscoveryProgressBroadcaster, DiscoveryProgressBroadcaster>();
+// Authenticated progress broadcaster for streaming discovery
+builder.Services.AddHttpClient<IDiscoveryProgressBroadcaster, DiscoveryProgressBroadcaster>();
 
 // Streaming discovery service with progress updates (Scoped to match IApiClient dependency)
 builder.Services.AddScoped<IStreamingDiscoveryService, StreamingDiscoveryService>();
@@ -45,9 +45,6 @@ builder.Services.AddHttpClient<ApiClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 builder.Services.AddScoped<IApiClient>(sp => sp.GetRequiredService<ApiClient>());
-
-// Add IHttpClientFactory for background services
-builder.Services.AddHttpClient();
 
 // Add periodic discovery background service (checks settings dynamically from API)
 builder.Services.AddHostedService<PeriodicDiscoveryBackgroundService>();

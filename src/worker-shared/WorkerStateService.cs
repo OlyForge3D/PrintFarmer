@@ -5,6 +5,9 @@ public class WorkerStateService : IWorkerStateService
     private readonly WorkerState _state = new();
     private readonly Lock _lock = new();
 
+    /// <summary>Leases currently held by this worker, keyed by job.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, WorkerJobLease> _leases = new();
+
     public WorkerState GetWorkerState()
     {
         lock (_lock)
@@ -12,12 +15,33 @@ public class WorkerStateService : IWorkerStateService
             return new WorkerState
             {
                 WorkerId = _state.WorkerId,
+                RegisteredServiceId = _state.RegisteredServiceId,
+                RegisteredServiceApiKey = _state.RegisteredServiceApiKey,
                 IsInitialized = _state.IsInitialized,
                 IsShuttingDown = _state.IsShuttingDown,
                 ActiveJobs = _state.ActiveJobs,
                 MaxConcurrentJobs = _state.MaxConcurrentJobs,
                 StartedAt = _state.StartedAt
             };
+        }
+    }
+
+    public void SetRegisteredService(Guid serviceId, string serviceApiKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceApiKey);
+        lock (_lock)
+        {
+            _state.RegisteredServiceId = serviceId;
+            _state.RegisteredServiceApiKey = serviceApiKey;
+        }
+    }
+
+    public void ClearRegisteredService()
+    {
+        lock (_lock)
+        {
+            _state.RegisteredServiceId = null;
+            _state.RegisteredServiceApiKey = null;
         }
     }
 
@@ -47,4 +71,13 @@ public class WorkerStateService : IWorkerStateService
             }
         }
     }
+
+    /// <inheritdoc/>
+    public void SetJobLease(Guid jobId, WorkerJobLease lease) => _leases[jobId] = lease;
+
+    /// <inheritdoc/>
+    public bool TryGetJobLease(Guid jobId, out WorkerJobLease lease) => _leases.TryGetValue(jobId, out lease);
+
+    /// <inheritdoc/>
+    public void ClearJobLease(Guid jobId) => _leases.TryRemove(jobId, out _);
 }

@@ -201,29 +201,42 @@ export function AutoDispatchDashboardPage() {
   );
 
   const handleGlobalToggle = (enabled: boolean) => {
-    setGlobalEnabledMutation.mutate(enabled);
+    setGlobalEnabledMutation.mutate({
+      enabled,
+      statuses: status?.printers ?? [],
+    });
   };
 
   const handlePrinterToggle = (printerId: string) => {
     const printer = status?.printers.find(p => p.printerId === printerId);
     const newEnabled = !(printer?.enabled ?? false);
-    setEnabledMutation.mutate({ printerId, enabled: newEnabled });
+    if (!printer?.dispatchStateETag || !printer.printerETag) return;
+    setEnabledMutation.mutate({
+      printerId,
+      enabled: newEnabled,
+      dispatchStateETag: printer.dispatchStateETag,
+      printerETag: printer.printerETag,
+    });
   };
 
   const handleMarkReady = (printerId: string) => {
-    markReadyMutation.mutate(printerId);
+    const printer = status?.printers.find(p => p.printerId === printerId);
+    if (printer) markReadyMutation.mutate(printer);
   };
 
   const handleSkip = (printerId: string) => {
-    skipMutation.mutate(printerId);
+    const printer = status?.printers.find(p => p.printerId === printerId);
+    if (printer) skipMutation.mutate(printer);
   };
 
   const handleCancel = (printerId: string) => {
-    cancelMutation.mutate(printerId);
+    const printer = status?.printers.find(p => p.printerId === printerId);
+    if (printer) cancelMutation.mutate(printer);
   };
 
   const handlePreClear = (printerId: string) => {
-    preClearMutation.mutate(printerId);
+    const printer = status?.printers.find(p => p.printerId === printerId);
+    if (printer) preClearMutation.mutate(printer);
   };
 
   if (isLoading) {

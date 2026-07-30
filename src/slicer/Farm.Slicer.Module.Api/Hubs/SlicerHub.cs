@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Farm.Infrastructure.Security;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Hubs;
@@ -37,15 +39,17 @@ public static class SlicerHubEvents
 /// SignalR hub for slicer service registration and status.
 /// Mapped to /hubs/slicer-registry.
 /// </summary>
+[Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
 public class SlicerHub(ILogger<SlicerHub> logger) : Hub
 {
     private readonly ILogger<SlicerHub> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <inheritdoc />
-    public override Task OnConnectedAsync()
+    public override async Task OnConnectedAsync()
     {
         _logger.LogInformation("SlicerHub client connected: {ConnectionId}", Context.ConnectionId);
-        return base.OnConnectedAsync();
+        await Groups.AddToGroupAsync(Context.ConnectionId, AuthorizedHubGroups.Administrators);
+        await base.OnConnectedAsync();
     }
 
     /// <inheritdoc />

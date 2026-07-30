@@ -2,8 +2,10 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -22,12 +24,15 @@ public sealed class OctoPrintPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<OctoPrintPollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<OctoPrintPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, OctoPrintWebSocketAdapter> _webSocketAdapters = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
@@ -222,7 +227,9 @@ public sealed class OctoPrintPollingService(
                                     _logger,
                                     octoPrintClient,
                                     _hub,
-                                    _statusCacheWriter);
+                                    _statusCacheWriter,
+                                    _coverageBroadcaster,
+                                    watermarkReader);
 
                                 _webSocketAdapters.TryAdd(id, adapter);
                                 PrinterPollingState state = _printerStates.GetOrAdd(id, printerId => new PrinterPollingState
@@ -355,7 +362,13 @@ public sealed class OctoPrintPollingService(
                     {
                         // Check for state transition from printing to idle/operational for job completion sync
                         string? previousState = state.LastKnownState;
+                        string? previousJobName = state.LastKnownJobName;
                         bool stateChanged = statusData.State != previousState;
+#pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
+                        bool progressChanged = state.LastKnownProgress is null || statusData.Progress is null
+                            ? state.LastKnownProgress != statusData.Progress
+                            : Math.Abs(state.LastKnownProgress.Value - statusData.Progress.Value) > 0.01;
+#pragma warning restore S1244
 
                         // Update state tracking (including PreviousState for transition detection)
                         state.PreviousState = previousState;
@@ -369,7 +382,12 @@ public sealed class OctoPrintPollingService(
                         // Check for print completion/failure transitions
                         if (stateChanged && previousState != null && statusData.State != null)
                         {
-                            await CheckAndSyncJobCompletionAsync(printerId, previousState, statusData.State, ct);
+                            await CheckAndSyncJobCompletionAsync(
+                                printerId,
+                                previousState,
+                                statusData.State,
+                                previousJobName,
+                                ct);
                         }
 
                         // External print detection: when printer transitions TO "printing" from a
@@ -419,10 +437,11 @@ public sealed class OctoPrintPollingService(
                             BedTemp: statusData.BedTemp,
                             HotendTarget: statusData.HotendTarget,
                             BedTarget: statusData.BedTarget,
-                            SpoolInfo: spoolInfo);
+                            SpoolInfo: spoolInfo,
+                            PrintTimeLeftSeconds: statusData.PrintTimeLeftSeconds);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(cacheUpdate);
+                        _statusCacheWriter.UpdateStatus(cacheUpdate, statusData.OriginWatermark);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var signalRUpdate = new PrinterStatusUpdate(
@@ -444,7 +463,12 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: spoolInfo,
                             FileName: PrinterStatusDto.ExtractFileName(statusData.JobName));
 
-                        await _hub.Clients.All.SendAsync("printerupdated", signalRUpdate, ct);
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", signalRUpdate, ct);
+                        await _coverageBroadcaster
+                            .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                            .ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -483,7 +507,7 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null);
 
                         // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
                         // Create SignalR update (PrinterStatusUpdate - includes HomedAxes)
                         var offlineSignalRUpdate = new PrinterStatusUpdate(
@@ -505,7 +529,9 @@ public sealed class OctoPrintPollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 
@@ -565,7 +591,12 @@ public sealed class OctoPrintPollingService(
     /// Checks for print completion/failure state transitions and synchronizes job status in database.
     /// Called when printer state changes from "printing" to operational/finishing (completion) or error (failure).
     /// </summary>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -584,7 +615,11 @@ public sealed class OctoPrintPollingService(
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
                 // Print completed successfully
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[OctoPrintPollingService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -593,7 +628,11 @@ public sealed class OctoPrintPollingService(
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
                 // Print failed
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[OctoPrintPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);

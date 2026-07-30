@@ -30,7 +30,204 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
 
     private readonly ArtifactsMetrics _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
 
-    public async Task<Artifact> UploadAsync(IFormFile file, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
+    public async Task<Artifact> UploadAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid? workerId,
+        string kind,
+        CancellationToken ct)
+    {
+        ValidateUpload(file, kind, declaredSizeBytes: null, requireVerification: false);
+        return await PersistAsync(
+            file,
+            jobId,
+            workerId,
+            claimToken: null,
+            kind,
+            declaredSha256: null,
+            requireActiveLease: false,
+            ct)
+            ?? throw new InvalidOperationException("The artifact could not be persisted.");
+    }
+
+    public async Task<Artifact?> UploadForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        string kind,
+        CancellationToken ct)
+    {
+        ValidateUpload(file, kind, declaredSizeBytes: null, requireVerification: false);
+        return await PersistAsync(
+            file,
+            jobId,
+            workerId,
+            claimToken,
+            kind,
+            declaredSha256: null,
+            requireActiveLease: true,
+            ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<Artifact> UploadVerifiedAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        string kind,
+        string? declaredSha256,
+        long? declaredSizeBytes,
+        CancellationToken ct)
+    {
+        ValidateUpload(file, kind, declaredSizeBytes, requireVerification: true);
+        return await PersistAsync(
+            file,
+            jobId,
+            workerId,
+            claimToken: null,
+            kind,
+            NormalizeHash(declaredSha256),
+            requireActiveLease: false,
+            ct)
+            ?? throw new InvalidOperationException("The artifact could not be persisted.");
+    }
+
+    /// <inheritdoc/>
+    public async Task<Artifact?> UploadVerifiedForActiveLeaseAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        string kind,
+        string? declaredSha256,
+        long? declaredSizeBytes,
+        CancellationToken ct)
+    {
+        ValidateUpload(file, kind, declaredSizeBytes, requireVerification: true);
+        return await PersistAsync(
+            file,
+            jobId,
+            workerId,
+            claimToken,
+            kind,
+            NormalizeHash(declaredSha256),
+            requireActiveLease: true,
+            ct);
+    }
+
+    private async Task<Artifact?> PersistAsync(
+        IFormFile file,
+        Guid jobId,
+        Guid? workerId,
+        Guid? claimToken,
+        string kind,
+        string? declaredSha256,
+        bool requireActiveLease,
+        CancellationToken ct)
+    {
+        string sanitized = SanitizeFileName(file.FileName);
+        string root = ResolveRootPath();
+        DateTime now = DateTime.UtcNow;
+        string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
+        _ = Directory.CreateDirectory(folder);
+        Guid artifactId = Guid.NewGuid();
+        string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
+        string fullPath = Path.Combine(folder, targetFileName);
+
+        bool persisted = false;
+        try
+        {
+            string sha256;
+            await using (FileStream target = File.Create(fullPath))
+            await using (Stream input = file.OpenReadStream())
+            using (SHA256 hasher = SHA256.Create())
+            {
+                sha256 = await CopyAndHashAsync(input, target, hasher, ct);
+            }
+
+            if (declaredSha256 is not null &&
+                !string.Equals(declaredSha256, sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                _metrics.RecordUploadRejected();
+                throw new ArtifactValidationException(
+                    ArtifactValidationException.HashMismatch,
+                    "The declared artifact digest does not match the uploaded bytes.");
+            }
+
+            string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+            Artifact artifact = new Artifact
+            {
+                Id = artifactId,
+                JobId = jobId,
+                WorkerId = workerId,
+                ClaimToken = claimToken,
+                Kind = kind,
+                FileName = sanitized,
+                RelativePath = relativePath,
+                ContentType = file.ContentType ?? "application/octet-stream",
+                SizeBytes = file.Length,
+                Sha256 = sha256,
+                DeclaredSha256 = declaredSha256,
+                CreatedAt = now
+            };
+
+            if (requireActiveLease)
+            {
+                if (workerId is not Guid activeWorkerId)
+                {
+                    throw new ArgumentException(
+                        "An active-lease upload requires a worker identifier.",
+                        nameof(workerId));
+                }
+
+                persisted = await _artifactsRepo.TryAddForActiveLeaseAsync(
+                    artifact,
+                    activeWorkerId,
+                    claimToken ?? Guid.Empty,
+                    ct);
+            }
+            else
+            {
+                _ = await _artifactsRepo.AddAsync(artifact, ct);
+                persisted = true;
+            }
+
+            if (!persisted)
+            {
+                return null;
+            }
+
+            _metrics.RecordUpload(file.Length);
+
+            // Increment worker artifact counters if available
+            if (workerId.HasValue)
+            {
+                Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
+                if (worker != null)
+                {
+                    worker.ArtifactsProduced++;
+                    worker.ArtifactBytesProduced += file.Length;
+                    await _artifactsRepo.UpdateWorkerAsync(worker, ct);
+                }
+            }
+
+            return artifact;
+        }
+        finally
+        {
+            if (!persisted)
+            {
+                TryDeleteQuietly(fullPath);
+            }
+        }
+    }
+
+    private void ValidateUpload(
+        IFormFile file,
+        string kind,
+        long? declaredSizeBytes,
+        bool requireVerification)
     {
         ArgumentNullException.ThrowIfNull(file);
         if (file.Length <= 0)
@@ -45,57 +242,62 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
 
         if (!IsAllowedKind(kind))
         {
+            if (requireVerification)
+            {
+                throw new ArtifactValidationException(
+                    ArtifactValidationException.UnsupportedKind,
+                    "The artifact kind is not accepted by this deployment.");
+            }
+
             throw new InvalidOperationException("Unsupported artifact kind.");
         }
 
-        string sanitized = SanitizeFileName(file.FileName);
-        string root = ResolveRootPath();
-        DateTime now = DateTime.UtcNow;
-        string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
-        _ = Directory.CreateDirectory(folder);
-        Guid artifactId = Guid.NewGuid();
-        string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
-        string fullPath = Path.Combine(folder, targetFileName);
-
-        string sha256;
-        await using (FileStream target = File.Create(fullPath))
-        await using (Stream input = file.OpenReadStream())
-        using (SHA256 hasher = SHA256.Create())
+        if (!requireVerification)
         {
-            sha256 = await CopyAndHashAsync(input, target, hasher, ct);
+            return;
         }
 
-        string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        Artifact artifact = new Artifact
+        IReadOnlyList<string> acceptedMimeTypes = SlicerArtifactKinds.AcceptedMimeTypes(kind);
+        string contentType = string.IsNullOrWhiteSpace(file.ContentType)
+            ? "application/octet-stream"
+            : file.ContentType.Split(';')[0].Trim();
+        if (acceptedMimeTypes.Count > 0 &&
+            !acceptedMimeTypes.Contains(contentType, StringComparer.OrdinalIgnoreCase))
         {
-            Id = artifactId,
-            JobId = jobId,
-            WorkerId = workerId,
-            Kind = kind,
-            FileName = sanitized,
-            RelativePath = relativePath,
-            ContentType = file.ContentType ?? "application/octet-stream",
-            SizeBytes = file.Length,
-            Sha256 = sha256,
-            CreatedAt = now
-        };
-
-        _ = await _artifactsRepo.AddAsync(artifact, ct);
-        _metrics.RecordUpload(file.Length);
-
-        // Increment worker artifact counters if available
-        if (workerId.HasValue)
-        {
-            Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
-            if (worker != null)
-            {
-                worker.ArtifactsProduced++;
-                worker.ArtifactBytesProduced += file.Length;
-                await _artifactsRepo.UpdateWorkerAsync(worker, ct);
-            }
+            throw new ArtifactValidationException(
+                ArtifactValidationException.UnsupportedMediaType,
+                "The artifact media type is not accepted for this artifact kind.");
         }
 
-        return artifact;
+        if (declaredSizeBytes.HasValue && declaredSizeBytes.Value != file.Length)
+        {
+            throw new ArtifactValidationException(
+                ArtifactValidationException.SizeMismatch,
+                "The declared artifact size does not match the uploaded bytes.");
+        }
+    }
+
+    private static string? NormalizeHash(string? hash) =>
+        string.IsNullOrWhiteSpace(hash)
+            ? null
+            : hash.Trim().Replace("-", string.Empty, StringComparison.Ordinal);
+
+    private static void TryDeleteQuietly(string fullPath)
+    {
+        try
+        {
+            File.Delete(fullPath);
+        }
+        catch (IOException exception)
+        {
+            // Orphan bytes are reclaimed by ArtifactCleanupService; a delete failure must not mask
+            // the integrity error that the caller needs to see.
+            System.Diagnostics.Debug.WriteLine(exception.Message);
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            System.Diagnostics.Debug.WriteLine(exception.Message);
+        }
     }
 
     public async Task<Artifact> UploadTextAsync(string content, string fileName, Guid jobId, Guid? workerId, string kind, CancellationToken ct)
@@ -130,47 +332,59 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string targetFileName = artifactId.ToString() + "-" + sanitized;
         string fullPath = Path.Combine(folder, targetFileName);
 
-        string sha256;
-        await using (FileStream target = File.Create(fullPath))
-        using (SHA256 hasher = SHA256.Create())
+        bool persisted = false;
+        try
         {
-            // Write and hash
-            _ = hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
-            await target.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
-            _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
-            sha256 = Convert.ToHexString(hasher.Hash!);
-        }
-
-        string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
-        Artifact artifact = new Artifact
-        {
-            Id = artifactId,
-            JobId = jobId,
-            WorkerId = workerId,
-            Kind = kind,
-            FileName = sanitized,
-            RelativePath = relativePath,
-            ContentType = "text/plain",
-            SizeBytes = bytes.Length,
-            Sha256 = sha256,
-            CreatedAt = now
-        };
-
-        _ = await _artifactsRepo.AddAsync(artifact, ct);
-        _metrics.RecordUpload(bytes.Length);
-
-        if (workerId.HasValue)
-        {
-            Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
-            if (worker != null)
+            string sha256;
+            await using (FileStream target = File.Create(fullPath))
+            using (SHA256 hasher = SHA256.Create())
             {
-                worker.ArtifactsProduced++;
-                worker.ArtifactBytesProduced += bytes.Length;
-                await _artifactsRepo.UpdateWorkerAsync(worker, ct);
+                // Write and hash
+                _ = hasher.TransformBlock(bytes, 0, bytes.Length, null, 0);
+                await target.WriteAsync(bytes.AsMemory(0, bytes.Length), ct);
+                _ = hasher.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+                sha256 = Convert.ToHexString(hasher.Hash!);
+            }
+
+            string relativePath = Path.GetRelativePath(root, fullPath).Replace(Path.DirectorySeparatorChar, '/');
+            Artifact artifact = new Artifact
+            {
+                Id = artifactId,
+                JobId = jobId,
+                WorkerId = workerId,
+                Kind = kind,
+                FileName = sanitized,
+                RelativePath = relativePath,
+                ContentType = "text/plain",
+                SizeBytes = bytes.Length,
+                Sha256 = sha256,
+                CreatedAt = now
+            };
+
+            _ = await _artifactsRepo.AddAsync(artifact, ct);
+            persisted = true;
+            _metrics.RecordUpload(bytes.Length);
+
+            if (workerId.HasValue)
+            {
+                Worker? worker = await _artifactsRepo.GetWorkerByIdAsync(workerId.Value, ct);
+                if (worker != null)
+                {
+                    worker.ArtifactsProduced++;
+                    worker.ArtifactBytesProduced += bytes.Length;
+                    await _artifactsRepo.UpdateWorkerAsync(worker, ct);
+                }
+            }
+
+            return artifact;
+        }
+        finally
+        {
+            if (!persisted)
+            {
+                File.Delete(fullPath);
             }
         }
-
-        return artifact;
     }
 
     public async Task<Artifact?> GetAsync(Guid id, CancellationToken ct)
@@ -194,6 +408,27 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string root = ResolveRootPath();
         string fullPath = Path.Combine(root, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         return (artifact, fullPath);
+    }
+
+    /// <inheritdoc/>
+    public async Task<ArtifactContentStream?> OpenReadStreamAsync(Guid id, CancellationToken ct)
+    {
+        (Artifact Artifact, string FullPath)? resolved = await GetWithPathAsync(id, ct);
+        if (resolved is null || !File.Exists(resolved.Value.FullPath))
+        {
+            return null;
+        }
+
+        string fullPath = resolved.Value.FullPath;
+        return ArtifactContentStream.Open(
+            resolved.Value.Artifact,
+            () => new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                useAsync: true));
     }
 
     private string ResolveRootPath()

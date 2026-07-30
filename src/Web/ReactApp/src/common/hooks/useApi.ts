@@ -2,6 +2,7 @@ import { apiClient } from '@/services/api';
 import type { BasicHealthStatus, DetailedHealthStatus, HealthStatus } from '@/types/api';
 import {
   ApiError,
+  BedType,
   CatalogContext,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
@@ -30,7 +31,9 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  PrintJobObjectListDto,
   QueuedPrintJobWithFileMetaDto,
+  RegisterDiscoveredPrinterRequest,
   StartDiscoveryRequest,
   ToolheadModelDefinition,
   UpdateExtruderModelDto,
@@ -68,6 +71,9 @@ import {
   JobStateHistoryDto,
   UpdateObicoServerRequest,
   TimezoneInfo,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
 } from '@/types/api';
 import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -86,6 +92,7 @@ export const queryKeys = {
     ['printers', id, 'history', options] as const,
   printerHistoryJob: (printerId: string, jobId: string) => ['printers', printerId, 'history', jobId] as const,
   printerHistoryTotals: (printerId: string) => ['printers', printerId, 'history', 'totals'] as const,
+  printJobObjects: (printerId: string) => ['printers', printerId, 'printjob', 'objects'] as const,
   manufacturers: ['manufacturers'] as const,
   models: (manufacturerId?: string) => ['models', manufacturerId] as const,
   hotendModels: ['hotend-models'] as const,
@@ -118,6 +125,7 @@ export const queryKeys = {
   nfcDevices: ['nfc-devices'] as const,
   nfcDevice: (id: string) => ['nfc-devices', id] as const,
   nfcDeviceHistory: (id: string) => ['nfc-devices', id, 'history'] as const,
+  nfcBindings: ['nfc-bindings'] as const,
   notifications: ['notifications'] as const,
   unreadCount: ['notifications', 'unread-count'] as const,
   notificationPreferences: ['notifications', 'preferences'] as const,
@@ -139,6 +147,9 @@ export const queryKeys = {
   printSessionTimeline: (jobId?: string) => (
     ['job-queue-analytics', 'jobs', jobId ?? null, 'state-history'] as const
   ),
+  bedTypes: ['bed-types'] as const,
+  customFieldDefinitions: (entityType: string) => ['custom-field-definitions', entityType] as const,
+  customFieldValues: (entityType: string, entityId: string) => ['custom-field-values', entityType, entityId] as const,
 } as const;
 
 // ============ Printer Hooks ============
@@ -191,6 +202,19 @@ export function usePrinterBackendCapabilitiesSingle(printerId: string | null, op
     },
     enabled: !!printerId,
     staleTime: 600000, // 10 minutes
+    ...options,
+  });
+}
+
+export function usePrintJobObjects(printerId: string | null, options?: QueryOptions<PrintJobObjectListDto>) {
+  return useQuery({
+    queryKey: printerId ? queryKeys.printJobObjects(printerId) : ['printers', 'missing-printer', 'printjob', 'objects'],
+    queryFn: () => {
+      if (!printerId) throw new Error('printerId is required');
+      return apiClient.getPrintJobObjects(printerId);
+    },
+    enabled: !!printerId,
+    staleTime: 10_000,
     ...options,
   });
 }
@@ -371,8 +395,15 @@ export function useUpdatePrinter() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ id, printer }: { id: string; printer: UpdatePrinterDto }) =>
-      apiClient.updatePrinter(id, printer),
+    mutationFn: ({
+      id,
+      printer,
+      reviewedRowVersion,
+    }: {
+      id: string;
+      printer: UpdatePrinterDto;
+      reviewedRowVersion: string;
+    }) => apiClient.updatePrinter(id, printer, reviewedRowVersion),
     onMutate: async ({ id, printer }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.printers });
       await queryClient.cancelQueries({ queryKey: queryKeys.printer(id) });
@@ -457,6 +488,23 @@ export function useStartDiscoveryStream() {
 export function useCancelDiscoveryStream() {
   return useMutation({
     mutationFn: (sessionId: string) => apiClient.cancelDiscoveryStream(sessionId),
+  });
+}
+
+export function useRegisterDiscoveredPrinter() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      sessionId,
+      request,
+    }: {
+      sessionId: string;
+      request: RegisterDiscoveredPrinterRequest;
+    }) => apiClient.registerDiscoveredPrinter(sessionId, request),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    },
   });
 }
 
@@ -790,6 +838,40 @@ export function useManufacturersByContext(
 }
 
 // ============ Settings Hooks ============
+
+// ---- Bed Type Hooks ----
+
+export function useBedTypes(options?: QueryOptions<BedType[]>) {
+  return useQuery({
+    queryKey: queryKeys.bedTypes,
+    queryFn: () => apiClient.getBedTypes(),
+    staleTime: 300000, // 5 minutes
+    ...options,
+  });
+}
+
+// ---- Custom Field Hooks ----
+
+export function useCustomFieldDefinitions(entityType: CustomFieldEntityType, options?: QueryOptions<CustomFieldDefinition[]>) {
+  return useQuery({
+    queryKey: queryKeys.customFieldDefinitions(entityType),
+    queryFn: () => apiClient.getCustomFieldDefinitions(entityType),
+    staleTime: 300000,
+    ...options,
+  });
+}
+
+export function useCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, options?: QueryOptions<CustomFieldValue[]>) {
+  return useQuery({
+    queryKey: queryKeys.customFieldValues(entityType, entityId),
+    queryFn: () => apiClient.getCustomFieldValues(entityType, entityId),
+    staleTime: 30000,
+    enabled: !!entityId,
+    ...options,
+  });
+}
+
+// ---- Filament Type Hooks ----
 
 export function useFilamentTypes(options?: QueryOptions<FilamentTypeDto[]>) {
   return useQuery({
@@ -1259,6 +1341,9 @@ export function useQueuePrintJob() {
           status: 'Queued',
           priority,
           queuePosition: 0,
+          copies: 1,
+          completedCopies: 0,
+          remainingCopies: 1,
           createdAtUtc: new Date().toISOString(),
           updatedAtUtc: new Date().toISOString(),
           queuedAtUtc: new Date().toISOString(),
@@ -1300,8 +1385,14 @@ export function useCancelPrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.cancelPrintQueueJob(jobId),
-    onMutate: async (jobId) => {
+    mutationFn: ({
+      jobId,
+      reviewedRowVersion,
+    }: {
+      jobId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.cancelPrintQueueJob(jobId, reviewedRowVersion),
+    onMutate: async ({ jobId }) => {
       const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
@@ -1331,8 +1422,14 @@ export function useDeletePrintQueueJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (jobId: string) => apiClient.deletePrintQueueJob(jobId),
-    onMutate: async (jobId) => {
+    mutationFn: ({
+      jobId,
+      reviewedRowVersion,
+    }: {
+      jobId: string;
+      reviewedRowVersion: string;
+    }) => apiClient.deletePrintQueueJob(jobId, reviewedRowVersion),
+    onMutate: async ({ jobId }) => {
       const allQueues = queryClient.getQueriesData<QueuedPrintJobWithFileMetaDto[]>({ queryKey: ['job-queue'] });
       const snapshots = allQueues.map(([key, value]) => ({ key, value }));
       allQueues.forEach(([key, jobs]) => {
@@ -1592,6 +1689,41 @@ export function useDeleteNfcDevice() {
       toast.success('NFC device removed');
     },
     onError: (err: ApiError) => toast.error(`Failed to remove device: ${err.message}`),
+  });
+}
+
+// ============ NFC Binding Hooks ============
+
+export function useNfcBindings(options?: QueryOptions<import('@/features/nfc/types').NfcBindingDto[]>) {
+  return useQuery({
+    queryKey: queryKeys.nfcBindings,
+    queryFn: () => apiClient.getNfcBindings(),
+    staleTime: 30_000,
+    ...options,
+  });
+}
+
+export function useLinkNfcTag() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: import('@/features/nfc/types').NfcLinkRequest) => apiClient.linkNfcTag(request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcBindings });
+      toast.success('NFC tag linked successfully');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to link tag: ${err.message}`),
+  });
+}
+
+export function useDeleteNfcBinding() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => apiClient.deleteNfcBinding(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.nfcBindings });
+      toast.success('NFC tag unbound');
+    },
+    onError: (err: ApiError) => toast.error(`Failed to unbind tag: ${err.message}`),
   });
 }
 
@@ -1858,8 +1990,22 @@ export function useTestObicoServerHealth() {
 export function useSetToolheadSpool() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ printerId, toolheadIndex, spoolId }: { printerId: string; toolheadIndex: number; spoolId: number }) =>
-      apiClient.setToolheadSpool(printerId, toolheadIndex, spoolId),
+    mutationFn: ({
+      printerId,
+      toolheadIndex,
+      spoolId,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      toolheadIndex: number;
+      spoolId: number;
+      reviewedRowVersion: string;
+    }) => apiClient.setToolheadSpool(
+      printerId,
+      toolheadIndex,
+      spoolId,
+      reviewedRowVersion
+    ),
     onSuccess: (_data, { printerId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });
@@ -1872,8 +2018,19 @@ export function useSetToolheadSpool() {
 export function useClearToolheadSpool() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ printerId, toolheadIndex }: { printerId: string; toolheadIndex: number }) =>
-      apiClient.clearToolheadSpool(printerId, toolheadIndex),
+    mutationFn: ({
+      printerId,
+      toolheadIndex,
+      reviewedRowVersion,
+    }: {
+      printerId: string;
+      toolheadIndex: number;
+      reviewedRowVersion: string;
+    }) => apiClient.clearToolheadSpool(
+      printerId,
+      toolheadIndex,
+      reviewedRowVersion
+    ),
     onSuccess: (_data, { printerId }) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.printers });

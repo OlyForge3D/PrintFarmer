@@ -1,5 +1,7 @@
 ﻿using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Api.HostedServices;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Repositories;
@@ -9,10 +11,12 @@ using Farm.Slicer.Module.Repositories;
 using Farm.Slicer.Module.Services;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api;
@@ -42,6 +46,12 @@ public static class SlicerApiExtensions
         // SignalR notifiers
         _ = services.AddSingleton<ISlicerProgressNotifier, SignalRSlicerProgressNotifier>();
         _ = services.AddScoped<ISliceJobEventService, SliceJobEventService>();
+        _ = services.AddScoped<IPermissionValidator, ClaimsPermissionValidator>();
+        _ = services.AddScoped<ISlicerResourceAccessAuthorizer, SlicerResourceAccessAuthorizer>();
+        _ = services.AddScoped<IPrinterAccessValidator, PrinterAccessValidator>();
+        services.TryAddSingleton<
+            Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
+            SlicerAuthorizationResultHandler>();
 
         // Profile mapping and export
         _ = services.AddScoped<IOrcaPresetMappingService, OrcaPresetMappingService>();
@@ -55,23 +65,14 @@ public static class SlicerApiExtensions
         // Core slicing services
         _ = services.AddScoped<ISlicersService, SlicersService>();
         _ = services.AddScoped<IProfilesService, ProfilesService>();
-        _ = services.AddSingleton<IWorkerAuthService, WorkerAuthService>();
+        _ = services.AddScoped<IWorkerAuthService, WorkerAuthService>();
+        _ = services.AddScoped<ISlicerApiKeyValidator, SlicerApiKeyValidator>();
 
         // Artifact services
         _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
         _ = services.AddScoped<IArtifactsService, ArtifactsService>();
         _ = services.AddScoped<IArtifactCleanupService, ArtifactCleanupService>();
         _ = services.AddHostedService<ArtifactCleanupHostedService>();
-
-        // Job dispatch
-        _ = services.AddScoped<ISlicerJobDispatcherService, JobDispatcherService>();
-        _ = services.AddSingleton(sp =>
-        {
-            IConfiguration cfg = sp.GetRequiredService<IConfiguration>();
-            RetryOptions opts = new RetryOptions();
-            cfg.GetSection("JobDispatchRetry").Bind(opts);
-            return opts;
-        });
 
         // Host-independent adapters (bridge module interfaces → infrastructure services)
         _ = services.AddSingleton<IRateLimitService, ModuleRateLimitAdapter>();
@@ -91,6 +92,23 @@ public static class SlicerApiExtensions
         // Background services
         _ = services.AddHostedService<ProfileTaskCheckService>();
 
+        // Printables import (preview, #349)
+        _ = services.Configure<PrintablesGraphQlOptions>(configuration.GetSection(PrintablesGraphQlOptions.SectionName));
+        _ = services.Configure<PrintablesOAuthOptions>(configuration.GetSection(PrintablesOAuthOptions.SectionName));
+        _ = services.AddHttpClient<IPrintablesGraphQLClient, PrintablesGraphQLClient>((sp, client) =>
+        {
+            PrintablesGraphQlOptions options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<PrintablesGraphQlOptions>>().Value;
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer/1.0");
+            client.DefaultRequestHeaders.Add("Origin", "https://www.printables.com");
+            client.Timeout = TimeSpan.FromSeconds(Math.Max(1, options.TimeoutSeconds));
+        });
+        _ = services.AddHttpClient<IPrintablesOAuthService, PrintablesOAuthService>((_, client) =>
+        {
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer/1.0");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        _ = services.AddScoped<IPrintablesImportService, PrintablesImportService>();
+
         return services;
     }
 
@@ -103,6 +121,7 @@ public static class SlicerApiExtensions
     /// <returns>The endpoint route builder for chaining.</returns>
     public static IEndpointRouteBuilder MapSlicerHubs(this IEndpointRouteBuilder endpoints)
     {
+        // Registry and progress hubs require the host's authenticated bearer identity.
         _ = endpoints.MapHub<SlicerHub>("/hubs/slicer-registry");
         _ = endpoints.MapHub<SlicerProgressHub>("/hubs/slicers");
         return endpoints;

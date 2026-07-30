@@ -1,5 +1,18 @@
 import Foundation
 
+struct AcknowledgeBedClearRequest: Encodable, Sendable {
+    let printerId: UUID
+    let expectedPrinterConfigRevision: Int64?
+}
+
+struct AcknowledgeBedClearResponse: Decodable, Sendable {
+    let message: String?
+    let jobETag: String?
+    let dispatchStateETag: String?
+    let error: String?
+    let detail: String?
+}
+
 // MARK: - Printer Request DTOs
 
 struct UpdatePrinterRequest: Codable, Sendable {
@@ -90,4 +103,11 @@ struct APIError: Codable, Sendable {
     let errors: [String: [String]]?
     // Backend CommandResult returns "message" instead of "detail"
     let message: String?
+    /// ProblemDetails extension used by the operator feature gate (#725).
+    /// Populated with values such as `"featureDisabled"` when a gated
+    /// endpoint (e.g. `/api/attention`) short-circuits with 404. Clients
+    /// use this to distinguish a genuinely missing resource from an
+    /// intentionally disabled feature and switch to the appropriate
+    /// fallback UI.
+    let code: String?
 }

@@ -8,17 +8,17 @@ final class JobDetailViewModelTests: XCTestCase {
     private var viewModel: JobDetailViewModel!
     private let testJobId = UUID(uuidString: "770e8400-e29b-41d4-a716-446655440002")!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobService = MockJobService()
         viewModel = JobDetailViewModel(jobId: testJobId)
         viewModel.configure(jobService: mockJobService)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     // MARK: - Initial State
@@ -68,6 +68,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testDispatchJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.dispatchJob()
 
@@ -76,7 +77,9 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testDispatchJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.dispatchJob()
 
@@ -87,10 +90,48 @@ final class JobDetailViewModelTests: XCTestCase {
     func testDispatchReloadsJobOnSuccess() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.dispatchJob()
 
         XCTAssertEqual(mockJobService.getJobCalledWith, testJobId)
+    }
+
+    func testDispatchUnknownShowsReconciliationNotice() async throws {
+        let job = try TestData.decodePrintJob()
+        mockJobService.jobToReturn = job
+        await viewModel.loadJob()
+        mockJobService.dispatchResultToReturn = .reconciliation(
+            dispatchResponse(
+                outcome: .unknown,
+                detail: "Reconciliation required."
+            )
+        )
+
+        await viewModel.dispatchJob()
+
+        XCTAssertEqual(
+            viewModel.actionNotice,
+            "Reconciliation required."
+        )
+        XCTAssertNil(viewModel.actionError)
+    }
+
+    func testDispatchRejectedShowsTypedConflict() async throws {
+        let job = try TestData.decodePrintJob()
+        mockJobService.jobToReturn = job
+        await viewModel.loadJob()
+        mockJobService.dispatchResultToReturn = .rejected(
+            dispatchResponse(
+                outcome: .rejected,
+                detail: "Printer busy."
+            )
+        )
+
+        await viewModel.dispatchJob()
+
+        XCTAssertEqual(viewModel.actionError, "Printer busy.")
+        XCTAssertNil(viewModel.actionNotice)
     }
 
     // MARK: - Cancel
@@ -98,6 +139,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testCancelJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.cancelJob()
 
@@ -105,11 +147,26 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testCancelJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.cancelJob()
 
         XCTAssertNotNil(viewModel.actionError)
+    }
+
+    func testCancelJobStaleRevisionReloadsAndRequiresReconfirmation() async throws {
+        mockJobService.jobToReturn = try TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.preconditionRequired(nil)
+
+        await viewModel.cancelJob()
+
+        XCTAssertEqual(
+            viewModel.actionError,
+            "This job changed after you reviewed it. Review the refreshed details and confirm again."
+        )
     }
 
     // MARK: - Abort
@@ -117,6 +174,7 @@ final class JobDetailViewModelTests: XCTestCase {
     func testAbortJobCallsService() async throws {
         let job = try TestData.decodePrintJob()
         mockJobService.jobToReturn = job
+        await viewModel.loadJob()
 
         await viewModel.abortJob()
 
@@ -124,7 +182,9 @@ final class JobDetailViewModelTests: XCTestCase {
     }
 
     func testAbortJobSetsActionError() async {
-        mockJobService.errorToThrow = NetworkError.serverError(500)
+        mockJobService.jobToReturn = try? TestData.decodePrintJob()
+        await viewModel.loadJob()
+        mockJobService.actionErrorToThrow = NetworkError.serverError(500)
 
         await viewModel.abortJob()
 
@@ -221,5 +281,49 @@ final class JobDetailViewModelTests: XCTestCase {
         let unconfigured = JobDetailViewModel(jobId: testJobId)
         await unconfigured.cancelJob()
         XCTAssertFalse(unconfigured.isPerformingAction)
+    }
+
+    // MARK: - Dispute C (#714): harvest-to-inventory gating
+
+    func testCanHarvestToInventoryTrueForCompletedUnharvestedJobWithFeatureEnabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobCompleted)
+
+        XCTAssertTrue(canHarvestToInventory(job: job, partsInventoryEnabled: true))
+    }
+
+    func testCanHarvestToInventoryFalseWhenAlreadyHarvested() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertNotNil(job.harvestedAt)
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: true),
+                       "An already-harvested job must not offer Harvest to Inventory again")
+    }
+
+    func testCanHarvestToInventoryFalseWhenFeatureDisabled() throws {
+        let job = try TestData.decodePrintJob(from: TestJSON.printJobHarvested)
+
+        XCTAssertFalse(canHarvestToInventory(job: job, partsInventoryEnabled: false))
+    }
+
+    private func dispatchResponse(
+        outcome: DispatchAttemptOutcome,
+        detail: String?
+    ) -> DispatchJobResponse {
+        DispatchJobResponse(
+            id: testJobId.uuidString,
+            rowVersion: "job-v2",
+            status: "Starting",
+            dispatchResult: DispatchAttemptResult(
+                attemptId: UUID(),
+                attemptNumber: 2,
+                outcome: outcome,
+                errorCode: outcome == .rejected ? "printer_busy" : nil,
+                errorDetail: detail,
+                isRetryable: false,
+                requiresReconciliation: outcome == .unknown,
+                jobRevision: "job-v2",
+                dispatchStateRevision: "dispatch-v2"
+            )
+        )
     }
 }

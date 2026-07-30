@@ -1,6 +1,7 @@
 ﻿using System.Diagnostics;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Settings;
@@ -113,7 +114,7 @@ public sealed class PrintFailureMonitorService : BackgroundService
     {
         if (status is null
             || !status.IsOnline
-            || !string.Equals(status.State, "Printing", StringComparison.OrdinalIgnoreCase))
+            || !PrinterStateClassifier.IsActivePrintingJob(status.State))
         {
             return (false, NotPrintingReason);
         }
@@ -190,7 +191,9 @@ public sealed class PrintFailureMonitorService : BackgroundService
                     .Where(j =>
                         j.AssignedPrinterId.HasValue
                         && configuredPrinterIds.Contains(j.AssignedPrinterId.Value)
-                        && (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
+                        && (j.Status == PrintJobStatus.Starting ||
+                            j.Status == PrintJobStatus.Printing ||
+                            j.Status == PrintJobStatus.Paused))
                     .ToListAsync(cancellationToken);
             Dictionary<Guid, ActivePrintWindow> activeJobsByPrinter = activeJobs
                 .GroupBy(j => j.AssignedPrinterId!.Value)
@@ -582,7 +585,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
         }
 
         // Broadcast failure event to all connected clients
-        await _hub.Clients.All.SendAsync("FailureDetected", failureEvent, cancellationToken);
+        await _hub.Clients.Group(AuthorizedHubGroups.Farm)
+            .SendAsync("FailureDetected", failureEvent, cancellationToken);
 
         _logger.LogInformation(
             "[PrintFailureMonitor] Failure event broadcast for printer {PrinterId}, job {JobId}",

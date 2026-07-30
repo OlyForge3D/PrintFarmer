@@ -1,0 +1,713 @@
+﻿using System;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Telemetry;
+using Farm.Web.Api.Controllers;
+using Farm.Web.Api.Controllers.Requests;
+using FluentValidation;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Controllers;
+
+/// <summary>
+/// Unit tests for the server-side capability guards on PrintersController control endpoints
+/// (/temps, /move, /moveto, /home, /homexy, /homez). See GitHub issues
+/// OlyForge3D/PrintFarmer#290 and OlyForge3D/PrintFarmer#314.
+/// </summary>
+public class PrintersControllerControlGuardsTests
+{
+    private static PrintersController CreateController(
+        Mock<IPrintersService> printersService,
+        Mock<IPrinterStatusCacheReader> statusCache,
+        out Mock<IPrintFarmerTelemetryService> telemetry)
+    {
+        telemetry = new Mock<IPrintFarmerTelemetryService>();
+
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        actuation.Setup(service => service.AcquireDirectAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(async (
+                Guid printerId,
+                string actor,
+                string operation,
+                CancellationToken ct) =>
+            {
+                Printer? printer = await printersService.Object.FindByIdAsync(printerId, ct);
+                if (printer is null)
+                {
+                    return new PrinterActuationResult(
+                        PrinterActuationResultCode.PrinterNotFound);
+                }
+
+                PrinterStatusDto? status = statusCache.Object.GetStatus(printerId);
+                if (PrinterControlGate.IsBusyForControl(status?.State))
+                {
+                    return new PrinterActuationResult(
+                        PrinterActuationResultCode.PrinterBusy,
+                        Detail: $"Printer is currently {status?.State?.ToLowerInvariant()}.");
+                }
+
+                return new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    new PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        null,
+                        operation,
+                        actor));
+            });
+        actuation.Setup(service => service.AcquireActiveAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((
+                Guid printerId,
+                string actor,
+                string operation,
+                CancellationToken _) =>
+                new PrinterActuationResult(
+                    PrinterActuationResultCode.Accepted,
+                    new PrinterActuationLease(
+                        Guid.NewGuid(),
+                        printerId,
+                        Guid.NewGuid(),
+                        operation,
+                        actor)));
+        actuation.Setup(service => service.CompleteDirectAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<bool>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        actuation.Setup(service => service.MarkDirectUnknownAsync(
+                It.IsAny<PrinterActuationLease>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var controller = new PrintersController(
+            logger: Mock.Of<ILogger<PrintersController>>(),
+            printersService: printersService.Object,
+            catalogService: Mock.Of<Farm.Web.Api.Services.Catalog.ICatalogService>(),
+            validator: Mock.Of<IValidator<CreatePrinterFromDiscoveryDto>>(),
+            discoveryProxyService: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService>(),
+            discoverySessions: Mock.Of<Farm.Infrastructure.Services.Discovery.IDiscoverySessionRegistry>(),
+            printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
+            backendClientFactory: Mock.Of<IBackendClientFactory>(),
+            httpClientFactory: Mock.Of<IHttpClientFactory>(),
+            obicoServerAssignment: Mock.Of<Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
+            settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
+            printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
+            telemetryService: telemetry.Object,
+            bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
+            physicalActuationService: actuation.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+                ], "test")),
+            },
+        };
+        return controller;
+    }
+
+    private static Printer SamplePrinter(Guid id) => new()
+    {
+        Id = id,
+        Name = "printer-1",
+        ServerUrl = "http://printer-1.local",
+    };
+
+    [Theory]
+    [InlineData("M23 plate.gcode\nM24")]
+    [InlineData("m23 plate.gcode\nm24")]
+    [InlineData("START_PRINT FILE=plate.gcode")]
+    [InlineData("SDCARD_PRINT_FILE FILENAME=plate.gcode")]
+    [InlineData("G28\nRUN_SHELL_COMMAND CMD=start_print\nM24")]
+    public async Task SendGcodeAsync_StartingPayloadVariants_ReturnGoneWithZeroBackendIo(
+        string payload)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.SendGcodeAsync(
+            id,
+            new GcodeCommandRequest { Command = payload },
+            CancellationToken.None);
+
+        ObjectResult gone = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status410Gone, gone.StatusCode);
+        CommandResult body = Assert.IsType<CommandResult>(gone.Value);
+        Assert.False(body.Success);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+        telemetry.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(0, 300)]
+    [InlineData(101, 300)]
+    [InlineData(-101, 300)]
+    [InlineData(5, 0)]
+    [InlineData(5, 6001)]
+    public async Task ExtrudeFilamentAsync_InvalidBounds_ProduceZeroBackendIo(
+        double distance,
+        int feedrate)
+    {
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.ExtrudeFilamentAsync(
+            Guid.NewGuid(),
+            new ExtrudeFilamentRequest
+            {
+                DistanceMm = distance,
+                FeedrateMmPerMinute = feedrate,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ExtrudeFilamentAsync_ValidRequest_UsesBoundedServerCommand()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(service => service.SendGcodeAsync(
+                id,
+                "M83\nG1 E-5 F300\nM82",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.ExtrudeFilamentAsync(
+            id,
+            new ExtrudeFilamentRequest
+            {
+                DistanceMm = -5,
+                FeedrateMmPerMinute = 300,
+            },
+            CancellationToken.None);
+
+        Assert.True(result.Value?.Success);
+        printersService.Verify(service => service.SendGcodeAsync(
+            id,
+            "M83\nG1 E-5 F300\nM82",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Qidibox", "Load", 2, null, "T2")]
+    [InlineData("Qidibox", "Unload", 2, null, "UNLOAD_T2")]
+    [InlineData("Qidibox", "Eject", 2, null, "EJECT_T2")]
+    [InlineData("Afc", "Load", null, "lane_2", "CHANGE_TOOL LANE=lane_2")]
+    [InlineData("Afc", "Unload", null, "lane-2", "TOOL_UNLOAD LANE=lane-2")]
+    public async Task MmuGateActionAsync_ValidTypedAction_UsesAllowlistedCommand(
+        string protocol,
+        string action,
+        int? gateIndex,
+        string? laneName,
+        string expectedCommand)
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(service => service.SendGcodeAsync(
+                id,
+                expectedCommand,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.MmuGateActionAsync(
+            id,
+            new MmuGateActionRequest
+            {
+                Protocol = protocol,
+                Action = action,
+                GateIndex = gateIndex,
+                LaneName = laneName,
+            },
+            CancellationToken.None);
+
+        Assert.True(result.Value?.Success);
+        printersService.Verify(service => service.SendGcodeAsync(
+            id,
+            expectedCommand,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Qidibox", "Load", 99, null)]
+    [InlineData("Qidibox", "Start", 1, null)]
+    [InlineData("Afc", "Load", null, "lane 1; START_PRINT")]
+    [InlineData("Afc", "Eject", null, "lane1")]
+    public async Task MmuGateActionAsync_InvalidTypedAction_ProducesZeroBackendIo(
+        string protocol,
+        string action,
+        int? gateIndex,
+        string? laneName)
+    {
+        var printersService = new Mock<IPrintersService>(MockBehavior.Strict);
+        var statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.MmuGateActionAsync(
+            Guid.NewGuid(),
+            new MmuGateActionRequest
+            {
+                Protocol = protocol,
+                Action = action,
+                GateIndex = gateIndex,
+                LaneName = laneName,
+            },
+            CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result.Result);
+        printersService.VerifyNoOtherCalls();
+        statusCache.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task SetTempsAsync_ReturnsConflict_WhenPrinterIsPrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.SetTempsAsync(
+            id, new TempTargets(Hotend: 210, Bed: 60), CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer is currently printing.", body.Message);
+        printersService.Verify(s => s.SetTempsAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveAsync_ReturnsConflict_WhenPrinterIsPrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.MoveAsync(
+            id, new MoveRequest(X: 10, Y: null, Z: null, F: 3000), CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer is currently printing.", body.Message);
+        printersService.Verify(s => s.MoveAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveAsync_ReturnsNotFound_WhenPrinterMissing()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Printer?)null);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.MoveAsync(
+            id, new MoveRequest(X: 10, Y: null, Z: null, F: 3000), CancellationToken.None);
+
+        NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(notFound.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer not found.", body.Message);
+        printersService.Verify(s => s.MoveAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetPrintJobObjectsAsync_ReturnsOk_WithObjects()
+    {
+        Guid id = Guid.NewGuid();
+        var objects = new PrintJobObjectListDto(
+            id,
+            "plate.gcode",
+            new[] { new PrintJobObjectDto("cube", IsExcluded: false, IsCurrent: true) });
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.GetPrintJobObjectsAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(objects);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<PrintJobObjectListDto> result = await controller.GetPrintJobObjectsAsync(id, CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        PrintJobObjectListDto body = Assert.IsType<PrintJobObjectListDto>(ok.Value);
+        Assert.Equal(id, body.PrinterId);
+        Assert.Equal("cube", body.Objects.Single().Name);
+    }
+
+    [Fact]
+    public async Task GetPrintJobObjectsAsync_ReturnsNotFound_WhenPrinterMissing()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.GetPrintJobObjectsAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrintJobObjectListDto?)null);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<PrintJobObjectListDto> result = await controller.GetPrintJobObjectsAsync(id, CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsBadRequest_WhenObjectNameEmpty()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest(" "),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(badRequest.Value);
+        Assert.False(body.Success);
+        printersService.Verify(s => s.ExcludePrintJobObjectAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsOk_WhenServiceSucceeds()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.ExcludePrintJobObjectAsync(id, "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, "Object skipped"));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest("cube"),
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(ok.Value);
+        Assert.True(body.Success);
+        telemetry.Verify(t => t.RecordPrinterOperation("exclude_object", id.ToString(), true), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExcludePrintJobObjectAsync_ReturnsBadRequest_WhenServiceRejectsRequest()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.ExcludePrintJobObjectAsync(id, "cube", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(false, "No active printing job is available for object exclusion."));
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        PrintersController controller = CreateController(printersService, statusCache, out Mock<IPrintFarmerTelemetryService> telemetry);
+
+        ActionResult<CommandResult> result = await controller.ExcludePrintJobObjectAsync(
+            id,
+            new ExcludePrintJobObjectRequest("cube"),
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(badRequest.Value);
+        Assert.False(body.Success);
+        Assert.Equal("No active printing job is available for object exclusion.", body.Message);
+        telemetry.Verify(t => t.RecordPrinterOperation("exclude_object", id.ToString(), false), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetTempsAsync_ReturnsOk_WhenPrinterIdle()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.SetTempsAsync(id, 210, 60, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.SetTempsAsync(
+            id, new TempTargets(Hotend: 210, Bed: 60), CancellationToken.None);
+
+        CommandResult body = Assert.IsType<CommandResult>(result.Value);
+        Assert.True(body.Success);
+        Assert.Null(body.Message);
+        printersService.Verify(s => s.SetTempsAsync(id, 210, 60, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// Full-path test: service layer returns <see cref="PrinterControlOutcome.BackendBusy"/>
+    /// (mapped from a thrown <see cref="PrinterBackendBusyException"/> inside the service).
+    /// The controller must surface this as HTTP 409 Conflict, not 502 (#318 blocker 1).
+    /// </summary>
+    [Fact]
+    public async Task SetTempsAsync_Returns409Conflict_WhenServiceReturnsBackendBusy()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.SetTempsAsync(id, 210, 60, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.BackendBusy);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.SetTempsAsync(
+            id, new TempTargets(Hotend: 210, Bed: 60), CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.NotNull(body.Message);
+    }
+
+    [Fact]
+    public async Task MoveAsync_Returns409Conflict_WhenServiceReturnsBackendBusy()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.MoveAsync(id, It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.BackendBusy);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.MoveAsync(
+            id, new MoveRequest(X: 10, Y: null, Z: null, F: 3000), CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+    }
+
+    [Fact]
+    public async Task HomeAsync_ReturnsConflict_WhenPrinterIsPrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeAsync(id, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer is currently printing.", body.Message);
+        printersService.Verify(s => s.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HomeXYAsync_ReturnsConflict_WhenPrinterIsPrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeXYAsync(id, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer is currently printing.", body.Message);
+        printersService.Verify(s => s.HomeXYAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HomeZAsync_ReturnsConflict_WhenPrinterIsPrinting()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Printing"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeZAsync(id, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        CommandResult body = Assert.IsType<CommandResult>(conflict.Value);
+        Assert.False(body.Success);
+        Assert.Equal("Printer is currently printing.", body.Message);
+        printersService.Verify(s => s.HomeZAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HomeAsync_ReturnsOk_WhenPrinterIdle()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.SendHomeAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeAsync(id, CancellationToken.None);
+
+        CommandResult body = Assert.IsType<CommandResult>(result.Value);
+        Assert.True(body.Success);
+        Assert.Null(body.Message);
+        printersService.Verify(s => s.SendHomeAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task HomeXYAsync_ReturnsOk_WhenPrinterIdle()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.HomeXYAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeXYAsync(id, CancellationToken.None);
+
+        CommandResult body = Assert.IsType<CommandResult>(result.Value);
+        Assert.True(body.Success);
+        Assert.Null(body.Message);
+        printersService.Verify(s => s.HomeXYAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task HomeZAsync_ReturnsOk_WhenPrinterIdle()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(s => s.FindByIdAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(s => s.HomeZAsync(id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(c => c.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+
+        PrintersController controller = CreateController(printersService, statusCache, out _);
+
+        ActionResult<CommandResult> result = await controller.HomeZAsync(id, CancellationToken.None);
+
+        CommandResult body = Assert.IsType<CommandResult>(result.Value);
+        Assert.True(body.Success);
+        Assert.Null(body.Message);
+        printersService.Verify(s => s.HomeZAsync(id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+}

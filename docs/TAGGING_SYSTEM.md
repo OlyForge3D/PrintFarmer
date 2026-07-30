@@ -417,11 +417,16 @@ Centralized hub for managing all tags in the system with statistics and control.
 
 #### Location
 
-`/src/Web/ReactApp/src/pages/TagAdminPage.tsx`
+`src/Web/ReactApp/src/features/admin/pages/TagAdminPage.tsx`
+
+Mounted inside the settings shell at sub-page key `data.tags`.
 
 #### Route
 
-`/admin/tags`
+`/admin/manage?tab=data&sub=tags`
+
+Legacy `/admin/tags` still resolves via `legacyRedirects.ts` so external
+bookmarks continue to work.
 
 #### Access Control
 
@@ -1473,7 +1478,7 @@ const { mutate: bulkAssignTags } = useMutation({
 
 ### TagAdminPage Component
 
-**Path:** `/src/Web/ReactApp/src/pages/TagAdminPage.tsx`
+**Path:** `src/Web/ReactApp/src/features/admin/pages/TagAdminPage.tsx`
 
 **Size:** ~500 lines
 
@@ -1809,7 +1814,7 @@ if (model == null)
 │   │   ├─ Import: ModelDetailPage
 │   │   ├─ Import: TagAdminPage
 │   │   ├─ Route: /models/:modelId
-│   │   └─ Route: /admin/tags (protected)
+│   │   └─ Route: /admin/manage?tab=data&sub=tags (protected, legacy /admin/tags redirects)
 │   │
 │   ├── services/
 │   │   ├── api.ts (MODIFIED)
@@ -1955,7 +1960,8 @@ curl http://localhost:3000/
 
 ### Creating Your First Tag
 
-1. Navigate to <http://localhost:3000/admin/tags>
+1. Navigate to <http://localhost:3000/admin/manage?tab=data&sub=tags>
+   (or the legacy `/admin/tags` URL, which redirects there)
 2. Login with admin credentials
 3. Fill in tag form:
    - Name: "Mechanical"
@@ -2406,8 +2412,8 @@ The PrintFarmer 3D Model Tagging System is production-ready with:
 
 *For detailed component source code, see:*
 
-- `/src/Web/ReactApp/src/pages/ModelDetailPage.tsx`
-- `/src/Web/ReactApp/src/pages/TagAdminPage.tsx`
-- `/src/Web/ReactApp/src/components/modals/BulkTagAssignmentModal.tsx`
-- `/src/api/Controllers/ModelController.cs`
-- `/src/infra/Domain/Entities.cs`
+- `src/Web/ReactApp/src/features/admin/pages/TagAdminPage.tsx`
+- `src/Web/ReactApp/src/common/components/modals/BulkTagAssignmentModal.tsx`
+- Backend model API controllers (search under `src/`) and entity classes
+  under `src/infra/Domain/` — paths have shifted over time; see repository
+  structure for current locations.

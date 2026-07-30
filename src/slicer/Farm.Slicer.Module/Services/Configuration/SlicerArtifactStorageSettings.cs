@@ -14,8 +14,11 @@ public sealed class SlicerArtifactStorageSettings
     /// <summary>Maximum allowed uploaded file size in bytes (default 100 MB).</summary>
     public long MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024;
 
-    /// <summary>Comma-separated list of allowed kinds (e.g. "gcode,thumbnail,preview,log").</summary>
-    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log";
+    /// <summary>
+    /// Comma-separated list of allowed artifact kinds. The default covers the slicing kinds plus the
+    /// calibration geometry, manifest, effective-profile and profile-patch kinds.
+    /// </summary>
+    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log,geometry,geometry-manifest,calibration-manifest,machine-profile,process-profile,filament-profile,profile-patch";
 
     /// <summary>Enable static file serving for artifacts at /artifacts/* URLs.</summary>
     public bool EnableStaticServing { get; set; }
@@ -40,4 +43,7 @@ public sealed class SlicerArtifactStorageSettings
 
     /// <summary>Interval in hours between cleanup service scans.</summary>
     public int CleanupIntervalHours { get; set; } = 24;
+
+    /// <summary>Minutes before an abandoned cleanup reservation becomes eligible for takeover.</summary>
+    public int CleanupReservationTimeoutMinutes { get; set; } = 30;
 }

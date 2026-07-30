@@ -11,7 +11,13 @@ import { Button } from '@/common/components/ui';
 import TagInput from '@/components/TagInput';
 import { apiClient } from '@/services/api';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { ModelsFileBrowser } from '@/features/models3d/components/ModelsFileBrowser';
+import { CollectionsNav } from '@/features/models3d/components/collections/CollectionsNav';
+import { AddModelsToCollectionModal } from '@/features/models3d/components/collections/AddModelsToCollectionModal';
+import { CollectionFormModal } from '@/features/models3d/components/collections/CollectionFormModal';
+import { useModelCollectionMembers, useCreateModelCollection } from '@/features/models3d/hooks/useCollections';
+import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
 import type { GCodeViewerProps } from '@/features/models3d/components/3d/GCodeViewer3D';
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
@@ -33,6 +39,16 @@ export const ModelsPage: React.FC = () => {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
   const [selectedModelForTagging, setSelectedModelForTagging] = useState<Model | null>(null);
   const [selectedModelIds, setSelectedModelIds] = useState<string[]>([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+  const [showAddToCollectionModal, setShowAddToCollectionModal] = useState(false);
+  const [showNewCollectionModal, setShowNewCollectionModal] = useState(false);
+  const [quickSliceModel, setQuickSliceModel] = useState<Model | null>(null);
+
+  const createCollection = useCreateModelCollection();
+  const { data: collectionMembers } = useModelCollectionMembers(selectedCollectionId);
+  const collectionModelIds = selectedCollectionId
+    ? (collectionMembers ?? []).map((membership) => membership.modelId)
+    : null;
 
   const { data: allTags = [] } = useQuery<ModelTag[]>({
     queryKey: ['model-tags'],
@@ -121,23 +137,33 @@ export const ModelsPage: React.FC = () => {
         )}
 
         {/* Content */}
-        <div className="flex-1 min-h-0">
-          <ModelsFileBrowser
-            viewMode={viewMode as 'grid' | 'explorer'}
-            onViewModeChange={setViewMode}
-            selectedTags={selectedTags}
-            selectedModelIds={selectedModelIds}
-            onSelectionChange={setSelectedModelIds}
-            onOpenModel={setViewerModel}
-            onSliceModel={(model) => {
-              window.location.assign(`/jobs/new?modelId=${model.id}`);
-            }}
-            onShowTagModal={() => setShowBulkTagModal(true)}
-            onShowSingleTagModal={(model) => {
-              setSelectedModelForTagging(model);
-            }}
-            onToggleTagFilterPanel={() => setShowFiltersPanel(!showFiltersPanel)}
-          />
+        <div className="flex-1 min-h-0 flex gap-4">
+          <aside className="w-56 shrink-0 overflow-y-auto border-r border-pf-border pr-3">
+            <CollectionsNav
+              selectedCollectionId={selectedCollectionId}
+              onSelectCollection={setSelectedCollectionId}
+            />
+          </aside>
+          <div className="flex-1 min-w-0">
+            <ModelsFileBrowser
+              viewMode={viewMode as 'grid' | 'explorer'}
+              onViewModeChange={setViewMode}
+              selectedTags={selectedTags}
+              selectedModelIds={selectedModelIds}
+              onSelectionChange={setSelectedModelIds}
+              onOpenModel={setViewerModel}
+              onSliceModel={(model) => {
+                setQuickSliceModel(model);
+              }}
+              onShowTagModal={() => setShowBulkTagModal(true)}
+              onShowSingleTagModal={(model) => {
+                setSelectedModelForTagging(model);
+              }}
+              onToggleTagFilterPanel={() => setShowFiltersPanel(!showFiltersPanel)}
+              collectionModelIds={collectionModelIds}
+              onShowCollectionModal={() => setShowAddToCollectionModal(true)}
+            />
+          </div>
         </div>
 
         {/* Model Viewer Modal */}
@@ -163,11 +189,11 @@ export const ModelsPage: React.FC = () => {
                     />
                   }
                 >
-                  {viewerModel.url && viewerModel.fileType && (
+                  {(viewerModel.url || viewerModel.id) && viewerModel.fileType && (
                     <ModelViewer
-                      modelUrl={viewerModel.url}
+                      modelUrl={viewerModel.url || `${getApiBaseUrl()}/3d-models/file/${viewerModel.id}`}
                       fileType={viewerModel.fileType}
-                      showGrid={false}
+                      showGrid={true}
                       className="h-128 w-full"
                     />
                   )}
@@ -207,6 +233,39 @@ export const ModelsPage: React.FC = () => {
           initialSelectedModelIds={selectedModelIds}
         />
 
+        {/* Add Selected Models to Collection(s) Modal */}
+        <AddModelsToCollectionModal
+          key={showAddToCollectionModal ? 'open' : 'closed'}
+          isOpen={showAddToCollectionModal}
+          modelIds={selectedModelIds}
+          onClose={() => setShowAddToCollectionModal(false)}
+          onCreateNew={() => {
+            // Close this modal before opening CollectionFormModal - the shared Modal
+            // implementation isn't designed to have two instances open at once (duplicate
+            // "modal-title" ids, conflicting scroll-lock/Escape handling).
+            setShowAddToCollectionModal(false);
+            setShowNewCollectionModal(true);
+          }}
+        />
+
+        {/* Quick "new collection" form reachable from the add-to-collection flow */}
+        <CollectionFormModal
+          key={showNewCollectionModal ? 'open' : 'closed'}
+          isOpen={showNewCollectionModal}
+          isSaving={createCollection.isPending}
+          onSubmit={(values) =>
+            createCollection.mutate(values, {
+              onSuccess: () => {
+                setShowNewCollectionModal(false);
+                // Reopen the add-to-collection modal so the user can pick the collection
+                // they just created without restarting the flow from the toolbar.
+                setShowAddToCollectionModal(true);
+              },
+            })
+          }
+          onClose={() => setShowNewCollectionModal(false)}
+        />
+
         {/* Individual Tagging Modal */}
         {selectedModelForTagging && (
           <TaggingModal
@@ -219,6 +278,13 @@ export const ModelsPage: React.FC = () => {
             initialTags={selectedModelForTagging.tags || []}
           />
         )}
+
+        {/* Quick Slice Modal */}
+        <QuickSliceModal
+          isOpen={quickSliceModel !== null}
+          onClose={() => setQuickSliceModel(null)}
+          model={quickSliceModel}
+        />
 
         {/* Floating Action Button for Upload */}
         <FloatingActionButton

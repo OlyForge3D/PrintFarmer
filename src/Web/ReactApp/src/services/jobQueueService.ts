@@ -4,6 +4,8 @@ import type {
   QueuedPrintJobWithFileMetaDto,
   QueueHistoryPageDto,
   QueueOverviewDto,
+  QueueStatsDto,
+  DispatchClientResult,
 } from '@/types/api';
 
 /**
@@ -40,62 +42,83 @@ export const jobQueueService = {
     return apiClient.enqueueJob(request);
   },
 
-  async deletePrintQueueJob(jobId: string): Promise<void> {
-    return apiClient.deletePrintQueueJob(jobId);
+  async deletePrintQueueJob(jobId: string, reviewedRowVersion: string): Promise<void> {
+    return apiClient.deletePrintQueueJob(jobId, reviewedRowVersion);
   },
 
-  async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
-    return apiClient.dispatchPrintQueueJob(jobId);
+  async dispatchPrintQueueJob(
+    jobId: string,
+    reviewedRowVersion: string
+  ): Promise<DispatchClientResult> {
+    return apiClient.dispatchPrintQueueJob(jobId, reviewedRowVersion);
   },
 
   // ── Job State Control ─────────────────────────────────────────────────
 
-  async pauseJob(jobId: string): Promise<unknown> {
-    return apiClient.pauseJob(jobId);
+  async pauseJob(jobId: string, reviewedRowVersion: string): Promise<unknown> {
+    return apiClient.pauseJob(jobId, reviewedRowVersion);
   },
 
-  async resumeJob(jobId: string): Promise<unknown> {
-    return apiClient.resumeJob(jobId);
+  async resumeJob(jobId: string, reviewedRowVersion: string): Promise<unknown> {
+    return apiClient.resumeJob(jobId, reviewedRowVersion);
   },
 
-  async cancelPrintQueueJob(jobId: string): Promise<void> {
-    return apiClient.cancelPrintQueueJob(jobId);
+  async cancelPrintQueueJob(jobId: string, reviewedRowVersion: string): Promise<void> {
+    return apiClient.cancelPrintQueueJob(jobId, reviewedRowVersion);
   },
 
-  async abortPrint(jobId: string): Promise<void> {
-    return apiClient.abortPrint(jobId);
+  async abortPrint(jobId: string, reviewedRowVersion: string): Promise<void> {
+    return apiClient.abortPrint(jobId, reviewedRowVersion);
   },
 
-  async rerunPrintQueueJob(jobId: string): Promise<unknown> {
-    return apiClient.rerunPrintQueueJob(jobId);
+  async rerunPrintQueueJob(jobId: string, reviewedRowVersion: string): Promise<unknown> {
+    return apiClient.rerunPrintQueueJob(jobId, reviewedRowVersion);
   },
 
   // ── Job Updates ───────────────────────────────────────────────────────
 
-  async updateJob(jobId: string, request: unknown): Promise<unknown> {
-    return apiClient.updateJob(jobId, request);
+  async updateJob(
+    jobId: string,
+    request: unknown,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    return apiClient.updateJob(jobId, request, reviewedRowVersion);
   },
 
-  async updateJobPriority(jobId: string, newPriority: number): Promise<unknown> {
-    return apiClient.updateJobPriority(jobId, newPriority);
+  async updateJobPriority(
+    jobId: string,
+    newPriority: number,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    return apiClient.updateJobPriority(jobId, newPriority, reviewedRowVersion);
   },
 
-  async updateJobDetails(jobId: string, updates: unknown): Promise<unknown> {
-    return apiClient.updateJobDetails(jobId, updates);
+  async updateJobDetails(
+    jobId: string,
+    updates: unknown,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    return apiClient.updateJobDetails(jobId, updates, reviewedRowVersion);
   },
 
-  async updateJobNotes(jobId: string, notes: string): Promise<void> {
-    return apiClient.updateJobNotes(jobId, notes);
+  async updateJobNotes(
+    jobId: string,
+    notes: string,
+    reviewedRowVersion: string
+  ): Promise<void> {
+    return apiClient.updateJobNotes(jobId, notes, reviewedRowVersion);
   },
 
   // ── Bulk Operations ───────────────────────────────────────────────────
 
-  async bulkCancelJobs(request: unknown): Promise<unknown> {
+  async bulkCancelJobs(request: {
+    jobs: Array<{ jobId: string; rowVersion: string }>;
+  }): Promise<unknown> {
     return apiClient.bulkCancelJobs(request);
   },
 
   async reorderQueueJobs(
-    moves: { jobId: string; newPosition: number }[]
+    moves: { jobId: string; newPosition: number; rowVersion: string }[]
   ): Promise<unknown> {
     return apiClient.reorderQueueJobs(moves);
   },
@@ -112,24 +135,24 @@ export const jobQueueService = {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy?: "priority" | "deadline" | "deadline_desc",
     limit?: number,
     offset?: number
   ): Promise<unknown[]> {
-    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, limit, offset);
+    return apiClient.getAnalyticsQueueJobs(filterStatus, filterModel, filterMaterial, sortBy, limit, offset);
   },
 
   async getAnalyticsPrinterQueue(printerId: string, limit?: number): Promise<unknown[]> {
     return apiClient.getAnalyticsPrinterQueue(printerId, limit);
   },
 
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     return apiClient.getAnalyticsQueueStats();
   },
 
   async getAnalyticsQueueModelStats(): Promise<unknown[]> {
     return apiClient.getAnalyticsQueueModelStats();
   },
-
   async getAnalyticsQueueHistory(
     limit?: number,
     offset?: number,

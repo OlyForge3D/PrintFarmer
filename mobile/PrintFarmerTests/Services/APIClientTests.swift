@@ -5,17 +5,24 @@ import XCTest
 /// error mapping, and base URL configuration.
 final class APIClientTests: XCTestCase {
 
+    private static let testServerID = UUID()
+
+    private struct TransportValue: Decodable, Equatable, Sendable {
+        let value: String
+    }
+
+    private var mockAPIClient: MockAPIClient!
     private var apiClient: APIClient!
 
     override func setUp() {
         super.setUp()
-        MockURLProtocol.reset()
-        apiClient = MockAPIClient.makeAPIClient()
+        mockAPIClient = MockAPIClient()
+        apiClient = mockAPIClient.apiClient
     }
 
     override func tearDown() {
-        MockURLProtocol.reset()
         apiClient = nil
+        mockAPIClient = nil
         super.tearDown()
     }
 
@@ -228,92 +235,93 @@ final class APIClientTests: XCTestCase {
 
     func testRequestIncludesAuthorizationHeader() async throws {
         let token = "test-jwt-token-123"
-        await apiClient.setAccessToken(token)
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        await apiClient.setAuthenticatedSession(
+            AuthenticatedIdentity(accessToken: token, serverID: Self.testServerID))
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNotNil(captured)
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Authorization"), "Bearer \(token)")
     }
 
     func testRequestOmitsAuthorizationWhenNoToken() async throws {
-        await apiClient.setAccessToken(nil)
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        await apiClient.clearSession()
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertNil(captured?.value(forHTTPHeaderField: "Authorization"))
     }
 
     func testRequestIncludesAcceptHeader() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Accept"), "application/json")
     }
 
     // MARK: - Request Building (HTTP Methods)
 
     func testGetRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printerArray)
+        mockAPIClient.stubResponse(json: TestJSON.printerArray)
 
         let _: [Printer] = try await apiClient.get("/api/printers")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "GET")
         XCTAssertTrue(captured?.url?.path.contains("/api/printers") ?? false)
     }
 
     func testPostRequestUsesCorrectMethodAndBody() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
 
         let loginRequest = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
         let _: AuthResponse = try await apiClient.post("/api/auth/login", body: loginRequest)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "POST")
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertNotNil(captured?.capturedHTTPBody())
     }
 
     func testPostVoidRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
 
         try await apiClient.postVoid("/api/printers/\(TestData.testUUID)/pause")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "POST")
     }
 
     func testPutRequestUsesCorrectMethodAndBody() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printer)
+        mockAPIClient.stubResponse(json: TestJSON.printer)
 
         let update = UpdatePrinterRequest(name: "Renamed")
         let _: Printer = try await apiClient.put("/api/printers/\(TestData.testUUID)", body: update)
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "PUT")
         XCTAssertEqual(captured?.value(forHTTPHeaderField: "Content-Type"), "application/json")
     }
 
     func testDeleteRequestUsesCorrectMethod() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
 
         try await apiClient.delete("/api/printers/\(TestData.testUUID)")
 
-        let captured = MockURLProtocol.capturedRequests.first
+        let captured = mockAPIClient.capturedRequests.first
         XCTAssertEqual(captured?.httpMethod, "DELETE")
     }
 
     // MARK: - Error Response Parsing
 
     func testUnauthorizedResponseThrows401() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 401)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 401)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -330,7 +338,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testForbiddenResponseThrows403() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 403)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 403)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -347,7 +355,132 @@ final class APIClientTests: XCTestCase {
     }
 
     func testNotFoundResponseThrows404() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 404)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    // MARK: - Gated 404 ProblemDetails (#728)
+
+    /// Structured operator feature-gate 404: body carries ProblemDetails
+    /// with `code: "featureDisabled"`. Callers must be able to branch on
+    /// this without parsing localized text.
+    func testFeatureDisabled404ThrowsFeatureDisabled() async {
+        let json = """
+        {
+            "type": "https://printfarmer/errors/feature-disabled",
+            "title": "Feature Disabled",
+            "status": 404,
+            "detail": "The attention feature is disabled on this server.",
+            "code": "featureDisabled"
+        }
+        """
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/attention")
+            XCTFail("Expected NetworkError.featureDisabled")
+        } catch let error as NetworkError {
+            if case .featureDisabled(let apiError) = error {
+                XCTAssertEqual(apiError.code, "featureDisabled")
+                XCTAssertEqual(apiError.status, 404)
+                XCTAssertEqual(apiError.title, "Feature Disabled")
+                XCTAssertEqual(apiError.detail, "The attention feature is disabled on this server.")
+            } else {
+                XCTFail("Expected .featureDisabled, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Ordinary ProblemDetails 404 without the gate `code` must remain a
+    /// plain `.notFound` so existing callers behave unchanged.
+    func testOrdinaryProblemDetails404FallsBackToNotFound() async {
+        let json = """
+        {
+            "type": "https://printfarmer/errors/not-found",
+            "title": "Not Found",
+            "status": 404,
+            "detail": "Printer not found."
+        }
+        """
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Empty 404 body (legacy server behavior) maps to `.notFound`.
+    func testEmpty404BodyFallsBackToNotFound() async {
+        mockAPIClient.stubResponse(json: "", statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// Malformed JSON in a 404 body must safely fall back to `.notFound`
+    /// instead of surfacing a decode error.
+    func testMalformed404BodyFallsBackToNotFound() async {
+        mockAPIClient.stubResponse(json: "{ not valid json", statusCode: 404)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.notFound")
+        } catch let error as NetworkError {
+            if case .notFound = error {
+                // Expected
+            } else {
+                XCTFail("Expected .notFound, got \(error)")
+            }
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    /// A ProblemDetails 404 whose `code` extension is some unrecognized
+    /// value (not `"featureDisabled"`) is treated as an ordinary
+    /// not-found so the gate contract stays narrow.
+    func testUnknownCode404FallsBackToNotFound() async {
+        let json = """
+        {
+            "title": "Not Found",
+            "status": 404,
+            "code": "someOtherCode"
+        }
+        """
+        mockAPIClient.stubResponse(json: json, statusCode: 404)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -364,7 +497,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testServerErrorResponseThrows500() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 500)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 500)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -381,7 +514,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testConflictResponseThrows409() async {
-        MockAPIClient.stubResponse(json: "{}", statusCode: 409)
+        mockAPIClient.stubResponse(json: "{}", statusCode: 409)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -398,7 +531,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testClientErrorParseAPIError() async {
-        MockAPIClient.stubResponse(json: TestJSON.apiError, statusCode: 400)
+        mockAPIClient.stubResponse(json: TestJSON.apiError, statusCode: 400)
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -416,10 +549,71 @@ final class APIClientTests: XCTestCase {
         }
     }
 
+    func testPreconditionFailedResponseRequiresReview() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 412)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.preconditionFailed")
+        } catch let error as NetworkError {
+            guard case .preconditionFailed = error else {
+                XCTFail("Expected .preconditionFailed, got \(error)")
+                return
+            }
+            XCTAssertEqual(
+                error.errorDescription,
+                "This item changed after you reviewed it. Refresh and confirm again."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testPreconditionRequiredResponseRequiresRefresh() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 428)
+
+        do {
+            let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
+            XCTFail("Expected NetworkError.preconditionRequired")
+        } catch let error as NetworkError {
+            guard case .preconditionRequired = error else {
+                XCTFail("Expected .preconditionRequired, got \(error)")
+                return
+            }
+            XCTAssertEqual(
+                error.errorDescription,
+                "A reviewed revision is required. Refresh and confirm again."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
+    func testMethodNotAllowedResponseHasActionableMessage() async {
+        mockAPIClient.stubResponse(json: "{}", statusCode: 405)
+
+        do {
+            let _: SpoolmanFilament = try await apiClient.get("/api/spoolman/filaments/by-barcode?code=STALE")
+            XCTFail("Expected NetworkError.methodNotAllowed")
+        } catch let error as NetworkError {
+            guard case .methodNotAllowed = error else {
+                XCTFail("Expected .methodNotAllowed, got \(error)")
+                return
+            }
+
+            XCTAssertEqual(
+                error.errorDescription,
+                "This action isn't supported by your PrintFarmer server (405). Update the server to the latest version."
+            )
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
+
     // MARK: - Network Errors
 
     func testNoConnectionThrowsNetworkError() async {
-        MockAPIClient.stubError(.notConnectedToInternet)
+        mockAPIClient.stubError(.notConnectedToInternet)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -436,7 +630,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testTimeoutThrowsNetworkError() async {
-        MockAPIClient.stubError(.timedOut)
+        mockAPIClient.stubError(.timedOut)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -453,7 +647,7 @@ final class APIClientTests: XCTestCase {
     }
 
     func testCannotFindHostThrowsServerUnreachable() async {
-        MockAPIClient.stubError(.cannotFindHost)
+        mockAPIClient.stubError(.cannotFindHost)
 
         do {
             let _: [Printer] = try await apiClient.get("/api/printers")
@@ -470,8 +664,9 @@ final class APIClientTests: XCTestCase {
     }
 
     func testCannotConnectToPrivateHTTPSHostThrowsTransportError() async {
-        let privateHTTPSClient = MockAPIClient.makeAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
-        MockAPIClient.stubError(.cannotConnectToHost)
+        let privateHTTPSMockAPIClient = MockAPIClient(baseURL: URL(string: "https://10.0.0.20")!)
+        let privateHTTPSClient = privateHTTPSMockAPIClient.apiClient
+        privateHTTPSMockAPIClient.stubError(.cannotConnectToHost)
 
         do {
             let _: [Printer] = try await privateHTTPSClient.get("/api/printers")
@@ -490,7 +685,7 @@ final class APIClientTests: XCTestCase {
     // MARK: - Decoding
 
     func testDecodingFailureThrowsDecodingError() async {
-        MockAPIClient.stubResponse(json: "{ \"invalid\": true }")
+        mockAPIClient.stubResponse(json: "{ \"invalid\": true }")
 
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -505,11 +700,44 @@ final class APIClientTests: XCTestCase {
             XCTFail("Unexpected error type: \(error)")
         }
     }
+
+    func testDecodingFailureDescriptionIncludesPathTypeAndServerVersionHint() async {
+        mockAPIClient.stubResponse(
+            json: """
+            {
+              "id": "not-an-int",
+              "name": "Bad Spool",
+              "material": "PLA",
+              "inUse": true
+            }
+            """
+        )
+
+        do {
+            let _: SpoolmanSpool = try await apiClient.get("/api/spoolman/spools/501")
+            XCTFail("Expected NetworkError.decodingFailed")
+        } catch let error as NetworkError {
+            guard case .decodingFailed = error else {
+                XCTFail("Expected .decodingFailed, got \(error)")
+                return
+            }
+
+            let description = error.errorDescription ?? ""
+            XCTAssertTrue(description.contains("Failed to decode response for SpoolmanSpool"))
+            XCTAssertTrue(description.contains("typeMismatch"))
+            XCTAssertTrue(description.contains("id"))
+            XCTAssertTrue(description.contains("expected Int"))
+            XCTAssertTrue(description.contains("server version may be incompatible"))
+            XCTAssertTrue(description.contains("update the server"))
+        } catch {
+            XCTFail("Unexpected error type: \(error)")
+        }
+    }
     
     // MARK: - Empty Response Handling
     
     func testEmptyResponseWithOptionalTypeReturnsNil() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         let result: Printer? = try await apiClient.get("/api/printers/\(TestData.testUUID)")
         
@@ -517,7 +745,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWithNonOptionalTypeThrows() async {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         do {
             let _: Printer = try await apiClient.get("/api/printers/\(TestData.testUUID)")
@@ -534,7 +762,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWith204StatusReturnsNilForOptional() async throws {
-        MockURLProtocol.requestHandler = { request in
+        mockAPIClient.requestHandler = { request in
             let response = TestData.httpResponse(url: request.url, statusCode: 204)
             return (response, Data())
         }
@@ -545,7 +773,7 @@ final class APIClientTests: XCTestCase {
     }
     
     func testEmptyResponseWithOptionalArrayReturnsNil() async throws {
-        MockAPIClient.stubEmptySuccess()
+        mockAPIClient.stubEmptySuccess()
         
         let result: [Printer]? = try await apiClient.get("/api/printers")
         
@@ -553,12 +781,290 @@ final class APIClientTests: XCTestCase {
     }
     
     func testNonEmptyResponseWithOptionalTypeDecodesProperly() async throws {
-        MockAPIClient.stubResponse(json: TestJSON.printer)
+        mockAPIClient.stubResponse(json: TestJSON.printer)
         
         let result: Printer? = try await apiClient.get("/api/printers/\(TestData.testUUID)")
         
         XCTAssertNotNil(result, "Non-empty response should decode the value")
         XCTAssertEqual(result?.name, "Prusa MK4")
+    }
+
+    func testMockURLProtocolHandlersAreIsolatedPerSession_underDeterministicOverlap() async throws {
+        let firstURL = URL(string: "https://mock.invalid/first")!
+        let secondURL = URL(string: "https://mock.invalid/second")!
+        let firstSession = MockURLProtocol.makeSession()
+        let secondSession = MockURLProtocol.makeSession()
+
+        // Explicit two-phase barrier: each handler signals `entryLatch` when
+        // it is inside `startLoading`, then blocks on `releaseLatch`. The
+        // test drains two entry signals — proving both handlers were live
+        // concurrently — before it releases either. Handler waits use a
+        // 10-second timeout so that if URLProtocol serialization ever
+        // starves one handler, the test fails fast with an explicit
+        // diagnostic instead of hanging XCTest. There is no `Task.sleep`,
+        // yield, polling, elapsed-time correctness, or ignored timeout.
+        //
+        // Against the rejected process-global-handler implementation this
+        // test fails deterministically: setting `secondSession.requestHandler`
+        // overwrites the shared handler, so both URL requests would invoke
+        // the second handler and both bodies would decode to
+        // `"second-handler"`.
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        firstSession.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data("first-handler".utf8))
+        }
+
+        secondSession.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data("second-handler".utf8))
+        }
+
+        async let firstData = firstSession.urlSession.data(from: firstURL).0
+        async let secondData = secondSession.urlSession.data(from: secondURL).0
+
+        // Drain two entry signals on a background dispatch thread so the
+        // Swift concurrency executor is never blocked. Both handlers must
+        // be simultaneously parked on `releaseLatch` before either returns.
+        let bothEntered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let firstEntered = entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                let secondEntered = firstEntered
+                    ? entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                    : false
+                cont.resume(returning: firstEntered && secondEntered)
+            }
+        }
+        XCTAssertTrue(
+            bothEntered,
+            "Both per-session MockURLProtocol handlers must be simultaneously live inside startLoading before release. If this fails, sessions are sharing handler dispatch and the per-session isolation is broken."
+        )
+
+        // Both handlers are provably parked; release them.
+        releaseLatch.signal()
+        releaseLatch.signal()
+
+        let firstBody = String(decoding: try await firstData, as: UTF8.self)
+        let secondBody = String(decoding: try await secondData, as: UTF8.self)
+
+        XCTAssertEqual(firstBody, "first-handler")
+        XCTAssertEqual(secondBody, "second-handler")
+        XCTAssertEqual(firstSession.capturedRequests.count, 1)
+        XCTAssertEqual(firstSession.capturedRequests.first?.url, firstURL)
+        XCTAssertEqual(secondSession.capturedRequests.count, 1)
+        XCTAssertEqual(secondSession.capturedRequests.first?.url, secondURL)
+    }
+
+    func testConcurrentMockAPIClientsKeepResponsesAndCapturesIsolated_underDeterministicOverlap() async throws {
+        let firstMockAPIClient = MockAPIClient(baseURL: URL(string: "https://first.mock.invalid")!)
+        let secondMockAPIClient = MockAPIClient(baseURL: URL(string: "https://second.mock.invalid")!)
+
+        // Same barrier discipline as the raw-URLSession isolation test, but
+        // exercising real `APIClient` actors and their captured requests.
+        // Overlap is enforced by the semaphore protocol; correctness never
+        // depends on scheduling luck. Handler waits use a bounded timeout
+        // so a starved handler produces an explicit diagnostic instead of
+        // hanging XCTest. Against the rejected global-handler
+        // implementation this test fails deterministically because both
+        // APIClients would receive the second stub's payload.
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        firstMockAPIClient.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data(#"{"value":"first"}"#.utf8))
+        }
+
+        secondMockAPIClient.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            let response = TestData.httpResponse(url: request.url, statusCode: 200)
+            return (response, Data(#"{"value":"second"}"#.utf8))
+        }
+
+        async let firstValue: TransportValue = firstMockAPIClient.apiClient.get("/value")
+        async let secondValue: TransportValue = secondMockAPIClient.apiClient.get("/value")
+
+        let bothEntered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let firstEntered = entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                let secondEntered = firstEntered
+                    ? entryLatch.wait(timeout: barrierTimeout) != .timedOut
+                    : false
+                cont.resume(returning: firstEntered && secondEntered)
+            }
+        }
+        XCTAssertTrue(
+            bothEntered,
+            "Both APIClient actors must have concurrent MockURLProtocol handlers live inside startLoading before release. If this fails, per-session handler dispatch is serialized and the isolation contract is broken."
+        )
+
+        releaseLatch.signal()
+        releaseLatch.signal()
+
+        let firstResolved = try await firstValue
+        let secondResolved = try await secondValue
+
+        XCTAssertEqual(firstResolved, TransportValue(value: "first"))
+        XCTAssertEqual(secondResolved, TransportValue(value: "second"))
+        XCTAssertEqual(firstMockAPIClient.capturedRequests.count, 1)
+        XCTAssertEqual(firstMockAPIClient.capturedRequests.first?.url?.host, "first.mock.invalid")
+        XCTAssertEqual(secondMockAPIClient.capturedRequests.count, 1)
+        XCTAssertEqual(secondMockAPIClient.capturedRequests.first?.url?.host, "second.mock.invalid")
+    }
+
+    // MARK: - Issue #812: session ordering & cancellation regressions
+
+    /// Same-session handlers must run FIFO on one serial queue: request #1 fully
+    /// completes before request #2 begins. Against the rejected concurrent
+    /// global-queue dispatch, #2 would start while #1 is still parked, so
+    /// "start2" would appear before "end1" and this exact-sequence assertion
+    /// fails. Bounded semaphore waits only fail fast; correctness never depends
+    /// on elapsed time, sleeps, polling, or retries.
+    func testSameSessionHandlersRunSeriallyInFIFOOrder() async throws {
+        let session = MockURLProtocol.makeSession()
+        let firstURL = URL(string: "https://mock.invalid/serial-1")!
+        let secondURL = URL(string: "https://mock.invalid/serial-2")!
+
+        let events = OrderedEventLog()
+        let firstEntered = DispatchSemaphore(value: 0)
+        let firstMayFinish = DispatchSemaphore(value: 0)
+        let completions = CompletionLog()
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        session.onCompletion = { delivered in completions.record(delivered: delivered) }
+
+        session.requestHandler = { request in
+            if request.url == firstURL {
+                events.append("start1")
+                firstEntered.signal()
+                if firstMayFinish.wait(timeout: barrierTimeout) == .timedOut {
+                    throw URLError(.timedOut)
+                }
+                events.append("end1")
+                return (TestData.httpResponse(url: request.url, statusCode: 200), Data("1".utf8))
+            } else {
+                events.append("start2")
+                events.append("end2")
+                return (TestData.httpResponse(url: request.url, statusCode: 200), Data("2".utf8))
+            }
+        }
+
+        async let firstData: Data = session.urlSession.data(from: firstURL).0
+
+        // Wait until request #1 is provably running inside the serial queue.
+        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: firstEntered.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(entered, "Request #1 handler must enter the serial queue before #2 is submitted.")
+
+        // Submit #2 while #1 holds the serial queue, then release #1.
+        async let secondData: Data = session.urlSession.data(from: secondURL).0
+        firstMayFinish.signal()
+
+        let firstBody = String(decoding: try await firstData, as: UTF8.self)
+        let secondBody = String(decoding: try await secondData, as: UTF8.self)
+
+        XCTAssertEqual(firstBody, "1")
+        XCTAssertEqual(secondBody, "2")
+        XCTAssertEqual(
+            events.snapshot(),
+            ["start1", "end1", "start2", "end2"],
+            "Same-session handlers must execute serially in FIFO order. Interleaving (e.g. start2 before end1) means the per-session queue is not serial."
+        )
+        XCTAssertEqual(completions.deliveredCount(), 2, "Each request must deliver its terminal callback exactly once.")
+        XCTAssertEqual(completions.suppressedCount(), 0)
+    }
+
+    /// Cancelling a request after its handler has entered `startLoading` but
+    /// before it releases must suppress the terminal callback: the fence set by
+    /// `stopLoading()` drops every later `URLProtocolClient` callback. The
+    /// `onStopLoading` seam orders the stop strictly before the release, so the
+    /// suppression is deterministic. Against the rejected unfenced dispatch the
+    /// terminal callback would be delivered after cancellation instead of
+    /// suppressed, so `deliveredCount == 0` / `suppressedCount == 1` fails.
+    func testStopLoadingSuppressesCompletionAfterHandlerEntry() async throws {
+        let session = MockURLProtocol.makeSession()
+        let url = URL(string: "https://mock.invalid/cancel")!
+
+        let entryLatch = DispatchSemaphore(value: 0)
+        let releaseLatch = DispatchSemaphore(value: 0)
+        let stopLatch = DispatchSemaphore(value: 0)
+        let completions = CompletionLog()
+        let barrierTimeout: DispatchTime = .now() + .seconds(10)
+
+        session.onStopLoading = { stopLatch.signal() }
+        session.onCompletion = { delivered in completions.record(delivered: delivered) }
+
+        session.requestHandler = { request in
+            entryLatch.signal()
+            if releaseLatch.wait(timeout: barrierTimeout) == .timedOut {
+                throw URLError(.timedOut)
+            }
+            return (TestData.httpResponse(url: request.url, statusCode: 200), Data("late".utf8))
+        }
+
+        let task = Task { () -> Data in
+            try await session.urlSession.data(from: url).0
+        }
+
+        // Handler is provably parked inside startLoading.
+        let entered: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: entryLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(entered, "Handler must enter startLoading before cancellation.")
+
+        // Cancel while the handler is parked, then wait until stopLoading fences.
+        task.cancel()
+        let fenced: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: stopLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(fenced, "stopLoading() must fence the load after cancellation.")
+
+        // Release the parked handler; its terminal callback must be suppressed.
+        releaseLatch.signal()
+
+        do {
+            let data = try await task.value
+            XCTFail("Cancelled request must not deliver a completed response; got \(String(decoding: data, as: UTF8.self)).")
+        } catch {
+            // Expected: cancellation propagates.
+        }
+
+        // The handler's terminal callback must reach the fence and be suppressed.
+        let sawTerminal: Bool = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                cont.resume(returning: completions.terminalLatch.wait(timeout: barrierTimeout) != .timedOut)
+            }
+        }
+        XCTAssertTrue(sawTerminal, "The handler's terminal callback must reach the lifecycle fence.")
+        XCTAssertEqual(completions.deliveredCount(), 0, "stopLoading() must suppress the terminal callback after cancellation.")
+        XCTAssertEqual(completions.suppressedCount(), 1, "Exactly one terminal callback must be fenced/suppressed.")
+        XCTAssertEqual(session.capturedRequests.count, 1)
     }
 
     func testLiveHTTPSLoginAgainstRealServer() async throws {
@@ -582,5 +1088,56 @@ final class APIClientTests: XCTestCase {
         XCTAssertTrue(response.success)
         XCTAssertNotNil(response.token)
         XCTAssertEqual(response.user?.username, username)
+    }
+}
+
+// MARK: - Issue #812 regression support (thread-safe recorders)
+
+/// Ordered, synchronized event recorder used to assert same-session FIFO
+/// serialization from inside sync `MockURLProtocol` handlers running on the
+/// per-session serial queue.
+private final class OrderedEventLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [String] = []
+
+    func append(_ event: String) {
+        lock.lock()
+        events.append(event)
+        lock.unlock()
+    }
+
+    func snapshot() -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return events
+    }
+}
+
+/// Records the delivered/suppressed outcome of each terminal `MockURLProtocol`
+/// callback via the session's `onCompletion` seam. `terminalLatch` lets a test
+/// causally await the fenced terminal decision with a fail-fast timeout.
+private final class CompletionLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var delivered = 0
+    private var suppressed = 0
+    let terminalLatch = DispatchSemaphore(value: 0)
+
+    func record(delivered isDelivered: Bool) {
+        lock.lock()
+        if isDelivered { delivered += 1 } else { suppressed += 1 }
+        lock.unlock()
+        terminalLatch.signal()
+    }
+
+    func deliveredCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return delivered
+    }
+
+    func suppressedCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return suppressed
     }
 }

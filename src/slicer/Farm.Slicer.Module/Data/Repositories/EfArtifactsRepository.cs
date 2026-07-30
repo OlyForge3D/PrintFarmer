@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Farm.Slicer.Module.Data.Repositories;
 
@@ -18,6 +19,40 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
         _ = db.Set<Artifact>().Add(artifact);
         _ = await db.SaveChangesAsync(ct);
         return artifact;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryAddForActiveLeaseAsync(
+        Artifact artifact,
+        Guid workerId,
+        Guid claimToken,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        await using IDbContextTransaction transaction = await db.Database.BeginTransactionAsync(ct);
+        DateTime now = DateTime.UtcNow;
+        int fenced = await db.SliceJobs
+            .Where(job =>
+                job.Id == artifact.JobId &&
+                job.WorkerId == workerId &&
+                job.ClaimToken == claimToken &&
+                job.Status == SliceJobStatus.Processing &&
+                job.LeaseExpiresAt != null &&
+                job.LeaseExpiresAt > now)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(job => job.UpdatedAt, now),
+                ct);
+        if (fenced != 1)
+        {
+            await transaction.RollbackAsync(ct);
+            return false;
+        }
+
+        artifact.ClaimToken = claimToken;
+        _ = db.Artifacts.Add(artifact);
+        _ = await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return true;
     }
 
     /// <inheritdoc/>
@@ -57,10 +92,189 @@ public class EfArtifactsRepository(IDbContextFactory<SlicerDbContext> dbFactory)
     }
 
     /// <inheritdoc/>
+    public async Task<IReadOnlyList<Artifact>> GetCleanupInProgressAsync(
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.Set<Artifact>()
+            .AsNoTracking()
+            .Where(artifact =>
+                artifact.CleanupReservationToken != null &&
+                artifact.CleanupDeletionStartedAtUtc != null)
+            .OrderBy(artifact => artifact.CleanupDeletionStartedAtUtc)
+            .ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryReserveForCleanupAsync(
+        Guid artifactId,
+        Guid? expectedReservationToken,
+        DateTime? expectedReservedAtUtc,
+        Guid reservationToken,
+        DateTime reservedAtUtc,
+        DateTime staleBeforeUtc,
+        CancellationToken ct = default)
+    {
+        if (expectedReservationToken.HasValue &&
+            (!expectedReservedAtUtc.HasValue || expectedReservedAtUtc.Value > staleBeforeUtc))
+        {
+            return false;
+        }
+
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        IQueryable<Artifact> candidate = db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == expectedReservationToken &&
+                artifact.CleanupReservedAtUtc == expectedReservedAtUtc &&
+                artifact.CleanupDeletionStartedAtUtc == null &&
+                (artifact.PromotionStartedAtUtc == null || artifact.PromotedAtUtc != null));
+        int affected = await candidate.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(artifact => artifact.CleanupReservationToken, reservationToken)
+                .SetProperty(artifact => artifact.CleanupReservedAtUtc, reservedAtUtc),
+            ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryBeginCleanupDeletionAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        DateTime startedAtUtc,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(
+                    artifact => artifact.CleanupDeletionStartedAtUtc,
+                    startedAtUtc),
+                ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> FinalizeCleanupAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc != null)
+            .ExecuteDeleteAsync(ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task ReleaseCleanupReservationAsync(
+        Guid artifactId,
+        Guid reservationToken,
+        CancellationToken ct = default)
+    {
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        _ = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == reservationToken &&
+                artifact.CleanupDeletionStartedAtUtc == null)
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(artifact => artifact.CleanupReservationToken, (Guid?)null)
+                    .SetProperty(artifact => artifact.CleanupReservedAtUtc, (DateTime?)null),
+                ct);
+    }
+
+    /// <inheritdoc/>
     public async Task<long> GetTotalSizeAsync(CancellationToken ct = default)
     {
         using SlicerDbContext db = _dbFactory.CreateDbContext();
         return await db.Set<Artifact>().AsNoTracking().SumAsync(a => (long?)a.SizeBytes, ct) ?? 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> TryPinForPromotionAsync(
+        Guid artifactId,
+        Guid? checkpointId,
+        PromotionOperationIdentity operation,
+        DateTime startedAtUtc,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.Key);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.OperationId);
+
+        await using SlicerDbContext db = await _dbFactory.CreateDbContextAsync(ct);
+        int affected = await db.Set<Artifact>()
+            .Where(artifact =>
+                artifact.Id == artifactId &&
+                artifact.CleanupReservationToken == null &&
+                (artifact.PromotionOperationKey == null ||
+                    artifact.PromotionOperationKey == operation.Key))
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(artifact => artifact.PromotionOperationKey, operation.Key)
+                    .SetProperty(artifact => artifact.PromotionOperationId, operation.OperationId)
+                    .SetProperty(
+                        artifact => artifact.PromotionCheckpointId,
+                        artifact => checkpointId ?? artifact.PromotionCheckpointId)
+                    .SetProperty(
+                        artifact => artifact.PromotionStartedAtUtc,
+                        artifact => artifact.PromotionStartedAtUtc ?? startedAtUtc),
+                ct);
+        return affected == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> MarkPromotedAsync(
+        Guid artifactId,
+        Guid gcodeFileId,
+        DateTime promotedAtUtc,
+        CancellationToken ct = default)
+    {
+        using SlicerDbContext db = _dbFactory.CreateDbContext();
+        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
+        if (artifact is null)
+        {
+            return false;
+        }
+
+        artifact.PromotedGcodeFileId = gcodeFileId;
+        artifact.PromotedAtUtc ??= promotedAtUtc;
+        _ = await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> ReleasePromotionPinAsync(
+        Guid artifactId,
+        PromotionOperationIdentity operation,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operation.Key);
+
+        using SlicerDbContext db = _dbFactory.CreateDbContext();
+        Artifact? artifact = await db.Set<Artifact>().FirstOrDefaultAsync(a => a.Id == artifactId, ct);
+        if (artifact is null ||
+            !string.Equals(artifact.PromotionOperationKey, operation.Key, StringComparison.Ordinal) ||
+            artifact.PromotedAtUtc is not null)
+        {
+            return false;
+        }
+
+        artifact.PromotionOperationKey = null;
+        artifact.PromotionOperationId = null;
+        artifact.PromotionCheckpointId = null;
+        artifact.PromotionStartedAtUtc = null;
+        _ = await db.SaveChangesAsync(ct);
+        return true;
     }
 
     /// <inheritdoc/>

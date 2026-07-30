@@ -47,7 +47,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -114,7 +114,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 5,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -141,7 +141,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 2,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string json = await response.Content.ReadAsStringAsync();
@@ -162,7 +162,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 3,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -181,7 +181,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 3,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -200,7 +200,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 3,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -219,7 +219,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 0,
         };
 
-        HttpResponseMessage response = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage response = await PutWithCurrentEtagAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -239,7 +239,7 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MaxConcurrentDispatches = 2,
         };
 
-        HttpResponseMessage putResponse = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage putResponse = await PutWithCurrentEtagAsync(request);
         putResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Then read back
@@ -275,10 +275,86 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             MinimumScoreThreshold = 80.0,
             MaxConcurrentDispatches = 1,
         };
-        HttpResponseMessage putResponse = await _client.PutAsJsonAsync("/api/dispatch-settings", request);
+        HttpResponseMessage putResponse = await PutWithCurrentEtagAsync(request);
         DispatchSettingsDto? after = await putResponse.Content.ReadFromJsonAsync<DispatchSettingsDto>(JsonOptions);
 
         after!.UpdatedAt.Should().BeAfter(before!.UpdatedAt, "UpdatedAt should advance on each update");
+    }
+
+    [Fact]
+    public async Task UpdateSettings_MissingIfMatch_Returns428()
+    {
+        var request = new UpdateDispatchSettingsDto
+        {
+            AutoDispatchEnabled = true,
+            AutoDispatchMode = AutoDispatchMode.Auto,
+            IdleThresholdSeconds = 30,
+            MinimumScoreThreshold = 50,
+            MaxConcurrentDispatches = 1,
+        };
+
+        HttpResponseMessage response = await _client.PutAsJsonAsync(
+            "/api/dispatch-settings",
+            request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionRequired);
+    }
+
+    [Fact]
+    public async Task UpdateSettings_TwoWritersWithSameEtag_SecondReturns412()
+    {
+        HttpResponseMessage current = await _client.GetAsync("/api/dispatch-settings");
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Dispatch settings GET did not return an ETag.");
+        var first = new UpdateDispatchSettingsDto
+        {
+            AutoDispatchEnabled = true,
+            AutoDispatchMode = AutoDispatchMode.Auto,
+            IdleThresholdSeconds = 10,
+            MinimumScoreThreshold = 80,
+            MaxConcurrentDispatches = 1,
+        };
+        var second = new UpdateDispatchSettingsDto
+        {
+            AutoDispatchEnabled = false,
+            AutoDispatchMode = AutoDispatchMode.Manual,
+            IdleThresholdSeconds = 90,
+            MinimumScoreThreshold = 10,
+            MaxConcurrentDispatches = 5,
+        };
+
+        HttpResponseMessage firstResponse = await PutWithEtagAsync(first, etag);
+        HttpResponseMessage secondResponse = await PutWithEtagAsync(second, etag);
+
+        firstResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        secondResponse.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+        DispatchSettingsDto? persisted = await _client.GetFromJsonAsync<DispatchSettingsDto>(
+            "/api/dispatch-settings",
+            JsonOptions);
+        persisted!.AutoDispatchEnabled.Should().BeTrue();
+        persisted.IdleThresholdSeconds.Should().Be(10);
+    }
+
+    private async Task<HttpResponseMessage> PutWithCurrentEtagAsync(
+        UpdateDispatchSettingsDto request)
+    {
+        HttpResponseMessage current = await _client.GetAsync("/api/dispatch-settings");
+        current.EnsureSuccessStatusCode();
+        string etag = current.Headers.ETag?.Tag
+            ?? throw new InvalidOperationException("Dispatch settings GET did not return an ETag.");
+        return await PutWithEtagAsync(request, etag);
+    }
+
+    private async Task<HttpResponseMessage> PutWithEtagAsync(
+        UpdateDispatchSettingsDto request,
+        string etag)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Put, "/api/dispatch-settings")
+        {
+            Content = JsonContent.Create(request),
+        };
+        message.Headers.TryAddWithoutValidation("If-Match", etag);
+        return await _client.SendAsync(message);
     }
 
     // =========================================================================

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { apiClient } from "@/services/api";
 import { Button, Input, FormField, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { adminToast } from '@/common/components/admin';
 import type { SystemLog, LogColumnKey } from '@/types/admin';
 
 const DEFAULT_COLUMNS: Record<LogColumnKey, { label: string; default: boolean }> = {
@@ -21,19 +22,25 @@ export function SystemLogsContent() {
   const [useAdvancedQuery, setUseAdvancedQuery] = useState(false);
   const [queryString, setQueryString] = useState("");
   const [visibleColumns, setVisibleColumns] = useState<Record<LogColumnKey, boolean>>(() => {
+    const defaults = Object.fromEntries(
+      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
+    ) as Record<LogColumnKey, boolean>;
     const saved = localStorage.getItem(COLUMNS_STORAGE_KEY);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        // Merge over the defaults rather than returning the parsed value
+        // as-is: a saved preferences blob from an older column set (or a
+        // partial value, e.g. from a test seed) must not leave newer
+        // columns' `checked` prop as `undefined` on first render — that
+        // would make the checkbox start uncontrolled and then flip to
+        // controlled the moment any column toggles, which React warns
+        // about.
+        return { ...defaults, ...JSON.parse(saved) };
       } catch {
-        return Object.fromEntries(
-          Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-        ) as Record<LogColumnKey, boolean>;
+        return defaults;
       }
     }
-    return Object.fromEntries(
-      Object.entries(DEFAULT_COLUMNS).map(([key, { default: def }]) => [key, def])
-    ) as Record<LogColumnKey, boolean>;
+    return defaults;
   });
   const [expandedRowId, setExpandedRowId] = useState<number | null>(null);
   const defaultDateRange = useMemo(() => {
@@ -87,7 +94,7 @@ export function SystemLogsContent() {
       setLogs(logsData as unknown as SystemLog[]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to fetch logs';
-      alert(message);
+      adminToast.error(message);
     }
     setLoading(false);
   };
@@ -111,7 +118,7 @@ export function SystemLogsContent() {
       link.remove();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to export logs';
-      alert(message);
+      adminToast.error(message);
     }
   };
 

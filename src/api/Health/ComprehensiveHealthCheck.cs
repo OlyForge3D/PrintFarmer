@@ -453,7 +453,7 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
         {
             Status = "Healthy",
             Uptime = DateTime.UtcNow.Subtract(System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime()),
-            Environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
+            Environment = hostEnvironment.EnvironmentName,
             Version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "Unknown"
         };
 

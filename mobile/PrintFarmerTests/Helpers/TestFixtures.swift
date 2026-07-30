@@ -31,6 +31,10 @@ enum TestJSON {
         "jobName": "benchy.gcode",
         "thumbnailUrl": "http://192.168.1.100/thumb/benchy.png",
         "cameraStreamUrl": "http://192.168.1.100:8080/?action=stream",
+        "cameraSnapshotUrl": "http://192.168.1.100/snapshot.jpg",
+        "cameraAccessMode": "StreamAndSnapshot",
+        "cameraStreamFormat": "Mjpeg",
+        "cameraSnapshotStrategy": "DirectUrl",
         "x": 120.0,
         "y": 85.5,
         "z": 12.3,
@@ -63,6 +67,7 @@ enum TestJSON {
     static let printerMinimal = """
     {
         "id": "660e8400-e29b-41d4-a716-446655440001",
+        "rowVersion": "AQIDBA==",
         "name": "Ender 3",
         "backend": "Moonraker",
         "backendPort": 7125,
@@ -74,11 +79,45 @@ enum TestJSON {
 
     static let printerArray = "[\(printer), \(printerMinimal)]"
 
+    static let printerCameraUrls = """
+    [
+        {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "Prusa MK4",
+            "cameraStreamUrl": "http://192.168.1.100:8080/?action=stream",
+            "cameraSnapshotUrl": "http://192.168.1.100/snapshot.jpg",
+            "cameraAccessMode": "StreamAndSnapshot",
+            "cameraStreamFormat": "Mjpeg",
+            "cameraSnapshotStrategy": "DirectUrl"
+        },
+        {
+            "id": "660e8400-e29b-41d4-a716-446655440001",
+            "name": "Snapmaker U1",
+            "cameraStreamUrl": null,
+            "cameraSnapshotUrl": null,
+            "cameraAccessMode": "SnapshotOnly",
+            "cameraStreamFormat": "Unknown",
+            "cameraSnapshotStrategy": "SnapmakerU1MonitorJpeg"
+        }
+    ]
+    """
+
+    static let printerCameraUrl = """
+    {
+        "streamUrl": null,
+        "snapshotUrl": null,
+        "accessMode": "SnapshotOnly",
+        "streamFormat": "Unknown",
+        "snapshotStrategy": "SnapmakerU1MonitorJpeg"
+    }
+    """
+
     // MARK: PrintJob (JobQueuePrintJobDto)
 
     static let printJob = """
     {
         "id": "770e8400-e29b-41d4-a716-446655440002",
+        "rowVersion": "AQIDBQ==",
         "status": "Printing",
         "priority": 1,
         "queuePosition": 1,
@@ -118,6 +157,46 @@ enum TestJSON {
     """
 
     static let printJobArray = "[\(printJob), \(printJobQueued)]"
+
+    /// Dispute C (#714): completed job not yet harvested — eligible for
+    /// "Harvest to Inventory".
+    static let printJobCompleted = """
+    {
+        "id": "cc0e8400-e29b-41d4-a716-446655440008",
+        "status": "Completed",
+        "priority": 1,
+        "queuePosition": 0,
+        "gcodeFileName": "widget.gcode",
+        "assignedPrinterName": "Prusa MK4",
+        "createdAt": "2025-07-17T07:00:00Z",
+        "updatedAt": "2025-07-17T08:00:00Z",
+        "actualStartTime": "2025-07-17T07:05:00Z",
+        "actualEndTime": "2025-07-17T08:00:00Z",
+        "copies": 1,
+        "completedCopies": 1,
+        "remainingCopies": 0
+    }
+    """
+
+    /// Dispute C (#714): completed job that has already been harvested.
+    static let printJobHarvested = """
+    {
+        "id": "aa0e8400-e29b-41d4-a716-446655440006",
+        "status": "Completed",
+        "priority": 1,
+        "queuePosition": 0,
+        "gcodeFileName": "gear.gcode",
+        "assignedPrinterName": "Prusa MK4",
+        "createdAt": "2025-07-17T07:00:00Z",
+        "updatedAt": "2025-07-17T09:00:00Z",
+        "actualStartTime": "2025-07-17T07:05:00Z",
+        "actualEndTime": "2025-07-17T08:00:00Z",
+        "copies": 1,
+        "completedCopies": 1,
+        "remainingCopies": 0,
+        "harvestedAt": "2025-07-17T09:00:00Z"
+    }
+    """
 
     // MARK: QueueOverview (QueueOverviewDto)
 
@@ -222,6 +301,7 @@ enum TestJSON {
     {
         "job": {
             "id": "770e8400-e29b-41d4-a716-446655440002",
+            "rowVersion": "AQIDBg==",
             "name": "benchy.gcode",
             "fileName": "benchy.gcode",
             "assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000",
@@ -249,6 +329,7 @@ enum TestJSON {
     {
         "job": {
             "id": "880e8400-e29b-41d4-a716-446655440003",
+            "rowVersion": "AQIDBw==",
             "name": "phone_case.gcode",
             "fileName": "phone_case.gcode",
             "status": "Queued",
@@ -270,6 +351,7 @@ enum TestJSON {
     {
         "job": {
             "id": "990e8400-e29b-41d4-a716-446655440004",
+            "rowVersion": "AQIDCA==",
             "name": "vase.gcode",
             "fileName": "vase.gcode",
             "status": "Completed",
@@ -289,10 +371,37 @@ enum TestJSON {
     }
     """
 
+    /// Dispute C (#714): a completed job already harvested — must decode
+    /// `harvestedAt` and must be excluded from the bin-scan harvest picker.
+    static let queuedPrintJobResponseCompletedHarvested = """
+    {
+        "job": {
+            "id": "bb0e8400-e29b-41d4-a716-446655440007",
+            "name": "harvested_part.gcode",
+            "fileName": "harvested_part.gcode",
+            "status": "Completed",
+            "priority": 1,
+            "queuePosition": 0,
+            "actualStartTimeUtc": "2025-07-17T06:00:00Z",
+            "actualEndTimeUtc": "2025-07-17T07:00:00Z",
+            "createdAtUtc": "2025-07-17T05:00:00Z",
+            "copies": 1,
+            "completedCopies": 1,
+            "remainingCopies": 0,
+            "harvestedAt": "2025-07-17T07:05:00Z"
+        },
+        "gcodeFile": null,
+        "assignedPrinter": null,
+        "estimatedStartTime": null,
+        "estimatedCompletionTime": null
+    }
+    """
+
     static let queuedPrintJobResponseFailed = """
     {
         "job": {
             "id": "aa0e8400-e29b-41d4-a716-446655440005",
+            "rowVersion": "AQIDCQ==",
             "name": "failed_part.gcode",
             "fileName": "failed_part.gcode",
             "status": "Failed",
@@ -315,6 +424,7 @@ enum TestJSON {
     {
         "job": {
             "id": "bb0e8400-e29b-41d4-a716-446655440006",
+            "rowVersion": "AQIDCg==",
             "name": "paused_model.gcode",
             "fileName": "paused_model.gcode",
             "status": "Paused",
@@ -337,6 +447,7 @@ enum TestJSON {
     {
         "job": {
             "id": "cc0e8400-e29b-41d4-a716-446655440007",
+            "rowVersion": "AQIDCw==",
             "name": "assigned_job.gcode",
             "fileName": "assigned_job.gcode",
             "assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000",

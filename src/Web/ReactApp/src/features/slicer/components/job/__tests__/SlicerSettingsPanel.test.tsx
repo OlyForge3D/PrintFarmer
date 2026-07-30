@@ -1,0 +1,348 @@
+/**
+ * Unit tests for SlicerSettingsPanel (Simple mode controls).
+ * Covers: infill %, infill pattern, top/bottom layers, perimeters,
+ * support toggle + type, and bed adhesion dropdown.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, within } from '@testing-library/react';
+import '@testing-library/jest-dom';
+import React from 'react';
+import { SlicerSettingsPanel, type SlicerSettings } from '../SlicerSettingsPanel';
+
+vi.mock('@/features/slicer/components/settings/metadataTypes', () => ({
+  INFILL_PATTERNS: [
+    { value: 'grid', label: 'Grid' },
+    { value: 'gyroid', label: 'Gyroid' },
+    { value: 'cubic', label: 'Cubic' },
+    { value: 'honeycomb', label: 'Honeycomb' },
+  ],
+}));
+
+vi.mock('@/common/components/ui', () => ({
+  Button: ({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { children?: React.ReactNode }) => (
+    <button {...rest}>{children}</button>
+  ),
+  Checkbox: ({ id, checked, onChange }: { id: string; checked: boolean; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void }) => (
+    <input type="checkbox" id={id} checked={checked} onChange={onChange} />
+  ),
+  Select: ({ children, ...rest }: React.SelectHTMLAttributes<HTMLSelectElement> & { children: React.ReactNode }) => (
+    <select {...rest}>{children}</select>
+  ),
+}));
+
+const DEFAULT_SETTINGS: SlicerSettings = {
+  layerHeight: 0.2,
+  infillPercent: 15,
+  infillPattern: 'grid',
+  topShellLayers: 4,
+  bottomShellLayers: 3,
+  wallLoops: 2,
+  supportEnabled: false,
+  supportType: 'normal(auto)',
+  bedAdhesionType: 'none',
+};
+
+function renderPanel(partial?: Partial<SlicerSettings>, onChange = vi.fn()) {
+  const settings = { ...DEFAULT_SETTINGS, ...partial };
+  return { onChange, ...render(<SlicerSettingsPanel settings={settings} onSettingsChange={onChange} simpleMode />)};
+}
+
+describe('SlicerSettingsPanel — perimeters / shell layers', () => {
+  it('clamps layer height to the supported range', () => {
+    const onChange = vi.fn();
+    render(
+      <SlicerSettingsPanel
+        settings={{ ...DEFAULT_SETTINGS, layerHeight: 0.2 }}
+        onSettingsChange={onChange}
+        simpleMode={false}
+      />
+    );
+    const input = screen.getByRole('spinbutton', { name: /layer height/i });
+    fireEvent.change(input, { target: { value: '1' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ layerHeight: 0.4 }));
+  });
+
+  it('renders perimeters (wall loops) input with current value', () => {
+    renderPanel({ wallLoops: 3 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i }) as HTMLInputElement;
+    expect(input.value).toBe('3');
+  });
+
+  it('calls onSettingsChange with updated wallLoops', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '4' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 4 }));
+  });
+
+  it('renders top shell layers input with current value', () => {
+    renderPanel({ topShellLayers: 5 });
+    const input = screen.getByRole('spinbutton', { name: /top layers/i }) as HTMLInputElement;
+    expect(input.value).toBe('5');
+  });
+
+  it('calls onSettingsChange with updated topShellLayers', () => {
+    const { onChange } = renderPanel({ topShellLayers: 4 });
+    const input = screen.getByRole('spinbutton', { name: /top layers/i });
+    fireEvent.change(input, { target: { value: '6' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ topShellLayers: 6 }));
+  });
+
+  it('renders bottom shell layers input with current value', () => {
+    renderPanel({ bottomShellLayers: 2 });
+    const input = screen.getByRole('spinbutton', { name: /bottom layers/i }) as HTMLInputElement;
+    expect(input.value).toBe('2');
+  });
+
+  it('calls onSettingsChange with updated bottomShellLayers', () => {
+    const { onChange } = renderPanel({ bottomShellLayers: 3 });
+    const input = screen.getByRole('spinbutton', { name: /bottom layers/i });
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bottomShellLayers: 5 }));
+  });
+});
+
+describe('SlicerSettingsPanel — infill', () => {
+  it('renders infill percentage slider with current value', () => {
+    renderPanel({ infillPercent: 20 });
+    const slider = screen.getByRole('slider', { name: /infill density/i }) as HTMLInputElement;
+    expect(slider.value).toBe('20');
+  });
+
+  it('calls onSettingsChange with updated infillPercent via slider', () => {
+    const { onChange } = renderPanel({ infillPercent: 15 });
+    fireEvent.change(screen.getByRole('slider', { name: /infill density/i }), { target: { value: '40' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 40 }));
+  });
+
+  it('renders the infill pattern select and preview icon', () => {
+    renderPanel({ infillPattern: 'grid' });
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    expect(trigger).toBeInTheDocument();
+    expect(trigger).toHaveAccessibleDescription(/pattern used for internal fill/i);
+    expect(trigger.querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_grid.svg');
+    fireEvent.click(trigger, { detail: 1 });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+
+  it('opens an icon-backed listbox of infill patterns', () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }), { detail: 1 });
+    const listbox = screen.getByRole('listbox');
+    const options = within(listbox).getAllByRole('option');
+    expect(options).toHaveLength(4);
+    expect(options[1].querySelector('img')?.getAttribute('src')).toContain('/icons/orca/param_gyroid.svg');
+    expect(screen.queryByRole('button', { name: /gyroid/i })).not.toBeInTheDocument();
+  });
+
+  it('calls onSettingsChange with updated infillPattern', () => {
+    const { onChange } = renderPanel({ infillPattern: 'grid' });
+    fireEvent.click(screen.getByRole('combobox', { name: /infill pattern grid/i }), { detail: 1 });
+    fireEvent.click(screen.getByRole('option', { name: /gyroid/i }), { detail: 1 });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
+  });
+
+  it('supports keyboard selection with arrow keys and enter', () => {
+    const { onChange } = renderPanel({ infillPattern: 'grid' });
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPattern: 'gyroid' }));
+  });
+
+  it('scrolls the highlighted infill option into view', () => {
+    const originalScrollIntoView = (HTMLElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView;
+    const scrollIntoView = vi.fn();
+    try {
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: scrollIntoView,
+      });
+
+      renderPanel();
+      const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+      fireEvent.click(trigger, { detail: 1 });
+      scrollIntoView.mockClear();
+      fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+        configurable: true,
+        value: originalScrollIntoView,
+      });
+    }
+  });
+
+  it('closes the listbox on escape and tab', () => {
+    renderPanel();
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+    fireEvent.keyDown(trigger, { key: 'Tab' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('opens the listbox for screen-reader style click activation', () => {
+    renderPanel();
+    const trigger = screen.getByRole('combobox', { name: /infill pattern grid/i });
+
+    fireEvent.click(trigger, { detail: 0 });
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+  });
+});
+
+describe('SlicerSettingsPanel — supports', () => {
+  it('renders support enabled checkbox unchecked by default', () => {
+    renderPanel({ supportEnabled: false });
+    const checkbox = screen.getByRole('checkbox');
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it('does not render support type selector when supports are disabled', () => {
+    renderPanel({ supportEnabled: false });
+    expect(screen.queryByRole('combobox', { name: /support type/i })).not.toBeInTheDocument();
+  });
+
+  it('renders support type selector when supports are enabled', () => {
+    renderPanel({ supportEnabled: true, supportType: 'tree(auto)' });
+    const select = screen.getByRole('combobox', { name: /support type/i }) as HTMLSelectElement;
+    expect(select.value).toBe('tree(auto)');
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['Normal', 'Tree']);
+  });
+
+  it('calls onSettingsChange with updated supportType', () => {
+    const { onChange } = renderPanel({ supportEnabled: true, supportType: 'normal(auto)' });
+    fireEvent.change(screen.getByRole('combobox', { name: /support type/i }), { target: { value: 'tree(auto)' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ supportType: 'tree(auto)' }));
+  });
+
+  it('calls onSettingsChange with supportEnabled=true when checkbox is checked', () => {
+    const { onChange } = renderPanel({ supportEnabled: false });
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ supportEnabled: true }));
+  });
+});
+
+describe('SlicerSettingsPanel — bed adhesion', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('renders bed adhesion dropdown with all options', () => {
+    renderPanel({ bedAdhesionType: 'none' });
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(Array.from(select.options).map((option) => option.textContent)).toEqual(['None', 'Skirt', 'Brim', 'Raft']);
+  });
+
+  it('shows the current bed adhesion value', () => {
+    renderPanel({ bedAdhesionType: 'brim' });
+    const select = screen.getByRole('combobox', { name: /bed adhesion/i }) as HTMLSelectElement;
+    expect(select.value).toBe('brim');
+  });
+
+  it('calls onSettingsChange with bedAdhesionType=skirt when value changes', () => {
+    const { onChange } = renderPanel({ bedAdhesionType: 'none' });
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'skirt' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'skirt' }));
+  });
+
+  it('calls onSettingsChange with bedAdhesionType=brim when value changes', () => {
+    const { onChange } = renderPanel({ bedAdhesionType: 'none' });
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'brim' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'brim' }));
+  });
+
+  it('calls onSettingsChange with bedAdhesionType=raft when value changes', () => {
+    const { onChange } = renderPanel({ bedAdhesionType: 'none' });
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'raft' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'raft' }));
+  });
+
+  it('calls onSettingsChange with bedAdhesionType=none when value changes', () => {
+    const { onChange } = renderPanel({ bedAdhesionType: 'brim' });
+    fireEvent.change(screen.getByRole('combobox', { name: /bed adhesion/i }), { target: { value: 'none' } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bedAdhesionType: 'none' }));
+  });
+});
+
+describe('SlicerSettingsPanel — simpleMode hides layer height', () => {
+  it('hides layer height input in simpleMode', () => {
+    render(
+      <SlicerSettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onSettingsChange={vi.fn()}
+        simpleMode
+      />
+    );
+    expect(screen.queryByRole('spinbutton', { name: /layer height/i })).not.toBeInTheDocument();
+  });
+
+  it('shows layer height input when simpleMode is false', () => {
+    render(
+      <SlicerSettingsPanel
+        settings={DEFAULT_SETTINGS}
+        onSettingsChange={vi.fn()}
+        simpleMode={false}
+      />
+    );
+    expect(screen.getByRole('spinbutton', { name: /layer height/i })).toBeInTheDocument();
+  });
+});
+
+describe('SlicerSettingsPanel — input clamping', () => {
+  it('clamps wallLoops to minimum 1 when 0 is entered', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '0' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 1 }));
+  });
+
+  it('clamps wallLoops to minimum 1 when negative value is entered', () => {
+    const { onChange } = renderPanel({ wallLoops: 2 });
+    const input = screen.getByRole('spinbutton', { name: /perimeters/i });
+    fireEvent.change(input, { target: { value: '-3' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ wallLoops: 1 }));
+  });
+
+  it('clamps topShellLayers to minimum 0 when negative value is entered', () => {
+    const { onChange } = renderPanel({ topShellLayers: 4 });
+    const input = screen.getByRole('spinbutton', { name: /top layers/i });
+    fireEvent.change(input, { target: { value: '-1' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ topShellLayers: 0 }));
+  });
+
+  it('clamps bottomShellLayers to minimum 0 when negative value is entered', () => {
+    const { onChange } = renderPanel({ bottomShellLayers: 3 });
+    const input = screen.getByRole('spinbutton', { name: /bottom layers/i });
+    fireEvent.change(input, { target: { value: '-5' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ bottomShellLayers: 0 }));
+  });
+
+  it('clamps infillPercent to 100 when value above max is entered via number input', () => {
+    const { onChange } = renderPanel({ infillPercent: 50 });
+    const input = screen.getByRole('spinbutton', { name: /infill density/i });
+    fireEvent.change(input, { target: { value: '150' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 100 }));
+  });
+
+  it('clamps infillPercent to 0 when negative value is entered via number input', () => {
+    const { onChange } = renderPanel({ infillPercent: 50 });
+    const input = screen.getByRole('spinbutton', { name: /infill density/i });
+    fireEvent.change(input, { target: { value: '-10' } });
+    fireEvent.blur(input);
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ infillPercent: 0 }));
+  });
+});

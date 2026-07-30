@@ -18,8 +18,9 @@ interface Props {
   error: Error | null;
 }
 
-export const FailureReasonsChart: React.FC<Props> = ({ data, isLoading, error }) => (
-  <Card title="Failure Reasons" className="h-96">
+export const FailureReasonsChart = React.memo(function FailureReasonsChart({ data, isLoading, error }: Props) {
+  return (
+    <Card title="Failure Reasons" className="h-96">
     {isLoading ? (
       <ChartSkeleton />
     ) : error ? (
@@ -41,5 +42,6 @@ export const FailureReasonsChart: React.FC<Props> = ({ data, isLoading, error })
         </BarChart>
       </ResponsiveContainer>
     )}
-  </Card>
-);
+    </Card>
+  );
+});

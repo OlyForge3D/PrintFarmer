@@ -1,109 +1,141 @@
-﻿using System.Security.Claims;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
-using Microsoft.AspNetCore.Authentication;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddEnvironmentVariables("PFARM__");
 
-// ── Database ──────────────────────────────────────────────────────────────────
-// SlicerDbContext (module-owned; multi-provider: SQLite, PostgreSQL, SQL Server)
+// SlicerDbContext (module-owned; multi-provider: SQLite, PostgreSQL, SQL Server).
 builder.Services.AddSlicerModule(builder.Configuration);
 
-// ── Slicer API-layer services (real implementations from Farm.Slicer.Module.Api) ──
-// Registers controllers' service dependencies: SlicersService, SlicingSubmissionService,
-// ArtifactsService, ProfilesService, WorkerAuthService, file storage, job dispatch, etc.
+// Slicer API-layer services (real implementations from Farm.Slicer.Module.Api).
 builder.Services.AddSlicerApiServices(builder.Configuration);
 
-// ── Cross-domain lookup services (HTTP → main API) ───────────────────────────
-// Resolves printers, catalog models, and manufacturer names from the main API
-// via REST calls with in-memory caching. Must come AFTER AddSlicerApiServices so
-// that HttpCatalogServiceAdapter and HttpPrinterLookupService take precedence over
-// the module-local adapters registered above.
+// Cross-domain lookup services must follow AddSlicerApiServices so the HTTP adapters win.
 builder.Services.AddCrossDomainLookupServices(builder.Configuration);
 
-// ── Shared infrastructure services (AppDbContext, tags, catalog, settings) ────
-// In standalone mode, the slicer-host shares the same PostgreSQL database
-// as the main API and registers infrastructure services locally rather than
-// proxying all calls over HTTP.
+// Standalone slicer-host shares the core database and infrastructure services.
 builder.Services.AddSharedInfrastructureServices(builder.Configuration);
 
-// ── Slicer service implementations for standalone host ────────────────────────
-// IModel3DFileService (Farm.Slicer.Module) and I3MfToStlConversionService (Farm.Infrastructure).
 builder.Services.AddUnimplementedSlicerServiceStubs();
 
-// ── Infrastructure services shared with the main API ──────────────────────────
-// ILogger<T> is automatically provided by the DI container
+string jwtKey = builder.Configuration["Jwt:Key"]
+    ?? throw new InvalidOperationException(
+        "JWT Key not configured. Provide Jwt__Key using the same secret as the main PrintFarmer API.");
 
-// ── Authentication (transitional — allow all for standalone mode) ──────────────
-// When the host is deployed behind an API gateway, this will be replaced with
-// proper JWT/API-key authentication forwarded from the gateway.
 builder.Services
-    .AddAuthentication("StandaloneScheme")
-    .AddScheme<AuthenticationSchemeOptions, StandaloneAuthHandler>(
-        "StandaloneScheme", null);
-builder.Services.AddAuthorization(opts =>
-{
-    opts.AddPolicy("farm_admin", policy => policy.RequireAssertion(_ => true));
-});
+    .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.RequireHttpsMetadata = !builder.Environment.IsEnvironment("Testing");
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ValidateIssuer = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"] ?? "PrintFarmer",
+            ValidateAudience = true,
+            ValidAudience = builder.Configuration["Jwt:Audience"] ?? "PrintFarmer",
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+        };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                if (string.IsNullOrEmpty(context.Token))
+                {
+                    string? token = SlicerHubAuth.ResolveHubAccessToken(context.Request);
+                    if (token is not null)
+                    {
+                        context.Token = token;
+                    }
+                }
 
-// ── JSON serialisation ────────────────────────────────────────────────────────
-Action<JsonSerializerOptions> configureJson = o =>
+                return Task.CompletedTask;
+            },
+        };
+    });
+
+builder.Services.AddAuthorization(options =>
 {
-    o.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    o.Converters.Add(new JsonStringEnumConverter());
+    options.AddPolicy("farm_admin", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.RequireRole("farm_admin");
+    });
+
+    // Desktop exchange tokens remain scope-gated; regular JWTs pass these policies.
+    options.AddPolicy("ModelRead", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelRead")));
+    options.AddPolicy("ModelWrite", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelWrite")));
+    options.AddPolicy("LibrarySync", policy => policy.AddRequirements(new DesktopScopeRequirement("LibrarySync")));
+});
+builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+
+Action<JsonSerializerOptions> configureJson = options =>
+{
+    options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.Converters.Add(new JsonStringEnumConverter());
 };
 
-// ── Controllers (slicer module only) ──────────────────────────────────────────
 builder.Services
     .AddControllers()
     .AddSlicerControllers()
-    .AddJsonOptions(o => configureJson(o.JsonSerializerOptions));
+    .AddJsonOptions(options => configureJson(options.JsonSerializerOptions));
 
-// ── SignalR ───────────────────────────────────────────────────────────────────
 builder.Services.AddSignalR()
-    .AddJsonProtocol(o => configureJson(o.PayloadSerializerOptions));
+    .AddJsonProtocol(options => configureJson(options.PayloadSerializerOptions));
 
-// ── Health checks ─────────────────────────────────────────────────────────────
 builder.Services.AddHealthChecks()
+    .AddDbContextCheck<AppDbContext>("core-db")
     .AddDbContextCheck<SlicerDbContext>("slicer-db");
 
-// ── CORS ──────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()));
+    {
+#pragma warning disable S5122 // Internal same-origin gateway plus supported direct LAN access require this host policy.
+        _ = policy.AllowAnyOrigin();
+#pragma warning restore S5122
+        _ = policy.AllowAnyMethod();
+        _ = policy.AllowAnyHeader();
+    }));
 
-// ── Bind port ─────────────────────────────────────────────────────────────────
 #pragma warning disable S1075
 builder.WebHost.UseUrls("http://0.0.0.0:5246");
 #pragma warning restore S1075
 
 WebApplication app = builder.Build();
 
-// Configure artifact storage metrics thresholds and alert subscriptions.
 app.ConfigureSlicerMetrics();
 
-// Ensure slicer database schema exists on startup
+// ── Slicer plugin sanity check (issue #578) ───────────────────────────────────
+// slicer-host is useless without at least one slicer library plugin — a config
+// or Docker layout regression that ships an empty plugins dir would otherwise
+// present as "no engines" in the API with no clear cause. Fail fast at startup
+// so the container restarts and the deployment problem is visible.
 using (IServiceScope scope = app.Services.CreateScope())
 {
-    SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
-    string providerName = db.Database.ProviderName ?? string.Empty;
-    bool isSqlite = providerName.Contains("Sqlite", StringComparison.OrdinalIgnoreCase);
-
-    if (isSqlite)
+    Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry registry =
+        scope.ServiceProvider.GetRequiredService<Farm.Slicer.Module.Contracts.Libraries.ISlicerRegistry>();
+    int count = registry.ListAllLibraries().Count();
+    if (count == 0)
     {
-        await db.Database.EnsureCreatedAsync();
-    }
-    else
-    {
-        await db.Database.MigrateAsync();
+        string pluginsPath = builder.Configuration["Slicer:PluginsPath"] ?? "(unset)";
+        throw new InvalidOperationException(
+            "slicer-host started with zero registered slicer libraries. " +
+            $"Slicer:PluginsPath={pluginsPath}. Ensure the container image includes " +
+            "Farm.Slicers.OrcaSlicer.v2_4_0.dll / v2_3_1.dll in the plugins directory.");
     }
 }
 
@@ -115,10 +147,37 @@ app.MapSlicerHubs();
 app.MapHealthChecks("/healthz");
 app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "running" }));
 
+app.MapGet("/api/system/version", () =>
+{
+    var assembly = System.Reflection.Assembly.GetEntryAssembly();
+    string? informationalVersion = (assembly is not null
+        ? Attribute.GetCustomAttribute(assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+            as System.Reflection.AssemblyInformationalVersionAttribute
+        : null)?.InformationalVersion;
+    string version = "0.0.0";
+    string? commit = null;
+    if (informationalVersion is not null)
+    {
+        string[] parts = informationalVersion.Split('+', 2);
+        version = parts[0];
+        commit = parts.Length > 1 ? parts[1] : null;
+    }
+
+    return Results.Ok(new
+    {
+        service = "Farm.Slicer.Host",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+});
+
 await app.RunAsync();
 
 /// <summary>Marker type so integration tests can reference the host assembly.</summary>
-#pragma warning disable S1118 // Utility classes should not have public constructors — marker type for WebApplicationFactory
+#pragma warning disable S1118 // Utility classes should not have public constructors - marker type for WebApplicationFactory.
 public partial class Program
 {
 }

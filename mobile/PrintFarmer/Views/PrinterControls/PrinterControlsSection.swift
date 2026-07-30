@@ -1,0 +1,230 @@
+import SwiftUI
+
+/// Composite Printer Controls section. Hosts the three subgroups (Preheat,
+/// Home, Jog), owns the `PrinterControlsViewModel`, and applies the section-
+/// level visibility rules from the v1 design spec (printer-controls-v1.md):
+///
+/// * Hidden entirely when `printer.isOnline == false`.
+/// * **Visible** when `printing` / `paused` — a lockout banner is shown
+///   and all subgroup buttons are disabled (section stays on-screen so
+///   the user can see it is there but locked, per spec §2.2 and §2.4).
+/// * Phone: vertical stack (Preheat → Divider → Home → Divider → Jog).
+/// * iPad (regular width): Preheat + Home side-by-side (top), Jog full-width (bottom).
+///
+/// The section forwards parent-driven printer updates into
+/// `viewModel.handlePrinterUpdate(_:)` so pending command state clears once
+/// the backend confirms the effect via `printerupdated` SignalR.
+struct PrinterControlsSection: View {
+
+    let printer: Printer
+    @StateObject private var viewModel: PrinterControlsViewModel
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    /// Production init. `StateObject(wrappedValue:)` takes an `@autoclosure
+    /// @escaping` argument, so wrapping the view-model construction directly
+    /// here defers `PrinterControlsViewModel.init` to the first SwiftUI
+    /// installation of the view — SwiftUI redraws that reinit the section
+    /// struct do NOT reconstruct the view-model, matching the design
+    /// contract in `mobile/docs/design/printer-controls-section.md`.
+    ///
+    /// Delegating to the injected-VM initializer (as the pre-revision code
+    /// did) would eagerly evaluate the VM allocation on every parent redraw
+    /// before the autoclosure captured it, defeating the `@StateObject`
+    /// lifetime guarantee. The injected-VM initializer below is retained
+    /// only for deterministic snapshot / unit-test injection.
+    init(printer: Printer, printerService: any PrinterServiceProtocol) {
+        self.printer = printer
+        _viewModel = StateObject(
+            wrappedValue: PrinterControlsViewModel(printerService: printerService, printer: printer)
+        )
+    }
+
+    /// Test-only injection init. Not part of the production surface — every
+    /// production caller must route through `init(printer:printerService:)`
+    /// so `@StateObject`'s autoclosure semantics keep VM construction lazy.
+    init(printer: Printer, viewModel: PrinterControlsViewModel) {
+        self.printer = printer
+        _viewModel = StateObject(wrappedValue: viewModel)
+    }
+
+    /// Hides the entire section only when the printer is offline. During a
+    /// print or pause the section remains visible with disabled controls and
+    /// a lockout banner (spec §2.2, §2.4).
+    static func isHidden(for printer: Printer) -> Bool {
+        !printer.isOnline
+    }
+
+    private var isPrintingOrPaused: Bool {
+        switch printer.state?.lowercased() {
+        case "printing", "paused": return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        // Wrap both the hidden and visible branches so the `.onChange`
+        // observer is installed unconditionally. Otherwise a printer going
+        // offline swaps the visible `content` (which owned the observer) for
+        // `EmptyView` before the offline snapshot is delivered, and
+        // `pendingCommand` sticks forever (issue #706 F1 review defect B).
+        //
+        // The wrapper view identity is stable across the online/offline swap,
+        // and the signal is derived from the immutable `printer` prop, so
+        // re-renders triggered by the VM's own `@Published` state cannot
+        // re-fire `.onChange` — no update loop.
+        ZStack {
+            if Self.isHidden(for: printer) {
+                EmptyView()
+            } else {
+                content
+                    .task { await viewModel.loadCapabilities() }
+            }
+        }
+        // Forward every meaningful live snapshot to the VM so
+        // `pendingCommand` clears after jog/preheat/home effects land even
+        // when `state` / `isOnline` did not change (position/temp/homing
+        // updates typically arrive without a state transition). The signal
+        // captures only the fields the VM actually reads, so unrelated churn
+        // (camera URLs, spool metadata, notes) does not thrash `.onChange`.
+        .onChange(of: PrinterControlsUpdateSignal(printer: printer)) { _, _ in
+            viewModel.handlePrinterUpdate(printer)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Controls")
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.pfTextPrimary)
+                .accessibilityAddTraits(.isHeader)
+
+            VStack(alignment: .leading, spacing: 0) {
+                if isPrintingOrPaused {
+                    lockoutBanner
+                        .padding(.bottom, 12)
+                }
+
+                if horizontalSizeClass == .regular {
+                    // iPad: Preheat + Home side-by-side (top), Jog full-width (bottom).
+                    HStack(alignment: .top, spacing: 16) {
+                        PreheatSubgroup(viewModel: viewModel)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HomeSubgroup(viewModel: viewModel)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
+                    JogSubgroup(viewModel: viewModel)
+                } else {
+                    // Phone: vertical stack with dividers between subgroups.
+                    PreheatSubgroup(viewModel: viewModel)
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
+                    HomeSubgroup(viewModel: viewModel)
+                    Divider()
+                        .background(Color.pfBorder)
+                        .padding(.vertical, 8)
+                    JogSubgroup(viewModel: viewModel)
+                }
+
+                if let error = viewModel.lastError {
+                    errorBanner(error)
+                        .padding(.top, 12)
+                }
+            }
+            .padding()
+            .background(Color.pfCard, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.pfBorder, lineWidth: 1)
+            )
+        }
+    }
+
+    // MARK: - Banners
+
+    @ViewBuilder
+    private var lockoutBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "lock.fill")
+                .foregroundStyle(Color.pfWarning)
+            Text("Controls are disabled while a print is active.")
+                .font(.footnote)
+                .foregroundStyle(Color.pfTextPrimary)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            String(localized: "Controls disabled, print is active.",
+                   comment: "VoiceOver: lockout banner during print")
+        )
+    }
+
+    @ViewBuilder
+    private func errorBanner(_ error: ControlsError) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(Color.pfError)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(error.message)
+                    .font(.footnote)
+                    .foregroundStyle(Color.pfTextPrimary)
+            }
+            Spacer()
+            Button("Dismiss") { viewModel.dismissError() }
+                .font(.footnote)
+                .buttonStyle(.borderless)
+        }
+        .padding(10)
+        .background(Color.pfError.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - Update Signal
+
+/// Snapshot of the printer fields that the controls VM cares about when
+/// deciding whether a live update should clear an in-flight command
+/// (`PrinterControlsViewModel.handlePrinterUpdate`).
+///
+/// Two signals compare equal iff none of these fields moved: only then
+/// can we safely skip forwarding the snapshot to the VM. Any drift in
+/// state, online status, homing status, position or temperatures is
+/// treated as evidence that the last jog/preheat/home command produced
+/// an effect and the pending state should be released.
+///
+/// The signal deliberately excludes churn-heavy metadata (camera URLs,
+/// spool info, progress %, thumbnails) so `.onChange` fires exactly
+/// when it is meaningful for the controls surface.
+struct PrinterControlsUpdateSignal: Hashable {
+    let id: UUID
+    let isOnline: Bool
+    let state: String?
+    let x: Double?
+    let y: Double?
+    let z: Double?
+    let hotendTemp: Double?
+    let bedTemp: Double?
+    let hotendTarget: Double?
+    let bedTarget: Double?
+    let homedAxes: String?
+
+    init(printer: Printer) {
+        self.id = printer.id
+        self.isOnline = printer.isOnline
+        self.state = printer.state
+        self.x = printer.x
+        self.y = printer.y
+        self.z = printer.z
+        self.hotendTemp = printer.hotendTemp
+        self.bedTemp = printer.bedTemp
+        self.hotendTarget = printer.hotendTarget
+        self.bedTarget = printer.bedTarget
+        self.homedAxes = printer.homedAxes
+    }
+}

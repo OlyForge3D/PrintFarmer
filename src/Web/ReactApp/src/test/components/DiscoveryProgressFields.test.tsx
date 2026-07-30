@@ -1,35 +1,38 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import React from 'react';
-
-interface MockProgressDto {
-  sessionId: string;
-  networkRanges?: string[];
-  autoDetectedNetworks?: boolean;
-}
+import { DiscoveryStatus, type DiscoveryProgressDto } from '@/types/api';
 
 interface MockProgressProps {
-  progress: MockProgressDto;
+  progress: DiscoveryProgressDto;
 }
 
 const MockProgress: React.FC<MockProgressProps> = ({ progress }) => (
   <div>
     <div data-testid="session">{progress.sessionId}</div>
-    {progress.networkRanges && <div data-testid="networks">{progress.networkRanges.join(',')}</div>}
+    <div data-testid="progress">{progress.scannedIps}/{progress.totalIps}</div>
+    <div data-testid="message">{progress.message}</div>
     {progress.autoDetectedNetworks && <div data-testid="auto">auto</div>}
   </div>
 );
 
-describe('Discovery progress extended fields', () => {
-  it('renders session and network ranges', () => {
+describe('Discovery progress fields', () => {
+  it('renders redacted progress without network targets', () => {
     const progress = {
       sessionId: 'sess-x',
-      networkRanges: ['192.168.1.0/24','10.0.0.0/24'],
-      autoDetectedNetworks: true
-    };
+      totalIps: 256,
+      scannedIps: 64,
+      printersFound: 1,
+      printersExcluded: 0,
+      progressPercentage: 25,
+      status: DiscoveryStatus.Scanning,
+      message: 'Scanning for compatible printers',
+      autoDetectedNetworks: true,
+    } satisfies DiscoveryProgressDto;
     const { getByTestId } = render(<MockProgress progress={progress} />);
     expect(getByTestId('session').textContent).toBe('sess-x');
-    expect(getByTestId('networks').textContent).toBe('192.168.1.0/24,10.0.0.0/24');
+    expect(getByTestId('progress').textContent).toBe('64/256');
+    expect(getByTestId('message').textContent).not.toMatch(/(?:\d{1,3}\.){3}\d{1,3}/);
     expect(getByTestId('auto').textContent).toBe('auto');
   });
 });

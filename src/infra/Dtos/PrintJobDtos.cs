@@ -56,7 +56,10 @@ public record PrintJobDto(
     string[]? RequiredCapabilities = null,
     bool AutoAssign = true,
     Guid[]? PreferredPrinterIds = null,
-    Guid[]? ExcludedPrinterIds = null);
+    Guid[]? ExcludedPrinterIds = null,
+    int? PlateIndex = null,
+    string? PlateName = null,
+    IReadOnlyList<PrintJobToolRequirementDto>? ToolRequirements = null);
 
 /// <summary>
 /// Request payload for creating and queueing a new print job.
@@ -114,6 +117,27 @@ public class PrintJobStatusDto
 
     public string? Error { get; set; }
 }
+
+/// <summary>
+/// Represents one object from the active print's object-exclusion metadata.
+/// </summary>
+public record PrintJobObjectDto(
+    string Name,
+    bool IsExcluded = false,
+    bool IsCurrent = false);
+
+/// <summary>
+/// Current print job object-exclusion state for a printer.
+/// </summary>
+public record PrintJobObjectListDto(
+    Guid PrinterId,
+    string? JobName,
+    IReadOnlyList<PrintJobObjectDto> Objects);
+
+/// <summary>
+/// Request payload for excluding one object from the active print.
+/// </summary>
+public record ExcludePrintJobObjectRequest(string Name);
 
 #pragma warning restore SA1649 // File name should match first type name
 #pragma warning restore SA1402 // File may only contain a single type

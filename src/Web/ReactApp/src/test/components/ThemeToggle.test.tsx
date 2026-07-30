@@ -82,7 +82,15 @@ describe('ThemeToggle', () => {
       fireEvent.click(button);
       expect(button).toHaveAttribute('aria-label', 'Current theme: PrintFarmer Dark. Click to cycle themes.');
       
-      // Click to cycle: printfarmer-dark -> system
+      // Click to cycle: printfarmer-dark -> matrix
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-label', 'Current theme: Matrix. Click to cycle themes.');
+      
+      // Click to cycle: matrix -> forge
+      fireEvent.click(button);
+      expect(button).toHaveAttribute('aria-label', 'Current theme: Forge. Click to cycle themes.');
+      
+      // Click to cycle: forge -> system
       fireEvent.click(button);
       expect(button).toHaveAttribute('aria-label', 'Current theme: System. Click to cycle themes.');
       
@@ -105,7 +113,7 @@ describe('ThemeToggle', () => {
       const buttons = screen.getAllByRole('button');
       const compactButton = buttons[0];
       // Check that the button's title attribute contains the computed theme label
-      expect(compactButton.getAttribute('title')).toMatch(/\(github dark\)/i);
+      expect(compactButton.getAttribute('title')).toMatch(/\(dark\)/i);
     });
 
     it('applies custom className', () => {
@@ -228,7 +236,7 @@ describe('ThemeToggle', () => {
         'aria-label', 
         'Current theme: System. Click to cycle themes.'
       );
-      expect(button).toHaveAttribute('title', 'Current: System (GitHub Dark). Click to change.');
+      expect(button).toHaveAttribute('title', 'Current: System (Dark). Click to change.');
     });
 
     it('provides proper ARIA attributes for button group', () => {
@@ -306,7 +314,7 @@ describe('ThemeToggle', () => {
         </ThemeProvider>
       );
       const buttons = screen.getAllByRole('radio');
-      expect(buttons).toHaveLength(4); // light, github-dark, printfarmer-dark, system
+      expect(buttons).toHaveLength(6); // light, github-dark, printfarmer-dark, matrix, forge, system
       
       // Dropdown variant
       rerender(
@@ -361,7 +369,7 @@ describe('useThemeToggle hook', () => {
     renderWithTheme(<TestUseThemeToggle />, { defaultTheme: 'system' });
     
     expect(screen.getByTestId('is-system')).toHaveTextContent('true');
-    expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark'); // System preference
+    expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark'); // System preference
   });
 
   it('provides working toggle function', () => {

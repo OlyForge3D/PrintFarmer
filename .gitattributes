@@ -10,3 +10,17 @@
 # Shell scripts must always use LF line endings
 *.sh text eol=lf
 install.sh text eol=lf
+
+# Embedded slicer assets must not be modified by line-ending conversion
+*.png binary
+*.stl binary
+
+# Git hooks must always use LF line endings
+.githooks/pre-commit text eol=lf
+.githooks/pre-push text eol=lf
+
+# Compliance inputs and MSBuild metadata must remain stable across platforms
+*.conf text eol=lf
+/compliance/licenses/*.txt text eol=lf
+/Directory.Build.props whitespace=cr-at-eol
+/src/.editorconfig whitespace=cr-at-eol

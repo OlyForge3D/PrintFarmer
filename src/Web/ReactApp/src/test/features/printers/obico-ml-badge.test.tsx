@@ -34,8 +34,14 @@ vi.mock('@/common/hooks/usePrinterDisplay', () => ({
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
+    setQueryData: vi.fn(),
   }),
   useQuery: () => ({ data: undefined, isLoading: false }),
+  useMutation: () => ({
+    mutate: vi.fn(),
+    mutateAsync: vi.fn().mockResolvedValue({ success: true }),
+    isPending: false,
+  }),
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
@@ -73,6 +79,8 @@ const failureDetectionListeners: Array<(event: FailureDetectionEvent) => void> =
 
 vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
+    connect: vi.fn().mockResolvedValue(undefined),
+    onFilamentCoverageChanged: vi.fn(() => () => {}),
     onFailureDetected: vi.fn((callback: (event: FailureDetectionEvent) => void) => {
       failureDetectionListeners.push(callback);
       return () => {

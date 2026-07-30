@@ -86,6 +86,9 @@ public class PredictionController(PredictionService predictionService) : Control
         [FromQuery] int minSampleSize = 3,
         CancellationToken cancellationToken = default)
     {
+        _ = material;
+        _ = minSampleSize;
+
         try
         {
             Dictionary<string, PredictionDurationStatsDto> stats = await predictionService.GetMaterialStatsAsync(printerId, cancellationToken);

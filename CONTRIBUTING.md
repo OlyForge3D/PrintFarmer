@@ -93,6 +93,26 @@ cd ./src/Web/ReactApp
 npm run lint
 ```
 
+## Licensing, notices, and provenance
+
+Contributions beginning with PrintFarmer v0.2.3 are accepted under
+`AGPL-3.0-only`. Preserve third-party SPDX markers, copyright statements,
+license files, and notices. Dependency, container, asset, or calibration-source
+changes must follow
+[Licensing, Corresponding Source, and Provenance](docs/LICENSING_AND_SOURCE.md).
+
+After restoring .NET dependencies, run these blocking checks from the
+repository root:
+
+```bash
+node --test scripts/compliance/compliance.test.mjs
+node scripts/compliance/validate-compliance.mjs
+```
+
+Do not add source-derived Printer Calibration code without an immutable
+blob-level entry in `compliance/calibration-provenance.json`. Static printer
+data and unverified assets are not eligible for that manifest.
+
 ## React 19 Patterns & Best Practices
 
 PrintFarmer's React frontend uses modern React 19 patterns for improved code quality, type safety, and maintainability. When adding or modifying components, follow these established patterns.

@@ -13,6 +13,10 @@ public sealed class ArtifactsMetrics : IDisposable
         "printfarmer.artifacts.uploaded_total",
         description: "Total number of artifacts uploaded");
 
+    private static readonly Counter<long> s_uploadRejectedCount = s_meter.CreateCounter<long>(
+        "printfarmer.artifacts.upload_rejected_total",
+        description: "Total number of artifact uploads rejected by content verification");
+
     private static readonly Histogram<long> s_uploadBytes = s_meter.CreateHistogram<long>(
         "printfarmer.artifacts.upload_bytes",
         unit: "bytes",
@@ -78,6 +82,11 @@ public sealed class ArtifactsMetrics : IDisposable
         long newTotal = Interlocked.Add(ref s_storageBytes, sizeBytes);
         CheckThresholds(newTotal);
     }
+
+    /// <summary>
+    /// Records an artifact upload that was refused because its declared content did not verify.
+    /// </summary>
+    public void RecordUploadRejected() => s_uploadRejectedCount.Add(1);
 
     /// <summary>
     /// Reset internal shared storage counters. Intended for test usage only.

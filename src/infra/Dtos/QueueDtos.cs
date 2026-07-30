@@ -1,4 +1,7 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
+
+namespace Farm.Infrastructure;
 
 // Queue Management DTOs
 /// <summary>
@@ -63,6 +66,12 @@ public class UpdateJobPriorityDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
     public int Priority { get; set; }
+
+    /// <summary>
+    /// Base-64 <c>If-Match</c> token for the job row. Required — reordering the queue
+    /// invalidates bed-clear acknowledgements and must never race a concurrent change.
+    /// </summary>
+    public string? IfMatchJobRowVersion { get; set; }
 }
 
 /// <summary>
@@ -74,6 +83,48 @@ public class QueuePrintJobDto
 {
     public Guid GcodeFileId { get; set; }
 
+    public JobKind? JobKind { get; set; }
+
+    public string? IdempotencyKey { get; set; }
+
+    public string? IdempotencyScope { get; set; }
+
+    public Guid? CalibrationProjectId { get; set; }
+
+    public Guid? CalibrationAttemptId { get; set; }
+
+    public Guid? CalibrationConfigSnapshotId { get; set; }
+
+    public Guid? CalibrationOrchestrationId { get; set; }
+
+    public Guid? SourceArtifactId { get; set; }
+
+    public string? GcodeContentSha256 { get; set; }
+
+    public PrinterFirmwareFamily? RequiredFirmwareFamily { get; set; }
+
+    public PrinterGcodeDialect? RequiredGcodeDialect { get; set; }
+
+    public string? RequiredSlicerEngine { get; set; }
+
+    public string? RequiredSlicerDistribution { get; set; }
+
+    public string? RequiredSlicerVersion { get; set; }
+
+    public string? RequiredSlicerContainerDigest { get; set; }
+
+    public string? SpecificationSha256 { get; set; }
+
+    public string? MachineProfileSha256 { get; set; }
+
+    public string? ProcessProfileSha256 { get; set; }
+
+    public string? FilamentProfileSha256 { get; set; }
+
+    public string? PrinterConfigSnapshotSha256 { get; set; }
+
+    public long? PinnedPrinterConfigRevision { get; set; }
+
     public Guid? AssignedPrinterId { get; set; } // If null, auto-assign to best available printer
 
     public PrintJobPriority Priority { get; set; } = PrintJobPriority.Normal;
@@ -81,6 +132,12 @@ public class QueuePrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Capabilities the printer must advertise (e.g., <c>enclosure</c>, <c>hardened_nozzle</c>).
+    /// Part of the canonical idempotency hash — order and case insensitive.
+    /// </summary>
+    public string[]? RequiredCapabilities { get; set; }
 
     /// <summary>
     /// Required printer model name or slicer alias (e.g., "QIDI X-Plus 4", "COREONEL").
@@ -127,6 +184,21 @@ public class QueuePrintJobDto
     /// Link to the project file this job was created from.
     /// </summary>
     public Guid? ProjectFileId { get; set; }
+
+    /// <summary>
+    /// Optional plate index from a multi-plate 3MF model.
+    /// </summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// Optional plate name from a multi-plate 3MF model.
+    /// </summary>
+    public string? PlateName { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -149,6 +221,13 @@ public class UpdatePrintJobStatusDto
     public string? FailureReason { get; set; }
 
     /// <summary>
+    /// Base-64 <c>If-Match</c> token for the job row. Required — the generic update
+    /// endpoint mutates safety-relevant state and must never blindly overwrite.
+    /// Populated by the controller from the <c>If-Match</c> HTTP header.
+    /// </summary>
+    public string? IfMatchJobRowVersion { get; set; }
+
+    /// <summary>
     /// Spoolman filament ID. Use 0 to clear the assignment.
     /// </summary>
     public int? SpoolmanFilamentId { get; set; }
@@ -158,6 +237,11 @@ public class UpdatePrintJobStatusDto
     public string? FilamentVendor { get; set; }
 
     public string? FilamentColor { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -191,6 +275,33 @@ public class JobQueuePrintJobDto
 {
     public Guid Id { get; set; }
 
+    public string? RowVersion { get; set; }
+
+    public long Revision { get; set; }
+
+    /// <summary>
+    /// Current ETag of the assigned printer's dispatch state, when a printer is assigned.
+    /// Callers must echo this as <c>If-Match</c> on dispatch-state mutations.
+    /// </summary>
+    public string? DispatchStateRowVersion { get; set; }
+
+    public long? DispatchStateRevision { get; set; }
+
+    /// <summary>
+    /// Latest durable dispatch attempt. Authoritative recovery clients use this
+    /// identity to reject delayed progress from an older physical start attempt.
+    /// </summary>
+    public DispatchAttemptResultDto? DispatchResult { get; set; }
+
+    /// <summary>Server-derived job classification (never client-supplied).</summary>
+    public JobKind? JobKind { get; set; }
+
+    public Guid? CalibrationProjectId { get; set; }
+
+    public long? PinnedPrinterConfigRevision { get; set; }
+
+    public bool IsIdempotentReplay { get; set; }
+
     /// <summary>
     /// G-code file ID. Nullable for history-seeded jobs where the original
     /// file may not exist in PrintFarmer's library.
@@ -212,6 +323,13 @@ public class JobQueuePrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Authoritative per-tool material requirements for multi-material / MMU jobs
+    /// (issue #710). Empty for single-material jobs; <see cref="RequiredMaterialType"/>
+    /// is always preserved alongside this array.
+    /// </summary>
+    public List<PrintJobToolRequirementDto> ToolRequirements { get; set; } = [];
 
     public TimeSpan? EstimatedPrintTime { get; set; }
 
@@ -248,6 +366,21 @@ public class JobQueuePrintJobDto
     public Guid? ProjectFileId { get; set; }
 
     /// <summary>
+    /// Optional plate index from a multi-plate 3MF model.
+    /// </summary>
+    public int? PlateIndex { get; set; }
+
+    /// <summary>
+    /// Optional plate name from a multi-plate 3MF model.
+    /// </summary>
+    public string? PlateName { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
+    /// <summary>
     /// Per-toolhead filament usage records for multi-tool/MMU jobs.
     /// Empty for single-extruder jobs.
     /// </summary>
@@ -256,4 +389,14 @@ public class JobQueuePrintJobDto
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }
+
+    /// <summary>
+    /// UTC timestamp when this completed job was harvested into printed-part
+    /// stock (#714). Null when the job has not been harvested yet. Harvest is
+    /// orthogonal to lifecycle: harvested jobs remain <see cref="PrintJobStatus.Completed"/>,
+    /// and this timestamp is the durable discriminator used by mobile clients
+    /// to gate the Harvest action and filter already-harvested jobs from the
+    /// scan-station picker.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 }

@@ -85,6 +85,30 @@ describe('apiKeysService', () => {
       expect(result.key).toBeDefined();
       expect(result.id).toBeDefined();
     });
+
+    it('should create a Desktop-purpose API key with scopes and expiry', async () => {
+      const request: CreateApiKeyRequest = {
+        name: 'Desktop client',
+        purpose: 'Desktop',
+        scopes: 'ModelRead,LibrarySync',
+        expiresAt: '2026-01-01T00:00:00Z',
+      };
+      const mockResponse = {
+        key: 'pk_test_desktop_1234567890',
+        id: 'key-desktop',
+        purpose: 'Desktop' as const,
+        scopes: 'ModelRead, LibrarySync',
+        expiresAt: '2026-01-01T00:00:00Z',
+      };
+
+      vi.mocked(apiClient.createUserApiKey).mockResolvedValue(mockResponse);
+
+      const result = await createApiKey(userId, request);
+
+      expect(apiClient.createUserApiKey).toHaveBeenCalledWith(userId, request);
+      expect(result.purpose).toBe('Desktop');
+      expect(result.scopes).toContain('ModelRead');
+    });
   });
 
   describe('toggleApiKey', () => {

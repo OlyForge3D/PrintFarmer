@@ -24,6 +24,9 @@ public static class FeatureServicesStartup
         // ApiKey repository
         services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
 
+        // Desktop API-key exchange (issue #838)
+        services.AddScoped<Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService, Farm.Infrastructure.Services.Authentication.ApiKeyExchangeService>();
+
         // Print job approval service
         services.AddScoped<Farm.Infrastructure.Services.PrintJobs.IPrintApprovalService, Farm.Infrastructure.Services.PrintJobs.PrintApprovalService>();
 
@@ -42,12 +45,23 @@ public static class FeatureServicesStartup
         // Print Job Completion Sync Service (auto-marks jobs as completed when printer finishes)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintJobCompletionService, Farm.Infrastructure.Services.Printers.PrintJobCompletionService>();
 
+        // Auto-tag service for completed print jobs
+        services.AddScoped<Farm.Infrastructure.Services.AutoTagging.IAutoTagService, Farm.Infrastructure.Services.AutoTagging.AutoTagService>();
+
         // Print Cost Calculator (calculates job costs from Spoolman spool price and filament usage)
         services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintCostCalculator, Farm.Infrastructure.Services.Printers.PrintCostCalculator>();
 
         // Notification Module (job event notifications broadcast to all users)
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.ITelegramNotificationSender, Farm.Infrastructure.Services.Notifications.TelegramNotificationSender>();
+        services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationChannel, Farm.Infrastructure.Services.Notifications.TelegramNotificationChannel>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationService, Farm.Infrastructure.Services.Notifications.NotificationService>();
+        services.AddHttpClient("TelegramDelivery", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-Telegram/1.0");
+        });
 
         // Webhooks (event delivery via HTTP POST to external consumers)
         services.AddSingleton<Farm.Infrastructure.Services.Webhooks.WebhookService>();
@@ -76,6 +90,7 @@ public static class FeatureServicesStartup
 
         // Maintenance Module - Repositories
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IPrinterStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfPrinterStatisticsRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IToolheadStatisticsRepository, Farm.Infrastructure.Repositories.Maintenance.EfToolheadStatisticsRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceAlertRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceAlertRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenanceLogRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenanceLogRepository>();
         services.AddScoped<Farm.Infrastructure.Repositories.Maintenance.IMaintenancePlanRepository, Farm.Infrastructure.Repositories.Maintenance.EfMaintenancePlanRepository>();
@@ -86,9 +101,150 @@ public static class FeatureServicesStartup
         // Maintenance Module - Services
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertService, Farm.Web.Api.Services.Maintenance.MaintenanceAlertEngine>();
         services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceImportExportService, Farm.Infrastructure.Services.Maintenance.MaintenanceImportExportService>();
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceResolutionNotifier,
+            Farm.Web.Api.Services.Maintenance.MaintenanceResolutionNotifier>();
+
+        // Atomic resolve-with-log to close the resolve TOCTOU (issue #711, round-7 Finding 5).
+        services.AddScoped<Farm.Infrastructure.Services.Maintenance.IMaintenanceAlertResolutionService, Farm.Infrastructure.Services.Maintenance.MaintenanceAlertResolutionService>();
+
+        // Filament fallback groups (issue #711, F6)
+        services.AddScoped<Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService,
+            Farm.Infrastructure.Services.Printers.FilamentFallbackGroupService>();
+
+        // Persistent Idempotency-Key store and cleanup (issue #715). Store is
+        // registered scoped because it uses IDbContextFactory internally and is
+        // resolved per-request from the filter (and per-sweep from the cleanup
+        // hosted service via its own scope). See docs/OFFLINE_WRITE_REPLAY.md.
+        services.AddSingleton(Farm.Infrastructure.Services.Idempotency.IdempotencyOptions.Default);
+        services.AddScoped<Farm.Infrastructure.Services.Idempotency.IIdempotencyStore,
+            Farm.Infrastructure.Services.Idempotency.IdempotencyStore>();
+        services.AddScoped<Farm.Web.Api.Infrastructure.Idempotency.IdempotencyFilter>();
+        services.AddHostedService<Farm.Infrastructure.Services.Idempotency.IdempotencyRecordCleanupService>();
+
+        // Printed-part inventory (see #714). Distinct from MaintenanceComponents
+        // (replacement parts) — this module tracks parts produced by prints.
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IBinRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfBinRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartInventoryAdjustmentRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartInventoryAdjustmentRepository>();
+        services.AddScoped<Farm.Infrastructure.Repositories.PartsInventory.IPartOutputMappingRepository,
+            Farm.Infrastructure.Repositories.PartsInventory.EfPartOutputMappingRepository>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartInventoryService,
+            Farm.Infrastructure.Services.PartsInventory.PartInventoryService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartHarvestService,
+            Farm.Infrastructure.Services.PartsInventory.PartHarvestService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IPartOutputSnapshotService,
+            Farm.Infrastructure.Services.PartsInventory.PartOutputSnapshotService>();
+        services.AddScoped<Farm.Infrastructure.Services.PartsInventory.IReorderEvaluationService,
+            Farm.Infrastructure.Services.PartsInventory.ReorderEvaluationService>();
+
+        // Attention Feed (issue #707) — unified operator feed composed from failure,
+        // maintenance, offline, harvest, and runout sources.
+        services.AddScoped<Farm.Infrastructure.Repositories.Attention.IAttentionSnoozeRepository,
+            Farm.Infrastructure.Repositories.Attention.EfAttentionSnoozeRepository>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.FailureAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.MaintenanceAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.OfflineAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.HarvestAttentionSource>();
+        services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionService,
+            Farm.Infrastructure.Services.Attention.AttentionService>();
+        services.AddSingleton<Farm.Infrastructure.Services.Attention.IAttentionBroadcaster,
+            Farm.Infrastructure.Services.Attention.AttentionBroadcaster>();
+
+        // Native push (issue #708) — device-token registration, per-user category
+        // preferences, and the dispatcher hooked from AttentionBroadcaster after the
+        // SignalR broadcast. See docs/OPERATOR_NATIVE_PUSH.md.
+        //
+        // Hicks #6: fail-fast startup validation for credentials. The
+        // validator enforces mode-specific requirements (Relay: absolute
+        // HTTPS endpoint + api key; Direct: TeamId/KeyId/BundleId + a
+        // readable .p8 file OR inline PEM). Disabled mode requires nothing.
+        // Diagnostics NEVER echo the secret path, api key, PEM contents, or
+        // full URI — only high-level shape errors surface so ops logs stay
+        // safe.
+        services.AddOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings>,
+            Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettingsValidator>();
+
+        services.AddScoped<Farm.Infrastructure.Repositories.Notifications.IDeviceTokenRepository,
+            Farm.Infrastructure.Repositories.Notifications.EfDeviceTokenRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics>();
+        Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode nativePushMode =
+            configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName)
+                .GetValue<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode>("Mode");
+        switch (nativePushMode)
+        {
+            case Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode.Relay:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.RelayNativePushSender>();
+                break;
+            case Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode.Direct:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.DirectApnsNativePushSender>();
+                break;
+            default:
+                services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushSender,
+                    Farm.Infrastructure.Services.Notifications.NativePush.DisabledNativePushSender>();
+                break;
+        }
+
+        services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.INativePushDispatcher,
+            Farm.Infrastructure.Services.Notifications.NativePush.NativePushDispatcher>();
+        services.AddHttpClient(
+            Farm.Infrastructure.Services.Notifications.NativePush.RelayNativePushSender.HttpClientName,
+            client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-NativePush/1.0");
+            })
+
+            // Silence the default IHttpClientFactory request-logger for this
+            // named client. It writes the outbound URI at Information — a raw
+            // device token would end up in stdout logs (Bishop v3 B1). We still
+            // get the OTel span with a redacted url.full via TelemetryStartup's
+            // AddHttpClientInstrumentation enrich callbacks; that's the sole
+            // audit trail for these requests.
+            .RemoveAllLoggers();
+        services.AddHttpClient(
+            Farm.Infrastructure.Services.Notifications.NativePush.DirectApnsNativePushSender.HttpClientName,
+            client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(10);
+                client.DefaultRequestHeaders.Add("User-Agent", "PrintFarmer-NativePush/1.0");
+
+                // APNs REQUIRES HTTP/2. Default at the client level so a stray
+                // request that forgets to set Version still negotiates HTTP/2.
+                client.DefaultRequestVersion = System.Net.HttpVersion.Version20;
+                client.DefaultVersionPolicy = System.Net.Http.HttpVersionPolicy.RequestVersionOrHigher;
+            })
+
+            // Same reasoning as the Relay client above: the token is embedded
+            // in the APNs path `/3/device/<token>` and the default logger
+            // writes it verbatim. Redaction on the OTel span alone is not
+            // enough — the ILogger sink is a separate output.
+            .RemoveAllLoggers();
+
+        // NOTE: URL redaction of `/3/device/<token>` for OpenTelemetry spans is
+        // handled in TelemetryStartup via `AddHttpClientInstrumentation(o =>
+        // o.EnrichWithHttpRequestMessage = ...)`. A DelegatingHandler cannot
+        // scrub the tag because the runtime creates the HTTP client Activity
+        // in the primary handler, below every DelegatingHandler.
 
         // SPA services (only for monolithic deployments)
-        bool isMonolithicDeployment = configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+        string? deploymentMode =
+            configuration.GetValue<string>("DEPLOYMENT_MODE") ??
+            configuration.GetValue<string>("Deployment:Mode");
+        bool isMonolithicDeployment =
+            !string.Equals(deploymentMode, "microservices", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(deploymentMode, "split", StringComparison.OrdinalIgnoreCase);
         if (isMonolithicDeployment)
         {
             services.AddSpaStaticFiles(configuration =>
@@ -142,6 +298,11 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
+
+        // Admin Control Center overview aggregation (issue #933). Composes the existing
+        // health-check pipeline; does not run its own probes.
+        services.AddScoped<Farm.Web.Api.Services.Admin.IAdminOverviewService, Farm.Web.Api.Services.Admin.AdminOverviewService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

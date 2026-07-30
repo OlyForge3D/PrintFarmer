@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Authentication;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -81,39 +82,47 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             config.AddInMemoryCollection(testConfig);
         });
 
-        builder.ConfigureServices(services =>
+        builder.ConfigureServices((context, services) =>
         {
-            // Remove only the DbContext configuration, not the whole service
-            ServiceDescriptor? dbContextDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(DbContextOptions<AppDbContext>));
-            if (dbContextDescriptor != null)
+            if (_configOverrides?.TryGetValue("Testing:UseTestAuthentication", out string? useTestAuth) == true &&
+                bool.TryParse(useTestAuth, out bool enabled) &&
+                enabled)
             {
-                services.Remove(dbContextDescriptor);
+                _ = services
+                    .AddAuthentication(options =>
+                    {
+                        options.DefaultAuthenticateScheme = TestAuthHandler.SchemeName;
+                        options.DefaultChallengeScheme = TestAuthHandler.SchemeName;
+                        options.DefaultForbidScheme = TestAuthHandler.SchemeName;
+                    })
+                    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, TestAuthHandler>(
+                        TestAuthHandler.SchemeName,
+                        _ => { });
             }
 
-            // Also remove DbContextFactory and its singleton options since it was registered with the original options
-            ServiceDescriptor? dbContextFactoryDescriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IDbContextFactory<AppDbContext>));
-            if (dbContextFactoryDescriptor != null)
+            foreach (ServiceDescriptor descriptor in services
+                .Where(d => d.ServiceType == typeof(AppDbContext)
+                    || d.ServiceType == typeof(DbContextOptions<AppDbContext>)
+                    || d.ServiceType == typeof(Microsoft.EntityFrameworkCore.Infrastructure.IDbContextOptionsConfiguration<AppDbContext>)
+                    || d.ServiceType == typeof(IDbContextFactory<AppDbContext>))
+                .ToList())
             {
-                services.Remove(dbContextFactoryDescriptor);
-            }
-
-            // Remove singleton options that were registered for the factory
-            ServiceDescriptor? singletonOptionsDescriptor = services.FirstOrDefault(d =>
-                d.ServiceType == typeof(DbContextOptions<AppDbContext>) && d.Lifetime == ServiceLifetime.Singleton);
-            if (singletonOptionsDescriptor != null)
-            {
-                services.Remove(singletonOptionsDescriptor);
+                services.Remove(descriptor);
             }
 
             // Register in-memory SQLite database
             services.AddDbContext<AppDbContext>(options =>
             {
-                options.UseSqlite(_connectionString);
+                options.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             });
 
             // Re-register DbContextFactory with the test SQLite connection (same pattern as production)
             DbContextOptionsBuilder<AppDbContext> optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-            optionsBuilder.UseSqlite(_connectionString);
+            optionsBuilder.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             services.AddSingleton(optionsBuilder.Options);
             services.AddDbContextFactory<AppDbContext>();
 
@@ -128,10 +137,38 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             // Re-configure SlicerDbContext to use the same test SQLite database.
             // AddSlicerModule registered it with production defaults; override here.
             // Skip when slicer is disabled (no SlicerDbContext will be registered).
-            bool slicerRegistered = services.Any(d =>
-                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
+            //
+            // Determinism guard: AddSlicerIntegration discovers the slicer module via a runtime
+            // assembly scan (SlicerIntegrationExtensions). Under parallel host builds that scan can
+            // transiently fail — concurrent Assembly.GetTypes() throws ReflectionTypeLoadException,
+            // which the discovery code swallows — leaving the slicer module (and SlicerDbContext)
+            // unregistered for that host. This produced intermittent
+            // "No service for type 'SlicerDbContext' has been registered" failures. Re-run the
+            // idempotent AddSlicerModule so registration is deterministic unless the slicer is
+            // explicitly disabled for this factory.
+            bool slicerDisabled = string.Equals(
+                context.Configuration["Slicer:Enabled"], "false", StringComparison.OrdinalIgnoreCase);
+            if (!slicerDisabled && !services.Any(d =>
+                d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>)))
+            {
+                Farm.Slicer.Module.SlicerModuleExtensions.AddSlicerModule(services, context.Configuration);
+            }
 
-            if (slicerRegistered)
+            // Deterministically (re)register SlicerDbContext against the test SQLite database.
+            // This intentionally does NOT depend on whether discovery / AddSlicerModule already
+            // registered it. Two independent races could otherwise leave it unregistered:
+            //   1. The runtime assembly scan in AddSlicerIntegration can transiently miss the slicer
+            //      module under parallel host builds (ReflectionTypeLoadException), so nothing is
+            //      registered.
+            //   2. AddSlicerModule is idempotent on a SlicerModuleMarker and skips the DbContext in
+            //      microservices DEPLOYMENT_MODE — so the safety-net AddSlicerModule call above can be
+            //      a no-op that leaves SlicerDbContext unregistered while the marker is present.
+            // Either case previously fell through the old `if (slicerRegistered)` gate, causing
+            // ResetDatabaseAsync to throw "No service for type 'SlicerDbContext' has been registered".
+            // Registering unconditionally (unless slicer is explicitly disabled for this factory)
+            // makes the test host deterministic. The Remove calls below are null-safe when nothing
+            // was registered, so a fresh registration is added in that case.
+            if (!slicerDisabled)
             {
                 ServiceDescriptor? slicerDbDescriptor = services.FirstOrDefault(d =>
                     d.ServiceType == typeof(DbContextOptions<Farm.Slicer.Module.Data.SlicerDbContext>));
@@ -157,11 +194,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
                 services.AddDbContext<Farm.Slicer.Module.Data.SlicerDbContext>(options =>
                 {
-                    options.UseSqlite(_connectionString);
+                    options.UseSqlite(
+                        _connectionString,
+                        sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 });
 
                 DbContextOptionsBuilder<Farm.Slicer.Module.Data.SlicerDbContext> slicerOptionsBuilder = new();
-                slicerOptionsBuilder.UseSqlite(_connectionString);
+                slicerOptionsBuilder.UseSqlite(
+                    _connectionString,
+                    sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
                 services.AddSingleton(slicerOptionsBuilder.Options);
                 services.AddDbContextFactory<Farm.Slicer.Module.Data.SlicerDbContext>();
 
@@ -184,6 +225,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
+        _ = useInMemorySqlite;
+
         // Tests expect a factory instance configured for an isolated DB.
         return new CustomWebApplicationFactory();
     }

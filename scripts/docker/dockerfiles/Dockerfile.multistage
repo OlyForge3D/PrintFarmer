@@ -6,8 +6,11 @@
 ############################################################
 
 # Global build arguments
-ARG ORCASLICER_VERSION=2.3.1
+ARG ORCASLICER_VERSION=2.4.1
+ARG ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402
 ARG BUILD_VERBOSITY=quiet
+# Short git SHA of the source commit; embedded into each service's version endpoint
+ARG GIT_SHA=unknown
 
 # Multi-architecture support
 # BUILDPLATFORM = arch of the build host (for compile stages — faster, no emulation)
@@ -22,6 +25,15 @@ ARG ASPNET_TAG=10.0-noble
 ARG NODE_TAG=24-alpine
 ARG NGINX_TAG=alpine
 ARG UBUNTU_TAG=24.04
+ARG BUILD_VERSION=development
+ARG VCS_REF=unknown
+ARG SOURCE_REPOSITORY=""
+ARG SOURCE_ARCHIVE_URL=""
+ARG SBOM_URL=""
+
+FROM scratch AS legal-assets
+COPY LICENSE /LICENSE
+COPY THIRD-PARTY-NOTICES.md /THIRD-PARTY-NOTICES.md
 
 ############################################################
 # Shared Build Stage - Build all .NET projects once
@@ -31,10 +43,15 @@ ARG UBUNTU_TAG=24.04
 FROM --platform=${BUILDPLATFORM:-linux/amd64} mcr.microsoft.com/dotnet/sdk:${SDK_TAG} AS shared-build
 WORKDIR /
 
+# Re-declare git SHA in this stage (ARGs are scoped per-stage after FROM).
+# Passed to `dotnet publish` as GitCommitSha so InformationalVersion carries the commit.
+ARG GIT_SHA=unknown
+
 # Copy root-level files and the entire src directory
 # The context root is the repository root (/home/pi/pfarm)
 COPY Directory.Build.props ./
 COPY global.json ./
+COPY VERSION ./
 COPY proto ./proto
 COPY src/ ./src/
 
@@ -46,12 +63,14 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
+    dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj && \
     dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
-    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj
+    dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj
 
 # Build and publish all services: sequential restore, then sequential publish
 # Using BUILD_VERBOSITY argument: quiet, minimal, normal, or detailed
@@ -65,20 +84,32 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj && \
+    dotnet restore ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj && \
     echo "Publishing API..." && \
-    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./api/Farm.Web.Api.csproj -c Release -o /app/publish/api --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing OrcaSlicer Worker..." && \
-    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o /app/publish/orcaslicer-worker --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Printer Discovery..." && \
-    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Slicer Host..." && \
-    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Building backend plugins..." && \
     dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.Sdcp/Farm.Backend.Plugin.Sdcp.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
-    dotnet build ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
+    dotnet build ./backends/Farm.Backend.Plugin.FlashForge/Farm.Backend.Plugin.FlashForge.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./backends/Farm.Backend.Plugin.TestEmulator/Farm.Backend.Plugin.TestEmulator.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Building slicer plugins (issue #578 dual-engine)..." && \
+    dotnet build ./slicer/Farm.Slicer.Module.Api/Farm.Slicer.Module.Api.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./migrations/Farm.Slicer.Migrations.PostgreSQL/Farm.Slicer.Migrations.PostgreSQL.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./migrations/Farm.Slicer.Migrations.SqlServer/Farm.Slicer.Migrations.SqlServer.csproj -c Release -o /app/publish/api/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Mirroring slicer plugins into slicer-host publish payload (issue #578; microservices split loads plugins via Slicer:PluginsPath)..." && \
+    mkdir -p /app/publish/slicer-host/plugins/slicer && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj -c Release -o /app/publish/slicer-host/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    dotnet build ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj -c Release -o /app/publish/slicer-host/plugins/slicer --no-restore --verbosity ${BUILD_VERBOSITY:-quiet}
 
 # Verify critical runtime files exist and fail immediately if any are missing
 RUN echo "Checking published artifacts..." && \
@@ -97,14 +128,36 @@ RUN echo "Checking published artifacts..." && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.OctoPrint.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Sdcp.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Sdcp.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.FlashForge.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.FlashForge.dll"; exit 1)) && \
+    ([ -f /app/publish/api/Farm.Backend.Plugin.TestEmulator.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.TestEmulator.dll"; exit 1)) && \
+    echo "Checking for slicer plugin DLLs (issue #578 dual-engine):" && ls -lah /app/publish/api/plugins/slicer/ 2>&1 | head -30 && \
+    ([ -f /app/publish/api/plugins/slicer/Farm.Slicer.Module.Api.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicer.Module.Api.dll"; exit 1)) && \
+    ([ -f /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll"; exit 1)) && \
+    ([ -f /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll ] || (echo "✗ MISSING: /app/publish/api/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll"; exit 1)) && \
+    echo "Checking for slicer plugin DLLs in slicer-host payload (issue #578; microservices split):" && ls -lah /app/publish/slicer-host/plugins/slicer/ 2>&1 | head -10 && \
+    ([ -f /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_4_0.dll"; exit 1)) && \
+    ([ -f /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/plugins/slicer/Farm.Slicers.OrcaSlicer.v2_3_1.dll"; exit 1)) && \
     echo "✓ All .NET builds completed successfully"
 
 ############################################################
 # API Runtime Container
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS api-runtime
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /app
 EXPOSE 5000
+
+LABEL org.opencontainers.image.title="PrintFarmer API" \
+      org.opencontainers.image.description="PrintFarmer API server" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 # Install runtime tools that are present in the upgraded image
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -121,6 +174,8 @@ RUN mkdir -p /app/gcode /app/uploads /app/slicers /app/models && \
 
 # Copy API binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Download and extract Lib3MF library for 3MF file support
 # Lib3MF native library is already copied to output by csproj during build
@@ -129,16 +184,16 @@ COPY --chown=appuser:appuser --from=shared-build /app/publish/api .
 # Create startup script to fix mounted volume permissions for appuser (UID 1001)
 # This handles the case where mounted volumes from host preserve host UID/GID
 # Run as root initially to fix permissions, then drop to appuser to run the app
-RUN cat > /app/entrypoint.sh << 'EOF'
-#!/bin/bash
-set -e
-# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them
-# The appuser may not own these directories if they're bind mounts from the host
-mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true
-# Drop to appuser and run application
-exec gosu appuser dotnet Farm.Web.Api.dll
-EOF
+RUN printf '%s\n' \
+    '#!/bin/bash' \
+    'set -e' \
+    '# Fix permissions on mounted volumes to ensure appuser (UID 1001) can access them' \
+    '# The appuser may not own these directories if they are bind mounts from the host' \
+    'mkdir -p /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    'chown -R appuser:appuser /app/gcode /app/uploads /app/slicers /app/models /app/profiles /app/data-protection-keys 2>/dev/null || true' \
+    '# Drop to appuser and run application' \
+    'exec gosu appuser dotnet Farm.Web.Api.dll' \
+    > /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Install gosu for privilege dropping (used by many Docker images)
@@ -150,6 +205,11 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 ENV GCODE_STORAGE_PATH=/app/gcode
 ENV MODEL_UPLOAD_PATH=/app/models
 ENV SLICER_PROFILES_PATH=/app/profiles
+ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
+ENV PFARM__SourceInfo__Revision=${VCS_REF}
+ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
+ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
+ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
 
 # Keep as root so entrypoint can fix permissions
 # USER appuser
@@ -168,8 +228,22 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 # NOTE: amd64-only — depends on OrcaSlicer binaries
 ############################################################
 FROM --platform=linux/amd64 mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS slicer-host-runtime
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /app
 EXPOSE 5246
+
+LABEL org.opencontainers.image.title="PrintFarmer Slicer Host" \
+      org.opencontainers.image.description="PrintFarmer distributed slicer host" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates \
@@ -180,9 +254,14 @@ RUN if ! id appuser >/dev/null 2>&1; then useradd -m -u 1001 -s /bin/bash appuse
 RUN mkdir -p /app/artifacts /data && chown -R appuser:appuser /app /data
 
 COPY --chown=appuser:appuser --from=shared-build /app/publish/slicer-host .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 ENV ASPNETCORE_URLS=http://+:5246
 ENV ASPNETCORE_ENVIRONMENT=Production
+# Issue #578 dual-engine: point plugin discovery at the mirrored plugin payload
+# copied above so ISlicerRegistry sees both v2_4_0 and v2_3_1 in slicer-host too.
+ENV Slicer__PluginsPath=/app/plugins/slicer
 
 USER appuser
 
@@ -198,8 +277,12 @@ ENTRYPOINT ["dotnet", "Farm.Slicer.Host.dll"]
 FROM --platform=linux/amd64 ubuntu:${UBUNTU_TAG} AS orcaslicer-binaries
 ARG ORCASLICER_VERSION
 ARG ORCA_ASSET_PATH=""
-ARG ORCASLICER_URL=https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage
-ARG ALLOW_STUB=true
+ARG ORCASLICER_URL=https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage
+# SHA-256 of the pinned upstream AppImage. Required whenever a real binary is built.
+# Supply it explicitly at build time; the build fails rather than accepting an unverified download.
+ARG ORCASLICER_SHA256
+# Production default: never silently substitute a stub for the pinned upstream binary.
+ARG ALLOW_STUB=false
 ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
 WORKDIR /tmp
@@ -209,7 +292,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Download and extract OrcaSlicer binaries with robust error handling
+# Download and extract OrcaSlicer binaries from the pinned release URL only.
+# There is no release discovery: the URL and its checksum are the reproducibility contract.
 RUN set -e; \
     echo "[orcaslicer-binaries] Resolving OrcaSlicer version=${ORCASLICER_VERSION}"; \
     mkdir -p /orcaslicer-dist/opt; \
@@ -218,15 +302,39 @@ RUN set -e; \
     if [ "${_SKIP_ORCA_BINARY_BUILD}" = "1" ]; then \
         echo "[orcaslicer-binaries] Skipping binary build (using prebuilt image via additional_contexts)"; \
         mkdir -p /orcaslicer-dist/opt/orcaslicer && \
+        printf '' > /orcaslicer-dist/orcaslicer.sha256 && \
         echo "[orcaslicer-binaries] Setup complete (waiting for additional_contexts to populate /opt/orcaslicer)"; \
         exit 0; \
     fi; \
     \
     if [ "$ALLOW_STUB" = "true" ]; then \
-        echo "[orcaslicer-binaries] ALLOW_STUB=true, will create stub if download fails"; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=true (non-production build): a stub may replace the real binary"; \
     else \
-        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download real binary"; \
+        echo "[orcaslicer-binaries] ALLOW_STUB=false, must download and verify the pinned binary"; \
+        if [ -z "${ORCASLICER_SHA256}" ]; then \
+            echo "[orcaslicer-binaries] ERROR: ORCASLICER_SHA256 is required when ALLOW_STUB=false."; \
+            echo "[orcaslicer-binaries] Pass --build-arg ORCASLICER_SHA256=<sha256 of ${ORCASLICER_URL}>"; \
+            exit 1; \
+        fi; \
     fi; \
+    \
+    # Verifies a candidate AppImage against the pinned checksum. \
+    verify_checksum() { \
+        if [ -z "${ORCASLICER_SHA256}" ]; then \
+            echo "[orcaslicer-binaries] WARNING: no ORCASLICER_SHA256 supplied; skipping verification (stub build only)"; \
+            return 0; \
+        fi; \
+        echo "${ORCASLICER_SHA256}  orcaslicer.AppImage" > orcaslicer.AppImage.sha256; \
+        if sha256sum -c orcaslicer.AppImage.sha256; then \
+            echo "[orcaslicer-binaries] Checksum verified"; \
+            checksum_verified=1; \
+            return 0; \
+        fi; \
+        echo "[orcaslicer-binaries] ERROR: checksum verification failed"; \
+        rm -f orcaslicer.AppImage; \
+        return 1; \
+    }; \
+    checksum_verified=0; \
     \
     # Check if AppImage is available from ORCA_ASSET_PATH (for offline builds) \
     cached_appimage=""; \
@@ -240,14 +348,26 @@ RUN set -e; \
         fi; \
     fi; \
     \
-    # Try to find the correct download URL dynamically (only if not using cached AppImage) \
-    if [ ! -f orcaslicer.AppImage ]; then \
-        dynamic_url=$(curl -H "Accept: application/vnd.github+json" \
+    # Determine target architecture for asset selection (2.4.0+ ships both x86_64 and aarch64 AppImages) \
+    target_arch="$(uname -m)"; \
+    case "$target_arch" in aarch64|arm64) arch_is_arm=1;; *) arch_is_arm=0;; esac; \
+    echo "[orcaslicer-binaries] Target arch=${target_arch} (arm=${arch_is_arm})"; \
+    \
+    # Release discovery exists only for unpinned development builds. Once ORCASLICER_SHA256 is \
+    # supplied, the pinned URL and its checksum are the reproducibility contract and no other \
+    # asset may be substituted for them. \
+    if [ -z "${ORCASLICER_SHA256}" ] && [ ! -f orcaslicer.AppImage ]; then \
+        all_appimages=$(curl -H "Accept: application/vnd.github+json" \
                           -H "User-Agent: OrcaSlicerWorker/1.0" \
-                          -fsSL "https://api.github.com/repos/SoftFever/OrcaSlicer/releases" | \
+                          -fsSL "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases" | \
                       jq -r --arg ver "v${ORCASLICER_VERSION}" \
-                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)(orca)?slicer.*(linux).*(x86_64|amd64).*AppImage$") or test("(?i)(orca)?slicer.*(aarch64|arm64).*AppImage$") or test("(?i)AppImage$")) | .browser_download_url' | \
-                      head -n1 || true); \
+                         '.[] | select(.tag_name==$ver) | .assets[] | select(.name | test("(?i)AppImage$")) | .browser_download_url' || true); \
+        if [ "$arch_is_arm" = "1" ]; then \
+            dynamic_url=$(printf '%s\n' "$all_appimages" | grep -iE 'aarch64|arm64' | head -n1 || true); \
+        else \
+            dynamic_url=$(printf '%s\n' "$all_appimages" | grep -ivE 'aarch64|arm64' | head -n1 || true); \
+        fi; \
+        [ -z "$dynamic_url" ] && dynamic_url=$(printf '%s\n' "$all_appimages" | head -n1 || true); \
         \
         if [ -n "$dynamic_url" ]; then \
             echo "[orcaslicer-binaries] Discovered asset: $dynamic_url"; \
@@ -255,7 +375,7 @@ RUN set -e; \
         fi; \
     fi; \
     \
-    # Download function with validation \
+    # Download function with size validation \
     try_download() { \
         url="$1"; \
         echo "[orcaslicer-binaries] Attempting download: $url"; \
@@ -273,12 +393,33 @@ RUN set -e; \
         return 1; \
     }; \
     \
-    # Try multiple URL patterns (only if not using cached AppImage) \
+    # Pinned builds resolve exactly one URL; unpinned development builds may fall back per-arch. \
     if [ ! -f orcaslicer.AppImage ]; then \
-        try_download "${ORCASLICER_URL}" \
-        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
-        || try_download "https://github.com/SoftFever/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
-        || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+        if [ -n "${ORCASLICER_SHA256}" ]; then \
+            # Exactly one pinned URL; a failure here is a build failure, not a fallback. \
+            try_download "${ORCASLICER_URL}" \
+            || echo "[orcaslicer-binaries] WARNING: pinned download failed"; \
+        elif [ "$arch_is_arm" = "1" ]; then \
+            # Try the aarch64 asset first: ORCASLICER_URL defaults to the x86_64 AppImage, \
+            # so if dynamic discovery failed we must NOT fall through to it on ARM. \
+            try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V${ORCASLICER_VERSION}.AppImage" \
+            || try_download "${ORCASLICER_URL}" \
+            || echo "[orcaslicer-binaries] WARNING: All ARM download attempts failed"; \
+        else \
+            try_download "${ORCASLICER_URL}" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_V${ORCASLICER_VERSION}_Linux_x86_64.AppImage" \
+            || try_download "https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_V${ORCASLICER_VERSION}.AppImage" \
+            || echo "[orcaslicer-binaries] WARNING: All download attempts failed"; \
+        fi; \
+    fi; \
+    \
+    if [ -f orcaslicer.AppImage ]; then \
+        verify_checksum || { \
+            if [ "${ALLOW_STUB}" != "true" ]; then \
+                exit 1; \
+            fi; \
+        }; \
     fi; \
     \
     # Extract AppImage if available \
@@ -314,12 +455,25 @@ RUN set -e; \
         rm -f orcaslicer.AppImage; \
     fi; \
     \
+    # Record the identity of what was actually installed, not what the build argument asked for. \
+    # The digest is only attested when the pinned AppImage was downloaded AND verified AND extracted; \
+    # anything else (including the stub fallback below) leaves the attestation empty, which makes the \
+    # worker register as unverified instead of claiming a pin it cannot prove. \
+    if [ -f /orcaslicer-dist/orcaslicer ] && [ "${checksum_verified}" = "1" ]; then \
+        printf '%s' "${ORCASLICER_SHA256}" > /orcaslicer-dist/orcaslicer.sha256; \
+        echo "[orcaslicer-binaries] Attested installed binary digest"; \
+    else \
+        printf '' > /orcaslicer-dist/orcaslicer.sha256; \
+        echo "[orcaslicer-binaries] No verified binary installed; attestation left empty"; \
+    fi; \
+    \
     # Create stub if binary extraction failed but ALLOW_STUB is true \
     if [ ! -f /orcaslicer-dist/orcaslicer ]; then \
         if [ "${ALLOW_STUB}" = "true" ]; then \
             echo "[orcaslicer-binaries] Creating stub binary"; \
             printf '#!/bin/sh\n>&2 echo "[WARN] OrcaSlicer binary not present (version %s)"\nexit 2\n' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer; \
             chmod +x /orcaslicer-dist/orcaslicer; \
+            printf '' > /orcaslicer-dist/orcaslicer.sha256; \
         else \
             echo "[orcaslicer-binaries] ERROR: Binary missing and ALLOW_STUB=false"; \
             exit 1; \
@@ -345,7 +499,10 @@ WORKDIR /app
 # Install OrcaSlicer runtime deps for Ubuntu 24.04 (libgl1-mesa-glx → libgl1-mesa-glx | libglx0)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
-        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 \
+        libgtk-3-0 libglx0 libglib2.0-0 libstdc++6 libopengl0 libegl1 \
+        libglu1-mesa \
+        libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libmspack0 \
+        libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 \
         xvfb fuse squashfs-tools file p7zip-full \
     && rm -rf /var/lib/apt/lists/*
 
@@ -361,19 +518,46 @@ RUN mkdir -p /app/temp /app/gcode /app/profiles && chown -R appuser:appuser /app
 ############################################################
 FROM slicer-base AS orcaslicer-worker
 ARG ORCASLICER_VERSION
-ARG ALLOW_STUB
+ARG ALLOW_STUB=false
+ARG ORCASLICER_SHA256
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 
-LABEL component="orcaslicer-worker" \
+LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
+      org.opencontainers.image.description="PrintFarmer dedicated OrcaSlicer worker" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}" \
+      component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
-      description="Dedicated OrcaSlicer worker container" \
+      orcaslicer.distribution="upstream" \
+      orcaslicer.attestation="/etc/printfarmer/orcaslicer.sha256" \
+      orcaslicer.allow_stub="${ALLOW_STUB}" \
       security.sandbox="true"
 
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
+# A legacy external binary context may predate attestation support. Preserve an existing
+# attestation, or write an empty one so the worker registers the installed binary as unverified.
+RUN --mount=type=bind,from=orcaslicer-binaries,source=/orcaslicer-dist,target=/tmp/orcaslicer-dist,readonly \
+    install -d -o appuser -g appuser -m 0755 /etc/printfarmer && \
+    if [ -f /tmp/orcaslicer-dist/orcaslicer.sha256 ]; then \
+        install -o appuser -g appuser -m 0644 /tmp/orcaslicer-dist/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
+    else \
+        install -o appuser -g appuser -m 0644 /dev/null /etc/printfarmer/orcaslicer.sha256; \
+    fi
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Verify binary installation and set up permissions
 RUN set -e; \
@@ -384,6 +568,9 @@ RUN set -e; \
     # Create cache directory for SQLite profile cache \
     mkdir -p /app/cache && \
     chown appuser:appuser /app/cache && \
+    # Ensure temp working directory is writable by appuser \
+    mkdir -p /app/temp && \
+    chown appuser:appuser /app/temp && \
     # Verify profile directories exist \
     PROFILES_DIR="/opt/orcaslicer/resources/profiles"; \
     if [ -d "$PROFILES_DIR" ]; then \
@@ -403,8 +590,17 @@ ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
 ENV Worker__WorkingDirectory=/app/temp
-# Inject actual OrcaSlicer version for registration (overrides appsettings default)
+# Inject actual OrcaSlicer version for registration (overrides appsettings default).
+# Both keys are set from the single ORCASLICER_VERSION build arg so worker capability
+# advertisement (Worker__EngineVersion) and slicer registration (SlicerRegistry__Version)
+# can never drift from the binary that was baked into the image (issue #578).
 ENV SlicerRegistry__Version=${ORCASLICER_VERSION}
+ENV Worker__EngineVersion=${ORCASLICER_VERSION}
+# Reproducible build identity reported at worker registration. The worker reads the attestation the
+# build wrote for the binary it actually installed; the declared build argument is not exported,
+# because the ALLOW_STUB fallback does not honour it. An empty attestation means "unverified", which
+# keeps calibration capabilities false rather than asserting an unproven pin.
+ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
@@ -459,30 +655,48 @@ RUN set -eux; \
 
 # Copy source code and build with environment variables
 COPY src/Web/ReactApp/ ./
+COPY scripts/compliance /scripts/compliance
+COPY compliance/dependency-license-policy.json /compliance/dependency-license-policy.json
+COPY compliance/licenses /compliance/licenses
 ARG VITE_API_BASE_URL=/api
 ARG VITE_SIGNALR_PRINTERS_URL=/hubs/printers
 ARG VITE_SIGNALR_HARVEST_URL=/hubs/harvest
+# Short git SHA baked into the frontend bundle (vite.config reads process.env.VITE_GIT_SHA
+# as a fallback when .git is not present in the build context).
+ARG GIT_SHA=unknown
+ARG VITE_GIT_SHA=${GIT_SHA}
 RUN set -eux; \
     echo "[frontend-build] Starting React build with Vite..."; \
     echo "[frontend-build] VITE_API_BASE_URL=${VITE_API_BASE_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_PRINTERS_URL=${VITE_SIGNALR_PRINTERS_URL}"; \
     echo "[frontend-build] VITE_SIGNALR_HARVEST_URL=${VITE_SIGNALR_HARVEST_URL}"; \
+    echo "[frontend-build] VITE_GIT_SHA=${VITE_GIT_SHA}"; \
     \
     export VITE_API_BASE_URL="${VITE_API_BASE_URL}"; \
     export VITE_SIGNALR_PRINTERS_URL="${VITE_SIGNALR_PRINTERS_URL}"; \
     export VITE_SIGNALR_HARVEST_URL="${VITE_SIGNALR_HARVEST_URL}"; \
+    export VITE_GIT_SHA="${VITE_GIT_SHA}"; \
     \
-    npm run build 2>&1; \
+    set +e; \
+    npm run build > /tmp/frontend-build.log 2>&1; \
     build_status=$?; \
+    set -e; \
     \
     if [ "$build_status" -ne 0 ]; then \
         echo "[frontend-build] ERROR: Build failed with status $build_status"; \
+        tail -n 200 /tmp/frontend-build.log; \
         exit $build_status; \
     fi; \
+    \
+    node /scripts/compliance/create-npm-notices.mjs \
+        --repo / \
+        --package-root app \
+        --output app/dist/THIRD-PARTY-LICENSES.npm.txt; \
     \
     if [ ! -d dist ] || [ ! -f dist/index.html ]; then \
         echo "[frontend-build] ERROR: dist directory or index.html not found!"; \
         ls -la; \
+        tail -n 80 /tmp/frontend-build.log || true; \
         exit 1; \
     fi; \
     \
@@ -493,13 +707,29 @@ RUN set -eux; \
 # React Frontend Runtime Container
 ############################################################
 FROM nginx:${NGINX_TAG} AS frontend-runtime
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /usr/share/nginx/html
+
+LABEL org.opencontainers.image.title="PrintFarmer Frontend" \
+      org.opencontainers.image.description="PrintFarmer React web client" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 # Ensure curl present for health checks
 RUN apk update && apk add --no-cache curl && rm -rf /var/cache/apk/*
 
 # Copy built React app (from /app/dist since source was copied flat)
 COPY --from=frontend-build /app/dist .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Copy nginx configuration
 COPY scripts/docker/nginx.conf /etc/nginx/nginx.conf
@@ -522,8 +752,12 @@ CMD ["nginx", "-g", "daemon off;"]
 ############################################################
 FROM api-runtime AS monolith-runtime
 
+LABEL org.opencontainers.image.title="PrintFarmer Monolith" \
+      org.opencontainers.image.description="PrintFarmer API and web client monolith"
+
 # Copy React frontend build into wwwroot for static file serving
 COPY --from=frontend-build /app/dist ./wwwroot/
+COPY --from=frontend-build /app/dist/THIRD-PARTY-LICENSES.npm.txt ./THIRD-PARTY-LICENSES.npm.txt
 
 # Set monolith deployment mode
 ENV DEPLOYMENT_MODE=monolith
@@ -538,7 +772,21 @@ HEALTHCHECK --interval=30s --timeout=15s --start-period=120s --retries=8 \
 # Printer Discovery Service Runtime Container
 ############################################################
 FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS printer-discovery-runtime
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
 WORKDIR /app
+
+LABEL org.opencontainers.image.title="PrintFarmer Printer Discovery" \
+      org.opencontainers.image.description="PrintFarmer network printer discovery service" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
 
 # Install curl for health checks (standard base images don't have it)
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -549,6 +797,8 @@ RUN groupadd -r discovery && useradd -r -g discovery discovery && \
 
 # Copy published printer discovery service (as discovery user)
 COPY --chown=discovery:discovery --from=shared-build /app/publish/printer-discovery .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
 
 # Run as non-root user
 USER discovery

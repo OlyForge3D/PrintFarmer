@@ -1,0 +1,605 @@
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import clsx from 'clsx';
+import { ArrowRightIcon, CloseIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Input } from '@/common/components/ui';
+import {
+  getSettingsCategoryIcon,
+  type SettingsCommandItem,
+  type SettingsCommandItemKind,
+} from '@/features/settings/settings-navigation';
+
+const PREMIUM_TRANSITION_MS = 280;
+const MAX_VISIBLE_ITEMS = 12;
+const PREMIUM_EASING = 'cubic-bezier(0.16, 1, 0.3, 1)';
+const COMMAND_HINT_TEXT = '↑↓ navigate · ↵ open · esc close';
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'a[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+const COMMAND_PALETTE_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
+const COMMAND_PALETTE_GRID = [
+  'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
+  'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
+].join(', ');
+
+interface CommandPaletteProps {
+  isOpen: boolean;
+  items: SettingsCommandItem[];
+  onClose: () => void;
+  onSelect: (item: SettingsCommandItem) => void;
+}
+
+interface FuzzyResult {
+  item: SettingsCommandItem;
+  score: number;
+  labelMatches: number[];
+  breadcrumbMatches: number[];
+}
+
+interface FuzzyGroup {
+  kind: SettingsCommandItemKind;
+  label: string;
+  results: FuzzyResult[];
+}
+
+/**
+ * Display order and human-readable label for each palette section. Kinds
+ * missing from this list still render, but only at the tail of the results in
+ * insertion order — the map is authoritative for the visible sections.
+ */
+const KIND_SECTION_ORDER: { kind: SettingsCommandItemKind; label: string }[] = [
+  { kind: 'destination', label: 'Places' },
+  { kind: 'settings-nav', label: 'Settings sections' },
+  { kind: 'setting', label: 'Individual settings' },
+  { kind: 'action', label: 'Actions' },
+];
+
+function getItemKind(item: SettingsCommandItem): SettingsCommandItemKind {
+  return item.kind ?? 'settings-nav';
+}
+
+function normalizeQuery(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function getReducedMotionPreference(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function getFuzzyMatchIndices(text: string, query: string): number[] | null {
+  if (!query) {
+    return [];
+  }
+
+  const normalizedText = text.toLowerCase();
+  const matches: number[] = [];
+  let searchIndex = 0;
+
+  for (const character of query) {
+    const nextMatch = normalizedText.indexOf(character, searchIndex);
+    if (nextMatch === -1) {
+      return null;
+    }
+
+    matches.push(nextMatch);
+    searchIndex = nextMatch + 1;
+  }
+
+  return matches;
+}
+
+function scoreMatches(matches: number[]): number {
+  if (matches.length === 0) {
+    return 0;
+  }
+
+  const spread = matches[matches.length - 1] - matches[0];
+  let contiguousBonus = 0;
+
+  for (let index = 1; index < matches.length; index += 1) {
+    if (matches[index] === matches[index - 1] + 1) {
+      contiguousBonus += 4;
+    }
+  }
+
+  return spread - contiguousBonus;
+}
+
+function getFuzzyResult(item: SettingsCommandItem, query: string): FuzzyResult | null {
+  if (!query) {
+    return {
+      item,
+      score: 0,
+      labelMatches: [],
+      breadcrumbMatches: [],
+    };
+  }
+
+  const labelMatches = getFuzzyMatchIndices(item.label, query);
+  const breadcrumbMatches = getFuzzyMatchIndices(item.breadcrumb, query);
+  const keywordExactMatch = item.keywords.some((keyword) => keyword.includes(query));
+
+  if (!labelMatches && !breadcrumbMatches && !keywordExactMatch) {
+    return null;
+  }
+
+  let score = 300;
+
+  if (labelMatches) {
+    score -= 180;
+    score += scoreMatches(labelMatches);
+    if (item.label.toLowerCase().includes(query)) {
+      score -= 24;
+    }
+    if (item.label.toLowerCase().startsWith(query)) {
+      score -= 30;
+    }
+  }
+
+  if (breadcrumbMatches) {
+    score -= 70;
+    score += scoreMatches(breadcrumbMatches);
+  }
+
+  if (keywordExactMatch) {
+    score -= 28;
+  }
+
+  if (item.subPageId) {
+    score -= 6;
+  }
+
+  return {
+    item,
+    score,
+    labelMatches: labelMatches ?? [],
+    breadcrumbMatches: breadcrumbMatches ?? [],
+  };
+}
+
+function HighlightedFuzzyText({ text, matches }: { text: string; matches: number[] }) {
+  const matchSet = useMemo(() => new Set(matches), [matches]);
+
+  if (matchSet.size === 0) {
+    return <>{text}</>;
+  }
+
+  return (
+    <>
+      {Array.from(text).map((character, index) => (
+        <span
+          key={`${character}-${index}`}
+          className={clsx(
+            matchSet.has(index) && 'rounded-sm bg-pf-accent-bg/45 px-[0.08rem] text-pf-text-primary',
+          )}
+        >
+          {character}
+        </span>
+      ))}
+    </>
+  );
+}
+
+export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPaletteProps) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const listboxId = useId();
+  const [query, setQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [isRendered, setIsRendered] = useState(isOpen);
+  const [isVisible, setIsVisible] = useState(false);
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(() => getReducedMotionPreference());
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const resultRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const shouldRestoreFocusRef = useRef(true);
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = normalizeQuery(query);
+    const results = items
+      .map((item) => getFuzzyResult(item, normalizedQuery))
+      .filter((result): result is FuzzyResult => result !== null)
+      .sort((left, right) => left.score - right.score || left.item.breadcrumb.localeCompare(right.item.breadcrumb));
+
+    return results.slice(0, MAX_VISIBLE_ITEMS);
+  }, [items, query]);
+
+  const filteredGroups = useMemo<FuzzyGroup[]>(() => {
+    if (filteredItems.length === 0) {
+      return [];
+    }
+    const byKind = new Map<SettingsCommandItemKind, FuzzyResult[]>();
+    for (const result of filteredItems) {
+      const kind = getItemKind(result.item);
+      const bucket = byKind.get(kind) ?? [];
+      bucket.push(result);
+      byKind.set(kind, bucket);
+    }
+
+    const groups: FuzzyGroup[] = [];
+    for (const { kind, label } of KIND_SECTION_ORDER) {
+      const bucket = byKind.get(kind);
+      if (bucket && bucket.length > 0) {
+        groups.push({ kind, label, results: bucket });
+        byKind.delete(kind);
+      }
+    }
+    for (const [kind, bucket] of byKind.entries()) {
+      groups.push({ kind, label: kind, results: bucket });
+    }
+    return groups;
+  }, [filteredItems]);
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updatePreference = () => setPrefersReducedMotion(mediaQuery.matches);
+
+    updatePreference();
+    mediaQuery.addEventListener('change', updatePreference);
+    return () => mediaQuery.removeEventListener('change', updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      shouldRestoreFocusRef.current = true;
+
+      const openTimeout = window.setTimeout(() => {
+        setIsRendered(true);
+        setQuery('');
+        setActiveIndex(0);
+        window.requestAnimationFrame(() => {
+          setIsVisible(true);
+        });
+      }, 0);
+
+      return () => window.clearTimeout(openTimeout);
+    }
+
+    const closeAnimationFrame = window.requestAnimationFrame(() => {
+      setIsVisible(false);
+    });
+    const timeout = window.setTimeout(() => setIsRendered(false), prefersReducedMotion ? 0 : PREMIUM_TRANSITION_MS);
+
+    if (shouldRestoreFocusRef.current) {
+      previousFocusRef.current?.focus();
+    }
+
+    return () => {
+      window.cancelAnimationFrame(closeAnimationFrame);
+      window.clearTimeout(timeout);
+    };
+  }, [isOpen, prefersReducedMotion]);
+
+  useEffect(() => {
+    if (!isRendered || !isOpen) {
+      return;
+    }
+
+    inputRef.current?.focus();
+  }, [isRendered, isOpen]);
+
+  useEffect(() => {
+    if (!isRendered) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isRendered]);
+
+  useEffect(() => {
+    const activeItem = filteredItems[activeIndex];
+    if (!activeItem) {
+      return;
+    }
+
+    const activeElement = resultRefs.current.get(activeItem.item.id);
+    activeElement?.scrollIntoView?.({ block: 'nearest' });
+  }, [activeIndex, filteredItems]);
+
+  const setActiveResult = useCallback((nextIndex: number) => {
+    if (filteredItems.length === 0) {
+      return;
+    }
+
+    const normalizedIndex = (nextIndex + filteredItems.length) % filteredItems.length;
+    setActiveIndex(normalizedIndex);
+  }, [filteredItems.length]);
+
+  const handleDismiss = useCallback(() => {
+    shouldRestoreFocusRef.current = true;
+    onClose();
+  }, [onClose]);
+
+  const handleSelect = useCallback((item: SettingsCommandItem) => {
+    shouldRestoreFocusRef.current = false;
+    onSelect(item);
+  }, [onSelect]);
+
+  const handleDialogKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Tab') {
+      const focusableElements = dialogRef.current
+        ? Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => !element.hasAttribute('aria-hidden'))
+        : [];
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement;
+
+      if (event.shiftKey && activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      handleDismiss();
+    }
+  }, [handleDismiss]);
+
+  const boundedActiveIndex = filteredItems.length === 0 ? 0 : Math.min(activeIndex, filteredItems.length - 1);
+
+  const handleInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (filteredItems.length === 0) {
+      return;
+    }
+
+    const currentActiveIndex = Math.min(activeIndex, filteredItems.length - 1);
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveResult(currentActiveIndex + 1);
+      return;
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveResult(currentActiveIndex - 1);
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      setActiveResult(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      setActiveResult(filteredItems.length - 1);
+      return;
+    }
+
+    if (event.key === 'Enter' && filteredItems[currentActiveIndex]) {
+      event.preventDefault();
+      handleSelect(filteredItems[currentActiveIndex].item);
+    }
+  }, [activeIndex, filteredItems, handleSelect, setActiveResult]);
+
+  if (!isRendered) {
+    return null;
+  }
+  const activeOption = filteredItems[boundedActiveIndex];
+  const activeOptionId = activeOption ? `${listboxId}-${activeOption.item.id}` : undefined;
+  const transitionStyle = {
+    transitionDuration: `${PREMIUM_TRANSITION_MS}ms`,
+    transitionTimingFunction: PREMIUM_EASING,
+  } as const;
+
+  return createPortal(
+    <div
+      className={clsx(
+        'fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity motion-reduce:transition-none',
+        isVisible ? 'opacity-100' : 'opacity-0',
+      )}
+      style={transitionStyle}
+      onClick={handleDismiss}
+      aria-hidden={false}
+    >
+      <div
+        className={clsx(
+          'absolute inset-0 bg-pf-bg-2/72 backdrop-blur-sm transition-opacity motion-reduce:transition-none',
+          isVisible ? 'opacity-100' : 'opacity-0',
+        )}
+        style={transitionStyle}
+        aria-hidden="true"
+      />
+
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-hidden={!isOpen}
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        onKeyDown={handleDialogKeyDown}
+        onClick={(event) => event.stopPropagation()}
+        className={clsx(
+          'relative w-full max-w-[32rem] overflow-hidden rounded-[1.75rem] border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
+          isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.985] opacity-0',
+        )}
+        style={transitionStyle}
+      >
+        <div className="pointer-events-none absolute inset-0 opacity-[0.08]" style={{ backgroundImage: COMMAND_PALETTE_GRID, backgroundSize: '24px 24px' }} aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-0 opacity-[0.05]" style={{ backgroundImage: COMMAND_PALETTE_NOISE, backgroundSize: '140px 140px' }} aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-pf-border to-transparent" aria-hidden="true" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-pf-accent-bg/14 via-transparent to-transparent" aria-hidden="true" />
+
+        <div className="relative border-b border-pf-border/70 px-5 py-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary">Search</p>
+              <h2 id={titleId} className="mt-1 text-lg font-semibold text-pf-text-primary">Command palette</h2>
+              <p id={descriptionId} className="mt-1 text-sm text-pf-text-secondary">Jump to a page, a specific setting, or run a quick action.</p>
+            </div>
+            <Button
+              type="button"
+              variant="unstyled"
+              size="sm"
+              onClick={handleDismiss}
+              aria-label="Close command palette"
+              className="rounded-full p-2 text-pf-text-secondary transition-colors hover:bg-pf-bg-1 hover:text-pf-text-primary focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset motion-reduce:transition-none"
+              style={transitionStyle}
+              iconCenter={<span aria-hidden="true"><CloseIcon className="h-4 w-4" ariaLabel="Close" /></span>}
+            />
+          </div>
+
+          <div className="relative mt-4">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-pf-text-secondary" aria-hidden="true">
+              <SearchIcon className="h-4 w-4" ariaLabel="Search" />
+            </span>
+            <Input
+              ref={inputRef}
+              type="search"
+              role="combobox"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setActiveIndex(0);
+                inputRef.current?.focus();
+              }}
+              onKeyDown={handleInputKeyDown}
+              placeholder="Search pages, settings, or actions"
+              aria-label="Search settings command palette"
+              aria-autocomplete="list"
+              aria-controls={filteredItems.length > 0 ? listboxId : undefined}
+              aria-expanded={filteredItems.length > 0}
+              aria-activedescendant={activeOptionId}
+              className="h-12 pl-9 pr-24 text-sm"
+            />
+            <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary sm:inline-flex">
+              {typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K'}
+            </span>
+          </div>
+        </div>
+
+        <div className="relative px-3 py-3">
+          {filteredItems.length > 0 ? (
+            <div id={listboxId} role="listbox" aria-label="Command palette results" className="max-h-[24rem] space-y-3 overflow-y-auto pr-1">
+              {filteredGroups.map((group) => {
+                const startIndex = filteredItems.indexOf(group.results[0]);
+                return (
+                  <div key={group.kind} className="space-y-1.5">
+                    <div
+                      role="presentation"
+                      className="px-3 pt-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-pf-text-tertiary"
+                    >
+                      {group.label}
+                    </div>
+                    {group.results.map((result, offset) => {
+                      const index = startIndex + offset;
+                      const fallbackIcon = getSettingsCategoryIcon(result.item.categoryId);
+                      const Icon = result.item.icon ?? fallbackIcon;
+                      const isActive = index === boundedActiveIndex;
+                      const isDestructive = Boolean(result.item.confirmMessage);
+
+                      return (
+                        <div
+                          key={result.item.id}
+                          id={`${listboxId}-${result.item.id}`}
+                          ref={(element) => {
+                            if (element) {
+                              resultRefs.current.set(result.item.id, element);
+                            } else {
+                              resultRefs.current.delete(result.item.id);
+                            }
+                          }}
+                          role="option"
+                          aria-selected={isActive}
+                          onMouseMove={() => setActiveIndex(index)}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => handleSelect(result.item)}
+                          className={clsx(
+                            'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
+                            isActive
+                              ? 'border-pf-accent/60 bg-pf-accent-bg/22 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+                              : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
+                          )}
+                          style={transitionStyle}
+                        >
+                          <span
+                            className={clsx(
+                              'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pf-border/70 bg-pf-bg-0/80',
+                              isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
+                            )}
+                            aria-hidden="true"
+                          >
+                            <Icon className="h-4 w-4" />
+                          </span>
+
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+                              <HighlightedFuzzyText text={result.item.breadcrumb} matches={result.breadcrumbMatches} />
+                            </span>
+                            <span className="mt-1 flex items-center gap-2 text-sm font-medium text-pf-text-primary">
+                              <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
+                              {isDestructive ? (
+                                <span className="rounded-md border border-pf-status-danger/40 bg-pf-status-danger/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pf-status-danger">
+                                  Confirm
+                                </span>
+                              ) : null}
+                            </span>
+                            <span className="mt-1 block text-sm text-pf-text-secondary">{result.item.description}</span>
+                          </span>
+
+                          <span aria-hidden="true">
+                            <ArrowRightIcon
+                              className={clsx(
+                                'mt-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none',
+                                isActive ? 'translate-x-0 text-pf-accent' : 'text-pf-text-tertiary group-hover:translate-x-0.5',
+                              )}
+                              style={transitionStyle}
+                              ariaLabel="Open"
+                            />
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-dashed border-pf-border/80 bg-pf-bg-1/45 px-5 py-8 text-center">
+              <p className="text-sm font-medium text-pf-text-primary">Nothing matched</p>
+              <p className="mt-2 text-sm text-pf-text-secondary">Try a broader term like printers, theme, audit, or sign out.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-pf-border/70 px-5 py-3 text-center text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">
+          {COMMAND_HINT_TEXT}
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

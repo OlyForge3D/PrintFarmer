@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Card } from '@/common/components/ui/Card';
 import { DataTable } from '@/common/components/ui/DataTable';
 import { Spinner } from '@/common/components/ui/Spinner';
@@ -25,12 +25,19 @@ const formatDuration = (seconds?: number) => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-export const CostDashboardPage: React.FC = () => {
-  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
-  const days = period.type === 'preset' ? period.days : undefined;
-  const startDate = period.type === 'custom' ? period.startDate : undefined;
-  const endDate = period.type === 'custom' ? period.endDate : undefined;
+export interface CostDashboardContentProps {
+  days?: number;
+  startDate?: string;
+  endDate?: string;
+  showSummaryCards?: boolean;
+}
 
+export function CostDashboardContent({
+  days,
+  startDate,
+  endDate,
+  showSummaryCards = true,
+}: CostDashboardContentProps) {
   const { data: summary, isLoading: summaryLoading, error: summaryError } = useCostSummary(days, startDate, endDate);
   const { data: printerCosts, isLoading: printerLoading, error: printerError } = useCostsByPrinter(days, startDate, endDate);
   const { data: materialCosts, isLoading: materialLoading, error: materialError } = useCostsByMaterial(days, startDate, endDate);
@@ -48,23 +55,19 @@ export const CostDashboardPage: React.FC = () => {
 
   if (summaryError || printerError || materialError || jobError) {
     return (
-      <PageTemplate title="Cost Analytics" icon={TrendingUpIcon}>
-        <div className="p-4 text-pf-error">
-          Failed to load cost data: {String(summaryError || printerError || materialError || jobError)}
-        </div>
-      </PageTemplate>
+      <Card>
+        <Card.Body>
+          <div className="p-4 text-pf-error">
+            Failed to load cost data: {String(summaryError || printerError || materialError || jobError)}
+          </div>
+        </Card.Body>
+      </Card>
     );
   }
 
   return (
-    <PageTemplate
-      title="Cost Analytics"
-      subtitle="Track print job costs and analyze spending patterns"
-      icon={TrendingUpIcon}
-      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
-    >
-      <div className="space-y-6">
-        {/* Summary Cards */}
+    <div className="space-y-6">
+      {showSummaryCards && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           <KpiCard
             label="Total Cost"
@@ -89,32 +92,47 @@ export const CostDashboardPage: React.FC = () => {
             color="text-pf-warning"
           />
         </div>
+      )}
 
-        {/* Tabbed Cost Breakdown */}
-        <Tabs defaultTab="by-printer">
-          <Tabs.List>
-            <Tabs.Tab id="by-printer">Cost by Printer</Tabs.Tab>
-            <Tabs.Tab id="by-job">Costs by Job</Tabs.Tab>
-            <Tabs.Tab id="by-material">Costs by Material</Tabs.Tab>
-          </Tabs.List>
-          <Tabs.Panels>
-            <Tabs.Panel id="by-printer">
-              <CostByPrinterTab data={printerCosts} loading={printerLoading} />
-            </Tabs.Panel>
-            <Tabs.Panel id="by-job">
-              <CostByJobTab data={jobCosts} loading={jobLoading} />
-            </Tabs.Panel>
-            <Tabs.Panel id="by-material">
-              <CostByMaterialTab data={materialCosts} loading={materialLoading} />
-            </Tabs.Panel>
-          </Tabs.Panels>
-        </Tabs>
-      </div>
+      <Tabs defaultTab="by-printer">
+        <Tabs.List>
+          <Tabs.Tab id="by-printer">Cost by Printer</Tabs.Tab>
+          <Tabs.Tab id="by-job">Costs by Job</Tabs.Tab>
+          <Tabs.Tab id="by-material">Costs by Material</Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panels>
+          <Tabs.Panel id="by-printer">
+            <CostByPrinterTab data={printerCosts} loading={printerLoading} />
+          </Tabs.Panel>
+          <Tabs.Panel id="by-job">
+            <CostByJobTab data={jobCosts} loading={jobLoading} />
+          </Tabs.Panel>
+          <Tabs.Panel id="by-material">
+            <CostByMaterialTab data={materialCosts} loading={materialLoading} />
+          </Tabs.Panel>
+        </Tabs.Panels>
+      </Tabs>
+    </div>
+  );
+}
+
+export const CostDashboardPage: React.FC = () => {
+  const [period, setPeriod] = useState<TimePeriodFilterValue>({ type: 'preset', days: 30 });
+  const days = period.type === 'preset' ? period.days : undefined;
+  const startDate = period.type === 'custom' ? period.startDate : undefined;
+  const endDate = period.type === 'custom' ? period.endDate : undefined;
+
+  return (
+    <PageTemplate
+      title="Cost Analytics"
+      subtitle="Track print job costs and analyze spending patterns"
+      icon={TrendingUpIcon}
+      actions={<TimePeriodFilter value={period} onChange={setPeriod} />}
+    >
+      <CostDashboardContent days={days} startDate={startDate} endDate={endDate} />
     </PageTemplate>
   );
 };
-
-/* ─── Tab Content Components ─── */
 
 function CostByPrinterTab({ data, loading }: { data?: CostByPrinter[]; loading: boolean }) {
   const columns = [
@@ -199,8 +217,6 @@ function CostByMaterialTab({ data, loading }: { data?: CostByMaterial[]; loading
     </Card>
   );
 }
-
-/* ─── Shared Small Components ─── */
 
 function LoadingState() {
   return <div className="flex justify-center py-8"><Spinner size="lg" /></div>;

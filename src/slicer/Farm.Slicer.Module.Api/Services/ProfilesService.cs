@@ -9,8 +9,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
+using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -56,6 +59,7 @@ namespace Farm.Slicer.Module.Api.Services;
 /// <param name="parsingService">Service for parsing and validating raw profile JSON</param>
 /// <param name="slicerHubContext">SignalR hub context used to publish slicer-related notifications</param>
 /// <param name="slicersService">Service for querying registered slicer workers</param>
+/// <param name="aliasService">Service for resolving slicer profile model names to catalog PrinterModel IDs via aliases</param>
 /// <exception cref="ArgumentNullException">Thrown if any required dependency is null</exception>
 public class ProfilesService(
     IProfilesRepository repo,
@@ -67,7 +71,8 @@ public class ProfilesService(
     ICatalogService catalogService,
     IProfileParsingService parsingService,
     IHubContext<SlicerHub> slicerHubContext,
-    ISlicersService slicersService) : IProfilesService
+    ISlicersService slicersService,
+    IPrinterModelAliasService aliasService) : IProfilesService
 {
     private readonly IProfilesRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly ILogger<ProfilesService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -80,6 +85,7 @@ public class ProfilesService(
     private readonly ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
     private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
+    private readonly IPrinterModelAliasService _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
 
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -444,9 +450,8 @@ public class ProfilesService(
     {
         string? manufacturerFilter = string.IsNullOrWhiteSpace(manufacturer) ? null : manufacturer.Trim();
 
-        // Phase 3: Only return custom profiles (IsSystem=false) from database
-        // System profiles are fetched directly from OrcaSlicer worker on-demand
-        IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<MachineProfile> machineProfilesAll = await _machineProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
 
         MachineProfile? selectedMachine = null;
         if (machineProfileId.HasValue)
@@ -482,13 +487,12 @@ public class ProfilesService(
         }
 
         List<MachineProfile> machineProfiles = machineProfilesFiltered
-            .Where(m => m.PrinterModelId.HasValue)
             .OrderBy(m => m.Manufacturer)
             .ThenBy(m => m.Name)
             .ToList();
 
-        // Phase 3: Only return custom profiles (IsSystem=false)
-        IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<ProcessProfile> processProfilesAll = await _processProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         IEnumerable<ProcessProfile> processProfilesFiltered = processProfilesAll;
 
         // If a specific machine profile is selected, filter by CompatiblePrinters field
@@ -507,14 +511,17 @@ public class ProfilesService(
         }
         else if (machineProfiles.Count > 0)
         {
-            HashSet<Guid> modelIds = machineProfiles.Select(m => m.PrinterModelId!.Value).ToHashSet();
-            processProfilesFiltered = processProfilesFiltered.Where(p => p.PrinterModelId == null || (p.PrinterModelId.HasValue && modelIds.Contains(p.PrinterModelId.Value)));
+            HashSet<Guid> modelIds = machineProfiles.Where(m => m.PrinterModelId.HasValue).Select(m => m.PrinterModelId!.Value).ToHashSet();
+            if (modelIds.Count > 0)
+            {
+                processProfilesFiltered = processProfilesFiltered.Where(p => p.PrinterModelId == null || (p.PrinterModelId.HasValue && modelIds.Contains(p.PrinterModelId.Value)));
+            }
         }
 
         List<ProcessProfile> processProfiles = processProfilesFiltered.OrderBy(p => p.Name).ToList();
 
-        // Phase 3: Only return custom profiles (IsSystem=false)
-        IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: false, userId: null, ct);
+        // Return all profiles (system + custom) from database for browsing
+        IReadOnlyList<FilamentProfile> filamentProfilesAll = await _filamentProfileRepo.GetByEngineAsync(SlicerType.OrcaSlicer, includeSystem: true, userId: null, ct);
         IEnumerable<FilamentProfile> filamentProfilesFiltered = filamentProfilesAll;
 
         // Filter filaments by CompatiblePrinters if a specific machine is selected
@@ -564,7 +571,7 @@ public class ProfilesService(
             }
             else
             {
-                HashSet<Guid> neededModelIds = machineProfiles.Select(m => m.PrinterModelId!.Value).ToHashSet();
+                HashSet<Guid> neededModelIds = machineProfiles.Where(m => m.PrinterModelId.HasValue).Select(m => m.PrinterModelId!.Value).ToHashSet();
                 foreach (Guid modelId in neededModelIds)
                 {
                     PrinterModelDto? model = await _catalogService.GetModelByIdAsync(modelId, ct);
@@ -624,6 +631,7 @@ public class ProfilesService(
         }).ToList();
 
         Dictionary<Guid, List<MachineProfileListItemDto>> machinesByModelId = new();
+        HashSet<Guid> linkedProfileIds = new();
         foreach (MachineProfileListItemDto m in machineDtos)
         {
             MachineProfile? entity = machineProfiles.FirstOrDefault(x => x.Id == m.Id);
@@ -631,6 +639,8 @@ public class ProfilesService(
             {
                 continue;
             }
+
+            linkedProfileIds.Add(m.Id);
 
             if (!machinesByModelId.TryGetValue(pmid, out List<MachineProfileListItemDto>? list))
             {
@@ -692,6 +702,43 @@ public class ProfilesService(
             };
         }
 
+        // Second pass: profiles WITHOUT PrinterModelId, grouped by Manufacturer string
+        List<MachineProfileListItemDto> unlinkedDtos = machineDtos.Where(m => !linkedProfileIds.Contains(m.Id)).ToList();
+        foreach (IGrouping<string, MachineProfileListItemDto> mfgGroup in unlinkedDtos.GroupBy(m => m.Manufacturer ?? string.Empty))
+        {
+            string manufacturerName = string.IsNullOrWhiteSpace(mfgGroup.Key) ? "Unknown" : mfgGroup.Key;
+
+            if (!response.ByHierarchy.TryGetValue(manufacturerName, out HierarchicalManufacturerProfilesDto? mfgDto))
+            {
+                mfgDto = new HierarchicalManufacturerProfilesDto
+                {
+                    Name = manufacturerName,
+                    Models = new Dictionary<string, HierarchicalPrinterModelProfilesDto>()
+                };
+                response.ByHierarchy[manufacturerName] = mfgDto;
+            }
+
+            // Each unlinked profile becomes its own model entry keyed by profile ID
+            foreach (MachineProfileListItemDto mp in mfgGroup)
+            {
+                string profileKey = mp.Id.ToString();
+                mfgDto.Models[profileKey] = new HierarchicalPrinterModelProfilesDto
+                {
+                    Name = mp.Name,
+                    ModelId = profileKey,
+                    MachineProfiles = [mp],
+                    ProcessProfiles = processDtos
+                        .Where(p =>
+                        {
+                            ProcessProfile? ent = processProfiles.FirstOrDefault(x => x.Id == p.Id);
+                            return ent?.PrinterModelId is null;
+                        })
+                        .ToList(),
+                    FilamentProfiles = filamentDtos
+                };
+            }
+        }
+
         foreach (IGrouping<string, MachineProfileListItemDto> g in machineDtos.GroupBy(m => m.Manufacturer ?? string.Empty))
         {
             string key = string.IsNullOrWhiteSpace(g.Key) ? "Unknown" : g.Key;
@@ -741,7 +788,13 @@ public class ProfilesService(
             Id = p.Id,
             Name = p.Name,
             SlicerType = p.SlicerType.ToString(),
-            Quality = p.Quality.ToString()
+            Quality = p.Quality.ToString(),
+            LayerHeight = p.LayerHeight,
+            InfillPercentage = p.InfillPercentage,
+            IsSystem = p.IsSystem,
+            IsDefault = p.IsDefault,
+            IsPublic = p.IsPublic,
+            Hash = p.Hash ?? string.Empty,
         }).ToList();
         _logger.LogInformation("[ListSystemOrcaProfilesAsync] Returning {ResultCount} system profiles", result.Count);
         return result;
@@ -817,6 +870,8 @@ public class ProfilesService(
             Manufacturer = machineProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer machine profile for {modelDisplayName}",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrinterModelId = printerModelId,
             IsSystem = true,
             IsPublic = true,
@@ -863,6 +918,8 @@ public class ProfilesService(
             Manufacturer = filamentProfile.Manufacturer ?? manufacturerName,
             Description = $"OrcaSlicer filament profile for {modelDisplayName} - {filamentProfile.Material}",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrintSpeed = filamentProfile.PrintSpeed,
             NozzleTemperature = filamentProfile.NozzleTemperature,
             BedTemperature = filamentProfile.BedTemperature,
@@ -909,6 +966,8 @@ public class ProfilesService(
             Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
             Description = $"OrcaSlicer process profile for {modelDisplayName}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
             SlicerType = SlicerType.OrcaSlicer,
+            SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+            ProfileFormat = CalibrationContractConstants.ProfileFormat,
             PrinterModelId = printerModelId,
             Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
             LayerHeight = processProfile.LayerHeight,
@@ -955,8 +1014,44 @@ public class ProfilesService(
 
         try
         {
+            PrinterModelDto? catalogModel = await _catalogService.GetModelByIdAsync(printerModelId, ct);
+            if (catalogModel is null)
+            {
+                result.Error = $"Printer model with ID {printerModelId} not found in catalog";
+
+                return result;
+            }
+
+            IEnumerable<SlicerModelAliasDto> modelAliases = await _catalogService.GetModelAliasesAsync(printerModelId, ct);
+            List<string> orcaAliases = modelAliases
+                .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+                .Select(a => a.SlicerModelName)
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (orcaAliases.Count == 0)
+            {
+                result.Error = $"No OrcaSlicer aliases configured for model '{catalogModel.Name}'";
+
+                return result;
+            }
+
             // Use IHttpClientFactory if available, otherwise create new HttpClient
             using HttpClient httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+            IReadOnlyList<MachineProfileDto> aliasMachines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
+            if (aliasMachines.Count == 0)
+            {
+                result.Error = $"No OrcaSlicer machine profiles found for aliases configured for model '{catalogModel.Name}'";
+
+                return result;
+            }
+
+            HashSet<string> aliasMatchedMachineNames = new(
+                aliasMachines.Select(m => m.Name).Where(name => !string.IsNullOrWhiteSpace(name)),
+                StringComparer.OrdinalIgnoreCase);
 
             // Fetch all profiles from worker
             (AllProfilesResponseDto? allProfiles, string? orcaVersion, string workerUrl) = await FetchProfilesFromWorkerAsync(httpClient, ct);
@@ -984,6 +1079,11 @@ public class ProfilesService(
             HashSet<string> selectedProcesses = new(request.SelectedProcessProfiles, StringComparer.OrdinalIgnoreCase);
             HashSet<string> selectedFilaments = new(request.SelectedFilamentProfiles, StringComparer.OrdinalIgnoreCase);
 
+            static bool IsCompatibleWithAliasMatchedMachine(IEnumerable<string> compatiblePrinters, HashSet<string> aliasMatchedMachineNames)
+            {
+                return compatiblePrinters.Any(aliasMatchedMachineNames.Contains);
+            }
+
             // Iterate through all models to find matching profiles
             foreach ((string? _, PrinterModelProfilesDto? modelProfiles) in manufacturerProfiles.Models)
             {
@@ -1001,6 +1101,14 @@ public class ProfilesService(
                     {
                         if (!selectedMachines.Contains(machineProfile.Name ?? string.Empty))
                         {
+                            continue;
+                        }
+
+                        if (!aliasMatchedMachineNames.Contains(machineProfile.Name ?? string.Empty))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected machine profile '{MachineProfileName}' because it does not match a configured OrcaSlicer alias", machineProfile.Name);
+                            result.Skipped++;
+
                             continue;
                         }
 
@@ -1037,6 +1145,14 @@ public class ProfilesService(
                             continue;
                         }
 
+                        if (!IsCompatibleWithAliasMatchedMachine(filamentProfile.CompatiblePrinters, aliasMatchedMachineNames))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected filament profile '{FilamentProfileName}' because it is not compatible with an alias-matched machine", filamentProfile.Name);
+                            result.Skipped++;
+
+                            continue;
+                        }
+
                         try
                         {
                             bool imported = await PersistFilamentProfileAsync(
@@ -1067,6 +1183,14 @@ public class ProfilesService(
                     {
                         if (!selectedProcesses.Contains(processProfile.Name ?? string.Empty))
                         {
+                            continue;
+                        }
+
+                        if (!IsCompatibleWithAliasMatchedMachine(processProfile.CompatiblePrinters, aliasMatchedMachineNames))
+                        {
+                            _logger.LogDebug("[ImportSelectedProfilesForModel] Skipping selected process profile '{ProcessProfileName}' because it is not compatible with an alias-matched machine", processProfile.Name);
+                            result.Skipped++;
+
                             continue;
                         }
 
@@ -1101,13 +1225,13 @@ public class ProfilesService(
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Worker communication failed");
-            result.Error = $"Failed to communicate with OrcaSlicer worker: {ex.Message}";
+            result.Error = "Failed to communicate with OrcaSlicer worker";
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ImportSelectedProfilesForModel] Import failed");
-            result.Error = $"Import failed: {ex.Message}";
+            result.Error = "Import failed";
             return result;
         }
     }
@@ -1222,6 +1346,8 @@ public class ProfilesService(
                                 Manufacturer = machineProfile.Manufacturer ?? manufacturerKey ?? string.Empty,
                                 Description = $"OrcaSlicer machine profile for {modelProfiles.Name}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 IsSystem = true,
                                 IsPublic = true,
                                 Hash = profileHash,
@@ -1266,6 +1392,8 @@ public class ProfilesService(
                                 Manufacturer = filamentProfile.Manufacturer,
                                 Description = $"OrcaSlicer filament profile for {modelProfiles.Name} - {filamentProfile.Material}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 PrintSpeed = filamentProfile.PrintSpeed,
                                 NozzleTemperature = filamentProfile.NozzleTemperature,
                                 BedTemperature = filamentProfile.BedTemperature,
@@ -1311,6 +1439,8 @@ public class ProfilesService(
                                 Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                 Description = $"OrcaSlicer process profile for {modelProfiles.Name}: {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = processProfile.LayerHeight,
                                 InfillPercentage = processProfile.InfillPercentage,
@@ -1403,7 +1533,7 @@ public class ProfilesService(
         }
 
         // Emit start event
-        await _slicerHubContext.Clients.All.SendAsync("profileimportstarted", new
+        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimportstarted", new
         {
             message = $"Starting profile import from OrcaSlicer worker (v{orcaVersion ?? "unknown"})..."
         }, cancellationToken: ct);
@@ -1457,6 +1587,8 @@ public class ProfilesService(
                                 Manufacturer = machineProfile.Manufacturer ?? string.Empty,
                                 Description = "OrcaSlicer machine profile",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 IsSystem = true,
                                 Hash = profileHash,
                                 RawJson = sanitizedRaw,
@@ -1470,7 +1602,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = machineProfile.Name ?? "Unknown",
                                 profileType = "Machine",
@@ -1508,6 +1640,8 @@ public class ProfilesService(
                                 Manufacturer = filamentProfile.Manufacturer,
                                 Description = $"OrcaSlicer filament profile for {modelProfiles.Name} - {filamentProfile.Material}",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 PrintSpeed = filamentProfile.PrintSpeed,
                                 NozzleTemperature = filamentProfile.NozzleTemperature,
                                 BedTemperature = filamentProfile.BedTemperature,
@@ -1524,7 +1658,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = filamentProfile.Name ?? filamentProfile.Material ?? "Unknown",
                                 profileType = "Filament",
@@ -1560,6 +1694,8 @@ public class ProfilesService(
                                 Name = string.IsNullOrEmpty(processProfile.Name) ? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)" : processProfile.Name,
                                 Description = $"OrcaSlicer process profile for {modelProfiles.Name} - {processProfile.Quality} quality at {processProfile.LayerHeight}mm layer height",
                                 SlicerType = SlicerType.OrcaSlicer,
+                                SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
+                                ProfileFormat = CalibrationContractConstants.ProfileFormat,
                                 Quality = Enum.TryParse(processProfile.Quality ?? "standard", true, out ProfileQuality q) ? q : ProfileQuality.Standard,
                                 LayerHeight = processProfile.LayerHeight,
                                 InfillPercentage = processProfile.InfillPercentage,
@@ -1579,7 +1715,7 @@ public class ProfilesService(
                             imported++;
 
                             // Emit progress event
-                            await _slicerHubContext.Clients.All.SendAsync("profileimported", new
+                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                             {
                                 profileName = processProfile.Name ?? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)",
                                 profileType = "Process",
@@ -1596,7 +1732,7 @@ public class ProfilesService(
         }
 
         // Emit completion event
-        await _slicerHubContext.Clients.All.SendAsync("profileimportcompleted", new
+        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimportcompleted", new
         {
             imported,
             skipped,
@@ -1714,6 +1850,73 @@ public class ProfilesService(
         return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
     }
 
+    /// <inheritdoc />
+    public async Task<AllProfilesResponseDto?> GetCatalogFilteredWorkerHierarchyAsync(HttpClient httpClient, CancellationToken ct)
+    {
+        AllProfilesResponseDto? workerHierarchy = await GetWorkerProfilesHierarchyAsync(httpClient, ct);
+        if (workerHierarchy is null)
+        {
+            return null;
+        }
+
+        // Build a set of catalog manufacturer names (case-insensitive) for fast lookup
+        (IReadOnlyList<ManufacturerDto> catalogManufacturers, _) = await _catalogService.GetManufacturersAsync(ct);
+        HashSet<string> catalogManufacturerNames = new(StringComparer.OrdinalIgnoreCase);
+        foreach (ManufacturerDto m in catalogManufacturers)
+        {
+            catalogManufacturerNames.Add(m.Name);
+        }
+
+        // Filter ByHierarchy to only include manufacturers in the catalog
+        AllProfilesResponseDto filtered = new();
+
+        foreach ((string manufacturerKey, ManufacturerProfilesDto mfgProfiles) in workerHierarchy.ByHierarchy)
+        {
+            if (!catalogManufacturerNames.Contains(manufacturerKey) && !catalogManufacturerNames.Contains(mfgProfiles.Name))
+            {
+                continue;
+            }
+
+            filtered.ByHierarchy[manufacturerKey] = mfgProfiles;
+        }
+
+        // Filter flat profile dictionaries the same way
+        foreach ((string key, IList<MachineProfileDto> profiles) in workerHierarchy.MachineProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.MachineProfiles[key] = profiles;
+            }
+        }
+
+        foreach ((string key, IList<FilamentProfileDto> profiles) in workerHierarchy.FilamentProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.FilamentProfiles[key] = profiles;
+            }
+        }
+
+        foreach ((string key, IList<ProcessProfileDto> profiles) in workerHierarchy.ProcessProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.ProcessProfiles[key] = profiles;
+            }
+        }
+
+        // Also include MachineModelProfiles that match catalog manufacturers
+        foreach ((string key, IList<MachineModelProfileDto> profiles) in workerHierarchy.MachineModelProfiles)
+        {
+            if (catalogManufacturerNames.Contains(key))
+            {
+                filtered.MachineModelProfiles[key] = profiles;
+            }
+        }
+
+        return filtered;
+    }
+
     /// <summary>
     /// Fetches machine profiles for a specific manufacturer and model from the OrcaSlicer worker.
     /// </summary>
@@ -1721,9 +1924,10 @@ public class ProfilesService(
         HttpClient httpClient,
         string manufacturer,
         string model,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1751,9 +1955,10 @@ public class ProfilesService(
     public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesByAliasAsync(
         HttpClient httpClient,
         string printerModel,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1775,14 +1980,51 @@ public class ProfilesService(
     }
 
     /// <summary>
+    /// Fetches machine profiles for a catalog model by aggregating configured OrcaSlicer aliases.
+    /// </summary>
+    public async Task<IReadOnlyList<MachineProfileDto>> GetMachineProfilesForCatalogModelAsync(
+        HttpClient httpClient,
+        IEnumerable<string> orcaAliases,
+        CancellationToken ct,
+        string? engineVersion = null)
+    {
+        List<string> aliases = orcaAliases
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Dictionary<string, MachineProfileDto> profilesByKey = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string alias in aliases)
+        {
+            IReadOnlyList<MachineProfileDto> profiles = await GetMachineProfilesByAliasAsync(httpClient, alias, ct, engineVersion);
+            if (profiles.Count == 0)
+            {
+                _logger.LogDebug("No machine profiles found for OrcaSlicer alias '{Alias}'", alias);
+                continue;
+            }
+
+            foreach (MachineProfileDto profile in profiles)
+            {
+                string key = $"{profile.Manufacturer}|{profile.Name}";
+                profilesByKey.TryAdd(key, profile);
+            }
+        }
+
+        return profilesByKey.Values.ToList();
+    }
+
+    /// <summary>
     /// Fetches process profiles compatible with specific machines from the OrcaSlicer worker.
     /// </summary>
     public async Task<IReadOnlyList<ProcessProfileDto>> GetProcessProfilesForMachinesAsync(
         HttpClient httpClient,
         IEnumerable<string> machineNames,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1813,9 +2055,10 @@ public class ProfilesService(
     public async Task<IReadOnlyList<FilamentProfileDto>> GetFilamentProfilesForMachinesAsync(
         HttpClient httpClient,
         IEnumerable<string> machineNames,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? engineVersion = null)
     {
-        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync();
+        string? workerUrl = await GetOrcaSlicerWorkerUrlAsync(engineVersion);
         if (string.IsNullOrEmpty(workerUrl))
         {
             throw new HttpRequestException("OrcaSlicer worker not found in registry");
@@ -1941,8 +2184,63 @@ public class ProfilesService(
             throw new KeyNotFoundException($"Printer with ID {printerId} not found");
         }
 
-        _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName}, retrieving OrcaSlicer system profiles", printer.Name);
-        return await ListSystemOrcaProfilesAsync(ct);
+        _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found printer: {PrinterName} (ModelId: {ModelId})", printer.Name, printer.ModelId);
+
+        // Resolve the OrcaSlicer aliases for this printer's model. Catalog aliases are the source of truth.
+        IEnumerable<SlicerModelAliasDto> aliases = await _catalogService.GetModelAliasesAsync(printer.ModelId, ct);
+        List<string> orcaAliases = aliases
+            .Where(a => string.Equals(a.SlicerType, "OrcaSlicer", StringComparison.OrdinalIgnoreCase))
+            .Select(a => a.SlicerModelName)
+            .Where(alias => !string.IsNullOrWhiteSpace(alias))
+            .Select(alias => alias.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (orcaAliases.Count == 0)
+        {
+            _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No OrcaSlicer aliases for model {ModelId}", printer.ModelId);
+            return [];
+        }
+
+        _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Using {AliasCount} OrcaSlicer aliases for printer {PrinterName}", orcaAliases.Count, printer.Name);
+
+        try
+        {
+            using HttpClient httpClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+            // Get machine profiles matching this printer's aliases from the worker
+            IReadOnlyList<MachineProfileDto> machines = await GetMachineProfilesForCatalogModelAsync(httpClient, orcaAliases, ct);
+            if (machines.Count == 0)
+            {
+                _logger.LogWarning("[GetAvailableProfilesForPrinterAsync] No machine profiles found for OrcaSlicer aliases {Aliases}", string.Join(", ", orcaAliases));
+                return [];
+            }
+
+            List<string> machineNames = machines.Select(m => m.Name).ToList();
+            _logger.LogDebug("[GetAvailableProfilesForPrinterAsync] Found {Count} machine profiles, fetching compatible process profiles", machines.Count);
+
+            // Get process profiles compatible with those machines
+            IReadOnlyList<ProcessProfileDto> processProfiles = await GetProcessProfilesForMachinesAsync(httpClient, machineNames, ct);
+            _logger.LogInformation("[GetAvailableProfilesForPrinterAsync] Found {Count} process profiles for printer {PrinterName}", processProfiles.Count, printer.Name);
+
+            return processProfiles.Select(p => new SlicerProfileListItemDto
+            {
+                Id = Guid.NewGuid(),
+                Name = p.Name,
+                SlicerType = "OrcaSlicer",
+                Quality = p.Quality,
+                LayerHeight = p.LayerHeight,
+                InfillPercentage = p.InfillPercentage,
+                IsSystem = true,
+                IsPublic = false,
+                Hash = string.Empty
+            }).ToList();
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[GetAvailableProfilesForPrinterAsync] Worker unavailable, returning no printer-scoped profiles");
+            return [];
+        }
     }
 
     /// <summary>
@@ -2540,33 +2838,98 @@ public class ProfilesService(
         return string.IsNullOrWhiteSpace(input) ? fallback : input.Trim();
     }
 
-    private async Task<string?> GetOrcaSlicerWorkerUrlAsync()
+    /// <summary>
+    /// Selects an OrcaSlicer worker URL for profile browsing / metadata queries.
+    /// Issue #578: when <paramref name="engineVersion"/> is supplied, prefer a
+    /// worker whose registered <c>SlicerService.Version</c> matches — otherwise
+    /// a UI pinned to 2.3.1 could read profile metadata from a 2.4.1 worker
+    /// (or vice versa) and hand version-exclusive profile names off to a
+    /// worker that has never seen them, producing a "profile not found"
+    /// slicing failure at the moment the job is claimed.
+    /// </summary>
+    /// <param name="engineVersion">
+    /// Optional exact engine version string (e.g. "2.4.1"). When null/empty the
+    /// caller does not care which version answers the query and any Online
+    /// OrcaSlicer worker is acceptable.
+    /// </param>
+    private async Task<string?> GetOrcaSlicerWorkerUrlAsync(string? engineVersion = null)
     {
         try
         {
             // Query SlicerService entities via ISlicersService (not the old Worker table)
             IReadOnlyList<SlicerService> allSlicers = await _slicersService.ListAsync(CancellationToken.None);
 
-            // SlicerType 1 = OrcaSlicer (per SlicerType enum)
-            SlicerService? orcaWorker = allSlicers.FirstOrDefault(s =>
-                s.Status == "Online" &&
+            // SlicerType 1 = OrcaSlicer (per SlicerType enum). Materialize once
+            // to avoid multi-enumeration warnings when we probe four times.
+            List<SlicerService> orcaCandidates = allSlicers.Where(s =>
                 s.SlicerType == 1 &&
-                !string.IsNullOrEmpty(s.Host));
+                CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+                CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
+                !string.IsNullOrEmpty(s.Host)).ToList();
 
-            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
+            // Freshness cutoff mirrors SlicersController.ListEnginesAsync
+            // (issue #578, Hicks R4 #1). A row can linger with Status="Online"
+            // after a worker is killed abruptly — worse, the host it advertised
+            // can be reused by a NEW worker running a DIFFERENT engine version
+            // before the old row is reaped. Requiring a recent heartbeat before
+            // trusting either the Status or the (host, version) mapping closes
+            // that wrong-version data-serving gap.
+            const int OnlineFreshnessSeconds = 60;
+            DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
+
+            string? trimmedVersion = string.IsNullOrWhiteSpace(engineVersion) ? null : engineVersion.Trim();
+
+            // Preference 1: Fresh, online worker of the requested version.
+            SlicerService? orcaWorker = null;
+            if (trimmedVersion is not null)
             {
-                _logger.LogInformation("Using OrcaSlicer worker from registry: {OrcaWorkerName} at {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
+                orcaWorker = orcaCandidates.FirstOrDefault(s =>
+                    s.Status == "Online" &&
+                    s.LastSeen >= freshnessCutoff &&
+                    string.Equals(s.Version?.Trim(), trimmedVersion, StringComparison.OrdinalIgnoreCase));
+                if (orcaWorker != null)
+                {
+                    _logger.LogInformation(
+                        "Using OrcaSlicer worker {OrcaWorkerName} (v{Version}) at {OrcaWorkerHost} for version-scoped query",
+                        orcaWorker.Name, orcaWorker.Version, orcaWorker.Host);
+                    return orcaWorker.Host;
+                }
+
+                // Version explicitly requested but no FRESH ONLINE candidate
+                // exists. Do NOT fall back to a stale/offline row — the host
+                // it advertised may now belong to a different-version worker
+                // (Hicks R4 #1). Returning null forces the caller to surface
+                // an "engine unavailable" error rather than serving profiles
+                // that could mismatch the executing binary.
+                _logger.LogWarning(
+                    "No fresh online OrcaSlicer worker (v{Version}) found in slicer registry",
+                    trimmedVersion);
+                return null;
+            }
+
+            // Preference 2: Any fresh online OrcaSlicer worker (unpinned query).
+            orcaWorker = orcaCandidates.FirstOrDefault(s =>
+                s.Status == "Online" && s.LastSeen >= freshnessCutoff);
+            if (orcaWorker != null)
+            {
+                _logger.LogInformation(
+                    "Using OrcaSlicer worker from registry: {OrcaWorkerName} ({OrcaWorkerId})",
+                    orcaWorker.Name,
+                    orcaWorker.Id);
                 return orcaWorker.Host;
             }
 
-            // Fallback: any OrcaSlicer worker regardless of status
-            orcaWorker = allSlicers.FirstOrDefault(s =>
-                s.SlicerType == 1 &&
-                !string.IsNullOrEmpty(s.Host));
-
-            if (orcaWorker != null && !string.IsNullOrEmpty(orcaWorker.Host))
+            // Preference 3: any eligible OrcaSlicer worker regardless of status
+            // (legacy fallback when no version was requested and nothing is
+            // fresh/online). Best-effort browsing only — never used for
+            // version-scoped queries.
+            orcaWorker = orcaCandidates.FirstOrDefault();
+            if (orcaWorker != null)
             {
-                _logger.LogWarning("OrcaSlicer worker '{OrcaWorkerName}' is not online, but using endpoint anyway: {OrcaWorkerHost}", orcaWorker.Name, orcaWorker.Host);
+                _logger.LogWarning(
+                    "OrcaSlicer worker {OrcaWorkerName} ({OrcaWorkerId}) is not online, but using its configured endpoint",
+                    orcaWorker.Name,
+                    orcaWorker.Id);
                 return orcaWorker.Host;
             }
 
@@ -2655,7 +3018,7 @@ public class ProfilesService(
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
             CompatiblePrinters = source.CompatiblePrinters,
-            PrinterModelId = source.PrinterModelId,
+            PrinterModelId = request.PrinterModelId ?? source.PrinterModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -2700,7 +3063,7 @@ public class ProfilesService(
             RawJson = source.RawJson,
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
-            CompatiblePrinters = source.CompatiblePrinters,
+            CompatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters) ?? source.CompatiblePrinters,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -2741,7 +3104,7 @@ public class ProfilesService(
             RawJson = source.RawJson,
             SettingsJson = source.SettingsJson,
             Hash = ComputeSha256Hash($"{userId}{newName}{source.RawJson}{DateTime.UtcNow.Ticks}"),
-            PrinterModelId = source.PrinterModelId,
+            PrinterModelId = request.PrinterModelId ?? source.PrinterModelId,
             MachineModelProfileId = source.MachineModelProfileId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -2797,6 +3160,12 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly set the printer-model association; otherwise attempt to
+        // resolve it from the raw JSON via the alias service so uploaded profiles land
+        // in the correct printer-model bucket instead of as orphans.
+        Guid? printerModelId = request.PrinterModelId
+            ?? await ResolvePrinterModelIdFromRawJsonAsync(request.RawJson, "process");
+
         ProcessProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -2807,12 +3176,13 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            PrinterModelId = printerModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _processProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
 
         return new CustomProfileDto
         {
@@ -2822,7 +3192,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -2842,6 +3213,12 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly supply CompatiblePrinters; otherwise attempt to extract
+        // them from the raw JSON's compatible_printers array so uploaded filaments are
+        // discoverable by the per-machine filtering logic instead of orphaned.
+        string? compatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters)
+            ?? ExtractCompatiblePrintersFromRawJson(request.RawJson);
+
         FilamentProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -2852,13 +3229,16 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            CompatiblePrinters = compatiblePrinters,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _filamentProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", name, userId, profile.CompatiblePrinters ?? "<none>");
 
+        // Filament profiles do not carry a PrinterModelId column; they are matched to
+        // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
         return new CustomProfileDto
         {
             Id = profile.Id,
@@ -2867,7 +3247,9 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = null,
+            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
         };
     }
 
@@ -2887,6 +3269,11 @@ public class ProfilesService(
             throw new ArgumentException($"Invalid JSON: {ex.Message}");
         }
 
+        // Caller may explicitly set the printer-model association; otherwise attempt to
+        // resolve it from the raw JSON via the alias service.
+        Guid? printerModelId = request.PrinterModelId
+            ?? await ResolvePrinterModelIdFromRawJsonAsync(request.RawJson, "machine");
+
         MachineProfile profile = new()
         {
             Id = Guid.NewGuid(),
@@ -2897,12 +3284,13 @@ public class ProfilesService(
             CreatedByUserId = userId,
             RawJson = request.RawJson,
             Hash = ComputeSha256Hash($"{userId}{name}{request.RawJson}{DateTime.UtcNow.Ticks}"),
+            PrinterModelId = printerModelId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
 
         await _machineProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId}", name, userId);
+        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
 
         return new CustomProfileDto
         {
@@ -2912,7 +3300,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -2933,7 +3322,8 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = p.PrinterModelId
             });
         }
 
@@ -2949,7 +3339,9 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = null,
+                CompatiblePrinters = SplitCompatiblePrinters(p.CompatiblePrinters)
             });
         }
 
@@ -2965,7 +3357,8 @@ public class ProfilesService(
                 IsSystem = false,
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt,
-                RawJson = p.RawJson
+                RawJson = p.RawJson,
+                PrinterModelId = p.PrinterModelId
             });
         }
 
@@ -3027,6 +3420,18 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply printer-model association change requested by the user.
+        // ClearPrinterModelId takes precedence over PrinterModelId so the UI can detach
+        // an existing association without sending a sentinel Guid.
+        if (request.ClearPrinterModelId == true)
+        {
+            profile.PrinterModelId = null;
+        }
+        else if (request.PrinterModelId.HasValue)
+        {
+            profile.PrinterModelId = request.PrinterModelId.Value;
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _processProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", profile.Name, userId);
@@ -3039,7 +3444,8 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
     }
 
@@ -3066,10 +3472,23 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply CompatiblePrinters change. ClearCompatiblePrinters takes precedence so the
+        // UI can detach the list without sending a sentinel empty array.
+        if (request.ClearCompatiblePrinters == true)
+        {
+            profile.CompatiblePrinters = null;
+        }
+        else if (request.CompatiblePrinters is not null)
+        {
+            profile.CompatiblePrinters = NormalizeCompatiblePrintersList(request.CompatiblePrinters);
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _filamentProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", profile.Name, userId);
 
+        // Filament profiles do not have a PrinterModelId column; ignore any printer-model
+        // fields on the request and always emit null in the response.
         return new CustomProfileDto
         {
             Id = profile.Id,
@@ -3078,7 +3497,9 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = null,
+            CompatiblePrinters = SplitCompatiblePrinters(profile.CompatiblePrinters)
         };
     }
 
@@ -3105,6 +3526,16 @@ public class ProfilesService(
             profile.Hash = ComputeSha256Hash($"{userId}{profile.Name}{request.RawJson}{DateTime.UtcNow.Ticks}");
         }
 
+        // Apply printer-model association change requested by the user.
+        if (request.ClearPrinterModelId == true)
+        {
+            profile.PrinterModelId = null;
+        }
+        else if (request.PrinterModelId.HasValue)
+        {
+            profile.PrinterModelId = request.PrinterModelId.Value;
+        }
+
         profile.UpdatedAt = DateTime.UtcNow;
         await _machineProfileRepo.UpdateAsync(profile, ct);
         _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", profile.Name, userId);
@@ -3117,7 +3548,206 @@ public class ProfilesService(
             IsSystem = false,
             CreatedAt = profile.CreatedAt,
             UpdatedAt = profile.UpdatedAt,
-            RawJson = profile.RawJson
+            RawJson = profile.RawJson,
+            PrinterModelId = profile.PrinterModelId
         };
+    }
+
+    /// <summary>
+    /// Best-effort resolution of a catalog PrinterModel ID from a raw OrcaSlicer profile JSON.
+    /// </summary>
+    /// <remarks>
+    /// Used by upload paths so that user-uploaded machine and process profiles land in the
+    /// correct printer-model bucket without requiring the caller to specify it manually.
+    ///
+    /// Resolution rules:
+    /// <list type="bullet">
+    ///   <item>Machine profiles: read <c>printer_model</c> (fallback to <c>name</c> / <c>inherits</c>) and resolve via the alias service.</item>
+    ///   <item>Process profiles: read the <c>compatible_printers</c> array and return the first machine name that resolves.</item>
+    ///   <item>Filament profiles: not supported (no PrinterModelId column); always returns null.</item>
+    ///   <item>Malformed JSON or unrecognised types: returns null and the caller falls back to leaving the association unset.</item>
+    /// </list>
+    /// </remarks>
+    private async Task<Guid?> ResolvePrinterModelIdFromRawJsonAsync(string rawJson, string profileType)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            JsonElement root = doc.RootElement;
+
+            switch (profileType)
+            {
+                case "machine":
+                {
+                    // Prefer the explicit printer_model field; fall back to name / inherits when absent.
+                    string? candidate = TryGetString(root, "printer_model")
+                        ?? TryGetString(root, "name")
+                        ?? TryGetString(root, "inherits");
+                    if (string.IsNullOrWhiteSpace(candidate))
+                    {
+                        return null;
+                    }
+
+                    return await _aliasService.ResolveModelAliasAsync(candidate, "OrcaSlicer");
+                }
+
+                case "process":
+                {
+                    // Process profiles reference compatible printers (machine variant names).
+                    // Return the first one that resolves to a known catalog model.
+                    if (!root.TryGetProperty("compatible_printers", out JsonElement compatibleElem)
+                        || compatibleElem.ValueKind != JsonValueKind.Array)
+                    {
+                        return null;
+                    }
+
+                    foreach (JsonElement entry in compatibleElem.EnumerateArray())
+                    {
+                        if (entry.ValueKind != JsonValueKind.String)
+                        {
+                            continue;
+                        }
+
+                        string? name = entry.GetString();
+                        if (string.IsNullOrWhiteSpace(name))
+                        {
+                            continue;
+                        }
+
+                        Guid? resolved = await _aliasService.ResolveModelAliasAsync(name, "OrcaSlicer");
+                        if (resolved.HasValue)
+                        {
+                            return resolved;
+                        }
+                    }
+
+                    return null;
+                }
+
+                default:
+                    // Filament and unknown types do not carry a PrinterModelId association.
+                    return null;
+            }
+        }
+        catch (JsonException ex)
+        {
+            // The caller already validates JSON for upload, but log defensively for diagnostics.
+            _logger.LogDebug(ex, "Failed to parse raw profile JSON while resolving PrinterModelId for {ProfileType}", profileType);
+            return null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Swallow unexpected resolver errors so that an upload still succeeds with no
+            // association rather than failing outright. Cancellation must always propagate.
+            _logger.LogWarning(ex, "Unexpected error resolving PrinterModelId from raw JSON for {ProfileType}", profileType);
+            return null;
+        }
+    }
+
+    private static string? TryGetString(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out JsonElement prop))
+        {
+            return null;
+        }
+
+        return prop.ValueKind == JsonValueKind.String ? prop.GetString() : null;
+    }
+
+    /// <summary>
+    /// Normalises a caller-supplied list of compatible printer names into the
+    /// comma-separated storage format. Trims whitespace, drops empties, and dedupes
+    /// while preserving order. Returns null when the list is null or contains no
+    /// usable entries (so callers can use the null-coalesce fallback chain).
+    /// </summary>
+    private static string? NormalizeCompatiblePrintersList(IReadOnlyList<string>? entries)
+    {
+        if (entries is null || entries.Count == 0)
+        {
+            return null;
+        }
+
+        List<string> cleaned = new(entries.Count);
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        foreach (string entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+
+            string trimmed = entry.Trim();
+            if (seen.Add(trimmed))
+            {
+                cleaned.Add(trimmed);
+            }
+        }
+
+        return cleaned.Count == 0 ? null : string.Join(',', cleaned);
+    }
+
+    /// <summary>
+    /// Best-effort extraction of the <c>compatible_printers</c> JSON array from a raw
+    /// filament profile. Returns the comma-separated storage format or null when no
+    /// usable values are found. Malformed JSON yields null without throwing because
+    /// the caller has already validated structure for upload.
+    /// </summary>
+    private static string? ExtractCompatiblePrintersFromRawJson(string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            if (!doc.RootElement.TryGetProperty("compatible_printers", out JsonElement arr) || arr.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            List<string> values = [];
+            foreach (JsonElement entry in arr.EnumerateArray())
+            {
+                if (entry.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+
+                string? value = entry.GetString();
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    values.Add(value.Trim());
+                }
+            }
+
+            return NormalizeCompatiblePrintersList(values);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Splits the comma-separated CompatiblePrinters storage column into a clean list
+    /// for response DTOs. Returns null when the column is null or empty so callers can
+    /// distinguish "no association" from "explicit empty list".
+    /// </summary>
+    private static string[]? SplitCompatiblePrinters(string? compatiblePrinters)
+    {
+        if (string.IsNullOrWhiteSpace(compatiblePrinters))
+        {
+            return null;
+        }
+
+        string[] parts = compatiblePrinters.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length == 0 ? null : parts;
     }
 }

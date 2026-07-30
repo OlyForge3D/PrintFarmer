@@ -59,7 +59,7 @@ describe('NotificationBell', () => {
     expect(button).toHaveAttribute('title', 'Notifications');
 
     // Badge should not be present
-    const badge = button.querySelector('span.bg-pf-accent');
+    const badge = button.querySelector('span.bg-pf-accent-bg');
     expect(badge).not.toBeInTheDocument();
   });
 
@@ -77,9 +77,10 @@ describe('NotificationBell', () => {
     expect(button).toHaveAttribute('title', '1 unread notification');
 
     // Badge should show "1"
-    const badge = button.querySelector('span.bg-pf-accent');
+    const badge = button.querySelector('span.bg-pf-accent-bg');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('1');
+    expect(badge?.className).toContain('text-[var(--pf-on-accent)]');
   });
 
   it('renders bell icon with unread count badge for multiple notifications', () => {
@@ -96,7 +97,7 @@ describe('NotificationBell', () => {
     expect(button).toHaveAttribute('title', '5 unread notifications');
 
     // Badge should show "5"
-    const badge = button.querySelector('span.bg-pf-accent');
+    const badge = button.querySelector('span.bg-pf-accent-bg');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('5');
   });
@@ -111,7 +112,7 @@ describe('NotificationBell', () => {
     );
 
     const button = screen.getByRole('button');
-    const badge = button.querySelector('span.bg-pf-accent');
+    const badge = button.querySelector('span.bg-pf-accent-bg');
     expect(badge).toBeInTheDocument();
     expect(badge).toHaveTextContent('99+');
   });
@@ -176,7 +177,7 @@ describe('NotificationBell', () => {
     expect(button).toBeInTheDocument();
 
     // Badge should not be present when count is undefined
-    const badge = button.querySelector('span.bg-pf-accent');
+    const badge = button.querySelector('span.bg-pf-accent-bg');
     expect(badge).not.toBeInTheDocument();
   });
 });

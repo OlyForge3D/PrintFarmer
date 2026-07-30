@@ -29,14 +29,22 @@ public class Model3DConfiguration : IEntityTypeConfiguration<Model3D>
         _ = builder.Property(m => m.HealthStatus).HasConversion<int>().HasDefaultValue(FileHealthStatus.Unknown);
         _ = builder.Property(m => m.LastVerificationResult).HasColumnType("TEXT");
         _ = builder.Property(m => m.RowVersion).IsRowVersion();
+        _ = builder.Property(m => m.UpdatedAt).IsConcurrencyToken();
 
         // Model3D-specific properties
         _ = builder.Property(m => m.FileFormat).HasConversion<int>();
         _ = builder.Property(m => m.ValidationErrors).HasColumnType("TEXT");
+        _ = builder.Property(m => m.ClientUploadHash).HasMaxLength(64);
+
+        // Attribution fields (nullable — only set for imported models)
+        _ = builder.Property(m => m.SourceUrl).HasMaxLength(2048);
+        _ = builder.Property(m => m.SourceLicense).HasMaxLength(128);
+        _ = builder.Property(m => m.SourceCreator).HasMaxLength(256);
 
         // Soft-reference indexes (no FK constraints — FolderNode, User live in core)
         _ = builder.HasIndex(m => m.FolderId);
         _ = builder.HasIndex(m => m.UploadedByUserId);
+        _ = builder.HasIndex(m => new { m.UploadedByUserId, m.ClientUploadId }).IsUnique();
 
         // Indexes
         _ = builder.HasIndex(m => m.FileHash).IsUnique();

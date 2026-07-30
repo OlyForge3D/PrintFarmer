@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Services.Queue.Dispatch;
+﻿using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,6 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/dispatch")]
 [Tags("Dispatch Dashboard")]
 [Authorize]
+[RequirePermission(PrintFarmerPermissions.Queue.Read)]
 public class DispatchController(
     IBatchDispatchService batchDispatchService) : ControllerBase
 {
@@ -31,15 +34,19 @@ public class DispatchController(
     /// </summary>
     /// <param name="page">1-based page number (default: 1).</param>
     /// <param name="pageSize">Items per page (default: 20, max: 100).</param>
+    /// <param name="dateFrom">Optional inclusive lower bound for log entries (UTC).</param>
+    /// <param name="dateTo">Optional inclusive upper bound for log entries (UTC).</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("history")]
     [ProducesResponseType(typeof(DispatchHistoryPageDto), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetDispatchHistoryAsync(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 20,
+        [FromQuery] DateTime? dateFrom = null,
+        [FromQuery] DateTime? dateTo = null,
         CancellationToken ct = default)
     {
-        (List<DispatchHistoryDto> items, int totalCount) = await batchDispatchService.GetDispatchHistoryAsync(page, pageSize, ct);
+        (List<DispatchHistoryDto> items, int totalCount) = await batchDispatchService.GetDispatchHistoryAsync(page, pageSize, dateFrom, dateTo, ct);
 
         return Ok(new DispatchHistoryPageDto
         {

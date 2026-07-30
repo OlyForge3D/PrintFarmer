@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using FluentAssertions;
@@ -44,7 +45,7 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
             UserId = Guid.NewGuid(),
             ModelFileUrl = "http://example.com/model.stl",
             ModelFileName = "model.stl",
-            SlicerEngine = 0,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfileJson = "{}"
         };
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submitReq);
@@ -55,20 +56,34 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         // Claim job
         ClaimJobRequest claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = Guid.Parse(_client.DefaultRequestHeaders.GetValues("X-Worker-Id").Single()),
             Capabilities = new[] { "orcaslicer" },
             LeaseDurationSeconds = 120
         };
         HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         _ = claimResp.IsSuccessStatusCode.Should().BeTrue();
+        WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
+        _ = claimed.Should().NotBeNull();
+        _ = claimed!.ClaimToken.Should().NotBe(Guid.Empty);
+        _ = claimed!.LeaseToken.Should().NotBe(Guid.Empty);
+        _ = claimed.LeaseFence.Should().BeGreaterThan(0);
 
-        // Progress update
+        // Progress update presenting the claim-issued lease
         SliceJobProgressUpdateRequest progressReq = new SliceJobProgressUpdateRequest
         {
             ProgressPercent = 42,
             ProgressMessage = "Layer slicing"
         };
-        HttpResponseMessage progressResp = await _client.PostAsJsonAsync($"/api/slice/{submitted!.JobId}/progress", progressReq);
+        using HttpRequestMessage progressMessage = new(HttpMethod.Post, $"/api/slice/{submitted!.JobId}/progress")
+        {
+            Content = JsonContent.Create(progressReq),
+        };
+        progressMessage.Headers.Add(WorkerClaimHeaders.ClaimToken, claimed.ClaimToken.ToString());
+        progressMessage.Headers.Add(WorkerLeaseHeaders.LeaseToken, claimed.LeaseToken.ToString());
+        progressMessage.Headers.Add(
+            WorkerLeaseHeaders.LeaseFence,
+            claimed.LeaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        HttpResponseMessage progressResp = await _client.SendAsync(progressMessage);
         _ = progressResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         // Fetch status
@@ -77,7 +92,8 @@ public class SliceJobProgressEndpointTests : IAsyncLifetime
         SliceJobStatusResponse? status = await statusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
         _ = status.Should().NotBeNull();
         _ = status!.ProgressPercent.Should().Be(42);
-        _ = status.ProgressMessage.Should().Be("Layer slicing");
+        _ = status.ProgressMessage.Should().Be("Slicing in progress (42%).");
+        _ = status.ProgressMessage.Should().NotContain("Layer slicing");
         _ = status.Status.Should().Be("Processing");
     }
 }

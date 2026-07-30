@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router';
 import { formatDistanceToNow } from 'date-fns';
 import {
@@ -17,6 +17,7 @@ import {
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCancelHarvestOperation } from '@/common/hooks/useApi';
 import { Button } from '@/common/components/ui/Button';
+import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { parseApiDateTimeValue, formatDuration } from '@/common/utils/datetime';
 
 interface HarvestOperationCardProps {
@@ -52,13 +53,6 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
   const config = statusConfig[operation.status];
   const progress = operation.filesProcessed / Math.max(operation.filesFound, 1) * 100;
-  const progressRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (progressRef.current) {
-      progressRef.current.style.width = `${Math.min(progress, 100)}%`;
-    }
-  }, [progress]);
 
   const handleCancel = () => {
     if (cancelMutation && typeof cancelMutation.mutate === 'function') {
@@ -100,12 +94,12 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
                   <span>{operation.filesProcessed} / {operation.filesFound} files</span>
                   <span>{Math.round(progress)}%</span>
                 </div>
-                <div className="w-full bg-pf-bg-2 rounded-full h-1.5">
-                  <div
-                    ref={progressRef}
-                    className="bg-pf-accent-bg h-1.5 rounded-full transition-all duration-300"
-                  />
-                </div>
+                <ProgressBar
+                  value={progress}
+                  ariaLabel={`${operation.printerName} harvest progress`}
+                  showPercent={false}
+                  size="xs"
+                />
               </div>
             )}
 

@@ -1,9 +1,19 @@
+import Foundation
 import SwiftUI
+
+/// Dispute C (#714): a completed job may be harvested at most once. Kept as
+/// a free function (mirrored 1:1 in `actionSection` below) so the gating
+/// rule has deterministic unit coverage independent of view rendering.
+func canHarvestToInventory(job: PrintJob, partsInventoryEnabled: Bool) -> Bool {
+    job.status == .completed && partsInventoryEnabled && job.harvestedAt == nil
+}
 
 struct JobDetailView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel: JobDetailViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var partsInventoryEnabled = true
+    @State private var showingHarvestSheet = false
 
     init(jobId: UUID) {
         _viewModel = State(initialValue: JobDetailViewModel(jobId: jobId))
@@ -53,9 +63,30 @@ struct JobDetailView: View {
                 Text(error)
             }
         }
+        .alert(
+            "Dispatch Reconciliation",
+            isPresented: .constant(viewModel.actionNotice != nil)
+        ) {
+            Button("OK") { viewModel.actionNotice = nil }
+        } message: {
+            if let notice = viewModel.actionNotice {
+                Text(notice)
+            }
+        }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(jobService: services.jobService)
             await viewModel.loadJob()
+            await services.capabilitiesService.refresh()
+            partsInventoryEnabled = services.capabilitiesService.resolved.printedPartsInventoryEnabled
+        }
+        .sheet(isPresented: $showingHarvestSheet) {
+            if let job = viewModel.job {
+                HarvestSheetView(job: job) {
+                    let task = Task { await viewModel.loadJob() }
+                    activeTasks.append(task)
+                }
+            }
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -169,6 +200,10 @@ struct JobDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Details")
                 .font(.headline)
+                .accessibilityLabel("\(job.name), job detail. Details")
+                .accessibilityIdentifier(
+                    "job.detail.destination.\(job.id.uuidString.lowercased())"
+                )
 
             VStack(spacing: 0) {
                 infoRow(label: "File", value: job.gcodeFileName, icon: "doc")
@@ -190,9 +225,24 @@ struct JobDetailView: View {
                     infoRow(label: "Priority", value: priorityLabel(priority), icon: "flag")
                 }
 
+                if let material = job.requiredMaterialType {
+                    Divider()
+                    infoRow(label: "Material", value: material, icon: "cube.box")
+                }
+
                 if let filament = job.filamentName {
                     Divider()
                     infoRow(label: "Filament", value: filament, icon: "circle.fill")
+                }
+
+                if let filamentUsage = filamentUsageSummary(job) {
+                    Divider()
+                    infoRow(label: "Filament Usage", value: filamentUsage, icon: "scalemass")
+                }
+
+                if let cost = costSummary(job) {
+                    Divider()
+                    infoRow(label: "Cost", value: cost, icon: "dollarsign.circle")
                 }
 
                 if let eta = job.estimatedPrintTime {
@@ -357,6 +407,34 @@ struct JobDetailView: View {
                 }
                 .buttonStyle(.bordered)
             }
+
+            // Completed: offer to harvest printed parts into inventory
+            // (#714, F9). Gated on the shared feature flag (#725) so the
+            // action disappears cleanly if printed-parts inventory is
+            // disabled for this deployment, and (Dispute C) on
+            // `harvestedAt == nil` so an already-harvested job shows its
+            // harvested state instead of a stale action.
+            if canHarvestToInventory(job: job, partsInventoryEnabled: partsInventoryEnabled) {
+                Button {
+                    showingHarvestSheet = true
+                } label: {
+                    Label("Harvest to Inventory", systemImage: "shippingbox.fill")
+                        .fullWidthActionButton(prominence: .prominent)
+                        .fontWeight(.semibold)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Color.pfSuccess)
+                .accessibilityIdentifier("jobDetail.harvestToInventory")
+            } else if let harvestedAt = job.harvestedAt {
+                Label {
+                    Text("Harvested \(harvestedAt.formatted(date: .abbreviated, time: .shortened))")
+                } icon: {
+                    Image(systemName: "checkmark.seal.fill")
+                }
+                .font(.subheadline)
+                .foregroundStyle(Color.pfSuccess)
+                .accessibilityIdentifier("jobDetail.harvestedState")
+            }
         }
         .disabled(viewModel.isPerformingAction)
     }
@@ -377,6 +455,30 @@ struct JobDetailView: View {
                 .lineLimit(1)
         }
         .padding(.vertical, 6)
+    }
+
+    private func filamentUsageSummary(_ job: PrintJob) -> String? {
+        if let actual = job.actualFilamentUsage, actual > 0 {
+            return String(format: "%.1fg", actual)
+        }
+        if let estimated = job.estimatedFilamentUsage, estimated > 0 {
+            return String(format: "%.1fg est.", estimated)
+        }
+        return nil
+    }
+
+    private func costSummary(_ job: PrintJob) -> String? {
+        if let actual = job.actualCost, actual > 0 {
+            return currencyString(actual)
+        }
+        if let estimated = job.estimatedCost, estimated > 0 {
+            return "\(currencyString(estimated)) est."
+        }
+        return nil
+    }
+
+    private func currencyString(_ amount: Decimal) -> String {
+        String(format: "$%.2f", NSDecimalNumber(decimal: amount).doubleValue)
     }
 
     private func progressColor(for job: PrintJob) -> Color {

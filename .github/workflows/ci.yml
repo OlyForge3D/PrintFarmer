@@ -1,71 +1,227 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.sln'
-      - 'global.json'
-      - 'Directory.Build.props'
-      - 'src/Web/ReactApp/package.json'
-      - 'src/Web/ReactApp/package-lock.json'
-      - '.github/workflows/ci.yml'
+    branches: [main, development]
+    # No path filter: every trusted-branch push must dispatch, then the selector
+    # forces the full-safe matrix before considering the changed-path set.
   pull_request:
     types: [opened, synchronize, reopened]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '*.sln'
-      - 'global.json'
-      - 'Directory.Build.props'
-      - 'src/Web/ReactApp/package.json'
-      - 'src/Web/ReactApp/package-lock.json'
-      - '.github/workflows/ci.yml'
+    # No `paths:` filter here — every PR must produce the required CI check.
+    # Individual jobs decide whether they have work to do based on the
+    # selector output. Docs-only or React-only PRs still see CI as "green"
+    # without paying for .NET compilation.
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-test:
+  # ---------------------------------------------------------------------------
+  # select — compute which downstream jobs to run.
+  # ---------------------------------------------------------------------------
+  select:
+    name: Select affected tests
+    runs-on: ubuntu-latest
+    outputs:
+      want_frontend: ${{ steps.selector.outputs.want_frontend }}
+      want_dotnet_build: ${{ steps.selector.outputs.want_dotnet_build }}
+      want_dotnet_test: ${{ steps.selector.outputs.want_dotnet_test }}
+      want_mig_drift: ${{ steps.selector.outputs.want_mig_drift }}
+      full_matrix: ${{ steps.selector.outputs.full_matrix }}
+      matrix: ${{ steps.selector.outputs.matrix }}
+      mig_matrix: ${{ steps.selector.outputs.mig_matrix }}
+      reason: ${{ steps.selector.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute change set
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/changed.z"
+          : > "$out"
+          case "$EVENT_NAME" in
+            pull_request)
+              base_sha="$PR_BASE_SHA"
+              head_sha="$PR_HEAD_SHA"
+              ;;
+            push)
+              base_sha="$BEFORE_SHA"
+              head_sha="$AFTER_SHA"
+              ;;
+            *)
+              base_sha=""
+              head_sha=""
+              ;;
+          esac
+          rc=0
+          if [[ -n "$base_sha" && -n "$head_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]]; then
+            if ! git -c core.quotePath=false diff -z --no-renames --name-only "$base_sha" "$head_sha" > "$out" 2>/dev/null; then
+              rc=1
+            fi
+          fi
+          {
+            echo "changed_file=$out"
+            if (( rc != 0 )); then
+              echo "force_full_safe=diff-failed"
+            else
+              echo "force_full_safe="
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run selector
+        id: selector
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          CHANGED_FILES_FROM_Z: ${{ steps.diff.outputs.changed_file }}
+          FORCE_FULL_SAFE: ${{ steps.diff.outputs.force_full_safe }}
+        run: bash scripts/ci/select-dotnet-tests.sh
+
+      - name: Publish selection to summary
+        env:
+          SELECTOR_REASON: ${{ steps.selector.outputs.reason }}
+          SELECTOR_MATRIX: ${{ steps.selector.outputs.matrix }}
+          SELECTOR_MIG_MATRIX: ${{ steps.selector.outputs.mig_matrix }}
+          WANT_FRONTEND: ${{ steps.selector.outputs.want_frontend }}
+          WANT_DOTNET_BUILD: ${{ steps.selector.outputs.want_dotnet_build }}
+          WANT_DOTNET_TEST: ${{ steps.selector.outputs.want_dotnet_test }}
+          WANT_MIG_DRIFT: ${{ steps.selector.outputs.want_mig_drift }}
+          FULL_MATRIX: ${{ steps.selector.outputs.full_matrix }}
+        run: |
+          # Every `printf` whose format string begins with `-` uses the POSIX
+          # `--` end-of-options terminator so Bash's `printf` builtin (and any
+          # coreutils `printf` on the runner) never interprets the leading dash
+          # as an option flag under `set -e`.
+          {
+            echo "## CI selection"
+            printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
+            printf -- '- want_frontend: `%s`\n' "$WANT_FRONTEND"
+            printf -- '- want_dotnet_build: `%s`\n' "$WANT_DOTNET_BUILD"
+            printf -- '- want_dotnet_test: `%s`\n' "$WANT_DOTNET_TEST"
+            printf -- '- want_mig_drift: `%s`\n' "$WANT_MIG_DRIFT"
+            printf -- '- full_matrix: `%s`\n' "$FULL_MATRIX"
+            echo ""
+            echo "### test matrix"
+            printf '```json\n%s\n```\n' "$SELECTOR_MATRIX"
+            echo "### migration matrix"
+            printf '```json\n%s\n```\n' "$SELECTOR_MIG_MATRIX"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # ci-tools — always runs. Exercises the selector and pre-push hook test
+  # suites plus shellcheck on the CI/hook scripts. Any failure here blocks the
+  # summary because the selector's own correctness gates every scoped run.
+  # ---------------------------------------------------------------------------
+  ci-tools:
+    name: CI tooling tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+
+      - name: shellcheck (info+ non-blocking, warning+ blocking)
+        run: |
+          set -e
+          shellcheck -x -s bash -S warning \
+            scripts/ci/select-dotnet-tests.sh \
+            scripts/ci/tests/test-select-dotnet-tests.sh \
+            .githooks/pre-push \
+            .githooks/tests/test-pre-push.sh \
+            .githooks/setup.sh
+
+      - name: bash -n syntax check
+        run: |
+          set -e
+          for f in \
+              scripts/ci/select-dotnet-tests.sh \
+              scripts/ci/tests/test-select-dotnet-tests.sh \
+              .githooks/pre-push \
+              .githooks/tests/test-pre-push.sh \
+              .githooks/setup.sh; do
+            bash -n "$f"
+          done
+
+      - name: Selector tests
+        run: bash scripts/ci/tests/test-select-dotnet-tests.sh
+
+      - name: Pre-push hook tests
+        run: bash .githooks/tests/test-pre-push.sh
+
+      - name: Test compliance controls
+        run: node --test scripts/compliance/compliance.test.mjs
+
+      - name: Test release tag-trigger policy
+        run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
+
+      # Full dependency-license validation requires restored NuGet assets
+      # (project.assets.json under src/**/obj/). Without a restore the
+      # validator emits NUGET_ASSETS_MISSING. `ci-tools` ALWAYS runs, so
+      # the restore-then-validate pair here keeps dependency validation
+      # fail-closed on every event — not gated behind the selector's
+      # `want_dotnet_build` decision.
       - name: Setup .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
+      - name: Restore .NET (for dependency-license inventory)
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Validate licenses and provenance
+        run: node scripts/compliance/validate-compliance.mjs
+
+  # ---------------------------------------------------------------------------
+  # frontend — React build + tests. Runs only when the selector wants it.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend build & tests
+    needs: [select, ci-tools]
+    if: ${{ needs.select.outputs.want_frontend == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: 24.x
           cache: "npm"
           cache-dependency-path: src/Web/ReactApp/package-lock.json
 
-      - name: Restore .NET
-        working-directory: src
-        run: dotnet restore ./farm-web.sln
-
       - name: Install frontend deps
         working-directory: src/Web/ReactApp
         run: npm ci
 
-      - name: Build .NET
-        working-directory: src
-        run: dotnet build ./farm-web.sln -c Debug --no-restore
+      - name: Lint frontend
+        working-directory: src/Web/ReactApp
+        run: npm run lint
 
       - name: Build frontend
         working-directory: src/Web/ReactApp
         run: npm run build
-
-      - name: Test .NET
-        # Temporarily restrict tests to quick unit/in-memory tests that do not require Docker or external services.
-        # This avoids CI failures caused by private Docker images and long integration tests.
-        working-directory: src
-        run: |
-          dotnet test ./farm-web.sln -c Debug --no-build --logger trx --results-directory TestResults \
-            --filter "Category!=DbHeavy&Category!=Docker"
 
       - name: Test frontend (with coverage)
         working-directory: src/Web/ReactApp
@@ -78,24 +234,467 @@ jobs:
           name: frontend-coverage
           path: src/Web/ReactApp/coverage
 
-      - name: Upload Test Results (.NET)
+  # ---------------------------------------------------------------------------
+  # dotnet-build — full solution restore + build. Runs whenever any .NET
+  # input changed (including tools). Preserves compile coverage.
+  # ---------------------------------------------------------------------------
+  dotnet-build:
+    name: .NET build
+    needs: [select, ci-tools]
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore .NET
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Build .NET
+        working-directory: src
+        run: dotnet build ./farm-web.sln -c Debug --no-restore
+
+  # ---------------------------------------------------------------------------
+  # migration-drift — affected App/Slicer context+provider pairs.
+  # ---------------------------------------------------------------------------
+  migration-drift:
+    name: Migration drift (${{ matrix.label }})
+    needs: [select, ci-tools, dotnet-build]
+    if: ${{ needs.select.outputs.want_mig_drift == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.select.outputs.mig_matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install -g dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      # Restore + build the specific migration project so its
+      # `obj/project.assets.json` and compiled assemblies exist before
+      # `dotnet ef` reflects over them. Without this step EF fails with
+      # NETSDK1004 because the migration-drift job is isolated from
+      # dotnet-build and never restores the matrix project itself.
+      - name: Restore migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet restore "./$MATRIX_PROJECT"
+
+      - name: Build migration project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+        run: dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore
+
+      - name: Check EF Core migration drift
+        working-directory: src
+        env:
+          MATRIX_LABEL: ${{ matrix.label }}
+          MATRIX_PROJECT: ${{ matrix.project }}
+          MATRIX_CONTEXT: ${{ matrix.context }}
+          DB_PROVIDER: ${{ matrix.provider }}
+        # `dotnet ef migrations has-pending-model-changes` returns 0 when the
+        # snapshot matches the current model. Any non-zero exit code means the
+        # check did not confirm "no drift", but the tool does NOT distinguish
+        # real drift (rc=1 on success paths) from design-time failures
+        # (missing/failed context factory, provider load errors, tool/version
+        # mismatches, restore/build errors surfaced through the tool) — those
+        # also exit non-zero, including 1, across supported EF Core versions.
+        # Because we cannot classify the cause purely from the exit code, we
+        # emit a single truthful annotation for any non-zero rc and direct the
+        # reader to the tool output already streamed to the Actions log. The
+        # job stays fail-closed either way: both drift and tool failures block
+        # the workflow.
+        run: |
+          set -u
+          echo "Checking $MATRIX_LABEL for pending EF Core model changes..."
+          set +e
+          dotnet ef migrations has-pending-model-changes \
+            --project "./$MATRIX_PROJECT" \
+            --startup-project "./$MATRIX_PROJECT" \
+            --context "$MATRIX_CONTEXT" \
+            --no-build
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "$MATRIX_LABEL: no pending model changes."
+          else
+            echo "::error title=EF Core migration drift check failed::$MATRIX_LABEL: 'dotnet ef migrations has-pending-model-changes' exited with $rc. This may indicate pending model changes (add a migration for $MATRIX_CONTEXT using DB_PROVIDER=$DB_PROVIDER) OR an EF Core tool / design-time context / provider failure. Inspect the tool output above to determine which."
+            exit "$rc"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # dotnet-test — one matrix leg per affected test project.
+  # ---------------------------------------------------------------------------
+  dotnet-test:
+    name: .NET test (${{ matrix.name }})
+    needs: [select, ci-tools, dotnet-build]
+    if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.select.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore test project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet restore "./$MATRIX_PROJECT" ${integration_args[@]+"${integration_args[@]}"}
+
+      - name: Build test project
+        working-directory: src
+        env:
+          MATRIX_PROJECT: ${{ matrix.project }}
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        run: |
+          set -euo pipefail
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet build "./$MATRIX_PROJECT" -c Debug --no-restore ${integration_args[@]+"${integration_args[@]}"}
+
+      - name: Test
+        working-directory: src
+        env:
+          MATRIX_NAME: ${{ matrix.name }}
+          MATRIX_PROJECT: ${{ matrix.project }}
+          RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
+        # Category filter matches the legacy CI behavior: skip Docker /
+        # DbHeavy categories that need external services. Callers who want
+        # those categories run them out-of-band (workflow_dispatch will
+        # force the full safe matrix, which still excludes Docker per
+        # policy).
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults
+          integration_args=()
+          if [[ "$RUN_INTEGRATION_TESTS" == "true" ]]; then
+            integration_args+=("-p:RunIntegrationTests=true")
+          fi
+          dotnet test "./$MATRIX_PROJECT" -c Debug --no-build \
+            ${integration_args[@]+"${integration_args[@]}"} \
+            --logger "trx;LogFileName=$MATRIX_NAME.trx" \
+            --results-directory TestResults \
+            --filter "Category!=DbHeavy&Category!=Docker"
+
+      - name: Assert non-zero test execution
+        working-directory: src
+        env:
+          MATRIX_NAME: ${{ matrix.name }}
+        run: |
+          set -e
+          python3 - "$MATRIX_NAME" <<'PY'
+          import sys, os
+          import xml.etree.ElementTree as ET
+          name = sys.argv[1]
+          path = os.path.join("TestResults", f"{name}.trx")
+          if not os.path.isfile(path):
+              print(f"::error::TRX not found at {path}")
+              sys.exit(1)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as e:
+              print(f"::error::TRX parse failed: {e}")
+              sys.exit(1)
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          counters = root.find(f"{ns}ResultSummary/{ns}Counters")
+          if counters is None:
+              print("::error::TRX missing ResultSummary/Counters")
+              sys.exit(1)
+          try:
+              total = int(counters.get("total", "0"))
+              executed = int(counters.get("executed", "0"))
+          except ValueError:
+              print("::error::TRX counters not numeric")
+              sys.exit(1)
+          if total <= 0 or executed <= 0:
+              print(f"::error::TRX reports total={total} executed={executed} — no tests ran")
+              sys.exit(1)
+          print(f"{name}: total={total} executed={executed}")
+          PY
+
+      - name: Upload TRX
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: dotnet-test-results
-          path: src/TestResults
+          name: dotnet-test-results-${{ matrix.name }}
+          path: src/TestResults/${{ matrix.name }}.trx
+          if-no-files-found: warn
 
-      - name: Lint frontend
-        working-directory: src/Web/ReactApp
-        run: npm run lint
+  # ---------------------------------------------------------------------------
+  # dotnet-test-providers — runs DbHeavy and Docker-tagged provider tests
+  # against real PostgreSQL and SQL Server instances. Provisions each database
+  # service, applies provider migrations, then runs DbHeavy production races for
+  # claim, bed-clear, consumer, reconciliation, physical control, and external print.
+  # The job fails visibly when a provider is unavailable or migration fails.
+  # ---------------------------------------------------------------------------
+  dotnet-test-providers:
+    name: .NET provider tests (DbHeavy)
+    needs: [select, ci-tools, dotnet-build]
+    if: ${{ needs.select.outputs.want_dotnet_test == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pfarm
+          POSTGRES_PASSWORD: pfarm_ci
+          POSTGRES_DB: pfarm_test
+        options: >-
+          --health-cmd "pg_isready -U pfarm"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          SA_PASSWORD: "Pfarm_CI_2024!"
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Pfarm_CI_2024!' -Q 'SELECT 1' -No"
+          --health-interval 15s
+          --health-timeout 10s
+          --health-retries 8
+        ports:
+          - 1433:1433
+    env:
+      PFARM_TEST_POSTGRES_CONN: "Host=localhost;Port=5432;Database=pfarm_test;Username=pfarm;Password=pfarm_ci"
+      PFARM_TEST_SQLSERVER_CONN: "Server=localhost,1433;Database=pfarm_test;User Id=sa;Password=Pfarm_CI_2024!;TrustServerCertificate=true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
 
-      - name: Dotnet format (check)
-        working-directory: src
-        run: dotnet format --verify-no-changes ./farm-web.sln || echo "Dotnet format issues detected" && exit 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
 
-      - name: Upload test results summary
-        if: always()
+      - name: Install dotnet-ef
         run: |
-          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- .NET test results: stored in artifact dotnet-test-results" >> $GITHUB_STEP_SUMMARY
-          echo "- Frontend coverage: artifact frontend-coverage" >> $GITHUB_STEP_SUMMARY
+          dotnet tool install -g dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Restore solution
+        working-directory: src
+        run: dotnet restore ./farm-web.sln
+
+      - name: Build solution
+        working-directory: src
+        run: dotnet build ./farm-web.sln -c Debug --no-restore
+
+      - name: Verify PostgreSQL is reachable
+        run: |
+          set -euo pipefail
+          PGPASSWORD=pfarm_ci psql -h localhost -U pfarm -d pfarm_test -c "SELECT 1;" \
+            || { echo "::error::PostgreSQL is not reachable — aborting provider tests"; exit 1; }
+
+      - name: Verify SQL Server is reachable
+        run: |
+          set -euo pipefail
+          # The service container health-check already verified SQL Server readiness via
+          # sqlcmd inside the container. This step confirms port 1433 is reachable from the runner.
+          timeout 20 bash -c 'until 2>/dev/null >/dev/tcp/localhost/1433; do sleep 2; done' \
+            || { echo "::error::SQL Server TCP port 1433 not reachable — aborting provider tests"; exit 1; }
+
+      - name: Apply PostgreSQL migrations (Farm.App)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          dotnet ef database update \
+            --project migrations/Farm.Migrations.PostgreSQL \
+            --startup-project migrations/Farm.Migrations.PostgreSQL \
+            --no-build \
+            --connection "$PFARM_TEST_POSTGRES_CONN" \
+            || { echo "::error::PostgreSQL Farm migration failed"; exit 1; }
+
+      - name: Apply SQL Server migrations (Farm.App)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          dotnet ef database update \
+            --project migrations/Farm.Migrations.SqlServer \
+            --startup-project migrations/Farm.Migrations.SqlServer \
+            --no-build \
+            --connection "$PFARM_TEST_SQLSERVER_CONN" \
+            || { echo "::error::SQL Server Farm migration failed"; exit 1; }
+
+      - name: Run DbHeavy provider business-race and production-call-chain tests
+        working-directory: src
+        env:
+          PFARM_TEST_POSTGRES_CONN: ${{ env.PFARM_TEST_POSTGRES_CONN }}
+          PFARM_TEST_SQLSERVER_CONN: ${{ env.PFARM_TEST_SQLSERVER_CONN }}
+        run: |
+          set -euo pipefail
+          mkdir -p TestResults
+          dotnet test tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj \
+            -c Debug --no-build \
+            --filter "Category=DbHeavy|Category=Docker" \
+            --logger "trx;LogFileName=provider-tests.trx" \
+            --results-directory TestResults
+
+      - name: Assert non-zero provider test execution
+        working-directory: src
+        run: |
+          set -e
+          python3 - "provider-tests" <<'PY'
+          import sys, os
+          import xml.etree.ElementTree as ET
+          name = sys.argv[1]
+          path = os.path.join("TestResults", f"{name}.trx")
+          if not os.path.isfile(path):
+              print(f"::error::TRX not found at {path}")
+              sys.exit(1)
+          try:
+              root = ET.parse(path).getroot()
+          except ET.ParseError as e:
+              print(f"::error::TRX parse failed: {e}")
+              sys.exit(1)
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          counters = root.find(f"{ns}ResultSummary/{ns}Counters")
+          if counters is None:
+              print("::error::TRX missing ResultSummary/Counters")
+              sys.exit(1)
+          try:
+              total = int(counters.get("total", "0"))
+              executed = int(counters.get("executed", "0"))
+          except ValueError:
+              print("::error::TRX counters not numeric")
+              sys.exit(1)
+          if total <= 0 or executed <= 0:
+              print(f"::error::TRX reports total={total} executed={executed} — no provider tests ran")
+              sys.exit(1)
+          print(f"{name}: total={total} executed={executed}")
+          PY
+
+      - name: Upload provider TRX
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dotnet-test-results-provider
+          path: src/TestResults/provider-tests.trx
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # summary — publishes an aggregate step summary and, most importantly,
+  # fails the required CI check when any *selected* job failed or was
+  # cancelled. Skipped-because-not-selected does not fail.
+  # ---------------------------------------------------------------------------
+  summary:
+    name: CI summary
+    needs: [select, ci-tools, frontend, dotnet-build, migration-drift, dotnet-test, dotnet-test-providers]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish job results
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
+          MIG_RESULT: ${{ needs.migration-drift.result }}
+          DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
+          DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
+          WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
+          WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
+          WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
+          WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
+          SELECTOR_REASON: ${{ needs.select.outputs.reason }}
+        run: |
+          # Every leading-dash format string is passed after the POSIX `--`
+          # end-of-options marker so `set -e` never trips on a Bash `printf`
+          # builtin that misreads the dash as an option (belt-and-braces even
+          # though the current builtin only accepts `-v`).
+          {
+            echo "## CI summary"
+            printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
+            printf -- '- select: `%s`\n' "$SELECT_RESULT"
+            printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
+            printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
+            printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
+            printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
+            printf -- '- dotnet-test: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
+            printf -- '- dotnet-test-providers: `%s` (wanted=`%s`)\n' "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if any required dependency failed or was cancelled
+        env:
+          SELECT_RESULT: ${{ needs.select.result }}
+          CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
+          MIG_RESULT: ${{ needs.migration-drift.result }}
+          DOTNET_TEST_RESULT: ${{ needs.dotnet-test.result }}
+          DOTNET_TEST_PROVIDERS_RESULT: ${{ needs.dotnet-test-providers.result }}
+          WANT_FRONTEND: ${{ needs.select.outputs.want_frontend }}
+          WANT_DOTNET_BUILD: ${{ needs.select.outputs.want_dotnet_build }}
+          WANT_DOTNET_TEST: ${{ needs.select.outputs.want_dotnet_test }}
+          WANT_MIG_DRIFT: ${{ needs.select.outputs.want_mig_drift }}
+        run: |
+          set -euo pipefail
+          fail=0
+          require_success() {
+            local name="$1" result="$2"
+            if [[ "$result" != "success" ]]; then
+              echo "::error::required job '$name' did not succeed (result=$result)"
+              fail=1
+            fi
+          }
+          # Foundations always required.
+          require_success select "$SELECT_RESULT"
+          require_success ci-tools "$CI_TOOLS_RESULT"
+
+          # Conditional jobs: require success when wanted, require skipped
+          # when not wanted.
+          check_conditional() {
+            local name="$1" result="$2" wanted="$3"
+            if [[ "$wanted" == "true" ]]; then
+              require_success "$name" "$result"
+            else
+              if [[ "$result" != "skipped" && "$result" != "success" ]]; then
+                echo "::error::job '$name' unexpectedly ran (result=$result, wanted=$wanted)"
+                fail=1
+              fi
+            fi
+          }
+          check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
+          check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
+          check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"
+          check_conditional dotnet-test "$DOTNET_TEST_RESULT" "$WANT_DOTNET_TEST"
+          check_conditional dotnet-test-providers "$DOTNET_TEST_PROVIDERS_RESULT" "$WANT_DOTNET_TEST"
+
+          exit "$fail"

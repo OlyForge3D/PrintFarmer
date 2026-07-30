@@ -48,7 +48,7 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()
@@ -161,7 +161,13 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
             && !check.Passed
             && check.Message.Contains("Waiting for operator"));
 
-        HttpResponseMessage readyResponse = await _client.PostAsync($"{CurrentRouteBase}/{printer.Id}/ready", null);
+        using HttpRequestMessage readyRequest = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/ready");
+        readyRequest.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+        HttpResponseMessage readyResponse = await _client.SendAsync(readyRequest);
 
         readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
@@ -192,6 +198,10 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
         };
 
         context.Printers.Add(printer);
+        context.PrinterDispatchStates.Add(new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+        });
         await context.SaveChangesAsync();
         return printer;
     }

@@ -15,6 +15,9 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
     private readonly LocalFileStorageOptions _options;
     private readonly ILogger<LocalSlicerFileStorage> _logger;
     private readonly IFileSystem _fileSystem;
+    private readonly string _basePath;
+    private readonly StringComparison _pathComparison =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     // Primary constructor for DI
     public LocalSlicerFileStorage(IOptions<LocalFileStorageOptions> options, ILogger<LocalSlicerFileStorage> logger, IFileSystem fileSystem)
@@ -22,11 +25,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
+        _basePath = Path.GetFullPath(_options.BasePath);
 
         // Ensure base directory exists
-        if (!_fileSystem.DirectoryExists(_options.BasePath))
+        if (!_fileSystem.DirectoryExists(_basePath))
         {
-            _fileSystem.CreateDirectory(_options.BasePath);
+            _fileSystem.CreateDirectory(_basePath);
         }
     }
 
@@ -287,7 +291,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         try
         {
             DateTime cutoffTime = DateTime.UtcNow.Subtract(maxAge);
-            string tempDirectory = Path.Combine(_options.BasePath, "temp");
+            string tempDirectory = Path.Combine(_basePath, "temp");
 
             if (!_fileSystem.DirectoryExists(tempDirectory))
             {
@@ -357,10 +361,10 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFilePath(string key)
     {
-        // Ensure key is safe for file system and normalize path separators
-        string safeKey = key.Replace("..", string.Empty).Replace(":", "_").Replace("?", "_").Replace("&", "_");
-        safeKey = safeKey.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
-        return Path.Combine(_options.BasePath, safeKey);
+        string normalizedKey = key
+            .Replace('/', Path.DirectorySeparatorChar)
+            .Replace('\\', Path.DirectorySeparatorChar);
+        return EnsureWithinBasePath(Path.Combine(_basePath, normalizedKey));
     }
 
     private string GetFilePathFromKeyOrUrl(string keyOrUrl)
@@ -376,14 +380,12 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         if (keyOrUrl.StartsWith("file://", StringComparison.OrdinalIgnoreCase) &&
             Uri.TryCreate(keyOrUrl, UriKind.Absolute, out Uri? fileUri))
         {
-            // Use local file path from URI
-            return fileUri.LocalPath;
+            return EnsureWithinBasePath(fileUri.LocalPath);
         }
 
-        // If it's already a file path within our base directory, use it directly
-        if (keyOrUrl.StartsWith(_options.BasePath))
+        if (Path.IsPathFullyQualified(keyOrUrl))
         {
-            return keyOrUrl;
+            return EnsureWithinBasePath(keyOrUrl);
         }
 
         // Otherwise treat as a key
@@ -403,26 +405,28 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
 
     private string GetFileUrlFromKeyOrUrl(string keyOrUrl)
     {
-        // If it's already a URL, return as-is
-        if (keyOrUrl.StartsWith("http://") || keyOrUrl.StartsWith("https://") || keyOrUrl.StartsWith("file://"))
-        {
-            return keyOrUrl;
-        }
-
-        // If it's a file path, convert to key and then to URL
-        if (keyOrUrl.StartsWith(_options.BasePath))
-        {
-            string key = GetKeyFromFilePath(keyOrUrl);
-            return GetFileUrl(key);
-        }
-
-        // Otherwise treat as a key
-        return GetFileUrl(keyOrUrl);
+        string filePath = GetFilePathFromKeyOrUrl(keyOrUrl);
+        return GetFileUrl(GetKeyFromFilePath(filePath));
     }
 
     private string GetKeyFromFilePath(string filePath)
     {
-        return Path.GetRelativePath(_options.BasePath, filePath).Replace(Path.DirectorySeparatorChar, '/');
+        string safeFilePath = EnsureWithinBasePath(filePath);
+        return Path.GetRelativePath(_basePath, safeFilePath).Replace(Path.DirectorySeparatorChar, '/');
+    }
+
+    private string EnsureWithinBasePath(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string relativePath = Path.GetRelativePath(_basePath, fullPath);
+        if (relativePath == ".." ||
+            relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", _pathComparison) ||
+            Path.IsPathFullyQualified(relativePath))
+        {
+            throw new UnauthorizedAccessException("The requested file is outside the configured storage root.");
+        }
+
+        return fullPath;
     }
 
     private void TryWriteSidecarMetadata(string filePath, string contentType)

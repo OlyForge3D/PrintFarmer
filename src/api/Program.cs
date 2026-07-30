@@ -3,9 +3,12 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.FeatureFlags;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Startup;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -16,9 +19,12 @@ using Farm.Web.Api;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.OpenApi;
 using Farm.Web.Api.Infrastructure.Temp;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Calibration.Generation;
+using Farm.Web.Api.Services.Capabilities;
 using Farm.Web.Api.Startup;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
@@ -93,12 +99,25 @@ builder.Services.AddPrintFarmerDataProtection(builder.Environment, builder.Envir
 // Register all PrintFarmer services
 builder.Services.AddPrintFarmerServices(builder.Configuration, builder.Environment);
 
+// Forwarded headers (X-Forwarded-For / -Proto / -Host) — bind config + options.
+// Disabled by default; operators behind a reverse proxy must set
+// ForwardedHeaders:Enabled=true and populate KnownProxies / KnownNetworks.
+// See docs/DEPLOYMENT.md and the ForwardedHeaders section in appsettings.json.
+builder.Services.AddPrintFarmerForwardedHeaders(builder.Configuration);
+
+// Feature flag service for phased rollout control
+builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
+
 // Slicer integration shim: loads Farm.Slicer.Module + Farm.Slicer.Module.Api DLLs at runtime
 // from Slicer:PluginsPath. No compile-time reference to EF Core, SignalR hubs, or OrcaSlicer.
 // All slicer registrations delegated to runtime-discovered ISlicerModule implementations.
-// In microservices mode, the slicer module runs in a separate slicer-host process.
-// The user-facing SlicerSettings.Enabled is set dynamically when a worker registers.
-bool slicerEnabled = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE") != "microservices";
+// In microservices mode, the slicer module runs in a separate slicer-host process —
+// the API does not load slicer DLLs, but the platform still reports slicing as available
+// so the frontend can route requests to the slicer-host via nginx.
+string? deployType = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+                   ?? builder.Configuration.GetValue<string>("DEPLOYMENT_TYPE");
+bool isMicroservices = deployType == "microservices";
+bool slicerModuleEnabled = !isMicroservices;
 
 // Platform-aware capability checks: auto-disable native x86-only features on ARM64 (Raspberry Pi)
 // unless explicitly overridden via configuration. Affects lib3mf, AssimpNetter, and slicer integration.
@@ -106,6 +125,10 @@ var arch = RuntimeInformation.ProcessArchitecture;
 bool isArm = arch is Architecture.Arm64 or Architecture.Arm;
 bool modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
 bool thumbnailEnabled = builder.Configuration.GetValue("Platform:ThumbnailGenerationEnabled", true);
+
+// slicerEnabled = platform capability flag reported to the frontend.
+// In microservices mode this starts as true (slicer-host provides the service).
+bool slicerEnabled = true;
 
 if (isArm)
 {
@@ -121,6 +144,7 @@ if (isArm)
     if (slicerExplicit is null)
     {
         slicerEnabled = false;
+        slicerModuleEnabled = false;
     }
 
     if (thumbnailExplicit is null)
@@ -132,7 +156,8 @@ else
 {
     // On x86/x64, respect configuration flags
     bool slicerConfigEnabled = builder.Configuration.GetValue("Slicer:Enabled", true);
-    slicerEnabled = slicerEnabled && slicerConfigEnabled;
+    slicerEnabled = slicerConfigEnabled;
+    slicerModuleEnabled = slicerModuleEnabled && slicerConfigEnabled;
     modelFilesEnabled = builder.Configuration.GetValue("Platform:ModelFilesEnabled", true);
 }
 
@@ -172,7 +197,7 @@ catch
 // Add API services (returns mvcBuilder so the slicer integration shim can add ApplicationParts)
 IMvcBuilder mvcBuilder = builder.Services.AddPrintFarmerControllers();
 
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     // Load slicer DLLs, register their services, and add their controllers as ApplicationParts.
     builder.Services.AddSlicerIntegration(mvcBuilder, builder.Configuration);
@@ -181,8 +206,21 @@ if (slicerEnabled)
 
 builder.Services.AddEndpointsApiExplorer();
 
+// Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolver = (options.SerializerOptions.TypeInfoResolver ?? new DefaultJsonTypeInfoResolver())
+        .WithAddedModifier(PruneOpenApiMaintenanceNavigationProperties);
+});
+
 // .NET 10 native OpenAPI - auto-detects JWT Bearer security from authentication configuration
-builder.Services.AddOpenApi();
+builder.Services.AddOpenApi(options =>
+{
+    options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
+    options.AddOperationTransformer<AuthorizationOperationTransformer>();
+});
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.MaxDepth = 256);
 
 // CORS configuration for API access
 builder.Services.AddPrintFarmerCors();
@@ -201,6 +239,52 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
+builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,
+    Farm.Web.Api.Services.Calibration.PrinterCalibrationContextService>();
+builder.Services.AddOptions<Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions>()
+    .Bind(builder.Configuration.GetSection(
+        Farm.Web.Api.Services.Calibration.CalibrationBlobStorageOptions.SectionName))
+    .Validate(
+        options =>
+            !string.IsNullOrWhiteSpace(options.RootPath) &&
+            options.MaxBytes > 0 &&
+            options.MaxWidth > 0 &&
+            options.MaxHeight > 0 &&
+            options.MaxPixels > 0,
+        "Calibration blob storage requires a private root and positive limits.")
+    .ValidateOnStart();
+builder.Services.AddSingleton<
+    Farm.Web.Api.Services.Calibration.ICalibrationBlobStore,
+    Farm.Web.Api.Services.Calibration.CalibrationBlobStore>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Calibration.ICalibrationProjectService,
+    Farm.Web.Api.Services.Calibration.CalibrationProjectService>();
+builder.Services.AddHostedService<
+    Farm.Web.Api.Services.Calibration.CalibrationPhotoDeleteReconciliationService>();
+
+// Deterministic calibration generation core: specification/model/plan/G-code/annotation/safety and
+// profile patch export. Registration alone does not advertise generation as operational.
+builder.Services.AddCalibrationGeneration();
+
+// Artifact -> GcodeFile promotion: scoped promoter plus the reconciler that resolves the unknown
+// outcomes a crash or a transient outage can leave between the slicer and core contexts.
+builder.Services.AddSingleton<Farm.Web.Api.Services.Gcode.GcodePromotionReconcilerState>();
+builder.Services.AddScoped<
+    Farm.Web.Api.Services.Gcode.IGcodeArtifactPromoter,
+    Farm.Web.Api.Services.Gcode.GcodeArtifactPromoter>();
+builder.Services.AddHostedService<
+    Farm.Web.Api.Services.Gcode.GcodePromotionReconciliationService>();
+
+// Durable calibration generation saga: attempt -> specification -> plan -> canonical slice job ->
+// verified artifact -> promoted G-code, plus the recovery loop that resumes interrupted runs.
+builder.Services.AddSingleton<CalibrationGenerationRecoveryState>();
+builder.Services.AddScoped<
+    ICalibrationGenerationCapabilityProbe,
+    CalibrationGenerationCapabilityProbe>();
+builder.Services.AddScoped<ICalibrationGenerationSaga, CalibrationGenerationSaga>();
+builder.Services.AddHostedService<CalibrationGenerationRecoveryService>();
 
 // Register background services for distributed slicing
 builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
@@ -216,8 +300,7 @@ builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Env
 // result in "server has not been started" errors in CreateClient().
 try
 {
-    string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-    if (!string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase))
+    if (!builder.Environment.IsEnvironment("Testing"))
     {
         _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
     }
@@ -247,8 +330,8 @@ catch (Exception ex)
 {
     try
     {
-        string? envName = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-        if (string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (builder.Environment.IsEnvironment("Testing")
+            || string.Equals(builder.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: Build() threw during test startup:");
@@ -286,13 +369,23 @@ if (isArm && (!modelFilesEnabled || !slicerEnabled))
 }
 
 app.Logger.LogInformation(
-    "Platform capabilities: Architecture={Architecture}, SlicingEnabled={SlicingEnabled}, ModelFilesEnabled={ModelFilesEnabled}",
+    "Platform capabilities: Architecture={Architecture}, SlicingEnabled={SlicingEnabled}, SlicerModuleLoaded={SlicerModuleLoaded}, ModelFilesEnabled={ModelFilesEnabled}",
     arch,
     slicerEnabled,
+    slicerModuleEnabled,
     modelFilesEnabled);
 
+// Forwarded headers must be the FIRST middleware in the pipeline so that
+// Connection.RemoteIpAddress is rewritten (or intentionally left as the direct
+// peer) before ANY other middleware — including runtime-discovered slicer plugin
+// modules — has a chance to read it. Registering here (before UseSlicerIntegration)
+// guarantees that even if a plugin module calls app.Use(...) in its Configure()
+// hook, it cannot register middleware ahead of the trust gate. No-op unless
+// ForwardedHeaders:Enabled=true and trusted proxies are configured. (#862)
+app.UsePrintFarmerForwardedHeaders();
+
 // Post-build slicer module configuration (metrics thresholds, alert subscriptions, etc.)
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     app.UseSlicerIntegration();
 }
@@ -302,7 +395,8 @@ if (slicerEnabled)
 // to ensure the database schema exists before any SettingsService queries run.
 
 // Early liveness endpoint (process up) + readiness separate
-app.MapGet("/livez", () => Results.Ok(new { status = "alive" }));
+app.MapGet("/livez", () => Results.Ok(new { status = "alive" }))
+    .AllowAnonymous();
 
 // Deferred console redirection (avoids blocking early host binding). Enable via ENABLE_CONSOLE_REDIRECTION=true
 if (string.Equals(Environment.GetEnvironmentVariable("ENABLE_CONSOLE_REDIRECTION"), "true", StringComparison.OrdinalIgnoreCase))
@@ -346,6 +440,9 @@ catch
 }
 
 // === MIDDLEWARE PIPELINE ===
+// NOTE: UsePrintFarmerForwardedHeaders is registered earlier (before slicer
+// integration) so that plugin-registered middleware cannot precede the trust
+// gate. See the #862 comment above.
 
 // Global exception handling
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -355,7 +452,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi();
+    _ = app.MapOpenApi().AllowAnonymous();
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -366,6 +463,7 @@ app.UseCors("Default");
 // When DEPLOYMENT_MODE=monolith, the API serves the React frontend directly from wwwroot
 // When DEPLOYMENT_MODE=microservices (or unset), frontend is served by separate nginx-proxy container
 string? deploymentMode = builder.Configuration.GetValue<string>("DEPLOYMENT_MODE")
+    ?? builder.Configuration.GetValue<string>("Deployment:Mode")
     ?? Environment.GetEnvironmentVariable("DEPLOYMENT_MODE");
 bool isMonolithMode = string.Equals(deploymentMode, "monolith", StringComparison.OrdinalIgnoreCase);
 
@@ -408,20 +506,26 @@ app.UseAuthorization();
 
 // Configure API routing and SignalR hubs
 app.MapControllers();
+
+// Public farm hubs require authenticated clients; NFC retains its existing anonymous contract.
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
+app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
-if (slicerEnabled)
+if (slicerModuleEnabled)
 {
     app.MapSlicerIntegrationHubs();
 }
 else
 {
-    // When slicer is disabled, the slicer controllers are not loaded.
-    // Map stub endpoints for list routes the frontend expects (empty results
-    // instead of 404s) and a catch-all for all other slicer routes.
+    // When slicer module is not loaded in this process (e.g. microservices mode),
+    // the slicer controllers are absent. Map stub endpoints for list routes the
+    // frontend expects (empty results instead of 404s) and a catch-all for all
+    // other slicer routes.
+    // In microservices mode, nginx routes slicer paths to the slicer-host,
+    // so these stubs are only hit if nginx misconfiguration falls through to the API.
     app.MapGet("/api/3d-models", () => Results.Ok(Array.Empty<object>()))
         .RequireAuthorization();
     app.MapGet("/api/3d-models/folders", () => Results.Ok(Array.Empty<object>()))
@@ -462,7 +566,7 @@ try
 {
     if (app.Services.GetService<MeterProvider>() != null)
     {
-        _ = app.MapPrometheusScrapingEndpoint();
+        _ = app.MapPrometheusScrapingEndpoint().AllowAnonymous();
     }
 }
 catch
@@ -483,7 +587,7 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     {
         await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
-});
+}).AllowAnonymous();
 
 // Alias route for clients expecting the comprehensive health endpoint under /api prefix
 app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
@@ -492,7 +596,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
     {
         await ProgramHelpers.WriteHealthResponseAsync(context, report, _startupStatus, _programHostEnvironment);
     }
-});
+}).AllowAnonymous();
 
 // Minimal API for network discovery settings
 // Helper: Map between model and DTO
@@ -533,7 +637,24 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
 });
 
 // Basic health endpoint for UI ping and tests
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
+    .AllowAnonymous();
+
+// Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
+app.MapGet("/api/system/version", () =>
+{
+    (string version, string? commit) = Farm.Web.Api.Health.BuildVersion.FromAssembly();
+
+    return Results.Ok(new
+    {
+        service = "Farm.Web.Api",
+        version,
+        commit,
+        environment = app.Environment.EnvironmentName,
+        runtime = RuntimeInformation.FrameworkDescription,
+        timestamp = DateTime.UtcNow,
+    });
+}).AllowAnonymous();
 
 // Extended diagnostic: expose active temp root (non-sensitive path) for debugging; omit if running in Production
 
@@ -638,7 +759,7 @@ if (isMonolithMode)
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        _ = app.MapFallbackToFile("index.html");
+        _ = app.MapFallbackToFile("index.html").AllowAnonymous();
     }
 }
 
@@ -690,7 +811,8 @@ catch (Exception ex)
     // Emit diagnostic details in Testing environment but still surface the failure to the test host.
     try
     {
-        if (app.Environment.IsEnvironment("Testing") || string.Equals(Environment.GetEnvironmentVariable("DISABLE_TELEMETRY"), "true", StringComparison.OrdinalIgnoreCase))
+        if (app.Environment.IsEnvironment("Testing")
+            || string.Equals(app.Configuration["DISABLE_TELEMETRY"], "true", StringComparison.OrdinalIgnoreCase))
         {
 #pragma warning disable CA1303
             Console.WriteLine("Program.cs: InitializeDatabaseAsync threw during test startup:");
@@ -741,6 +863,54 @@ else
         Console.WriteLine("Program.cs: StartAsync failed in Testing environment: " + ex.Message);
 #pragma warning restore CA1303
         throw;
+    }
+}
+
+static void PruneOpenApiMaintenanceNavigationProperties(JsonTypeInfo jsonTypeInfo)
+{
+    if (jsonTypeInfo.Kind != JsonTypeInfoKind.Object)
+    {
+        return;
+    }
+
+    string[] propertiesToRemove = jsonTypeInfo.Type switch
+    {
+        Type type when type == typeof(MaintenanceAlert) =>
+        [
+            "printer",
+            "printerMaintenanceSchedule",
+            "maintenanceTask",
+            "toolhead"
+        ],
+        Type type when type == typeof(MaintenanceLog) =>
+        [
+            "printer",
+            "printerMaintenanceSchedule",
+            "resolvedAlert",
+            "maintenanceTask",
+            "toolhead"
+        ],
+        Type type when type == typeof(PrinterMaintenanceSchedule) =>
+        [
+            "printer",
+            "maintenancePlan",
+            "toolhead"
+        ],
+        Type type when type == typeof(PrinterStatistics) =>
+        [
+            "printer"
+        ],
+        _ => []
+    };
+
+    foreach (string propertyName in propertiesToRemove)
+    {
+        JsonPropertyInfo? property = jsonTypeInfo.Properties.FirstOrDefault(candidate =>
+            string.Equals(candidate.Name, propertyName, StringComparison.OrdinalIgnoreCase));
+        if (property is not null)
+        {
+            _ = jsonTypeInfo.Properties.Remove(property);
+        }
     }
 }
 

@@ -18,9 +18,9 @@ public record PrinterStatusDto(
     double? Progress = null,
     string? JobName = null,
     string? FileName = null,
-    string? ThumbnailUrl = null,
-    string? CameraStreamUrl = null,
-    string? CameraSnapshotUrl = null,
+    [property: JsonIgnore] string? ThumbnailUrl = null,
+    [property: JsonIgnore] string? CameraStreamUrl = null,
+    [property: JsonIgnore] string? CameraSnapshotUrl = null,
     double? X = null,
     double? Y = null,
     double? Z = null,
@@ -31,7 +31,9 @@ public record PrinterStatusDto(
     PrinterSpoolInfoDto? SpoolInfo = null,
     MmuStatusDto? MmuStatus = null,
     IReadOnlyDictionary<int, ExtruderTemperature>? ExtruderTemperatures = null,
-    int? DetectedExtruderCount = null)
+    int? DetectedExtruderCount = null,
+    double? PrintTimeLeftSeconds = null,
+    int? SpeedMultiplier = null)
 {
     /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.

@@ -43,8 +43,49 @@ public interface ISliceJobRepository
     /// <summary>Updates job progress percentage and message.</summary>
     Task UpdateProgressAsync(Guid jobId, int progressPercent, string progressMessage, CancellationToken ct = default);
 
-    /// <summary>Atomically claims the next queued job matching capabilities (worker pull model).</summary>
-    Task<SliceJob?> ClaimNextJobAsync(Guid workerId, string[]? capabilities, int leaseDurationSeconds, CancellationToken ct = default);
+    /// <summary>Gets a processing job while its unexpired lease is owned by the worker.</summary>
+    Task<SliceJob?> GetByActiveWorkerLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        CancellationToken ct = default);
+
+    /// <summary>Updates progress only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryUpdateProgressForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        int progressPercent,
+        string progressMessage,
+        CancellationToken ct = default);
+
+    /// <summary>Completes a job only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryCompleteForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        string resultFileUrl,
+        IEnumerable<Guid> artifactIds,
+        int? estimatedPrintTimeSeconds = null,
+        decimal? filamentUsedGrams = null,
+        CancellationToken ct = default);
+
+    /// <summary>Fails a job only while the worker still owns an unexpired processing lease.</summary>
+    Task<bool> TryFailForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        string errorMessage,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically claims the next eligible job using a registered worker identity and bounded retry policy.
+    /// </summary>
+    Task<SliceJob?> ClaimNextJobAsync(
+        WorkerClaimIdentity worker,
+        int leaseDurationSeconds,
+        int maxRetries,
+        CancellationToken ct = default);
 
     /// <summary>Finds an existing job by correlation ID and checksum (idempotency lookup).</summary>
     Task<SliceJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken ct = default);
@@ -52,14 +93,73 @@ public interface ISliceJobRepository
     /// <summary>Checks whether a job exists with the given correlation ID and checksum.</summary>
     Task<bool> JobExistsAsync(Guid correlationId, string checksum, CancellationToken ct = default);
 
-    /// <summary>Finds jobs that are stuck (processing but lease expired or long-running).</summary>
-    Task<IReadOnlyList<SliceJob>> GetStuckJobsAsync(int maxAgeSeconds, int? limit = null, CancellationToken ct = default);
+    /// <summary>Finds processing jobs whose current lease has expired.</summary>
+    Task<IReadOnlyList<SliceJob>> GetExpiredLeaseJobsAsync(int? limit = null, CancellationToken ct = default);
 
-    /// <summary>Renews the lease for a job (extends <c>LeaseExpiresAt</c>).</summary>
-    Task RenewLeaseAsync(Guid jobId, int leaseDurationSeconds, CancellationToken ct = default);
+    /// <summary>
+    /// Renews an active, unexpired lease when it is still owned by the specified worker.
+    /// </summary>
+    Task<bool> RenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        int leaseDurationSeconds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically requeues or fails a job only if the selected claim remains expired.
+    /// </summary>
+    Task<bool> TryRecoverExpiredLeaseAsync(
+        Guid jobId,
+        Guid? expectedWorkerId,
+        Guid? expectedClaimToken,
+        DateTime expectedLeaseExpiresAt,
+        int maxRetries,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Renews an unexpired lease only when the presented worker, lease token and fencing counter
+    /// all still match the persisted row.
+    /// </summary>
+    /// <param name="jobId">The claimed job.</param>
+    /// <param name="workerId">The worker that holds the lease.</param>
+    /// <param name="leaseToken">The lease token issued at claim time.</param>
+    /// <param name="leaseFence">The fencing counter issued at claim time.</param>
+    /// <param name="leaseDurationSeconds">The requested lease extension.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns><see langword="true"/> when exactly one row was extended.</returns>
+    Task<bool> TryRenewLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid leaseToken,
+        long leaseFence,
+        int leaseDurationSeconds,
+        CancellationToken ct = default);
 
     /// <summary>Increments retry count and requeues or fails the job.</summary>
     Task IncrementRetryAndRequeueAsync(Guid jobId, int maxRetries, CancellationToken ct = default);
+
+    /// <summary>Requeues or fails a job only while the worker still owns an active lease.</summary>
+    Task<bool> TryRequeueForActiveLeaseAsync(
+        Guid jobId,
+        Guid workerId,
+        Guid claimToken,
+        int maxRetries,
+        CancellationToken ct = default);
+
+    /// <summary>Returns the total count of jobs, optionally filtered by status.</summary>
+    Task<int> CountAsync(string? status = null, CancellationToken ct = default);
+
+    /// <summary>Returns a paged list of jobs with sorting and optional status filter.</summary>
+    Task<IReadOnlyList<SliceJob>> GetPagedAsync(int page, int pageSize, string? status = null, string? sortBy = null, string? sortDir = null, CancellationToken ct = default);
+
+    /// <summary>Requeues an owner-visible terminal job only if its observed version is unchanged.</summary>
+    Task<SliceJob?> TryRetryJobAsync(
+        Guid jobId,
+        Guid expectedUserId,
+        string expectedStatus,
+        DateTime expectedUpdatedAt,
+        CancellationToken ct = default);
 
     /// <summary>Saves pending changes to the database.</summary>
     Task SaveChangesAsync(CancellationToken ct = default);

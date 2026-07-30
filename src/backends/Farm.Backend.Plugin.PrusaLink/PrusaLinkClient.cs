@@ -23,7 +23,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsControlOperations,
     ISupportsMovement,
     ISupportsTemperatureControl,
-    ISupportsFilamentUsageQuery
+    ISupportsFilamentUsageQuery,
+    ISupportsHistory
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly ILogger<PrusaLinkClient>? _logger;
@@ -40,6 +41,45 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         _apiClient = apiClient;
         _logger = logger;
     }
+
+    public async Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryListAsync(
+            baseUrl,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            credential,
+            ct);
+
+    public async Task<HistoryJob?> GetHistoryJobAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryJobAsync(baseUrl, jobId, credential, ct);
+
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(
+        string baseUrl,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryTotalsAsync(baseUrl, credential, ct);
+
+    public async Task<bool> DeleteHistoryJobAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.DeleteHistoryJobAsync(baseUrl, jobId, credential, ct);
 
     public async Task<PrusaCompositeStatus> GetCompositeStatusAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
@@ -78,7 +118,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
                 status?.Printer?.TargetBed,
                 status?.Printer?.AxisX,
                 status?.Printer?.AxisY,
-                status?.Printer?.AxisZ);
+                status?.Printer?.AxisZ,
+                job?.TimeRemaining,
+                status?.Printer?.Speed);
         }
         catch (Exception ex)
         {
@@ -371,17 +413,28 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             if (!success)
             {
                 progress?.Report(UploadAndPrintStage.Failed);
-                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"PrusaLink atomic upload+print failed for {fileName}");
+                return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, $"PrusaLink upload+print outcome is unknown for {fileName}");
             }
 
             progress?.Report(UploadAndPrintStage.Completed);
             return UploadAndPrintResult.Ok();
         }
+        catch (PrusaLinkCommandRejectedException ex)
+        {
+            _logger?.LogWarning(
+                "PrusaLink explicitly rejected upload-and-start for {FileName}: HTTP {StatusCode}",
+                fileName,
+                (int)ex.StatusCode);
+            progress?.Report(UploadAndPrintStage.Failed);
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.StartingPrint,
+                ex.Message);
+        }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Failed to upload and start print of {FileName} on {BaseUrl}", fileName, baseUrl);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+            return UploadAndPrintResult.Unknown(UploadAndPrintStage.StartingPrint, ex.Message);
         }
     }
 
@@ -628,7 +681,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         try
         {
-            PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, credential, ct);
+            Farm.Infrastructure.Contracts.Printers.PrusaLink.PrinterInfo printerInfo = await _apiClient.GetInfoAsync(baseUrl, credential, ct);
             VersionInfo versionInfo = await _apiClient.GetVersionAsync(baseUrl, credential, ct);
 
             return new PrinterInformation
@@ -824,7 +877,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning("[PrusaLink] Pause requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] Pause requires digest authentication credentials");
             return false;
         }
 
@@ -835,7 +888,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         if (credential?.HasDigestAuth != true)
         {
-            _logger?.LogWarning("[PrusaLink] Resume requires digest auth credentials (format: username:password) at {BaseUrl}", baseUrl);
+            _logger?.LogWarning("[PrusaLink] Resume requires digest authentication credentials");
             return false;
         }
 

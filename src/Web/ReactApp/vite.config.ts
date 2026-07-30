@@ -4,14 +4,41 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
-let gitHash = 'dev';
+const buildTime = new Date().toISOString();
+
+// Prefer the live git short SHA. In container builds the .git directory is absent, so
+// fall back to the VITE_GIT_SHA/GIT_SHA build arg injected by the Docker frontend stage.
+let gitHash = process.env.VITE_GIT_SHA || process.env.GIT_SHA || 'dev';
 try {
   gitHash = execSync('git rev-parse --short HEAD').toString().trim();
-} catch { /* ignore: git not available */ }
+} catch { /* ignore: git not available (e.g. Docker build) — keep injected VITE_GIT_SHA */ }
+
+// Emit dist/version.json at build time so the deployed frontend commit is queryable
+// (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
+function emitVersionJson() {
+  let outDir = 'dist';
+  return {
+    name: 'printfarmer-version-json',
+    apply: 'build' as const,
+    configResolved(config: { build: { outDir: string } }) {
+      outDir = config.build.outDir;
+    },
+    closeBundle() {
+      try {
+        mkdirSync(outDir, { recursive: true });
+        writeFileSync(
+          resolve(outDir, 'version.json'),
+          JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
+        );
+      } catch { /* non-fatal: version.json is best-effort */ }
+    },
+  };
+}
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [react(), tsconfigPaths(), emitVersionJson()],
   logLevel: 'info', // Only show info and above; suppress debug/warnings
   resolve: {
     // Keep an explicit fallback alias mapping for environments where
@@ -81,15 +108,72 @@ export default defineConfig({
       // External modules expect to be provided by the runtime environment
       // In a browser SPA, we need all dependencies bundled
       output: {
+        // Chunk-splitting policy:
+        //   1. Keep the routing chunk small and independent so the router
+        //      shell can render before the rest of the app is parsed.
+        //   2. Group three.js and its react-three-fiber/drei bindings into
+        //      a single chunk so they share tree-shaking across the graph.
+        //      This form matches the baseline that was tested to yield the
+        //      smallest chunk (~1,208 kB) because rollup can prune exports
+        //      transitively when the entry points are named packages.
+        //   3. Split heavy vendor libraries out of the main `index-*.js`
+        //      bundle so it stays under the 1200 kB warning threshold.
+        //   4. NEVER raise `chunkSizeWarningLimit`. If a new heavy library
+        //      is added, add it here (or lazy-load its consumers) instead
+        //      of silencing the warning.
         manualChunks: {
           routing: ['react-router'],
-          three: ['three', '@react-three/fiber', '@react-three/drei', 'three-stdlib']
+          // three.js ecosystem — split so the largest chunk (three core +
+          // stdlib + fiber bindings) stays under the 1,200 kB warning
+          // threshold. @react-three/drei is peeled out because it re-
+          // exports many components that pull heavy transitive deps
+          // (zustand, camera-controls, three-mesh-bvh, troika-three-text
+          // at runtime). Keeping it in a sibling chunk lets rollup drop
+          // the drei code path from routes that only need three-core.
+          three: ['three', '@react-three/fiber', 'three-stdlib'],
+          'three-drei': ['@react-three/drei'],
+          // Charting library — used across analytics/statistics/maintenance
+          // dashboards; ~400 kB minified. Splitting keeps it out of the
+          // main entry chunk (loaded only when a chart-using route mounts).
+          'vendor-charts': ['recharts'],
+          // Real-time transport. Isolated so the initial bundle does not
+          // pay for the SignalR client until a hub is actually contacted.
+          'vendor-signalr': ['@microsoft/signalr'],
+          // File / export utilities: PDF, CSV, zip generation. Heavy and
+          // only needed on export flows.
+          'vendor-files': ['jspdf', 'jspdf-autotable', 'jszip', 'fflate', 'html2canvas'],
+          // OpenTelemetry web SDK — instrumentation stack used by the
+          // telemetry provider. Grouping keeps the main bundle from
+          // pulling in the whole SDK on first paint.
+          'vendor-otel': [
+            '@opentelemetry/api',
+            '@opentelemetry/semantic-conventions',
+            '@opentelemetry/exporter-trace-otlp-http',
+            '@opentelemetry/auto-instrumentations-web',
+            '@opentelemetry/instrumentation-fetch',
+            '@opentelemetry/sdk-trace-web',
+            '@opentelemetry/resources',
+            '@opentelemetry/instrumentation-user-interaction',
+            '@opentelemetry/instrumentation-xml-http-request',
+          ],
+          // React Query — used by nearly every page. Splitting it out
+          // shrinks per-route chunks. react-query-devtools is left in the
+          // main entry chunk because bundling it with react-query creates
+          // a circular chunk cycle via recharts. react-virtual is used
+          // only transitively (via drei), so it does not need its own
+          // chunk.
+          'vendor-tanstack': ['@tanstack/react-query'],
+          // Icon libraries: pulled from many pages. Grouping icons keeps
+          // the tree-shakeable icon sets off the main entry.
+          'vendor-icons': ['@mdi/js', 'lucide-react', '@heroicons/react/24/outline', '@heroicons/react/24/solid'],
+          // Date utilities — pulled in from many pages.
+          'vendor-datetime': ['date-fns'],
         }
       }
     }
   },
   define: {
-    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __BUILD_TIME__: JSON.stringify(buildTime),
     __GIT_HASH__: JSON.stringify(gitHash),
   },
   test: {

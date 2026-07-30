@@ -4,29 +4,44 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Idempotency;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure.Authorization;
+using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 using FluentValidation;
 using FluentValidation.Results;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
+using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
+using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
+using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -45,6 +60,7 @@ public class PrintersController(
     Services.Catalog.ICatalogService catalogService,
     IValidator<CreatePrinterFromDiscoveryDto> validator,
     IDiscoveryProxyService discoveryProxyService,
+    IDiscoverySessionRegistry discoverySessions,
     Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
@@ -52,15 +68,25 @@ public class PrintersController(
     ISettingsService settingsService,
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
     IPrintFarmerTelemetryService telemetryService,
+    Farm.Infrastructure.Services.BedTypes.IBedTypeService bedTypeService,
     Farm.Infrastructure.Services.IProfileImportService? profileImportService = null,
-    IPrinterVersionCache printerVersionCache = null!)
+    IPrinterVersionCache printerVersionCache = null!,
+    Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? dispatchClaimService = null,
+    Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? queueResourceAuthorization = null,
+    Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? physicalActuationService = null,
+    AppDbContext? appDbContext = null)
     : ControllerBase
 {
+    private readonly Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
+    private readonly Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
+    private readonly Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? _physicalActuationService = physicalActuationService;
+    private readonly AppDbContext? _appDbContext = appDbContext;
     private readonly ILogger<PrintersController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Printers.IPrintersService _printersService = printersService;
     private readonly Services.Catalog.ICatalogService _catalogService = catalogService;
     private readonly IValidator<CreatePrinterFromDiscoveryDto> _validator = validator;
     private readonly IDiscoveryProxyService _discoveryProxyService = discoveryProxyService;
+    private readonly IDiscoverySessionRegistry _discoverySessions = discoverySessions;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
@@ -70,12 +96,13 @@ public class PrintersController(
     private readonly ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService _printerSessionTimelineService = printerSessionTimelineService;
     private readonly IPrintFarmerTelemetryService _telemetryService = telemetryService;
+    private readonly Farm.Infrastructure.Services.BedTypes.IBedTypeService _bedTypeService = bedTypeService;
 
     /// <summary>
-    /// Retrieves camera URLs for all printers without making external API calls.
+    /// Retrieves same-origin camera proxy URLs for enabled printers.
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>A lightweight list of all printers with their configured camera URLs.</returns>
+    /// <returns>A lightweight list of enabled printers with authenticated proxy URLs.</returns>
     /// <response code="200">Returns the list of printers with camera URL information.</response>
     [HttpGet("camera-urls")]
     [ProducesResponseType(typeof(IEnumerable<PrinterCameraUrlsDto>), 200)]
@@ -85,7 +112,7 @@ public class PrintersController(
         try
         {
             PrinterCameraUrlsDto[] dtos = await _printersService.GetCameraUrlsAsync(ct);
-            return Ok(dtos.ToList());
+            return Ok(dtos.Select(CreateSafeCameraUrls).ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -95,7 +122,14 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/camera-urls. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}\n{StackTrace}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message, ex.StackTrace);
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Camera routes could not be read",
+                type: "https://printfarmer.dev/problems/camera-routes-read-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "camera_routes_read_failed",
+                });
         }
     }
 
@@ -222,11 +256,18 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
         }
 
-        _logger.LogInformation("Testing connection to {RequestServerUrl} with backend {RequestBackend}", request.ServerUrl, request.Backend);
+        _logger.LogInformation("Testing printer connection with backend {RequestBackend}", request.Backend);
 
         try
         {
-            TestConnectionResponse result = await TestBackendConnectionAsync(serverUri, request.Backend, request.ApiKey, request.BackendPort, ct);
+            TestConnectionResponse result = await TestBackendConnectionAsync(
+                serverUri,
+                request.Backend,
+                request.ApiKey,
+                request.Username,
+                request.Password,
+                request.BackendPort,
+                ct);
             return Ok(result);
         }
         catch (Exception ex)
@@ -244,16 +285,24 @@ public class PrintersController(
     /// Tests connection to a printer backend based on the backend type.
     /// </summary>
     private async Task<TestConnectionResponse> TestBackendConnectionAsync(
-        Uri serverUrl, PrinterBackend backend, string? apiKey, int? backendPort, CancellationToken ct)
+        Uri serverUrl,
+        PrinterBackend backend,
+        string? apiKey,
+        string? username,
+        string? password,
+        int? backendPort,
+        CancellationToken ct)
     {
         using HttpClient httpClient = _httpClientFactory.CreateClient();
         httpClient.Timeout = TimeSpan.FromSeconds(10);
 
+        string? effectiveApiKey = apiKey ?? password;
+
         return backend switch
         {
-            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort ?? 7125, ct),
-            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, ct),
-            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, apiKey, ct),
+            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, username, password, ct),
+            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, effectiveApiKey, ct),
             PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
             PrinterBackend.FlashForge => await TestFlashForgeConnectionAsync(serverUrl, backendPort, ct),
             _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
@@ -326,44 +375,28 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Tests Moonraker connection by hitting /printer/info endpoint.
+    /// Tests Moonraker connection by probing stock /printer/info and Snapmaker U1 /machine/system_info endpoints.
     /// </summary>
     private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
-        HttpClient httpClient, Uri serverUrl, int backendPort, CancellationToken ct)
+        HttpClient httpClient, Uri serverUrl, int? backendPort, CancellationToken ct)
     {
-        // Build URL with backend port (default 7125 for Moonraker API)
-        var builder = new UriBuilder(serverUrl)
-        {
-            Port = backendPort,
-            Path = "/printer/info"
-        };
-
-        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
-
         try
         {
-            HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+            MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(httpClient, serverUrl, backendPort, ct);
 
-            if (response.IsSuccessStatusCode)
-            {
-                string content = await response.Content.ReadAsStringAsync(ct);
-
-                // Moonraker responses are wrapped in "result"
-                if (content.Contains("\"result\"") || content.Contains("hostname"))
+            return resolution is not null
+                ? new TestConnectionResponse
                 {
-                    return new TestConnectionResponse
-                    {
-                        Success = true,
-                        Message = "Successfully connected to Moonraker printer"
-                    };
+                    Success = true,
+                    Message = resolution.IsSnapmakerU1
+                        ? $"Successfully connected to Snapmaker U1 Moonraker printer on port {resolution.BackendPort}"
+                        : $"Successfully connected to Moonraker printer on port {resolution.BackendPort}"
                 }
-            }
-
-            return new TestConnectionResponse
-            {
-                Success = false,
-                Message = $"Moonraker returned status {(int)response.StatusCode}: {response.ReasonPhrase}"
-            };
+                : new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "Moonraker did not respond on the standard 7125 endpoint or Snapmaker U1 port 80 endpoint"
+                };
         }
         catch (TaskCanceledException)
         {
@@ -379,15 +412,19 @@ public class PrintersController(
     /// Tests PrusaLink connection by hitting /api/v1/status endpoint with Digest Authentication.
     /// </summary>
     private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
-        Uri serverUrl, string? apiKey, CancellationToken ct)
+        Uri serverUrl, string? apiKey, string? username, string? password, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(apiKey))
+        string? credentialSecret = !string.IsNullOrWhiteSpace(password) ? password : apiKey;
+        if (string.IsNullOrWhiteSpace(credentialSecret))
         {
-            return new TestConnectionResponse { Success = false, Message = "API Key is required for PrusaLink printers. Get it from printer Settings → Network → Credentials" };
+            return new TestConnectionResponse
+            {
+                Success = false,
+                Message = "PrusaLink credentials are required. Use the printer's Network → Credentials password/API key."
+            };
         }
 
-        // PrusaLink uses "maker" as the username with the API key as the password for digest auth
-        const string username = "maker";
+        string effectiveUsername = !string.IsNullOrWhiteSpace(username) ? username : "maker";
 
         var builder = new UriBuilder(serverUrl)
         {
@@ -395,7 +432,7 @@ public class PrintersController(
         };
 
         // Create a new HttpClient with Digest auth handler for this test
-        using var digestHandler = new DigestAuthHandler(username, apiKey);
+        using var digestHandler = new DigestAuthHandler(effectiveUsername, credentialSecret);
         using var digestClient = new HttpClient(digestHandler)
         {
             Timeout = TimeSpan.FromSeconds(10)
@@ -421,7 +458,7 @@ public class PrintersController(
                 return new TestConnectionResponse
                 {
                     Success = false,
-                    Message = "Invalid API key - authentication failed. Verify the API key from printer Settings → Network → Credentials."
+                    Message = "Invalid PrusaLink credentials - authentication failed. Verify the password/API key from printer Settings → Network → Credentials."
                 };
             }
 
@@ -504,30 +541,58 @@ public class PrintersController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
+    /// <param name="doneWithinMinutes">Only return printers estimated to finish within this many minutes.</param>
+    /// <param name="doneAfterMinutes">Only return printers estimated to finish after this many minutes.</param>
+    /// <param name="bedTypeId">Filter printers by bed type ID.</param>
     /// <returns>A complete list of all printers with configuration and live status merged.</returns>
     /// <response code="200">Returns the list of complete printer data with live status.</response>
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<CompletePrinterDto>), 200)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(CancellationToken ct, [FromQuery] bool includeDisabled = false)
+    public async Task<ActionResult<IEnumerable<CompletePrinterDto>>> GetAsync(
+        CancellationToken ct,
+        [FromQuery] bool includeDisabled = false,
+        [FromQuery] int? doneWithinMinutes = null,
+        [FromQuery] int? doneAfterMinutes = null,
+        [FromQuery] Guid? bedTypeId = null)
     {
         try
         {
             CompletePrinterDto[] dtos = await _printersService.GetAllCompleteDtosAsync(ct);
             bool isAdmin = User.IsInRole("farm_admin");
-            if (isAdmin)
+            IEnumerable<CompletePrinterDto> result = dtos;
+
+            if (!isAdmin)
             {
-                return Ok(dtos);
+                if (includeDisabled)
+                {
+                    return Forbid();
+                }
+
+                result = result.Where(p => p.IsEnabled);
             }
 
-            if (includeDisabled)
+            // Time-based availability filters
+            if (doneWithinMinutes.HasValue)
             {
-                return Forbid();
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneWithinMinutes.Value);
+                result = result.Where(p =>
+                    !p.EstimatedCompletionTimeUtc.HasValue || p.EstimatedCompletionTimeUtc.Value <= cutoff);
             }
 
-            // Filter to only enabled printers for normal users
-            List<CompletePrinterDto> enabledDtos = dtos.Where(p => p.IsEnabled).ToList();
-            return Ok(enabledDtos);
+            if (doneAfterMinutes.HasValue)
+            {
+                DateTime cutoff = DateTime.UtcNow.AddMinutes(doneAfterMinutes.Value);
+                result = result.Where(p =>
+                    p.EstimatedCompletionTimeUtc.HasValue && p.EstimatedCompletionTimeUtc.Value > cutoff);
+            }
+
+            if (bedTypeId.HasValue)
+            {
+                result = result.Where(p => p.BedTypeId == bedTypeId.Value);
+            }
+
+            return Ok(result.ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -728,6 +793,53 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Lists object-exclusion metadata for the current print job.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>The current job's objects and exclusion state.</returns>
+    [HttpGet("{id:guid}/printjob/objects")]
+    [ProducesResponseType(typeof(PrintJobObjectListDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<PrintJobObjectListDto>> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
+    {
+        PrintJobObjectListDto? objects = await _printersService.GetPrintJobObjectsAsync(id, ct);
+        if (objects is null)
+        {
+            return NotFound(new { message = $"Printer {id} not found" });
+        }
+
+        return Ok(objects);
+    }
+
+    /// <summary>
+    /// Excludes a single object from the current print job.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">Object exclusion request.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Command execution result.</returns>
+    [HttpPost("{id:guid}/printjob/objects/exclude")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> ExcludePrintJobObjectAsync(Guid id, [FromBody] ExcludePrintJobObjectRequest request, CancellationToken ct)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new CommandResult(false, "Object name is required."));
+        }
+
+        return await ExecuteActiveCommandControlAsync(
+            id,
+            "exclude_object",
+            "exclude_object",
+            token => _printersService.ExcludePrintJobObjectAsync(id, request.Name, token),
+            ct);
+    }
+
+    /// <summary>
     /// Gets the current status of a specific printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
@@ -775,6 +887,33 @@ public class PrintersController(
         try
         {
             PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct);
+            AppDbContext? revisionDb = ResolveAppDbContext();
+            if (revisionDb is not null)
+            {
+                var revision = await revisionDb.Printers
+                    .AsNoTracking()
+                    .Where(printer => printer.Id == id)
+                    .Select(printer => new
+                    {
+                        printer.RowVersion,
+                        printer.ConfigurationRevision,
+                    })
+                    .SingleOrDefaultAsync(ct);
+                if (revision is not null)
+                {
+                    string? encoded = EncodeRowVersion(revision.RowVersion);
+                    dto = dto with
+                    {
+                        RowVersion = encoded,
+                        ConfigurationRevision = revision.ConfigurationRevision,
+                    };
+                    if (encoded is not null)
+                    {
+                        Response.Headers.ETag = $"\"{encoded}\"";
+                    }
+                }
+            }
+
             return Ok(dto);
         }
         catch (KeyNotFoundException)
@@ -792,15 +931,21 @@ public class PrintersController(
     /// Gets detailed information about a specific printer including manufacturer, model, and configuration.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="fallbackGroupService">Injected fallback-group service used to include per-printer fallback chains in the details payload.</param>
+    /// <param name="featureGate">Operator feature gate consulted to decide whether multi-slot fallback chains are exposed (issue #711, FIX E).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Detailed printer information including manufacturer, model, purchase information, and settings.</returns>
+    /// <returns>Detailed printer information including manufacturer, model, purchase information, settings, and configured fallback groups.</returns>
     /// <response code="200">Returns detailed printer information.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpGet("{id:guid}/details")]
     [ProducesResponseType(typeof(PrinterDetailsDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(Guid id, CancellationToken ct)
+    public async Task<ActionResult<PrinterDetailsDto>> GetDetailsAsync(
+        Guid id,
+        [FromServices] Farm.Infrastructure.Services.Printers.IFilamentFallbackGroupService fallbackGroupService,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
+        CancellationToken ct)
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
@@ -811,12 +956,22 @@ public class PrintersController(
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
 
+        // Only expose per-tool attribution surface (SupportsPerToolAttribution flag and
+        // per-toolhead CumulativePrintHours) when the multi-slot-fallback operator feature
+        // is on AND the printer's persisted domain capability flag is true (issue #711, F6
+        // backend). When either condition fails, both the capability flag and the odometer
+        // values collapse to their unset defaults (false / null) so #719 UI consumers see a
+        // deterministic "not applicable" shape rather than stale or fabricated wear.
+        bool multiSlotFallbackEnabled = await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+        bool perToolAttributionActive = multiSlotFallbackEnabled && p.SupportsPerToolAttribution;
+
         // Create capabilities DTO from Printer entity fields (merged from legacy PrinterCapabilities)
         // This provides backward compatibility while we transition to using Toolheads directly
         PrinterCapabilitiesDto? capabilitiesDto = new PrinterCapabilitiesDto(
             Guid.NewGuid(), // PrinterCapabilities.Id - generate a temporary ID since this entity is being phased out
             p.Id,
             p.Name,
+            p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             primaryToolhead?.NozzleModel?.Diameter ?? 0.4,  // Nozzle diameter from NozzleModel
             primaryToolhead?.SupportedMaterials,
             p.MaxBuildVolumeX,
@@ -831,8 +986,7 @@ public class PrintersController(
             p.MaxPrintSpeed,
             p.CurrentMaterial,
             p.CurrentSpoolId,
-            p.IsAvailable,
-            p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow);
+            p.IsAvailable);
 
         // Map toolheads to DTOs with hardware tracking fields
         ToolheadDto[]? toolheadDtos = p.Toolheads?.OrderBy(t => t.Index).Select(t => new ToolheadDto(
@@ -859,8 +1013,25 @@ public class PrintersController(
             t.ToolheadType,
             t.CurrentSpoolId,
             t.CurrentMaterial,
-            t.CurrentFilamentColor)).ToArray();
+            t.CurrentFilamentColor,
 
+            // Only project the per-toolhead odometer when the capability is active for this
+            // printer; otherwise emit explicit null so consumers can distinguish "no
+            // attribution available" from "zero hours accrued" (a supported printer with a
+            // fresh baseline still returns 0.0 here).
+            perToolAttributionActive ? t.CumulativePrintHours : null)).ToArray();
+
+        // Only expose fallback chains when the multi-slot-fallback operator feature is on
+        // (issue #711, FIX E); otherwise return an empty list so gated-off clients never
+        // see fallback config.
+        IReadOnlyList<Farm.Infrastructure.Dtos.FilamentFallbackGroupDto> fallbackGroups =
+            multiSlotFallbackEnabled
+                ? await fallbackGroupService.ListForPrinterAsync(id, ct)
+                : [];
+
+        string? rowVersion = p.RowVersion is { Length: > 0 }
+            ? Convert.ToBase64String(p.RowVersion)
+            : null;
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
@@ -890,7 +1061,22 @@ public class PrintersController(
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
             p.MachineHourlyRate,
-            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            p.ZOffsetMm,
+            p.LastZOffsetCalibrationAt,
+            p.UseModelDispatchDefaults,
+            p.BuddyCameraIp,
+            p.NozzleDiameter,
+            p.HasMmu,
+            fallbackGroups,
+            perToolAttributionActive,
+            !string.IsNullOrWhiteSpace(p.ServerUrl),
+            !string.IsNullOrWhiteSpace(p.ApiKey),
+            !string.IsNullOrWhiteSpace(p.Username),
+            !string.IsNullOrWhiteSpace(p.Password),
+            false,
+            false,
+            rowVersion);
     }
 
     /// <summary>
@@ -928,43 +1114,48 @@ public class PrintersController(
         }
 
         _logger.LogInformation("Creating new printer: {DtoName} ({DtoBackend})", dto.Name, dto.Backend);
-
-        // Delegate creation/business logic to the service
-        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
-
-        // Import slicer profiles for this printer's model (pull-based, on-demand import)
-        // Only imports if profiles don't already exist for this model
-        // Use the input DTO since it has ModelId, and the result DTO only has names
-        Guid? modelId = dto.ModelId;
-        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
-        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
-
-        if (modelId.HasValue && modelId.Value != Guid.Empty)
-        {
-            try
-            {
-                if (_profileImportService is not null)
-                {
-                    int imported = await _profileImportService.ImportProfilesForModelAsync(
-                        modelId.Value,
-                        modelName,
-                        manufacturerName,
-                        ct);
-
-                    if (imported > 0)
-                    {
-                        _logger.LogInformation("Imported {Imported} slicer profiles for {ModelName}", imported, modelName);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Log but don't fail printer creation if profile import fails
-                _logger.LogWarning("Failed to import profiles for {ModelName}: {Message}", modelName, ex.Message);
-            }
-        }
+        PrinterDto created = await CreatePrinterAndImportProfilesAsync(dto, ct);
 
         return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
+    }
+
+    private async Task<PrinterDto> CreatePrinterAndImportProfilesAsync(
+        CreatePrinterFromDiscoveryDto dto,
+        CancellationToken ct)
+    {
+        PrinterDto created = await _printersService.CreatePrinterFromDtoAsync(dto, ct);
+        Guid? modelId = dto.ModelId;
+        if (modelId is null || modelId == Guid.Empty || _profileImportService is null)
+        {
+            return created;
+        }
+
+        string modelName = dto.NewModelName ?? created.ModelName ?? "Unknown";
+        string manufacturerName = dto.NewManufacturerName ?? created.ManufacturerName ?? "Unknown";
+        try
+        {
+            int imported = await _profileImportService.ImportProfilesForModelAsync(
+                modelId.Value,
+                modelName,
+                manufacturerName,
+                ct);
+            if (imported > 0)
+            {
+                _logger.LogInformation(
+                    "Imported {Imported} slicer profiles for {ModelName}",
+                    imported,
+                    modelName);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                "Failed to import profiles for {ModelName}: {Message}",
+                modelName,
+                ex.Message);
+        }
+
+        return created;
     }
 
     /// <summary>
@@ -1052,7 +1243,7 @@ public class PrintersController(
 
                 if (existing != null)
                 {
-                    _logger.LogInformation("Printer already registered: {ExistingName} (ServerUrl: {ExistingServerUrl})", existing.Name, existing.ServerUrl);
+                    _logger.LogInformation("Printer already registered: {ExistingName} ({ExistingId})", existing.Name, existing.Id);
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {
@@ -1135,8 +1326,22 @@ public class PrintersController(
             return NotFound();
         }
 
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
         printer.InMaintenance = inMaintenance;
-        await _printersService.SaveChangesAsync(ct);
+        try
+        {
+            await _printersService.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return PrinterRevisionConflict();
+        }
+
+        WritePrinterEtag(printer);
 
         // Optionally, you may want to return the updated DTO with more info
         string? manufacturerName = null;
@@ -1179,7 +1384,9 @@ public class PrintersController(
             BackendPort: printer.BackendPort,
             FrontendPort: printer.FrontendPort,
             BackendUrl: printer.BackendUrl,
-            FrontendUrl: printer.FrontendUrl);
+            FrontendUrl: printer.FrontendUrl,
+            RowVersion: EncodeRowVersion(printer.RowVersion),
+            ConfigurationRevision: printer.ConfigurationRevision);
         return Ok(dto);
     }
 
@@ -1327,6 +1534,11 @@ public class PrintersController(
         if (p is null)
         {
             return NotFound();
+        }
+
+        if (BindPrinterIfMatch(p) is { } precondition)
+        {
+            return precondition;
         }
 
         // Capture decrypted credentials BEFORE any modifications to avoid phantom changes
@@ -1558,7 +1770,7 @@ public class PrintersController(
 
         if (wasMultiMaterial != p.MultiMaterial)
         {
-            _printersService.SyncMmuToolheadsOnEntity(p, wasMultiMaterial);
+            await _printersService.SyncMmuToolheadsOnEntityAsync(p, wasMultiMaterial, ct: ct);
         }
 
         if (dto.SupportsAutoLeveling.HasValue && dto.SupportsAutoLeveling.Value != p.SupportsAutoLeveling)
@@ -1590,6 +1802,32 @@ public class PrintersController(
             p.MachineHourlyRate = dto.MachineHourlyRate.Value;
         }
 
+        if (dto.ZOffsetMm.HasValue && dto.ZOffsetMm.Value != p.ZOffsetMm)
+        {
+            p.ZOffsetMm = dto.ZOffsetMm.Value;
+            p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        }
+
+        if (dto.BedTypeId.HasValue && dto.BedTypeId.Value != p.BedTypeId)
+        {
+            if (dto.BedTypeId.Value == Guid.Empty)
+            {
+                p.BedTypeId = null;
+            }
+            else
+            {
+                var bedType = await _bedTypeService.GetByIdAsync(dto.BedTypeId.Value, ct);
+                if (bedType is null)
+                {
+                    return BadRequest(new { error = $"Bed type '{dto.BedTypeId.Value}' not found" });
+                }
+
+                p.BedTypeId = dto.BedTypeId.Value;
+            }
+        }
+
+        capabilityChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(p, dto);
+
         // Only update LastCapabilityUpdate if capability fields actually changed
         if (capabilityChanged)
         {
@@ -1600,6 +1838,11 @@ public class PrintersController(
             }
 
             p.ServiceState.LastCapabilityUpdate = DateTime.UtcNow;
+        }
+
+        if (dto.UseModelDispatchDefaults.HasValue)
+        {
+            p.UseModelDispatchDefaults = dto.UseModelDispatchDefaults.Value;
         }
 
         // Update toolheads if provided
@@ -1661,6 +1904,10 @@ public class PrintersController(
                         toolheadChanged = true;
                     }
 
+                    toolheadChanged |= Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(
+                        toolhead,
+                        toolheadDto);
+
                     if (toolheadChanged)
                     {
                         toolhead.UpdatedAt = DateTime.UtcNow;
@@ -1697,10 +1944,78 @@ public class PrintersController(
             modelName = mod?.Name;
         }
 
-        // Save all changes (printer + toolhead updates) with concurrency retry.
-        // Background polling services may update the same printer row (e.g. status, temps),
-        // which changes the RowVersion. The retry reloads the token and re-saves.
-        await _printersService.SaveChangesWithRetryAsync(ct);
+        // Auto-create/update/remove Buddy camera when BuddyCameraIp changes
+        if (dto.BuddyCameraIp != null)
+        {
+            string ip = dto.BuddyCameraIp.Trim();
+
+            if (ip.Length == 0)
+            {
+                // Empty string = explicit clear request; skip validation and remove the camera.
+                await _printersService.SyncBuddyCameraAsync(p, ip, ct);
+            }
+            else
+            {
+                // Accept valid IPv4 or IPv6 addresses (including bracketed IPv6 like [fe80::1]).
+                // Only apply the hostname char-blacklist for input that is not a parseable IP.
+                string candidateForParse = ip.StartsWith('[') && ip.EndsWith(']')
+                    ? ip[1..^1]
+                    : ip;
+
+                bool isValidHost;
+                if (IPAddress.TryParse(candidateForParse, out IPAddress? parsedIp))
+                {
+                    // Brackets are only valid around an IPv6 address (RFC 3986 §3.2.2).
+                    // Reject [v4-addr] — it passes TryParse but breaks URL construction
+                    // and is never a valid user intent (admin sees 200, camera never works).
+                    if (ip.StartsWith('[') && parsedIp.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    {
+                        return BadRequest("Invalid BuddyCameraIp: brackets are only valid around an IPv6 address.");
+                    }
+
+                    // Valid IP address; downstream SSRF validation handles range checks.
+                    isValidHost = true;
+                }
+                else
+                {
+                    // Not a parseable IP; treat as hostname and reject injection chars.
+                    bool hasInvalidChar = ip.Any(c =>
+                        c == ':' || c == '/' || c == '\\' || c == '@' || c == '?' || c == '#'
+                        || char.IsControl(c) || char.IsWhiteSpace(c));
+
+                    isValidHost = !hasInvalidChar &&
+                        Uri.CheckHostName(ip) == UriHostNameType.Dns;
+                }
+
+                if (!isValidHost)
+                {
+                    return BadRequest("Invalid BuddyCameraIp: must be a plain IP address or hostname.");
+                }
+
+                // TODO(#428 follow-up): extract a shared CameraHostNormalizer helper that
+                // validates + canonicalizes BuddyCameraIp in one place, removing the split
+                // between controller validation and service URL construction.
+                await _printersService.SyncBuddyCameraAsync(p, ip, ct);
+            }
+        }
+
+        // Backend, multi-material, and topology edits all converge on one equality-guarded
+        // capability derivation before the unit of work commits.
+        _ = PerToolAttributionCapability.Refresh(p);
+
+        // The endpoint is revision-guarded (BindPrinterIfMatch above). A concurrency
+        // conflict must surface as a typed 412 to honor the If-Match contract rather than
+        // silently retrying, so callers can refetch and re-issue against the new revision.
+        try
+        {
+            await _printersService.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return PrinterRevisionConflict();
+        }
+
+        WritePrinterEtag(p);
 
         PrinterDto dtoResponse = new(
             Id: p.Id,
@@ -1729,7 +2044,10 @@ public class PrintersController(
             FrontendPort: p.FrontendPort,
             BackendUrl: p.BackendUrl,
             FrontendUrl: p.FrontendUrl,
-            ObicoEnabled: p.ObicoEnabled);
+            ObicoEnabled: p.ObicoEnabled,
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+            RowVersion: EncodeRowVersion(p.RowVersion),
+            ConfigurationRevision: p.ConfigurationRevision);
 
         return Ok(dtoResponse);
     }
@@ -1891,16 +2209,22 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/home")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.SendHomeAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("home_all", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "home",
+            "home_all",
+            token => _printersService.SendHomeAsync(id, token),
+            ct);
     }
 
     /// <summary>
@@ -1911,16 +2235,22 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homexy")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeXYAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.HomeXYAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("home_xy", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "home_xy",
+            "home_xy",
+            token => _printersService.HomeXYAsync(id, token),
+            ct);
     }
 
     /// <summary>
@@ -1931,22 +2261,31 @@ public class PrintersController(
     /// <returns>Result indicating success or failure of the Z-axis homing operation.</returns>
     /// <response code="200">Returns the command execution result.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
+    /// <response code="409">If the printer is currently busy (e.g., printing).</response>
     /// <response code="500">If there was an error executing the homing command.</response>
     [HttpPost("{id:guid}/homez")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> HomeZAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.HomeZAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("home_z", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "home_z",
+            "home_z",
+            token => _printersService.HomeZAsync(id, token),
+            ct);
     }
 
     [HttpPost("{id:guid}/temps")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> SetTempsAsync(Guid id, [FromBody] Farm.Infrastructure.TempTargets targets, CancellationToken ct)
     {
@@ -1955,15 +2294,21 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, ct);
-        _telemetryService.RecordPrinterOperation("set_temperature", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectOutcomeControlAsync(
+            id,
+            "set_temperature",
+            "set_temperature",
+            token => _printersService.SetTempsAsync(id, targets.Hotend, targets.Bed, token),
+            ct);
     }
 
     [HttpPost("{id:guid}/move")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -1972,15 +2317,21 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectOutcomeControlAsync(
+            id,
+            "move",
+            "move",
+            token => _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, token),
+            ct);
     }
 
     [HttpPost("{id:guid}/moveto")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(409)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> MoveToAsync(Guid id, [FromBody] MoveRequest req, CancellationToken ct)
     {
@@ -1989,97 +2340,439 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
-        bool ok = await _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, ct);
-        _telemetryService.RecordPrinterOperation("move_to", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectOutcomeControlAsync(
+            id,
+            "move_to",
+            "move_to",
+            token => _printersService.MoveToAsync(id, req.X, req.Y, req.Z, req.F, token),
+            ct);
+    }
+
+    private async Task<ActionResult<CommandResult>> ExecuteDirectBooleanControlAsync(
+        Guid printerId,
+        string operation,
+        string telemetryOperation,
+        Func<CancellationToken, Task<bool>> backendCall,
+        CancellationToken ct)
+    {
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            printerId,
+            operation,
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
+        try
+        {
+            bool accepted = await backendCall(ct);
+            _telemetryService.RecordPrinterOperation(
+                telemetryOperation,
+                printerId.ToString(),
+                accepted);
+            if (accepted)
+            {
+                await _physicalActuationService!.CompleteDirectAsync(
+                    begin.Lease,
+                    accepted: true,
+                    ct: ct);
+                return new CommandResult(true, null);
+            }
+
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_outcome_unknown",
+                CancellationToken.None);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The backend did not prove whether the physical command was applied; reconciliation is required."));
+        }
+        catch (OperationCanceledException)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_cancelled_after_send",
+                CancellationToken.None);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_exception",
+                CancellationToken.None);
+            _logger.LogWarning(
+                exception,
+                "Physical operation {Operation} has an unknown outcome on printer {PrinterId}",
+                operation,
+                printerId);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The physical command outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<ActionResult<CommandResult>> ExecuteDirectOutcomeControlAsync(
+        Guid printerId,
+        string operation,
+        string telemetryOperation,
+        Func<CancellationToken, Task<Farm.Infrastructure.Services.Printers.PrinterControlOutcome>> backendCall,
+        CancellationToken ct)
+    {
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            printerId,
+            operation,
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
+        try
+        {
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
+                await backendCall(ct);
+            bool accepted =
+                outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok;
+            _telemetryService.RecordPrinterOperation(
+                telemetryOperation,
+                printerId.ToString(),
+                accepted);
+            if (outcome == Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnreachable)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    begin.Lease,
+                    "backend_unreachable",
+                    CancellationToken.None);
+            }
+            else
+            {
+                await _physicalActuationService!.CompleteDirectAsync(
+                    begin.Lease,
+                    accepted,
+                    accepted ? null : outcome.ToString(),
+                    ct);
+            }
+
+            return MapControlOutcome(outcome);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_exception",
+                CancellationToken.None);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The physical command outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<ActionResult<CommandResult>> ExecuteDirectCommandControlAsync(
+        Guid printerId,
+        string operation,
+        string telemetryOperation,
+        Func<CancellationToken, Task<CommandResult>> backendCall,
+        CancellationToken ct)
+    {
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            printerId,
+            operation,
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
+        try
+        {
+            CommandResult result = await backendCall(ct);
+            _telemetryService.RecordPrinterOperation(
+                telemetryOperation,
+                printerId.ToString(),
+                result.Success);
+            if (result.Success)
+            {
+                await _physicalActuationService!.CompleteDirectAsync(
+                    begin.Lease,
+                    accepted: true,
+                    ct: ct);
+            }
+            else
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    begin.Lease,
+                    "backend_control_outcome_unknown",
+                    CancellationToken.None);
+            }
+
+            return MapCommandResult(result);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_exception",
+                CancellationToken.None);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The physical command outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<ActionResult<CommandResult>> ExecuteActiveCommandControlAsync(
+        Guid printerId,
+        string operation,
+        string telemetryOperation,
+        Func<CancellationToken, Task<CommandResult>> backendCall,
+        CancellationToken ct)
+    {
+        if (_physicalActuationService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(false, "The physical actuation service is unavailable."));
+        }
+
+        PrinterActuationResult begin = await _physicalActuationService.AcquireActiveAsync(
+            printerId,
+            QueueActorIdentity.Resolve(User),
+            operation,
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
+        try
+        {
+            CommandResult result = await backendCall(ct);
+            _telemetryService.RecordPrinterOperation(
+                telemetryOperation,
+                printerId.ToString(),
+                result.Success);
+            if (result.Success)
+            {
+                await _physicalActuationService.CompleteDirectAsync(
+                    begin.Lease,
+                    accepted: true,
+                    ct: ct);
+            }
+            else
+            {
+                await _physicalActuationService.MarkDirectUnknownAsync(
+                    begin.Lease,
+                    "backend_control_outcome_unknown",
+                    CancellationToken.None);
+            }
+
+            return MapCommandResult(result);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            await _physicalActuationService.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_control_exception",
+                CancellationToken.None);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The physical command outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
+        Guid printerId,
+        string operation,
+        CancellationToken ct)
+    {
+        if (_physicalActuationService is null)
+        {
+            return new PrinterActuationResult(
+                PrinterActuationResultCode.FenceConflict,
+                Detail: "The physical actuation service is unavailable.");
+        }
+
+        return await _physicalActuationService.AcquireDirectAsync(
+            printerId,
+            QueueActorIdentity.Resolve(User),
+            operation,
+            ct);
+    }
+
+    private async Task<ActionResult<CommandResult>> QueueLifecycleControlAsync(
+        Guid printerId,
+        string operation,
+        string telemetryOperation,
+        CancellationToken ct)
+    {
+        if (_physicalActuationService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(false, "The physical actuation service is unavailable."));
+        }
+
+        PrinterActuationResult queued = await _physicalActuationService.QueueLifecycleAsync(
+            printerId,
+            QueueActorIdentity.Resolve(User),
+            operation,
+            ct);
+        _telemetryService.RecordPrinterOperation(
+            telemetryOperation,
+            printerId.ToString(),
+            queued.Success);
+        return queued.Success
+            ? Accepted(new CommandResult(true, "Attempt-bound control command queued."))
+            : MapActuationDenial(queued);
+    }
+
+    private ActionResult<CommandResult> MapActuationDenial(PrinterActuationResult result) =>
+        result.Code switch
+        {
+            PrinterActuationResultCode.PrinterNotFound =>
+                NotFound(new CommandResult(false, "Printer not found.")),
+            PrinterActuationResultCode.PrinterBusy or
+                PrinterActuationResultCode.FenceConflict or
+                PrinterActuationResultCode.ConcurrencyConflict =>
+                Conflict(new CommandResult(false, result.Detail ?? "Printer is busy.")),
+            _ => StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(false, result.Detail ?? "Physical actuation is unavailable.")),
+        };
+
+    private ActionResult? BindPrinterIfMatch(Printer printer)
+    {
+        AppDbContext? db = ResolveAppDbContext();
+        if (db is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_revision_service_unavailable" });
+        }
+
+        string? supplied = Request.Headers.IfMatch.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = "If-Match is required." });
+        }
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(
+                supplied.Trim().TrimStart('W', '/').Trim('"'));
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { error = "If-Match must be a base-64 encoded ETag." });
+        }
+
+        if (printer.RowVersion is not { Length: > 0 } actual ||
+            !expected.SequenceEqual(actual))
+        {
+            return PrinterRevisionConflict();
+        }
+
+        db.Entry(printer)
+            .Property(candidate => candidate.RowVersion)
+            .OriginalValue = expected;
+        return null;
+    }
+
+    private AppDbContext? ResolveAppDbContext() =>
+        _appDbContext ??
+        HttpContext.RequestServices.GetService<AppDbContext>();
+
+    private ObjectResult PrinterRevisionConflict() =>
+        StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new { error = "printer_revision_conflict" });
+
+    private void WritePrinterEtag(Printer printer)
+    {
+        string? encoded = EncodeRowVersion(printer.RowVersion);
+        if (encoded is not null)
+        {
+            Response.Headers.ETag = $"\"{encoded}\"";
+        }
+    }
+
+    private static string? EncodeRowVersion(byte[]? rowVersion) =>
+        rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : null;
+
+    private ActionResult<CommandResult> MapControlOutcome(Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome)
+    {
+        return outcome switch
+        {
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.Ok =>
+                new CommandResult(true, null),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.NotFound =>
+                NotFound(new CommandResult(false, "Printer not found.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendBusy =>
+                Conflict(new CommandResult(false, "Printer firmware refused the command (busy).")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnsupported =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend does not support this command.")),
+            Farm.Infrastructure.Services.Printers.PrinterControlOutcome.BackendUnreachable =>
+                StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Backend unreachable or returned an error.")),
+            _ => StatusCode(StatusCodes.Status502BadGateway, new CommandResult(false, "Command failed.")),
+        };
     }
 
     [HttpPost("{id:guid}/pause")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> PauseAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _printersService.FindByIdAsync(id, ct);
-        if (printer is null)
-        {
-            return NotFound(new CommandResult(false, "Printer not found."));
-        }
-
-        bool ok = await _printersService.PauseAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("pause", id.ToString(), ok);
-
-        return ok
-            ? new CommandResult(true, null)
-            : StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "Pause failed. Printer may be offline or backend does not support pausing."));
+        return await QueueLifecycleControlAsync(id, "pause", "pause", ct);
     }
 
     [HttpPost("{id:guid}/resume")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> ResumeAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _printersService.FindByIdAsync(id, ct);
-        if (printer is null)
-        {
-            return NotFound(new CommandResult(false, "Printer not found."));
-        }
-
-        bool ok = await _printersService.ResumeAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("resume", id.ToString(), ok);
-
-        return ok
-            ? new CommandResult(true, null)
-            : StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "Resume failed. Printer may be offline or backend does not support resuming."));
+        return await QueueLifecycleControlAsync(id, "resume", "resume", ct);
     }
 
     [HttpPost("{id:guid}/cancel")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> CancelAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _printersService.FindByIdAsync(id, ct);
-        if (printer is null)
-        {
-            return NotFound(new CommandResult(false, "Printer not found."));
-        }
-
-        bool ok = await _printersService.CancelPrintAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("cancel", id.ToString(), ok);
-
-        return ok
-            ? new CommandResult(true, null)
-            : StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "Cancel failed. Printer may be offline or backend does not support cancel."));
+        return await QueueLifecycleControlAsync(id, "cancel", "cancel", ct);
     }
 
     [HttpPost("{id:guid}/emergency-stop")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
-        Printer? printer = await _printersService.FindByIdAsync(id, ct);
-        if (printer is null)
-        {
-            return NotFound(new CommandResult(false, "Printer not found."));
-        }
-
-        bool ok = await _printersService.EmergencyStopAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("emergency_stop", id.ToString(), ok);
-
-        return ok
-            ? new CommandResult(true, null)
-            : StatusCode(
-                StatusCodes.Status502BadGateway,
-                new CommandResult(false, "Emergency stop failed. Printer may be offline or backend does not support stop."));
+        return await QueueLifecycleControlAsync(
+            id,
+            "emergencystop",
+            "emergency_stop",
+            ct);
     }
 
     /// <summary>
@@ -2096,6 +2789,7 @@ public class PrintersController(
     /// Both endpoints execute the same emergency-stop operation.
     /// </remarks>
     [HttpPost("{id:guid}/stop")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -2119,14 +2813,18 @@ public class PrintersController(
     /// This operation is typically used to recover from firmware issues.
     /// </remarks>
     [HttpPost("{id:guid}/firmware-restart")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> FirmwareRestartAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.FirmwareRestartAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("firmware_restart", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "firmware_restart",
+            "firmware_restart",
+            token => _printersService.FirmwareRestartAsync(id, token),
+            ct);
     }
 
     /// <summary>
@@ -2143,47 +2841,165 @@ public class PrintersController(
     /// Motors will remain disabled until explicitly re-enabled via homing or other operations.
     /// </remarks>
     [HttpPost("{id:guid}/disable-motors")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> DisableMotorsAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.DisableMotorsAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("disable_motors", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "disable_motors",
+            "disable_motors",
+            token => _printersService.DisableMotorsAsync(id, token),
+            ct);
     }
 
     /// <summary>
-    /// Sends a raw G-code command to the specified printer.
+    /// Rejects the retired generic raw G-code surface.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="request">The G-code command request containing the script to execute.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Result indicating success or failure of the G-code command.</returns>
-    /// <response code="200">Returns the command execution result.</response>
+    /// <returns>A typed error directing callers to bounded printer-control endpoints.</returns>
     /// <response code="400">If the request body is missing or the gcode string is empty.</response>
-    /// <response code="404">If the printer with the specified ID was not found.</response>
-    /// <response code="500">If there was an error sending the G-code command.</response>
+    /// <response code="410">The generic raw G-code route is permanently disabled.</response>
     /// <remarks>
-    /// Sends arbitrary G-code commands to the printer firmware.
-    /// Commonly used for Klipper macros (LOAD_FILAMENT, UNLOAD_FILAMENT) and standard commands (M600).
-    /// Requires the backend to support G-code execution capability.
+    /// Raw scripts cannot be proven non-starting across firmware dialects, macros, case variants,
+    /// comments, or multiline payloads. Use typed home, movement, temperature, filament, MMU,
+    /// lifecycle, and dispatch endpoints instead.
     /// </remarks>
     [HttpPost("{id:guid}/gcode")]
-    [ProducesResponseType(typeof(CommandResult), 200)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(400)]
-    [ProducesResponseType(404)]
-    [ProducesResponseType(500)]
-    public async Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status410Gone)]
+    public Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.Command))
         {
-            return BadRequest(new CommandResult(false, "G-code command is required."));
+            return Task.FromResult<ActionResult<CommandResult>>(
+                BadRequest(new CommandResult(false, "G-code command is required.")));
         }
 
-        bool ok = await _printersService.SendGcodeAsync(id, request.Command.Trim(), ct);
-        _telemetryService.RecordPrinterOperation("send_gcode", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return Task.FromResult<ActionResult<CommandResult>>(
+            StatusCode(
+                StatusCodes.Status410Gone,
+                new CommandResult(
+                    false,
+                    "Generic raw G-code is disabled. Use a typed printer-control or queue dispatch endpoint.")));
+    }
+
+    // Z-offset calibration endpoint
+
+    /// <summary>
+    /// Saves the calibrated Z-offset for a printer.
+    /// Persists the value to the database and optionally sends save commands to the printer firmware.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The Z-offset save request containing the offset value.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Result indicating success or failure.</returns>
+    /// <response code="200">Z-offset saved successfully.</response>
+    /// <response code="400">If the offset value is out of range.</response>
+    /// <response code="404">If the printer was not found.</response>
+    [HttpPost("{id:guid}/z-offset")]
+    [Authorize(Roles = "farm_admin")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<CommandResult>> SaveZOffsetAsync(Guid id, [FromBody] ZOffsetSaveRequest request, CancellationToken ct)
+    {
+        if (request.OffsetMm is null)
+        {
+            return BadRequest(new CommandResult(false, "offsetMm is required"));
+        }
+
+        decimal offsetMm = request.OffsetMm.Value;
+        Printer? p = await _printersService.FindByIdAsync(id, ct);
+        if (p is null)
+        {
+            return NotFound();
+        }
+
+        if (BindPrinterIfMatch(p) is { } precondition)
+        {
+            return precondition;
+        }
+
+        // Send save commands to the printer firmware and verify success
+        PrinterActuationLease? physicalLease = null;
+        if (request.SaveToFirmware)
+        {
+            PrinterActuationResult begin = await BeginPhysicalControlAsync(
+                id,
+                "save_z_offset",
+                ct);
+            if (!begin.Success || begin.Lease is null)
+            {
+                return MapActuationDenial(begin);
+            }
+
+            physicalLease = begin.Lease;
+
+            PrinterBackend backend = (PrinterBackend)p.Backend;
+            string saveCommands = backend switch
+            {
+                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={offsetMm:F3}\nSAVE_CONFIG",
+                _ => $"M851 Z{offsetMm:F3}\nM500"
+            };
+
+            foreach (string cmd in saveCommands.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            {
+                bool sent = await _printersService.SendGcodeAsync(id, cmd.Trim(), ct);
+                if (!sent)
+                {
+                    await _physicalActuationService!.MarkDirectUnknownAsync(
+                        physicalLease,
+                        "z_offset_firmware_outcome_unknown",
+                        CancellationToken.None);
+                    _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), false);
+                    return StatusCode(
+                        StatusCodes.Status503ServiceUnavailable,
+                        new CommandResult(
+                            false,
+                            "The firmware did not prove whether the Z-offset command was applied."));
+                }
+            }
+        }
+
+        // Persist the Z-offset to the database only after firmware success
+        p.ZOffsetMm = offsetMm;
+        p.LastZOffsetCalibrationAt = DateTime.UtcNow;
+        try
+        {
+            await _printersService.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            if (physicalLease is not null)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    physicalLease,
+                    "printer_revision_conflict_after_physical_control",
+                    CancellationToken.None);
+            }
+
+            return PrinterRevisionConflict();
+        }
+
+        if (physicalLease is not null)
+        {
+            await _physicalActuationService!.CompleteDirectAsync(
+                physicalLease,
+                accepted: true,
+                ct: ct);
+        }
+
+        WritePrinterEtag(p);
+
+        _telemetryService.RecordPrinterOperation("save_z_offset", id.ToString(), true);
+        return new CommandResult(true, null);
     }
 
     // Filament control endpoints
@@ -2198,34 +3014,50 @@ public class PrintersController(
     /// <response code="400">If the command failed (backend error, unsupported capability).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/filament-load")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> LoadFilamentAsync(Guid id, CancellationToken ct)
     {
-        CommandResult result = await _printersService.LoadFilamentAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("load_filament", id.ToString(), result.Success);
-        return MapCommandResult(result);
+        return await ExecuteDirectCommandControlAsync(
+            id,
+            "filament_load",
+            "load_filament",
+            token => _printersService.LoadFilamentAsync(id, token),
+            ct);
     }
 
     /// <summary>
-    /// Unloads filament from the extruder.
+    /// Unloads filament from the extruder and returns residual weight of the outgoing spool.
+    /// The residual weight is captured from Spoolman before the unload command is sent so the
+    /// operator's "return to shelf" workflow can log inventory without extra client round-trips.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / MMU-gate / U1-lane index whose spool is being unloaded.
+    /// When omitted, the outgoing spool defaults to <c>Printer.CurrentSpoolId</c> falling
+    /// back to the primary toolhead's <c>CurrentSpoolId</c> — the legacy single-tool path.
+    /// Guided swap flow supplies the target lane on multi-slot printers.
+    /// </param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Result indicating success or failure with descriptive message.</returns>
+    /// <returns>Result including success/failure, message, spool ID, material, and residual weight (g).</returns>
     /// <response code="200">Filament unload command sent successfully.</response>
-    /// <response code="400">If the command failed (backend error, unsupported capability).</response>
+    /// <response code="400">If the command failed (backend error, unsupported capability, unknown toolhead index).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/filament-unload")]
-    [ProducesResponseType(typeof(CommandResult), 200)]
-    [ProducesResponseType(typeof(CommandResult), 400)]
-    [ProducesResponseType(404)]
-    public async Task<ActionResult<CommandResult>> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(FilamentUnloadResult), 200)]
+    [ProducesResponseType(typeof(FilamentUnloadResult), 400)]
+    [ProducesResponseType(typeof(FilamentUnloadResult), 404)]
+    public async Task<ActionResult<FilamentUnloadResult>> UnloadFilamentAsync(
+        Guid id,
+        [FromQuery] int? toolheadIndex,
+        CancellationToken ct)
     {
-        CommandResult result = await _printersService.UnloadFilamentAsync(id, ct);
+        FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
         _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
-        return MapCommandResult(result);
+        return MapFilamentUnloadResult(result);
     }
 
     /// <summary>
@@ -2238,14 +3070,57 @@ public class PrintersController(
     /// <response code="400">If the command failed (backend error, unsupported capability).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/filament-change")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> ChangeFilamentAsync(Guid id, CancellationToken ct)
     {
-        CommandResult result = await _printersService.ChangeFilamentAsync(id, ct);
-        _telemetryService.RecordPrinterOperation("change_filament", id.ToString(), result.Success);
-        return MapCommandResult(result);
+        return await ExecuteDirectCommandControlAsync(
+            id,
+            "filament_change",
+            "change_filament",
+            token => _printersService.ChangeFilamentAsync(id, token),
+            ct);
+    }
+
+    /// <summary>Performs a bounded relative extrusion or retraction for maintenance.</summary>
+    [HttpPost("{id:guid}/extrude")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CommandResult>> ExtrudeFilamentAsync(
+        Guid id,
+        [FromBody] ExtrudeFilamentRequest request,
+        CancellationToken ct)
+    {
+        if (!double.IsFinite(request.DistanceMm) ||
+            request.DistanceMm == 0 ||
+            Math.Abs(request.DistanceMm) > 100)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Extrusion distance must be between -100 and 100 mm and cannot be zero."));
+        }
+
+        if (request.FeedrateMmPerMinute is < 1 or > 6000)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Extrusion feedrate must be between 1 and 6000 mm/min."));
+        }
+
+        string distance = request.DistanceMm.ToString(
+            "0.###",
+            CultureInfo.InvariantCulture);
+        string command =
+            $"M83\nG1 E{distance} F{request.FeedrateMmPerMinute}\nM82";
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "extrude_filament",
+            "extrude_filament",
+            token => _printersService.SendGcodeAsync(id, command, token),
+            ct);
     }
 
     // ── MMU (Multi-Material Unit) control endpoints ──
@@ -2261,6 +3136,7 @@ public class PrintersController(
     /// <response code="400">If the command failed.</response>
     /// <response code="404">If the printer was not found.</response>
     [HttpPost("{id:guid}/mmu/change-tool/{tool:int}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
@@ -2271,9 +3147,12 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
         }
 
-        bool ok = await _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", ct);
-        _telemetryService.RecordPrinterOperation("mmu_change_tool", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_change_tool",
+            "mmu_change_tool",
+            token => _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", token),
+            ct);
     }
 
     /// <summary>
@@ -2283,14 +3162,18 @@ public class PrintersController(
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("{id:guid}/mmu/eject")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuEjectAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.SendGcodeAsync(id, "MMU_EJECT", ct);
-        _telemetryService.RecordPrinterOperation("mmu_eject", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_eject",
+            "mmu_eject",
+            token => _printersService.SendGcodeAsync(id, "MMU_EJECT", token),
+            ct);
     }
 
     /// <summary>
@@ -2300,14 +3183,18 @@ public class PrintersController(
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("{id:guid}/mmu/load")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuLoadAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.SendGcodeAsync(id, "MMU_LOAD", ct);
-        _telemetryService.RecordPrinterOperation("mmu_load", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_load",
+            "mmu_load",
+            token => _printersService.SendGcodeAsync(id, "MMU_LOAD", token),
+            ct);
     }
 
     /// <summary>
@@ -2317,14 +3204,18 @@ public class PrintersController(
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("{id:guid}/mmu/home")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuHomeAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.SendGcodeAsync(id, "MMU_HOME", ct);
-        _telemetryService.RecordPrinterOperation("mmu_home", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_home",
+            "mmu_home",
+            token => _printersService.SendGcodeAsync(id, "MMU_HOME", token),
+            ct);
     }
 
     /// <summary>
@@ -2335,6 +3226,7 @@ public class PrintersController(
     /// <param name="tool">The tool/gate index to pre-select (0-based).</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("{id:guid}/mmu/select-tool/{tool:int}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
@@ -2345,9 +3237,12 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "Tool index must be between 0 and 16."));
         }
 
-        bool ok = await _printersService.SendGcodeAsync(id, $"MMU_SELECT_TOOL TOOL={tool}", ct);
-        _telemetryService.RecordPrinterOperation("mmu_select_tool", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_select_tool",
+            "mmu_select_tool",
+            token => _printersService.SendGcodeAsync(id, $"MMU_SELECT_TOOL TOOL={tool}", token),
+            ct);
     }
 
     /// <summary>
@@ -2357,14 +3252,76 @@ public class PrintersController(
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpPost("{id:guid}/mmu/recover")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> MmuRecoverAsync(Guid id, CancellationToken ct)
     {
-        bool ok = await _printersService.SendGcodeAsync(id, "MMU_RECOVER", ct);
-        _telemetryService.RecordPrinterOperation("mmu_recover", id.ToString(), ok);
-        return !ok ? NotFound() : new CommandResult(true, null);
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            "mmu_recover",
+            "mmu_recover",
+            token => _printersService.SendGcodeAsync(id, "MMU_RECOVER", token),
+            ct);
+    }
+
+    /// <summary>
+    /// Executes a bounded Qidibox or AFC gate action. The client selects typed fields; only
+    /// server-generated allowlisted macros can reach the backend.
+    /// </summary>
+    [HttpPost("{id:guid}/mmu/gate-action")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<CommandResult>> MmuGateActionAsync(
+        Guid id,
+        [FromBody] MmuGateActionRequest request,
+        CancellationToken ct)
+    {
+        string protocol = request.Protocol.Trim().ToLowerInvariant();
+        string action = request.Action.Trim().ToLowerInvariant();
+        string? command = null;
+        if (protocol == "qidibox" &&
+            request.GateIndex is >= 0 and <= 16)
+        {
+            command = action switch
+            {
+                "load" => $"T{request.GateIndex}",
+                "unload" => $"UNLOAD_T{request.GateIndex}",
+                "eject" => $"EJECT_T{request.GateIndex}",
+                _ => null,
+            };
+        }
+        else if (protocol == "afc" &&
+                 request.LaneName is { Length: > 0 } laneName &&
+                 laneName.Length <= 64 &&
+                 Regex.IsMatch(
+                     laneName,
+                     "^[A-Za-z0-9_-]+$",
+                     RegexOptions.CultureInvariant))
+        {
+            command = action switch
+            {
+                "load" => $"CHANGE_TOOL LANE={laneName}",
+                "unload" => $"TOOL_UNLOAD LANE={laneName}",
+                _ => null,
+            };
+        }
+
+        if (command is null)
+        {
+            return BadRequest(new CommandResult(
+                false,
+                "Unsupported or invalid MMU gate action."));
+        }
+
+        return await ExecuteDirectBooleanControlAsync(
+            id,
+            $"mmu_{protocol}_{action}",
+            "mmu_gate_action",
+            token => _printersService.SendGcodeAsync(id, command, token),
+            ct);
     }
 
     /// <summary>
@@ -2378,14 +3335,35 @@ public class PrintersController(
     /// <response code="400">If the request failed (backend error, Spoolman not configured, invalid spool ID).</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     [HttpPost("{id:guid}/active-spool")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> SetActiveSpoolAsync(Guid id, [FromBody] SetActiveSpoolRequest? request, CancellationToken ct)
     {
-        CommandResult result = await _printersService.SetActiveSpoolAsync(id, request?.SpoolId, ct);
-        _telemetryService.RecordPrinterOperation("set_active_spool", id.ToString(), result.Success);
-        return MapCommandResult(result);
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
+            id,
+            "set_active_spool",
+            "set_active_spool",
+            token => _printersService.SetActiveSpoolAsync(id, request?.SpoolId, token),
+            ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -2415,23 +3393,47 @@ public class PrintersController(
     /// <summary>
     /// Assigns a Spoolman spool to a specific toolhead (by index) on a printer.
     /// Fetches spool details from Spoolman to populate material and color information.
+    /// <para>
+    /// The server enforces the guided-swap material check here: if the scanned spool
+    /// does not match the expected material for this toolhead (per active/queued jobs)
+    /// and the request does not carry an explicit override, the assignment is rejected
+    /// with <c>409 Conflict</c> and a typed <see cref="Farm.Infrastructure.Services.Printers.SwapValidationResultDto"/>
+    /// body. This makes the hard-stop authoritative — thin clients cannot bypass it by
+    /// skipping the pre-flight validation endpoint.
+    /// </para>
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.).</param>
-    /// <param name="request">Request containing the spool ID to assign.</param>
+    /// <param name="request">Request containing the spool ID to assign and optional override flag.</param>
+    /// <param name="validator">Injected swap validator (server-enforced material check).</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725) controlling the guided-swap path.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>Result indicating success or failure with descriptive message.</returns>
     /// <response code="200">Spool was assigned successfully.</response>
     /// <response code="400">If the request failed (invalid spool ID, Spoolman not configured).</response>
     /// <response code="404">If the printer or toolhead was not found.</response>
+    /// <response code="409">Material mismatch and no valid override — body carries the SwapValidationResultDto.</response>
+    /// <remarks>
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): the
+    /// server-enforced validation / override-audit path is wrapped in a
+    /// <c>guidedSwapEnabled</c> check. This binding endpoint itself stays available even
+    /// when the guided flow is disabled (it is a direct capability-gated control per the
+    /// #710 acceptance addendum); when disabled it reverts to the pre-#710 blind
+    /// assignment (no pre-flight validation 409, no override log/telemetry).
+    /// </remarks>
     [HttpPut("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [Idempotent(IdempotencyRouteKeys.PrinterToolheadSpoolBind)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 409)]
     public async Task<ActionResult<CommandResult>> SetToolheadSpoolAsync(
         Guid id,
         int toolheadIndex,
         [FromBody] SetActiveSpoolRequest? request,
+        [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
         if (request?.SpoolId is not { } spoolId)
@@ -2439,8 +3441,129 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "SpoolId is required"));
         }
 
-        CommandResult result = await _printersService.SetToolheadSpoolAsync(id, toolheadIndex, spoolId, ct);
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        // #900 revision guard: this binding endpoint is If-Match protected. Verify the
+        // supplied precondition against the current printer revision before any mutation.
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
+        // An override is only honoured when the operator both set the flag AND supplied a
+        // non-empty reason (issue #710 contract: mismatch overrides are recorded with a
+        // reason). A flag without a reason is NOT a valid override.
+        bool hasOverrideIntent = request.OverrideMismatch
+            && !string.IsNullOrWhiteSpace(request.OverrideReason);
+
+        // Guided-swap gate (#725): the server-enforced material check and override audit
+        // only apply when guidedSwapEnabled is on. When disabled, revert to the pre-#710
+        // blind assignment so the direct spool-binding control remains usable.
+        bool guidedSwapEnabled = await featureGate.IsEnabledAsync(
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false);
+
+        // Audit context is built ONLY for an authorized mismatch override and passed to the
+        // service so the durable record commits atomically with the binding (B6). Null on
+        // every other path (ok / disabled / unknown / not-found).
+        Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext? overrideAudit = null;
+
+        if (guidedSwapEnabled)
+        {
+            // B1: ALWAYS validate before any binding — even when an override flag/reason is
+            // present. The override can only be honoured for a genuine mismatch (below).
+            Farm.Infrastructure.Services.Printers.SwapValidationResult validation =
+                await validator.ValidateAsync(id, toolheadIndex, spoolId, ct).ConfigureAwait(false);
+
+            // B2: an invalid / unresolved lane must NEVER fall through to a blind bind.
+            switch (validation.Outcome)
+            {
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+                    return NotFound(new CommandResult(false, $"Printer {id} not found"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                    return NotFound(new CommandResult(false, $"Toolhead index {toolheadIndex} not found on printer {id}"));
+                case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                    return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range"));
+            }
+
+            Farm.Infrastructure.Services.Printers.SwapValidationResultDto body = validation.Result!;
+
+            switch (body.Status)
+            {
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok:
+                    // Normal write permitted; no override, no audit.
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Mismatch:
+                    // Override permitted ONLY for a real mismatch AND explicit flag AND reason.
+                    if (!hasOverrideIntent)
+                    {
+                        return Conflict(body);
+                    }
+
+                    overrideAudit = new Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext(
+                        UserId: User?.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                        UserName: User?.Identity?.Name,
+                        Reason: request.OverrideReason!.Trim(),
+                        ExpectedMaterial: body.Expected,
+                        ScannedMaterial: body.Scanned,
+                        AffectedJobIds: body.AffectedJobs.Select(j => j.JobId).ToList());
+                    break;
+
+                case Farm.Infrastructure.Services.Printers.SwapValidationStatus.Unknown:
+                default:
+                    // B7: never override unknown — no write, no audit.
+                    return Conflict(body);
+            }
+        }
+
+        // C1: the guided binding contract (fail closed on a null commit-time re-resolution)
+        // applies only when the guided-swap feature is on. When disabled we pass Direct so the
+        // generic/legacy direct binding semantics are preserved unchanged. Guided mode is NOT
+        // inferred from overrideAudit — a normal guided `ok` bind has no audit but must still
+        // fail closed.
+        Farm.Infrastructure.Services.Printers.SpoolBindPolicy bindPolicy = guidedSwapEnabled
+            ? Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Guided
+            : Farm.Infrastructure.Services.Printers.SpoolBindPolicy.Direct;
+
+        CommandResult result = await _printersService
+            .SetToolheadSpoolAsync(id, toolheadIndex, spoolId, overrideAudit, bindPolicy, ct)
+            .ConfigureAwait(false);
         _telemetryService.RecordPrinterOperation("set_toolhead_spool", id.ToString(), result.Success);
+
+        // Emit override telemetry ONLY after an authorized-override assignment succeeded. The
+        // durable audit row is written atomically inside the service; this is best-effort
+        // observability on top. A failed write leaves neither audit row nor telemetry.
+        if (overrideAudit is not null && result.Success)
+        {
+            _logger.LogWarning(
+                "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
+                overrideAudit.UserName ?? overrideAudit.UserId ?? "(unknown)",
+                spoolId,
+                id,
+                toolheadIndex,
+                overrideAudit.Reason);
+            _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
+        }
+
+        if (result is ToolheadSpoolBindResult
+            {
+                FailureKind: ToolheadSpoolBindFailureKind.TopologyConflict,
+            })
+        {
+            return Conflict(result);
+        }
+
+        // Advance and surface the printer revision only on a committed binding so callers
+        // can chain subsequent If-Match requests against the new ETag.
+        if (result.Success)
+        {
+            WritePrinterEtag(printer);
+        }
+
         return MapCommandResult(result);
     }
 
@@ -2455,6 +3578,7 @@ public class PrintersController(
     /// <response code="200">Spool was cleared successfully.</response>
     /// <response code="404">If the printer or toolhead was not found.</response>
     [HttpDelete("{id:guid}/toolheads/{toolheadIndex:int}/spool")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> ClearToolheadSpoolAsync(
@@ -2462,9 +3586,32 @@ public class PrintersController(
         int toolheadIndex,
         CancellationToken ct)
     {
-        CommandResult result = await _printersService.ClearToolheadSpoolAsync(id, toolheadIndex, ct);
-        _telemetryService.RecordPrinterOperation("clear_toolhead_spool", id.ToString(), result.Success);
-        return MapCommandResult(result);
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
+            id,
+            "clear_toolhead_spool",
+            "clear_toolhead_spool",
+            token => _printersService.ClearToolheadSpoolAsync(
+                id,
+                toolheadIndex,
+                token),
+            ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -2478,14 +3625,113 @@ public class PrintersController(
     /// <response code="200">Sync completed (gates created or already present).</response>
     /// <response code="404">If the printer was not found.</response>
     [HttpPost("{id:guid}/toolheads/ensure-mmu")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<CommandResult>> EnsureMmuToolheadsAsync(
         Guid id,
         CancellationToken ct)
     {
-        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(id, ct);
-        return MapCommandResult(result);
+        Printer? printer = await _printersService.FindByIdAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
+        ActionResult<CommandResult> result = await ExecuteDirectCommandControlAsync(
+            id,
+            "ensure_mmu_toolheads",
+            "ensure_mmu_toolheads",
+            token => _printersService.EnsureMmuToolheadsAsync(id, token),
+            ct);
+        if (result.Result is OkObjectResult)
+        {
+            WritePrinterEtag(printer);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Validates a scanned Spoolman spool against the expected material for a specific
+    /// toolhead on the given printer. Thin endpoint that backs the guided filament swap flow.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="toolheadIndex">Zero-based toolhead index (T0, T1, T2, ...).</param>
+    /// <param name="spoolId">Spoolman spool identifier being scanned.</param>
+    /// <param name="validator">Injected swap validator service.</param>
+    /// <param name="featureGate">Injected operator-feature gate (#725).</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>Typed validation result describing ok/mismatch, expected/scanned material, and affected jobs.</returns>
+    /// <response code="200">Validation completed (ok or mismatch result in body).</response>
+    /// <response code="400">If the query is missing or invalid (e.g., spoolId missing).</response>
+    /// <response code="404">If the printer or toolhead was not found, or the guided-swap feature is disabled (ProblemDetails code=featureDisabled).</response>
+    /// <remarks>
+    /// Operator-feature gate integration (issue OlyForge3D/PrintFarmer#725): this guided-swap
+    /// validation endpoint is gated by <c>guidedSwapEnabled</c>. When disabled it short-circuits
+    /// to <c>404 Not Found</c> with ProblemDetails extension <c>code: "featureDisabled"</c> before
+    /// any read or telemetry, matching the shape defined by #725.
+    /// </remarks>
+    [HttpGet("{id:guid}/toolheads/{toolheadIndex:int}/swap-validation")]
+    [ProducesResponseType(typeof(Farm.Infrastructure.Services.Printers.SwapValidationResultDto), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<Farm.Infrastructure.Services.Printers.SwapValidationResultDto>> GetToolheadSwapValidationAsync(
+        Guid id,
+        int toolheadIndex,
+        [FromQuery] int? spoolId,
+        [FromServices] Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator validator,
+        [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
+        CancellationToken ct)
+    {
+        // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
+        // ProblemDetails before any read/validation/telemetry.
+        if (!await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false))
+        {
+            return Farm.Web.Api.Infrastructure.OperatorFeatures.OperatorFeatureProblemDetails.NotFound(
+                featureGate,
+                Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap);
+        }
+
+        if (spoolId is null || spoolId <= 0)
+        {
+            return BadRequest(new CommandResult(false, "spoolId query parameter is required and must be positive."));
+        }
+
+        if (toolheadIndex < 0)
+        {
+            return BadRequest(new CommandResult(false, "toolheadIndex must be zero or greater."));
+        }
+
+        Farm.Infrastructure.Services.Printers.SwapValidationResult validation = await validator
+            .ValidateAsync(id, toolheadIndex, spoolId.Value, ct)
+            .ConfigureAwait(false);
+
+        switch (validation.Outcome)
+        {
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.PrinterNotFound:
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadNotFound:
+                return NotFound();
+            case Farm.Infrastructure.Services.Printers.SwapValidationOutcome.ToolheadOutOfRange:
+                return BadRequest(new CommandResult(false, $"Toolhead index {toolheadIndex} is out of range."));
+        }
+
+        Farm.Infrastructure.Services.Printers.SwapValidationResultDto? result = validation.Result;
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        _telemetryService.RecordPrinterOperation(
+            "swap_validation",
+            id.ToString(),
+            result.Status == Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok);
+        return result;
     }
 
     // Camera control endpoints
@@ -2537,17 +3783,16 @@ public class PrintersController(
     }
 
     /// <summary>
-    /// Retrieves the camera stream and snapshot URLs for the specified printer.
+    /// Retrieves authenticated same-origin camera proxy URLs for the specified printer.
     /// </summary>
     /// <param name="id">The unique identifier of the printer.</param>
     /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>Object containing stream and snapshot URLs (may be null if camera not supported).</returns>
+    /// <returns>Object containing relative stream and snapshot proxy URLs.</returns>
     /// <response code="200">Returns the camera URLs.</response>
     /// <response code="404">If the printer with the specified ID was not found or camera is not available.</response>
     /// <remarks>
-    /// Returns the URLs for live camera streaming and snapshot capture.
-    /// Either or both URLs may be null depending on printer capabilities and configuration.
-    /// Frontend should validate URL accessibility before attempting to load.
+    /// Raw camera targets remain server-side so private network details and embedded
+    /// camera credentials are never disclosed to API clients.
     /// </remarks>
     [HttpGet("{id:guid}/camera/url")]
     [ProducesResponseType(typeof(CameraUrlResult), 200)]
@@ -2555,10 +3800,106 @@ public class PrintersController(
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
-        return streamUrl == null && snapshotUrl == null ? NotFound() : new CameraUrlResult(streamUrl, snapshotUrl);
+        return streamUrl == null && snapshotUrl == null
+            ? NotFound()
+            : new CameraUrlResult(
+                streamUrl == null ? null : GetCameraProxyPath(id, "stream"),
+                snapshotUrl == null ? null : GetCameraProxyPath(id, "snapshot"));
     }
 
+    /// <summary>Streams camera content without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/camera/stream")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraStreamAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: false, ct);
+
+    /// <summary>Returns a camera snapshot without disclosing its private target URL.</summary>
+    [HttpGet("{id:guid}/camera/snapshot")]
+    [ProducesResponseType(typeof(FileStreamResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(502)]
+    public Task<IActionResult> ProxyCameraSnapshotAsync(Guid id, CancellationToken ct) =>
+        ProxyCameraAsync(id, useSnapshot: true, ct);
+
+    private static PrinterCameraUrlsDto CreateSafeCameraUrls(PrinterCameraUrlsDto camera) =>
+        new(
+            camera.Id,
+            camera.Name,
+            camera.CameraStreamUrl == null ? null : GetCameraProxyPath(camera.Id, "stream"),
+            camera.CameraSnapshotUrl == null ? null : GetCameraProxyPath(camera.Id, "snapshot"));
+
+    private static string GetCameraProxyPath(Guid printerId, string kind) =>
+        $"/api/printers/{printerId:D}/camera/{kind}";
+
+    private async Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)
+    {
+        (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
+        string? target = useSnapshot ? snapshotUrl : streamUrl;
+        if (target is null)
+        {
+            return NotFound();
+        }
+
+        if (!Uri.TryCreate(target, UriKind.Absolute, out Uri? targetUri) ||
+            (targetUri.Scheme != Uri.UriSchemeHttp && targetUri.Scheme != Uri.UriSchemeHttps))
+        {
+            _logger.LogWarning("Camera target for printer {PrinterId} is not an HTTP(S) URL", id);
+            return CameraProxyProblem("camera_target_invalid", "The configured camera target is invalid.");
+        }
+
+        try
+        {
+            HttpClient client = _httpClientFactory.CreateClient();
+            using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
+            HttpResponseMessage response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Camera proxy request for printer {PrinterId} returned {StatusCode}",
+                    id,
+                    response.StatusCode);
+                response.Dispose();
+                return CameraProxyProblem("camera_upstream_failed", "The camera did not return a successful response.");
+            }
+
+            Stream content = await response.Content.ReadAsStreamAsync(ct);
+            HttpContext.Response.RegisterForDispose(response);
+            string contentType = response.Content.Headers.ContentType?.ToString() ?? "application/octet-stream";
+            if (response.Content.Headers.ContentLength is long contentLength)
+            {
+                HttpContext.Response.ContentLength = contentLength;
+            }
+
+            return File(content, contentType);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return CameraProxyProblem("camera_upstream_timeout", "The camera request timed out.");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Camera proxy request failed for printer {PrinterId}", id);
+            return CameraProxyProblem("camera_upstream_unavailable", "The camera is unavailable.");
+        }
+    }
+
+    private ObjectResult CameraProxyProblem(string code, string title) =>
+        Problem(
+            statusCode: StatusCodes.Status502BadGateway,
+            title: title,
+            type: $"https://printfarmer.dev/problems/{code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+
     [HttpPost("{id:guid}/files/upload")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(UploadGcodeResultDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -2575,25 +3916,70 @@ public class PrintersController(
             return BadRequest("File must be a .gcode file");
         }
 
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            id,
+            "gcode_upload",
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return begin.Code == PrinterActuationResultCode.PrinterNotFound
+                ? NotFound(new { error = "printer_not_found" })
+                : Conflict(new
+                {
+                    error = "physical_control_fence_conflict",
+                    detail = begin.Detail,
+                });
+        }
+
         try
         {
             await using Stream fileStream = file.OpenReadStream();
             bool success = await _printersService.UploadGcodeAsync(id, file.FileName, fileStream, ct);
+            if (!success)
+            {
+                await _physicalActuationService!.MarkDirectUnknownAsync(
+                    begin.Lease,
+                    "backend_upload_outcome_unknown",
+                    CancellationToken.None);
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new { error = "backend_upload_outcome_unknown" });
+            }
 
-            return !success ? NotFound() : Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
+            await _physicalActuationService!.CompleteDirectAsync(
+                begin.Lease,
+                accepted: true,
+                ct: ct);
+            return Ok(new UploadGcodeResultDto("File uploaded successfully", file.FileName));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Upload failed: {ex.Message}");
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "backend_upload_exception",
+                CancellationToken.None);
+            _logger.LogWarning(ex, "G-code upload outcome unknown for printer {PrinterId}", id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "backend_upload_outcome_unknown" });
         }
     }
 
     [HttpGet("{id:guid}/files")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(PrinterFileDto[]), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterFileDto[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterFileDto[] files = await _printersService.GetFileListAsync(id, ct);
@@ -2603,9 +3989,15 @@ public class PrintersController(
         {
             return NotFound();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get file list: {ex.Message}");
+            _logger.LogWarning(
+                exception,
+                "Failed to list printer files for {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_list_unavailable" });
         }
     }
 
@@ -2621,6 +4013,7 @@ public class PrintersController(
     /// <response code="404">The printer with the specified ID was not found, or the file does not exist on the printer.</response>
     /// <response code="500">An error occurred while downloading the file from the printer.</response>
     [HttpGet("{id:guid}/files/download")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -2632,12 +4025,20 @@ public class PrintersController(
             return BadRequest(new { error = "filename query parameter is required" });
         }
 
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             byte[]? fileContent = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
             if (fileContent == null)
             {
-                return NotFound(new { error = $"File not found: {filename}" });
+                return NotFound(new { error = "printer_file_not_found" });
             }
 
             // Return the file with appropriate content type
@@ -2654,17 +4055,24 @@ public class PrintersController(
         {
             return NotFound(new { error = "Printer not found" });
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogError(ex, "Failed to download file {Filename} from printer {Id}", filename, id);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = $"Download failed: {ex.Message}" });
+            _logger.LogError(
+                exception,
+                "Failed to download a file from printer {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_download_unavailable" });
         }
     }
 
     // File operations with body-based parameters (handles special characters in filenames)
     [HttpPost("{id:guid}/print")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(StartPrintResultDto), 200)]
     [ProducesResponseType(typeof(CommandResult), 200)]
+    [ProducesResponseType(typeof(CommandResult), 409)]
     [ProducesResponseType(typeof(CommandResult), 500)]
     public async Task<ActionResult<CommandResult>> StartPrintAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
     {
@@ -2673,20 +4081,121 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
+        if (_queueResourceAuthorization is not null &&
+            !await _queueResourceAuthorization.CanAccessPrinterAsync(
+                User,
+                id,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
+        }
+
+        // =====================================================================
+        // Starting a file that already lives on the printer is still a START PATH and
+        // must go through the shared dispatch claim (issue #900, defect 5). Without it,
+        // this endpoint could start a second print on a printer that already holds a
+        // dispatch lease, or on a printer that is disabled/in maintenance.
+        // =====================================================================
+        if (_dispatchClaimService is null)
+        {
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(false, "Dispatch claim service is not available."));
+        }
+
+        string actorSubject = QueueActorIdentity.Resolve(User);
+
+        DispatchClaimResult claim = await _dispatchClaimService.AcquireAdHocClaimAsync(
+            new AdHocDispatchClaimRequest(
+                id,
+                actorSubject,
+                "PrinterFile",
+                request.FileName,
+                UseDeterministicFileName: false),
+            ct);
+
+        if (!claim.Success || claim.Attempt is null)
+        {
+            _logger.LogWarning(
+                "Printer file-start denied on printer {PrinterId}: {Code}", id, claim.ErrorCode);
+
+            return Conflict(new CommandResult(
+                false,
+                $"{claim.ErrorCode}: {claim.ErrorDetail}"));
+        }
+
+        Guid attemptId = claim.Attempt.Id;
+
         try
         {
-            bool success = await _printersService.StartPrintFromFileAsync(id, request.FileName, ct);
-            return !success
-                ? Ok(new CommandResult(false, $"Printer not found or unable to start print for file: {request.FileName}"))
-                : Ok(new CommandResult(true, "Print started successfully"));
+            string backendFileName = claim.Attempt.BackendFileName ?? request.FileName;
+            if (!await _dispatchClaimService.RecordBackendCallStartedAsync(
+                    attemptId,
+                    ct))
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
+
+            bool success = await _printersService.StartPrintFromFileAsync(id, backendFileName, ct);
+
+            if (!success)
+            {
+                bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                    attemptId,
+                    "The legacy backend did not prove whether the start command was accepted.",
+                    CancellationToken.None);
+                if (!applied)
+                {
+                    return Conflict(new CommandResult(
+                        false,
+                        "attempt_superseded: The dispatch attempt no longer owns the printer."));
+                }
+
+                return StatusCode(
+                    StatusCodes.Status503ServiceUnavailable,
+                    new CommandResult(
+                        false,
+                        "The printer start outcome could not be determined; reconciliation is required."));
+            }
+
+            if (!await _dispatchClaimService.RecordBackendAcceptedAsync(
+                    attemptId,
+                    backendJobId: null,
+                    backendFileIdentity: backendFileName,
+                    ct))
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
+
+            return Ok(new CommandResult(true, "Print started successfully"));
         }
         catch (Exception ex)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to start print: {ex.Message}"));
+            // Unknown outcome — keep the lease and let reconciliation decide.
+            bool applied = await _dispatchClaimService.RecordUnknownOutcomeAsync(
+                attemptId,
+                ex.Message,
+                CancellationToken.None);
+            if (!applied)
+            {
+                return Conflict(new CommandResult(
+                    false,
+                    "attempt_superseded: The dispatch attempt no longer owns the printer."));
+            }
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new CommandResult(false, "The printer start outcome could not be determined; reconciliation is required."));
         }
     }
 
     [HttpDelete("{id:guid}/files")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(typeof(CommandResult), 500)]
     public async Task<ActionResult<CommandResult>> DeleteFileAsync(Guid id, [FromBody] FileOperationRequest request, CancellationToken ct)
@@ -2696,17 +4205,77 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
+        if (!await CanAccessPrinterFilesAsync(
+                id,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+            id,
+            "printer_file_delete",
+            ct);
+        if (!begin.Success || begin.Lease is null)
+        {
+            return MapActuationDenial(begin);
+        }
+
         try
         {
-            bool success = await _printersService.DeletePrinterFileAsync(id, request.FileName, ct);
-            return !success
-                ? Ok(new CommandResult(false, $"Printer not found or unable to delete file: {request.FileName}"))
-                : Ok(new CommandResult(true, "File deleted successfully"));
+            bool success = await _printersService.DeletePrinterFileAsync(
+                id,
+                request.FileName,
+                ct);
+            await _physicalActuationService!.CompleteDirectAsync(
+                begin.Lease,
+                accepted: success,
+                failureCode: success ? null : "printer_file_delete_rejected",
+                ct: ct);
+            return success
+                ? Ok(new CommandResult(true, "File deleted successfully"))
+                : Conflict(new CommandResult(
+                    false,
+                    "The printer did not accept the file deletion."));
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            return StatusCode(StatusCodes.Status500InternalServerError, new CommandResult(false, $"Failed to delete file: {ex.Message}"));
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "printer_file_delete_cancelled_after_send",
+                CancellationToken.None);
+            throw;
         }
+        catch (Exception exception) when (!ct.IsCancellationRequested)
+        {
+            await _physicalActuationService!.MarkDirectUnknownAsync(
+                begin.Lease,
+                "printer_file_delete_outcome_unknown",
+                CancellationToken.None);
+            _logger.LogWarning(
+                exception,
+                "Printer file deletion outcome unknown for {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new CommandResult(
+                    false,
+                    "The file deletion outcome is unknown; reconciliation is required."));
+        }
+    }
+
+    private async Task<bool> CanAccessPrinterFilesAsync(
+        Guid printerId,
+        PrinterGroupAccessLevel accessLevel,
+        CancellationToken ct)
+    {
+        return _queueResourceAuthorization is not null &&
+            await _queueResourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                accessLevel,
+                ct);
     }
 
     /// <summary>
@@ -2744,7 +4313,10 @@ public class PrintersController(
     // ===== HISTORY ENDPOINTS =====
     [HttpGet("{id}/history")]
     [ProducesResponseType(typeof(HistoryListResponse), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
@@ -2757,10 +4329,43 @@ public class PrintersController(
         {
             return NotFound();
         }
+        catch (NotSupportedException ex)
+        {
+            _logger.LogWarning(ex, "History requested for unsupported printer {Id}", id);
+            return BadRequest("History is not available for this printer backend");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Network error retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogError(ex, "Socket error retrieving history for printer {Id}", id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (Farm.Infrastructure.Services.Printers.HistoryAuthorityException ex)
+        {
+            _logger.LogError(ex, "Printer {Id} could not prove the requested history range", id);
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                new
+                {
+                    error = "history_completeness_unproven",
+                    detail = ex.Message,
+                });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get history for printer {Id}: {Message}", id, ex.Message);
-            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve printer history" });
         }
     }
 
@@ -2788,6 +4393,11 @@ public class PrintersController(
             _logger.LogInformation("History job {JobId} not found for printer {Id}", jobId, id);
             return NotFound($"History job {jobId} not found");
         }
+        catch (NotSupportedException ex)
+        {
+            _logger.LogWarning(ex, "History requested for unsupported printer {Id}", id);
+            return BadRequest("History is not available for this printer backend");
+        }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning(ex, "History requested for non-Moonraker printer {Id}", id);
@@ -2797,6 +4407,16 @@ public class PrintersController(
         {
             _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogError(ex, "Socket error retrieving history job {JobId} for printer {Id}", jobId, id);
+            return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {Id}", jobId, id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
@@ -2961,6 +4581,7 @@ public class PrintersController(
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
+    [Authorize(Policy = "farm_admin")]
     public async Task<IActionResult> GetPrinterConfigAsync(Guid id, CancellationToken ct)
     {
         try
@@ -2974,22 +4595,27 @@ public class PrintersController(
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
+            WritePrinterEtag(printer);
+
             // Return printer configuration as JSON object
             var config = new
             {
                 id = printer.Id,
                 name = printer.Name,
-                serverUrl = printer.ServerUrl,
-                originalServerUrl = printer.OriginalServerUrl,
                 backend = printer.Backend,
-                apiKey = printer.ApiKey,
                 backendPort = printer.BackendPort,
                 frontendPort = printer.FrontendPort,
                 notes = printer.Notes,
                 manufacturerId = printer.ManufacturerId,
                 modelId = printer.ModelId,
                 dateAcquired = printer.DateAcquired,
-                inMaintenance = printer.InMaintenance
+                inMaintenance = printer.InMaintenance,
+                serverConfigured = !string.IsNullOrWhiteSpace(printer.ServerUrl),
+                apiKeyConfigured = !string.IsNullOrWhiteSpace(printer.ApiKey),
+                usernameConfigured = !string.IsNullOrWhiteSpace(printer.Username),
+                passwordConfigured = !string.IsNullOrWhiteSpace(printer.Password),
+                rowVersion = EncodeRowVersion(printer.RowVersion),
+                configurationRevision = printer.ConfigurationRevision
             };
 
             return Ok(config);
@@ -2997,11 +4623,14 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Config] Failed to get printer configuration for {Id}: {Message}", id, ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to retrieve printer configuration",
-                error = ex.Message
-            });
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Printer configuration could not be read",
+                type: "https://printfarmer.dev/problems/printer-configuration-read-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "printer_configuration_read_failed",
+                });
         }
     }
 
@@ -3046,6 +4675,11 @@ public class PrintersController(
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
+            if (BindPrinterIfMatch(printer) is { } precondition)
+            {
+                return precondition;
+            }
+
             // Parse configuration updates from JSON
             if (config is JsonElement jsonElement)
             {
@@ -3088,6 +4722,7 @@ public class PrintersController(
 
                 _logger.LogInformation("[Config] Updating printer: {PrinterName} with new configuration", printer.Name);
                 await _printersService.SaveChangesAsync(ct);
+                WritePrinterEtag(printer);
                 _logger.LogInformation("[Config] Successfully updated printer configuration for {Id}", id);
 
                 // Return updated configuration
@@ -3095,10 +4730,7 @@ public class PrintersController(
                 {
                     id = printer.Id,
                     name = printer.Name,
-                    serverUrl = printer.ServerUrl,
-                    originalServerUrl = printer.OriginalServerUrl,
                     backend = printer.Backend,
-                    apiKey = printer.ApiKey,
                     backendPort = printer.BackendPort,
                     frontendPort = printer.FrontendPort,
                     notes = printer.Notes,
@@ -3106,6 +4738,12 @@ public class PrintersController(
                     modelId = printer.ModelId,
                     dateAcquired = printer.DateAcquired,
                     inMaintenance = printer.InMaintenance,
+                    serverConfigured = !string.IsNullOrWhiteSpace(printer.ServerUrl),
+                    apiKeyConfigured = !string.IsNullOrWhiteSpace(printer.ApiKey),
+                    usernameConfigured = !string.IsNullOrWhiteSpace(printer.Username),
+                    passwordConfigured = !string.IsNullOrWhiteSpace(printer.Password),
+                    rowVersion = EncodeRowVersion(printer.RowVersion),
+                    configurationRevision = printer.ConfigurationRevision,
                     message = "Configuration updated successfully"
                 };
 
@@ -3114,14 +4752,21 @@ public class PrintersController(
 
             return BadRequest(new { message = "Configuration must be a JSON object" });
         }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return PrinterRevisionConflict();
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Config] Failed to update printer configuration for {Id}: {Message}", id, ex.Message);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
-            {
-                message = "Failed to update printer configuration",
-                error = ex.Message
-            });
+            return Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Printer configuration could not be updated",
+                type: "https://printfarmer.dev/problems/printer-configuration-update-failed",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = "printer_configuration_update_failed",
+                });
         }
     }
 
@@ -3136,6 +4781,7 @@ public class PrintersController(
     /// <returns>Session ID for tracking discovery progress.</returns>
     /// <response code="200">Discovery started successfully.</response>
     /// <response code="500">Failed to start discovery.</response>
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3143,6 +4789,11 @@ public class PrintersController(
         [FromBody] DiscoveryStreamRequest? request,
         CancellationToken ct)
     {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
         try
         {
             bool autoRegister = request?.AutoRegister ?? false;
@@ -3152,6 +4803,7 @@ public class PrintersController(
             DiscoveryStreamResponse result = await _discoveryProxyService.StartDiscoveryStreamAsync(
                 backends: backends,
                 autoRegister: autoRegister,
+                ownerUserId: userId,
                 cancellationToken: ct);
 
             return Ok(new { sessionId = result.SessionId, message = result.Message });
@@ -3168,6 +4820,73 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Registers a redacted discovery result whose network target remains server-side.
+    /// </summary>
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [HttpPost("discover/{sessionId}/register")]
+    [ProducesResponseType(typeof(PrinterDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PrinterDto>> RegisterDiscoveryResultAsync(
+        [FromRoute] string sessionId,
+        [FromBody] RegisterDiscoveredPrinterRequest request,
+        CancellationToken ct)
+    {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
+        bool isOwner = _discoverySessions.IsSessionOwner(sessionId, userId);
+        bool isFarmAdmin = PrintFarmerPermissions.IsFarmAdmin(User);
+        if (!_discoverySessions.TryGetPrinter(
+                sessionId,
+                request.DiscoveryId,
+                userId,
+                isFarmAdmin,
+                out DiscoveredPrinterDto? discovered) ||
+            discovered is null)
+        {
+            return NotFound(new ProblemDetails
+            {
+                Status = StatusCodes.Status404NotFound,
+                Title = "Discovery result not found",
+                Type = "https://printfarmer.dev/problems/resource_not_found",
+                Extensions = { ["code"] = "resource_not_found" },
+            });
+        }
+
+        if (!isOwner)
+        {
+            _logger.LogInformation(
+                "Audited farm-admin discovery result bypass by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+        }
+
+        CreatePrinterFromDiscoveryDto dto = CreatePrinterFromDiscoveryDto.FromDiscovered(
+            discovered,
+            request.ManufacturerId,
+            request.ModelId,
+            request.NewManufacturerName,
+            request.NewModelName);
+        ValidationResult validationResult = await _validator.ValidateAsync(dto, ct);
+        if (!validationResult.IsValid)
+        {
+            foreach (ValidationFailure error in validationResult.Errors)
+            {
+                ModelState.AddModelError(error.PropertyName, error.ErrorMessage);
+            }
+
+            return BadRequest(ModelState);
+        }
+
+        PrinterDto created = await CreatePrinterAndImportProfilesAsync(dto, ct);
+        _discoverySessions.RemovePrinter(sessionId, request.DiscoveryId);
+        return CreatedAtRoute("GetPrinterById", new { id = created.Id }, created);
+    }
+
+    /// <summary>
     /// Cancel an active discovery stream.
     /// </summary>
     /// <param name="sessionId">The session ID to cancel.</param>
@@ -3175,6 +4894,7 @@ public class PrintersController(
     /// <returns>Cancellation confirmation.</returns>
     /// <response code="200">Discovery cancelled successfully.</response>
     /// <response code="500">Failed to cancel discovery.</response>
+    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
     [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -3182,6 +4902,31 @@ public class PrintersController(
         [FromRoute] string sessionId,
         CancellationToken ct)
     {
+        if (!PrintFarmerPermissions.TryGetUserId(User, out Guid userId))
+        {
+            return Forbid();
+        }
+
+        bool isOwner = _discoverySessions.IsSessionOwner(sessionId, userId);
+        if (!_discoverySessions.SessionExists(sessionId))
+        {
+            return NotFound(new ProblemDetails
+            {
+                Status = StatusCodes.Status404NotFound,
+                Title = "Discovery session not found",
+                Type = "https://printfarmer.dev/problems/resource_not_found",
+                Extensions = { ["code"] = "resource_not_found" },
+            });
+        }
+
+        if (!isOwner)
+        {
+            _logger.LogInformation(
+                "Audited farm-admin discovery session bypass by user {UserId} for session {SessionId}",
+                userId,
+                sessionId);
+        }
+
         try
         {
             _logger.LogInformation("[DISCOVERY] Cancelling discovery stream {SessionId}", sessionId);
@@ -3215,6 +4960,7 @@ public class PrintersController(
     /// <response code="200">Printer assigned to location successfully.</response>
     /// <response code="404">Printer or location not found.</response>
     /// <response code="500">Failed to assign printer to location.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -3262,6 +5008,7 @@ public class PrintersController(
     /// <response code="204">Printer unassigned from location successfully.</response>
     /// <response code="404">Printer not found.</response>
     /// <response code="500">Failed to unassign printer from location.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpDelete("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -3312,5 +5059,28 @@ public class PrintersController(
         }
 
         return BadRequest(result);
+    }
+
+    /// <summary>
+    /// Maps a <see cref="FilamentUnloadResult"/> to the appropriate HTTP status code so callers
+    /// still get consistent 404 semantics when the printer is missing, while success and other
+    /// failure paths preserve the residual-weight payload. Uses the typed
+    /// <see cref="FilamentUnloadFailureKind"/> discriminator rather than brittle message
+    /// substring matching (issue #710 low-severity fix): a missing printer is 404, an invalid
+    /// toolhead index is 400, and any other failure is 400.
+    /// </summary>
+    private ActionResult<FilamentUnloadResult> MapFilamentUnloadResult(FilamentUnloadResult result)
+    {
+        if (result.Success)
+        {
+            return Ok(result);
+        }
+
+        return result.FailureKind switch
+        {
+            FilamentUnloadFailureKind.PrinterNotFound => NotFound(result),
+            FilamentUnloadFailureKind.InvalidToolhead => BadRequest(result),
+            _ => BadRequest(result),
+        };
     }
 }

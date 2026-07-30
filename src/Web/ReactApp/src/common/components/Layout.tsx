@@ -2,57 +2,70 @@ import { LoginModal } from '@/features/auth/components/LoginModal';
 import { RegisterModal } from '@/features/auth/components/RegisterModal';
 import { EmailConfirmationBanner } from '@/features/auth/components/EmailConfirmationBanner';
 import { TasksBadge } from '@/features/tasks';
-import { NotificationBell } from '@/common/components/NotificationBell';
 import { InstallBanner } from '@/common/components/InstallBanner';
-import { useTheme, Theme } from '@/contexts/ThemeContext';
+import clsx from 'clsx';
 import { Button } from '@/common/components/ui';
-import { 
+import {
   HomeIcon,
   PrinterIcon,
   LayersIcon,
   SettingsIcon,
   MenuIcon,
-  AccountCheckIcon,
-  AccountIcon,
-  LogoutIcon,
-  LoginIcon,
-  ChevronDownIcon,
-  UsersIcon,
+  CloseIcon,
   GearIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  EyeIcon,
+  EyeOffIcon,
   FolderOpenIcon,
   HistoryIcon,
-  TagIcon,
   WrenchIcon,
   TrendingUpIcon,
-  LocationIcon,
-  KeyIcon,
-  DatabaseIcon,
-  CheckIcon,
-  CameraIcon,
-  NfcIcon,
-  ChartIcon,
-  ExternalLinkIcon,
   AlertIcon,
   ClipboardListIcon,
   PlayIcon,
   CalendarIcon,
+  LocationIcon,
+  PackageIcon,
 } from '@/common/components/icons/MdiIcons';
+import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
+import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
 import { useSignalRConnection } from '@/common/hooks/useSignalR';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { AutoDispatchStatus } from '@/types/api';
+import { RouteErrorBoundary } from '@/common/components/ErrorBoundary';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import DebugPrinterSignalRPanel from '@/features/printers/components/DebugPrinterSignalRPanel';
 import { printerSignalRService } from '@/services/printer-signalr';
+import { NfcPairingModal } from '@/features/nfc/components/NfcPairingModal';
+import { useNfcPairingSession } from '@/features/nfc/hooks/useNfcPairingSession';
+import { FloatingControlBar } from '@/common/components/FloatingControlBar';
+import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 import { BoxIcon, SpoolIcon } from 'lucide-react';
+import {
+  createDefaultNavPreferences,
+  getNavMoveFocusTarget,
+  getNavPreferencesStorageKey,
+  groupNavItemsByResolvedOrder,
+  loadNavPreferences,
+  moveNavItem,
+  normalizeNavPreferences,
+  resolveNavPreferences,
+  saveNavPreferences,
+  setNavItemHidden,
+  setNavItemPinned,
+} from '@/common/utils/navPreferences';
+import type { NavPreferenceItem, NavPreferenceRole, NavPreferences } from '@/common/utils/navPreferences';
 // Layout now uses <Outlet /> for nested routes
 
 interface NavigationItem {
+  id: string;
   name: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
@@ -63,7 +76,8 @@ interface NavigationItem {
   requiresSlicingCapability?: boolean;
   /** Hide when platform-level model file support is disabled (ARM / Raspberry Pi) */
   requiresModelFiles?: boolean;
-  children?: NavigationItem[];
+  matches?: (pathname: string) => boolean;
+  anchored?: true;
   isDivider?: false;
   isSectionHeader?: false;
 }
@@ -75,202 +89,253 @@ interface NavigationDivider {
 
 interface NavigationSectionHeader {
   name: string;
+  icon: React.ComponentType<{ className?: string }>;
   isSectionHeader: true;
   requiredRole?: string;
 }
 
+interface NavigationGroup {
+  header: Pick<NavigationSectionHeader, 'name' | 'icon'>;
+  items: SectionedNavigationItem[];
+}
+
 type NavigationElement = NavigationItem | NavigationDivider | NavigationSectionHeader;
+type SectionedNavigationItem = NavigationItem & { sectionName: string };
+type MoveButtonDirection = 'up' | 'down';
 
 const isDivider = (item: NavigationElement): item is NavigationDivider => 'isDivider' in item && item.isDivider === true;
 const isSectionHeader = (item: NavigationElement): item is NavigationSectionHeader => 'isSectionHeader' in item && item.isSectionHeader === true;
 const isNavigationItem = (item: NavigationElement): item is NavigationItem => !isDivider(item) && !isSectionHeader(item);
 
 const navigation: NavigationElement[] = [
-  // — Operations —
-  { name: 'Operations', isSectionHeader: true },
-  { name: 'Dashboard', href: '/dashboard', icon: HomeIcon },
+  { name: 'Dashboard', icon: HomeIcon, isSectionHeader: true },
+  { id: 'overview', name: 'Overview', href: '/dashboard', icon: HomeIcon, matches: (pathname) => pathname === '/' || pathname.startsWith('/dashboard') },
   {
-    name: 'Printers',
-    href: '/printers',
-    icon: PrinterIcon,
-    requiredPermission: { resource: 'printers', action: 'read' }
-  },
-  {
-    name: 'Files',
-    href: '/files',
-    icon: FolderOpenIcon,
-    requiredPermission: { resource: 'models', action: 'read' }
-  },
-  {
-    name: 'Projects',
-    href: '/projects',
-    icon: ClipboardListIcon,
-    requiredPermission: { resource: 'models', action: 'read' }
-  },
-  {
-    name: 'Slice',
-    href: '/jobs/new',
-    icon: BoxIcon,
-    requiredPermission: { resource: 'models', action: 'read' },
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
-  {
+    id: 'print-queue',
     name: 'Print Queue',
     href: '/printQueue',
     icon: HistoryIcon,
-    requiredPermission: { resource: 'printers', action: 'read' }
-  },
-  {
-    name: 'Auto-Dispatch',
-    href: '/auto-dispatch',
-    icon: PlayIcon,
-    requiredPermission: { resource: 'printers', action: 'read' }
+    requiredPermission: { resource: 'printers', action: 'read' },
+    matches: (pathname) => pathname.startsWith('/printQueue')
   },
 
-  // — Hardware —
-  { name: 'Hardware', isSectionHeader: true },
-  { 
-    name: 'Filament Inventory', 
-    href: '/spools', 
-    icon: SpoolIcon
+  { name: 'Printers', icon: PrinterIcon, isSectionHeader: true },
+  {
+    id: 'printers',
+    name: 'Printers',
+    href: '/printers',
+    icon: PrinterIcon,
+    requiredPermission: { resource: 'printers', action: 'read' },
+    matches: (pathname) => pathname === '/printers' || /^\/printers\/[^/]+$/.test(pathname)
   },
   {
-    name: 'Cameras',
-    href: '/cameras',
-    icon: CameraIcon
-  },
-  {
-    name: 'NFC Devices',
-    href: '/nfc-devices',
-    icon: NfcIcon
+    id: 'filament-inventory',
+    name: 'Filament Inventory',
+    href: '/spools',
+    icon: SpoolIcon,
+    matches: (pathname) => pathname.startsWith('/spools')
   },
 
-  // — Management —
-  { name: 'Management', isSectionHeader: true },
+  { name: 'Files', icon: FolderOpenIcon, isSectionHeader: true },
   {
-    name: 'Maintenance',
-    href: '/maintenance',
-    icon: WrenchIcon,
-    requiredPermission: { resource: 'printers', action: 'read' }
+    id: 'files',
+    name: 'Files',
+    href: '/files',
+    icon: FolderOpenIcon,
+    requiredPermission: { resource: 'models', action: 'read' },
+    matches: (pathname) => pathname.startsWith('/files')
   },
   {
-    name: 'Statistics',
-    href: '/statistics',
-    icon: ChartIcon,
+    id: 'projects',
+    name: 'Projects',
+    href: '/projects',
+    icon: ClipboardListIcon,
+    requiredPermission: { resource: 'models', action: 'read' },
+    matches: (pathname) => pathname.startsWith('/projects')
   },
   {
-    name: 'Cost Analytics',
-    href: '/statistics/costs',
-    icon: TrendingUpIcon,
-  },
-  {
-    name: 'Analytics',
-    href: '/analytics',
-    icon: TrendingUpIcon,
-  },
-  {
+    id: 'scheduling',
     name: 'Scheduling',
     href: '/scheduling',
     icon: CalendarIcon,
-  },
-  {
-    name: 'API Keys',
-    href: '/profile/api-keys',
-    icon: KeyIcon
+    matches: (pathname) => pathname.startsWith('/scheduling')
   },
 
-  // — Admin —
-  { name: 'Admin', isSectionHeader: true, requiredRole: 'farm_admin' },
+  { name: 'Slicer', icon: BoxIcon, isSectionHeader: true },
   {
-    name: 'Printer Groups',
-    href: '/printer-groups',
-    icon: PrinterIcon,
-    requiredRole: 'farm_admin'
+    id: 'slice-job',
+    name: 'Slice Job',
+    href: '/slicer',
+    icon: BoxIcon,
+    requiredPermission: { resource: 'models', action: 'read' },
+    requiresSlicer: true,
+    requiresSlicingCapability: true,
+    matches: (pathname) => pathname.startsWith('/slicer') || pathname.startsWith('/profiles/import')
+  },
+
+
+
+  { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
+  {
+    id: 'maintenance',
+    name: 'Maintenance',
+    href: '/maintenance',
+    icon: WrenchIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
   },
   {
+    id: 'parts-inventory',
+    name: 'Printed Parts',
+    href: '/parts-inventory',
+    icon: PackageIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
+  },
+  {
+    id: 'locations',
     name: 'Locations',
-    href: '/locations',
+    href: '/locations/dashboard',
     icon: LocationIcon,
-    requiredRole: 'farm_admin'
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname.startsWith('/locations')
   },
   {
+    id: 'analytics',
+    name: 'Analytics',
+    href: '/analytics',
+    icon: TrendingUpIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
+  },
+  {
+    id: 'auto-dispatch',
+    name: 'Auto-Dispatch',
+    href: '/auto-dispatch',
+    icon: PlayIcon,
+    requiredRole: 'farm_admin',
+    anchored: true,
+    matches: (pathname) => pathname.startsWith('/auto-dispatch')
+  },
+  {
+    id: 'catalog',
     name: 'Catalog',
     href: '/catalog',
     icon: LayersIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'User Accounts',
-    href: '/users',
-    icon: UsersIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Tags',
-    href: '/admin/tags',
-    icon: TagIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Webhooks',
-    href: '/admin/webhooks',
-    icon: ExternalLinkIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Workers',
-    href: '/admin/workers',
-    icon: WrenchIcon,
     requiredRole: 'farm_admin',
-    requiresSlicer: true,
-    requiresSlicingCapability: true
+    anchored: true,
+    matches: (pathname) => pathname.startsWith('/catalog')
   },
   {
-    name: 'Slicer Profiles',
-    href: '/admin/slicer-profiles',
+    id: 'admin',
+    name: 'Admin',
+    href: '/admin',
     icon: SettingsIcon,
     requiredRole: 'farm_admin',
-    requiresSlicer: true,
-    requiresSlicingCapability: true
-  },
-  {
-    name: 'System',
-    href: '/admin/system',
-    icon: TrendingUpIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Data Management',
-    href: '/admin/data',
-    icon: DatabaseIcon,
-    requiredRole: 'farm_admin'
-  },
-  {
-    name: 'Settings',
-    href: '/settings',
-    icon: GearIcon,
-    requiredRole: 'farm_admin'
+    anchored: true,
+    matches: (pathname) => pathname === '/admin' || pathname.startsWith('/admin/')
   },
 ];
+
+const FAVORITES_HEADER: Pick<NavigationSectionHeader, 'name' | 'icon'> = { name: 'Favorites', icon: HomeIcon };
+const NAVBAR_COLLAPSED_STORAGE_KEY = 'pf_navbar_collapsed';
+const FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ');
+
+function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
+  if (!container) {
+    return [];
+  }
+
+  return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter((element) => {
+    if (element.hasAttribute('disabled') || element.getAttribute('aria-hidden') === 'true') {
+      return false;
+    }
+
+    return element.tabIndex >= 0;
+  });
+}
+
+function focusFirstElement(container: HTMLElement | null): boolean {
+  const firstFocusable = getFocusableElements(container)[0];
+
+  if (!firstFocusable) {
+    return false;
+  }
+
+  firstFocusable.focus();
+  return true;
+}
+
+function getSectionedNavigation(elements: NavigationElement[]): SectionedNavigationItem[] {
+  const sectionedItems: SectionedNavigationItem[] = [];
+  let currentSectionName = 'Navigation';
+
+  elements.forEach((item) => {
+    if (isSectionHeader(item)) {
+      currentSectionName = item.name;
+      return;
+    }
+
+    if (isNavigationItem(item)) {
+      sectionedItems.push({ ...item, sectionName: currentSectionName });
+    }
+  });
+
+  return sectionedItems;
+}
+
+const navigationItems = getSectionedNavigation(navigation);
+const navigationHeadersByName = new Map(
+  navigation.filter(isSectionHeader).map((header) => [header.name, { name: header.name, icon: header.icon }])
+);
+
+function toPreferenceItem(item: SectionedNavigationItem): NavPreferenceItem {
+  return {
+    id: item.id,
+    name: item.name,
+    sectionName: item.sectionName,
+    anchored: item.anchored,
+  };
+}
+
+function isAnchoredNavigationGroup(group: NavigationGroup) {
+  return group.items.some((item) => item.anchored);
+}
+
+function groupNavigationItems(items: SectionedNavigationItem[]): NavigationGroup[] {
+  return groupNavItemsByResolvedOrder(items).map((group) => ({
+    header: navigationHeadersByName.get(group.sectionName) ?? { name: group.sectionName, icon: HomeIcon },
+    items: group.items,
+  }));
+}
 
 export function Layout() {
   const { isConnected } = useSignalRConnection('printer');
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const { isSlicerAvailable } = useSlicer();
+  const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.role === role, [hasRole, user?.role]);
+  const canPermission = useCallback((resource: string, action: string) => typeof hasPermission === 'function' ? hasPermission(resource, action) : true, [hasPermission]);
   const { data: capabilities } = useSystemCapabilities();
-  const { theme, setTheme } = useTheme();
+
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
+  const nfcPairingSession = useNfcPairingSession();
   const pendingAttentionCount = useMemo(
     () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter((status) => requiresBedClearConfirmation(status)).length,
     [allAutoDispatchStatuses]
   );
   const location = useLocation();
-  // Debug: log current pathname to ensure re-render on navigation
-  useEffect(() => {
-    // location change effect (debug removed)
-  }, [location.pathname]);
 
   // Global debug subscription to printer SignalR events (for dev verification)
   useEffect(() => {
@@ -294,139 +359,250 @@ export function Layout() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
-  const [navbarCollapsed, setNavbarCollapsed] = useState(() => {
-    const saved = localStorage.getItem('pf_navbar_collapsed');
-    return saved ? JSON.parse(saved) : false;
+  const [navbarCollapsed, setNavbarCollapsed] = useState<boolean>(() => {
+    const saved = localStorage.getItem(NAVBAR_COLLAPSED_STORAGE_KEY);
+    return saved ? Boolean(JSON.parse(saved)) : false;
   });
-  const [hoveredNavItem, setHoveredNavItem] = useState<string | null>(null);
+  const navPreferencesStorageKey = useMemo(() => getNavPreferencesStorageKey(user?.id), [user?.id]);
+  const [storedNavPreferences, setStoredNavPreferences] = useState<Partial<NavPreferences> | null>(() => loadNavPreferences(navPreferencesStorageKey));
+  const [customizeNavigation, setCustomizeNavigation] = useState(false);
+  const [showHiddenNavigation, setShowHiddenNavigation] = useState(false);
+  const [draggingNavItemId, setDraggingNavItemId] = useState<string | null>(null);
+  const desktopRailRef = useRef<HTMLDivElement | null>(null);
+  const mobileDrawerAnnouncementRef = useRef<HTMLDivElement | null>(null);
+  const mobileMenuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const mobileDrawerRef = useRef<HTMLDivElement | null>(null);
+  const sidebarAnnouncementTimeoutRef = useRef<number | null>(null);
+  const customizeMoveButtonRefs = useRef(new Map<string, { up: HTMLButtonElement | null; down: HTMLButtonElement | null; row: HTMLDivElement | null }>());
+  const pendingCustomizeMoveFocusRef = useRef<{ itemId: string; direction: MoveButtonDirection } | null>(null);
+  const previousSidebarOpenRef = useRef(false);
+  const previousDrawerFocusRef = useRef<HTMLElement | null>(null);
 
-  // Persist navbar collapsed state
   useEffect(() => {
-    localStorage.setItem('pf_navbar_collapsed', JSON.stringify(navbarCollapsed));
+    localStorage.setItem(NAVBAR_COLLAPSED_STORAGE_KEY, JSON.stringify(navbarCollapsed));
   }, [navbarCollapsed]);
 
-  // Filter navigation based on user permissions, slicer availability, and platform capabilities (stable memoization)
-  const filteredNavigation = useMemo(() => {
-    // Helper: check whether a nav item is hidden by platform capabilities.
-    // Uses `!== false` so items stay visible before the query resolves.
+  useEffect(() => {
+    setStoredNavPreferences(loadNavPreferences(navPreferencesStorageKey));
+  }, [navPreferencesStorageKey]);
+
+  const navPreferenceRole = useMemo<NavPreferenceRole>(() => {
+    if (!isAuthenticated) {
+      return 'guest';
+    }
+
+    return canRole('farm_admin') ? 'admin' : 'operator';
+  }, [canRole, isAuthenticated]);
+
+  const availableNavigationItems = useMemo<SectionedNavigationItem[]>(() => {
     const isHiddenByCapabilities = (item: NavigationItem) => {
+      if (!hasResolvedQueryData(capabilities)) {
+        return item.requiresSlicingCapability || item.requiresModelFiles;
+      }
       if (item.requiresSlicingCapability && capabilities?.slicingEnabled === false) return true;
       if (item.requiresModelFiles && capabilities?.modelFilesEnabled === false) return true;
       return false;
     };
 
     if (!isAuthenticated) {
-      // For non-authenticated users, show only public navigation (including section headers)
-      return navigation.filter(item => {
-        if (isDivider(item)) return true;
-        if (isSectionHeader(item)) {
-          if (item.requiredRole) return false;
-          return true;
-        }
+      return navigationItems.filter((item) => {
         if (isHiddenByCapabilities(item)) return false;
         if (item.requiresSlicer && !isSlicerAvailable) return false;
         return !item.requiredRole && !item.requiredPermission;
       });
     }
-    
-    return navigation.filter(item => {
-      if (isDivider(item)) return true;
-      if (isSectionHeader(item)) {
-        if (item.requiredRole && !hasRole(item.requiredRole)) return false;
-        return true;
-      }
-      if (item.requiredRole && !hasRole(item.requiredRole)) return false;
-      if (item.requiredPermission && !hasPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+
+    return navigationItems.filter((item) => {
+      if (item.requiredRole && !canRole(item.requiredRole)) return false;
+      if (item.requiredPermission && !canPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
       if (isHiddenByCapabilities(item)) return false;
       if (item.requiresSlicer && !isSlicerAvailable) return false;
       return true;
     });
-  }, [isAuthenticated, hasRole, hasPermission, isSlicerAvailable, capabilities]); // Include all dependencies
+  }, [isAuthenticated, canRole, canPermission, isSlicerAvailable, capabilities]);
+
+  const navPreferenceItems = useMemo(() => availableNavigationItems.map(toPreferenceItem), [availableNavigationItems]);
+  const navigationItemById = useMemo(() => new Map(availableNavigationItems.map((item) => [item.id, item])), [availableNavigationItems]);
+  const resolvedNavPreferences = useMemo(
+    () => resolveNavPreferences(navPreferenceItems, navPreferenceRole, storedNavPreferences),
+    [navPreferenceItems, navPreferenceRole, storedNavPreferences]
+  );
+  const navPreferences = resolvedNavPreferences.preferences;
+  const favoriteNavigationItems = useMemo(
+    () => resolvedNavPreferences.favoriteItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.favoriteItems]
+  );
+  const regularNavigationItems = useMemo(
+    () => resolvedNavPreferences.regularItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.regularItems]
+  );
+  const hiddenNavigationItems = useMemo(
+    () => resolvedNavPreferences.hiddenItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item)),
+    [navigationItemById, resolvedNavPreferences.hiddenItems]
+  );
+  const favoriteNavigationGroups = useMemo<NavigationGroup[]>(
+    () => favoriteNavigationItems.length > 0 ? [{ header: FAVORITES_HEADER, items: favoriteNavigationItems }] : [],
+    [favoriteNavigationItems]
+  );
+  const navigationGroups = useMemo<NavigationGroup[]>(() => groupNavigationItems(regularNavigationItems), [regularNavigationItems]);
+  const allNavigationGroups = useMemo<NavigationGroup[]>(
+    () => [...favoriteNavigationGroups, ...navigationGroups],
+    [favoriteNavigationGroups, navigationGroups]
+  );
+
+  const updateNavPreferences = useCallback((updater: (preferences: NavPreferences) => NavPreferences) => {
+    setStoredNavPreferences((current) => {
+      const normalized = normalizeNavPreferences(navPreferenceItems, navPreferenceRole, current);
+      const next = updater(normalized);
+      saveNavPreferences(navPreferencesStorageKey, next);
+      return next;
+    });
+  }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
+
+  const resetNavPreferences = useCallback(() => {
+    const defaults = createDefaultNavPreferences(navPreferenceItems, navPreferenceRole);
+    saveNavPreferences(navPreferencesStorageKey, defaults);
+    setStoredNavPreferences(defaults);
+    setShowHiddenNavigation(false);
+  }, [navPreferenceItems, navPreferenceRole, navPreferencesStorageKey]);
+
+  const isNavItemActive = (item: NavigationItem) => {
+    if (item.matches) {
+      return item.matches(location.pathname);
+    }
+
+    return location.pathname === item.href || location.pathname.startsWith(`${item.href}/`);
+  };
 
   const handleLogout = async () => {
     await logout();
     setUserMenuOpen(false);
   };
 
-  // Key for persisting expanded nav groups
-  const LOCAL_STORAGE_KEY = 'pf_nav_expanded_v1';
-
-  // Track which parent menus are expanded (with persistence)
-  // Initialize from localStorage with auto-expand for active routes
-  const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
-    const path = location.pathname;
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      let parsed: Record<string, boolean> = {};
-      if (raw) {
-        const storedData = JSON.parse(raw);
-        if (storedData && typeof storedData === 'object') {
-          parsed = storedData;
-        }
-      }
-      
-      // Auto-expand groups containing current route during initialization
-      // Note: filteredNavigation not available yet, so use navigation directly
-      for (const item of navigation) {
-        if (isNavigationItem(item) && item.children) {
-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild && !(item.name in parsed)) {
-            parsed[item.name] = true;
-          }
-        }
-      }
-      
-      return parsed;
-    } catch {
-      // If parsing fails, at least auto-expand current route
-      const autoExpanded: Record<string, boolean> = {};
-      for (const item of navigation) {
-        if (isNavigationItem(item) && item.children) {
-          const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-          if (hasActiveChild) {
-            autoExpanded[item.name] = true;
-          }
-        }
-      }
-      return autoExpanded;
+  const announceMobileDrawer = useCallback((message: string) => {
+    if (sidebarAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
     }
-  });
-  const [announcement, setAnnouncement] = useState('');
-  const announcementTimer = useRef<number | null>(null);
 
-  const toggleExpand = (name: string) => {
-    setExpanded((prev: Record<string, boolean>) => {
-      const currentValue = prev[name];
-      const nextValue = !currentValue;
-      
-      // Only update if value actually changes
-      if (currentValue === nextValue) {
-        return prev; // No change, return same object to prevent re-render
+    if (mobileDrawerAnnouncementRef.current) {
+      mobileDrawerAnnouncementRef.current.textContent = message;
+    }
+
+    sidebarAnnouncementTimeoutRef.current = window.setTimeout(() => {
+      if (mobileDrawerAnnouncementRef.current) {
+        mobileDrawerAnnouncementRef.current.textContent = '';
       }
-      
-      const next = { ...prev, [name]: nextValue };
-      
-      // Find item to get child count (from filtered list so it's permission-safe)
-      const itemDef = filteredNavigation.find(i => i.name === name);
-      const childCount = itemDef && isNavigationItem(itemDef) ? itemDef.children?.length ?? 0 : 0;
-      const message = nextValue
-        ? `${name} section expanded. ${childCount} item${childCount === 1 ? '' : 's'}.`
-        : `${name} section collapsed.`;
-      
-      setAnnouncement(message);
-      
-      // Clear previous timer
-      if (announcementTimer.current) {
-        clearTimeout(announcementTimer.current);
-      }
-      announcementTimer.current = window.setTimeout(() => {
-        setAnnouncement('');
-        announcementTimer.current = null;
-      }, 2500);
-      
+      sidebarAnnouncementTimeoutRef.current = null;
+    }, 1_500);
+  }, []);
+
+  const toggleNavbarCollapsed = useCallback(() => {
+    setNavbarCollapsed((prev) => {
+      const next = !prev;
+      announceMobileDrawer(next ? 'Navigation collapsed to icons.' : 'Navigation expanded.');
       return next;
     });
-  };
+  }, [announceMobileDrawer]);
+
+  useEffect(() => {
+    if (!sidebarOpen && !userMenuOpen) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSidebarOpen(false);
+        setUserMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sidebarOpen, userMenuOpen]);
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      previousDrawerFocusRef.current = document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : mobileMenuButtonRef.current;
+
+      const frame = window.requestAnimationFrame(() => {
+        if (!focusFirstElement(mobileDrawerRef.current)) {
+          mobileDrawerRef.current?.focus();
+        }
+      });
+
+      previousSidebarOpenRef.current = true;
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    if (previousSidebarOpenRef.current) {
+      announceMobileDrawer('Navigation menu closed.');
+
+      window.requestAnimationFrame(() => {
+        previousDrawerFocusRef.current?.focus();
+      });
+    }
+
+    previousSidebarOpenRef.current = false;
+
+    return undefined;
+  }, [announceMobileDrawer, sidebarOpen]);
+
+  useEffect(() => {
+    if (!sidebarOpen) {
+      return;
+    }
+
+    announceMobileDrawer('Navigation menu opened.');
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const drawer = mobileDrawerRef.current;
+      const focusableElements = getFocusableElements(drawer);
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        drawer?.focus();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const containsFocus = activeElement ? drawer?.contains(activeElement) : false;
+
+      if (event.shiftKey) {
+        if (!containsFocus || activeElement === firstElement) {
+          event.preventDefault();
+          lastElement.focus();
+        }
+        return;
+      }
+
+      if (!containsFocus || activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [announceMobileDrawer, sidebarOpen]);
+
+  useEffect(() => () => {
+    if (sidebarAnnouncementTimeoutRef.current !== null) {
+      window.clearTimeout(sidebarAnnouncementTimeoutRef.current);
+    }
+  }, []);
 
   const switchToRegister = () => {
     setShowLoginModal(false);
@@ -438,499 +614,608 @@ export function Layout() {
     setShowLoginModal(true);
   };
 
-  // (Removed unused prefersReducedMotion calculation to satisfy lint)
-  
-  // Compute merged expanded state: user selections + auto-expand for active route
-  const computedExpanded = useMemo(() => {
-    const path = location.pathname;
-    const result = { ...expanded };
-    
-    // Auto-expand groups containing current route
-    for (const item of filteredNavigation) {
-      if (isNavigationItem(item) && item.children) {
-        const hasActiveChild = item.children.some(c => path.startsWith(c.href));
-        // Only auto-expand if user hasn't explicitly set it
-        if (hasActiveChild && expanded[item.name] === undefined) {
-          result[item.name] = true;
-        }
-      }
-    }
-    
-    return result;
-  }, [location.pathname, expanded, filteredNavigation]);
+  const desktopRailWidthClassName = navbarCollapsed ? 'lg:w-16' : 'lg:w-[248px]';
+  const customizeNavigationItems = useMemo(
+    () => resolvedNavPreferences.orderedItems
+      .map((item) => navigationItemById.get(item.id))
+      .filter((item): item is SectionedNavigationItem => Boolean(item))
+      .filter((item) => !item.anchored),
+    [navigationItemById, resolvedNavPreferences.orderedItems]
+  );
+  const hiddenNavigationIds = useMemo(() => new Set(navPreferences.hiddenItemIds), [navPreferences.hiddenItemIds]);
+  const pinnedNavigationIds = useMemo(() => new Set(navPreferences.pinnedItemIds), [navPreferences.pinnedItemIds]);
+  const activeToggleHintId = 'desktop-nav-active-toggle-hint';
 
-  // Persist expanded changes to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expanded));
-    } catch {
-      // ignore
+  const reorderNavItem = useCallback((itemId: string, targetIndex: number, focusDirection?: MoveButtonDirection) => {
+    const item = customizeNavigationItems.find((candidate) => candidate.id === itemId);
+    const targetPosition = Math.max(1, Math.min(targetIndex + 1, customizeNavigationItems.length));
+    if (focusDirection) {
+      pendingCustomizeMoveFocusRef.current = { itemId, direction: focusDirection };
     }
-  }, [expanded]);
+
+    updateNavPreferences((preferences) => moveNavItem(preferences, itemId, targetIndex, navPreferenceItems));
+    if (item) {
+      announceMobileDrawer(`Moved ${item.name} to position ${targetPosition} of ${customizeNavigationItems.length}.`);
+    }
+  }, [announceMobileDrawer, customizeNavigationItems, navPreferenceItems, updateNavPreferences]);
+
+  useEffect(() => {
+    const pendingFocus = pendingCustomizeMoveFocusRef.current;
+    if (!pendingFocus) {
+      return;
+    }
+
+    const itemIndex = customizeNavigationItems.findIndex((item) => item.id === pendingFocus.itemId);
+    if (itemIndex < 0) {
+      pendingCustomizeMoveFocusRef.current = null;
+      return;
+    }
+
+    const moveRefs = customizeMoveButtonRefs.current.get(pendingFocus.itemId);
+    getNavMoveFocusTarget(moveRefs, pendingFocus.direction)?.focus();
+
+    pendingCustomizeMoveFocusRef.current = null;
+  }, [customizeNavigationItems]);
+
+  const renderNavigationLink = (item: SectionedNavigationItem, collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => {
+    const ItemIcon = item.icon;
+    const isActive = isNavItemActive(item);
+    const activeToggleDescription = isActive && enableActiveToggle
+      ? `${item.name} — activate again to ${navbarCollapsed ? 'expand' : 'collapse'} the menu`
+      : undefined;
+    const activeToggleHint = isActive && enableActiveToggle
+      ? `Activate again to ${navbarCollapsed ? 'expand' : 'collapse'} the menu.`
+      : undefined;
+    const activeToggleExpanded = isActive && enableActiveToggle ? !navbarCollapsed : undefined;
+    const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+      if (isActive && enableActiveToggle) {
+        event.preventDefault();
+        toggleNavbarCollapsed();
+        return;
+      }
+
+      onNavigate?.();
+    };
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLAnchorElement>) => {
+      if (!isActive || !enableActiveToggle || event.key !== ' ') {
+        return;
+      }
+
+      event.preventDefault();
+      toggleNavbarCollapsed();
+    };
+
+    if (collapsed) {
+      return (
+        <NavLink
+          key={item.id}
+          to={item.href}
+          title={activeToggleDescription ?? item.name}
+          aria-label={item.name}
+          aria-describedby={activeToggleHint ? activeToggleHintId : undefined}
+          aria-expanded={activeToggleExpanded}
+          aria-current={isActive ? 'page' : undefined}
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+          className={clsx(
+            'flex h-9 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+            isActive
+              ? 'bg-pf-accent-bg/18 text-pf-accent'
+              : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+          )}
+        >
+          <span aria-hidden="true">
+            <ItemIcon className="h-5 w-5" />
+          </span>
+        </NavLink>
+      );
+    }
+
+    return (
+      <NavLink
+        key={item.id}
+        to={item.href}
+        title={activeToggleDescription}
+        aria-describedby={activeToggleHint ? activeToggleHintId : undefined}
+        aria-expanded={activeToggleExpanded}
+        aria-current={isActive ? 'page' : undefined}
+        onClick={handleClick}
+        onKeyDown={handleKeyDown}
+        className={clsx(
+          'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+          isActive
+            ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
+            : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
+        )}
+      >
+        <span aria-hidden="true">
+          <ItemIcon className="mr-3 h-4 w-4 shrink-0" />
+        </span>
+        <span className="flex-1 text-left">{item.name}</span>
+      </NavLink>
+    );
+  };
+
+  const renderNavigationGroups = (groups: NavigationGroup[], collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => (
+    <div className="space-y-1">
+      {groups.map((group, groupIndex) => (
+        <Fragment key={`${group.header.name}-${groupIndex}`}>
+          {groupIndex > 0 && isAnchoredNavigationGroup(group) && (
+            <hr className="mx-3 border-pf-border" aria-hidden="true" />
+          )}
+          {collapsed ? (
+            <div className="flex flex-col items-center space-y-0.5" aria-label={group.header.name} role="group">
+              {group.items.map((item) => renderNavigationLink(item, true, onNavigate, enableActiveToggle))}
+            </div>
+          ) : (
+            <section aria-label={group.header.name} className="space-y-0.5">
+              <div className="space-y-0.5">
+                {group.items.map((item) => renderNavigationLink(item, false, onNavigate, enableActiveToggle))}
+              </div>
+            </section>
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
+
+  const renderHiddenNavigation = (collapsed = false, onNavigate?: () => void, enableActiveToggle = false) => {
+    if (hiddenNavigationItems.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className={clsx('border-t border-pf-border pt-2', collapsed ? 'mt-2 flex flex-col items-center gap-1' : 'mt-3 space-y-2')}>
+        <Button
+          type="button"
+          variant="subtle"
+          size="sm"
+          className={clsx(collapsed ? 'h-10 w-10 px-0' : 'w-full justify-center')}
+          aria-expanded={showHiddenNavigation}
+          aria-label={`${showHiddenNavigation ? 'Hide' : 'Show'} hidden navigation items`}
+          title={`${showHiddenNavigation ? 'Hide' : 'Show'} hidden navigation items`}
+          onClick={() => setShowHiddenNavigation((prev) => !prev)}
+          iconLeft={!collapsed ? (showHiddenNavigation ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />) : undefined}
+          iconCenter={collapsed ? (showHiddenNavigation ? <EyeOffIcon className="h-4 w-4" /> : <EyeIcon className="h-4 w-4" />) : undefined}
+        >
+          {!collapsed && `${showHiddenNavigation ? 'Hide' : 'Show'} hidden (${hiddenNavigationItems.length})`}
+        </Button>
+        {showHiddenNavigation && (
+          <div className={collapsed ? 'flex flex-col items-center space-y-0.5' : 'space-y-0.5'} aria-label="Hidden navigation items" role="group">
+            {hiddenNavigationItems.map((item) => renderNavigationLink(item, collapsed, onNavigate, enableActiveToggle))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderCustomizeNavigationPanel = () => {
+    if (!customizeNavigation) {
+      return null;
+    }
+
+    return (
+      <section className="mb-3 rounded-xl border border-pf-border bg-pf-bg-2 p-2" aria-label="Customize navigation">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold text-pf-text-primary">Customize nav</h2>
+            <p className="text-xs text-pf-text-muted">Drag items or use Move up/down. Hidden items remain available under Show hidden.</p>
+          </div>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setCustomizeNavigation(false)}>
+            Done
+          </Button>
+        </div>
+        <div className="space-y-1" role="list" aria-label="Navigation order">
+          {customizeNavigationItems.map((item, index) => {
+            const hidden = hiddenNavigationIds.has(item.id);
+            const pinned = pinnedNavigationIds.has(item.id);
+
+            return (
+              <div
+                key={item.id}
+                ref={(node) => {
+                  const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                  current.row = node;
+                  customizeMoveButtonRefs.current.set(item.id, current);
+                }}
+                role="listitem"
+                tabIndex={-1}
+                draggable
+                onDragStart={() => setDraggingNavItemId(item.id)}
+                onDragEnd={() => setDraggingNavItemId(null)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (draggingNavItemId && draggingNavItemId !== item.id) {
+                    reorderNavItem(draggingNavItemId, index);
+                  }
+                  setDraggingNavItemId(null);
+                }}
+                className={clsx(
+                  'rounded-lg border border-pf-border bg-pf-bg-1 p-2 text-xs',
+                  draggingNavItemId === item.id && 'opacity-60'
+                )}
+              >
+                <div className="flex flex-col gap-2">
+                  <span className="min-w-0 w-full">
+                    <span className="block break-words font-medium leading-snug text-pf-text-primary">{item.name}</span>
+                    <span className="block break-words text-pf-text-muted">{item.sectionName}</span>
+                  </span>
+                  <div className="flex w-full items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      className="h-8 w-8 px-0"
+                      aria-label={`Move ${item.name} up`}
+                      disabled={index === 0}
+                      ref={(node) => {
+                        const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                        current.up = node;
+                        customizeMoveButtonRefs.current.set(item.id, current);
+                      }}
+                      onClick={() => reorderNavItem(item.id, index - 1, 'up')}
+                      iconCenter={<ArrowUpIcon className="h-4 w-4" />}
+                    />
+                    <Button
+                      type="button"
+                      variant="subtle"
+                      size="sm"
+                      className="h-8 w-8 px-0"
+                      aria-label={`Move ${item.name} down`}
+                      disabled={index === customizeNavigationItems.length - 1}
+                      ref={(node) => {
+                        const current = customizeMoveButtonRefs.current.get(item.id) ?? { up: null, down: null, row: null };
+                        current.down = node;
+                        customizeMoveButtonRefs.current.set(item.id, current);
+                      }}
+                      onClick={() => reorderNavItem(item.id, index + 1, 'down')}
+                      iconCenter={<ArrowDownIcon className="h-4 w-4" />}
+                    />
+                    <Button
+                      type="button"
+                      variant={pinned ? 'secondary' : 'subtle'}
+                      size="sm"
+                      aria-pressed={pinned}
+                      onClick={() => updateNavPreferences((preferences) => setNavItemPinned(preferences, item.id, !pinned))}
+                    >
+                      {pinned ? 'Pinned' : 'Pin'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={hidden ? 'secondary' : 'subtle'}
+                      size="sm"
+                      aria-pressed={!hidden}
+                      onClick={() => updateNavPreferences((preferences) => setNavItemHidden(preferences, item.id, !hidden))}
+                    >
+                      {hidden ? 'Show' : 'Hide'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Button type="button" variant="ghost" size="sm" className="mt-2 w-full justify-center" onClick={resetNavPreferences}>
+          Reset to defaults
+        </Button>
+      </section>
+    );
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-pf-bg-0">
-      {/* Live region for accessibility announcements */}
-      <div className="sr-only" aria-live="polite" role="status">{announcement}</div>
-      {/* Top Header Bar */}
-      <header className="bg-pf-bg-1 border-b border-pf-border h-12 shrink-0 z-50">
-        <div className="flex items-center justify-between h-12 px-3">
-          {/* Left side - App branding */}
-          <div className="flex items-center space-x-4">
-            {/* Mobile menu button - toggles sidebar */}
+    <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-pf-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-pf-text-primary focus:shadow-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+      >
+        Skip to main content
+      </a>
+      <div ref={mobileDrawerAnnouncementRef} className="sr-only" aria-live="polite" aria-atomic="true" />
+      <div id={activeToggleHintId} className="sr-only">
+        Activate again to {navbarCollapsed ? 'expand' : 'collapse'} the menu.
+      </div>
+
+      <div className="flex h-full min-h-0 flex-col">
+        <header
+          inert={sidebarOpen || undefined}
+          className="hidden shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-4 py-2 lg:flex"
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
+            <div className="min-w-0">
+              <div className="truncate text-lg font-bold uppercase tracking-wide text-pf-text-primary font-bebas">PrintFarmer</div>
+            </div>
+            <span
+              className={clsx('ml-1 h-2.5 w-2.5 rounded-full', isConnected ? 'bg-pf-success' : 'bg-pf-error')}
+              title={isConnected ? 'Connected' : 'Disconnected'}
+              aria-label={isConnected ? 'Connected' : 'Disconnected'}
+            />
+          </div>
+
+          <FloatingControlBar
+            mobile
+            isAuthenticated={isAuthenticated}
+            userName={user?.username}
+            userMenuOpen={userMenuOpen}
+            onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
+            onCloseUserMenu={() => setUserMenuOpen(false)}
+            onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+            onOpenPreferences={() => navigate('/settings')}
+            onOpenLogin={() => setShowLoginModal(true)}
+            onOpenRegister={() => setShowRegisterModal(true)}
+            onLogout={handleLogout}
+          />
+        </header>
+
+        <div className="flex flex-col lg:flex-row min-h-0 flex-1">
+        <header
+          inert={sidebarOpen || undefined}
+          className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
+        >
+          <div className="flex items-center gap-2">
             <Button
+              ref={mobileMenuButtonRef}
               type="button"
-              aria-label={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
-              title={sidebarOpen ? "Close navigation menu" : "Open navigation menu"}
+              aria-controls="mobile-navigation-drawer"
+              aria-expanded={sidebarOpen}
+              aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              title={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
               variant="subtle"
               size="sm"
-              className="lg:hidden"
-              onClick={() => setSidebarOpen(prev => !prev)}
-            >
-              <MenuIcon className="h-5 w-5" />
-            </Button>
-
-            {/* App logo and name */}
-            <div className="flex items-center space-x-2">
-              <img 
-                src="/printfarmer-logo.svg" 
-                alt="PrintFarmer Logo" 
-                className="w-7 h-7" 
-              />
-              <h1 className="text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</h1>
+              className="h-9 w-9 justify-center px-0"
+              onClick={() => {
+                setSidebarOpen(prev => !prev);
+                setUserMenuOpen(false);
+              }}
+              iconCenter={<MenuIcon className="h-5 w-5" />}
+            />
+            <div className="flex min-w-0 items-center gap-2">
+              <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
+              <div className="min-w-0">
+                <div className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+              </div>
             </div>
           </div>
 
-          {/* Right side - Status and user */}
-          <div className="flex items-center space-x-3">
-            {/* Printer attention badge */}
+          <div className="flex items-center gap-2">
             {pendingAttentionCount > 0 && (
               <Button
                 type="button"
                 variant="unstyled"
                 onClick={() => navigate('/printers?view=collapsed')}
-                className="relative flex items-center text-pf-warning animate-pulse hover:animate-none cursor-pointer p-0 mr-6"
+                className="relative flex h-9 w-9 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
                 title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
-                aria-label={`${pendingAttentionCount} printers need attention`}
+                aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
               >
                 <AlertIcon className="h-4 w-4" />
-                <span className="absolute -top-1.5 -right-1.5 bg-pf-warning text-black text-[9px] font-bold rounded-full min-w-3.5 h-3.5 flex items-center justify-center leading-none">
+                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
                   {pendingAttentionCount}
                 </span>
               </Button>
             )}
 
-            {/* Connection status */}
-            <div className="flex items-center space-x-2">
-              <div 
-                className={`h-2 w-2 rounded-full ${
-                  isConnected ? 'bg-pf-success' : 'bg-pf-error'
-                }`}
-              />
-              <span className="text-sm text-pf-text-tertiary">
-                {isConnected ? 'Connected' : 'Disconnected'}
-              </span>
-            </div>
-
-            {/* Pending Tasks Badge */}
             {isAuthenticated && <TasksBadge />}
+            <FloatingControlBar
+              mobile
+              isAuthenticated={isAuthenticated}
+              userName={user?.username}
+              userMenuOpen={userMenuOpen}
+              onToggleUserMenu={() => setUserMenuOpen((prev) => !prev)}
+              onCloseUserMenu={() => setUserMenuOpen(false)}
+              onViewSystemStatus={() => navigate('/admin/manage?tab=operations&sub=status')}
+              onOpenPreferences={() => navigate('/settings')}
+              onOpenLogin={() => setShowLoginModal(true)}
+              onOpenRegister={() => setShowRegisterModal(true)}
+              onLogout={handleLogout}
+            />
+          </div>
+        </header>
 
-            {/* Notification Bell */}
-            {isAuthenticated && <NotificationBell />}
+        <div
+          className={clsx(
+            'fixed inset-x-0 top-12 bottom-0 z-50 lg:hidden',
+            sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
+          )}
+          aria-hidden={!sidebarOpen}
+          inert={!sidebarOpen}
+        >
+          <div
+            className={clsx(
+              'absolute inset-0 bg-black/60 transition-opacity duration-200',
+              sidebarOpen ? 'opacity-100' : 'opacity-0'
+            )}
+            onClick={() => setSidebarOpen(false)}
+          />
 
-            {/* User menu */}
-            <div className="relative">
+          <div
+            ref={mobileDrawerRef}
+            id="mobile-navigation-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Mobile navigation drawer"
+            tabIndex={-1}
+            className={clsx(
+              'relative flex h-full min-h-0 w-[248px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-2xl transition-transform duration-200 ease-out',
+              sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+            )}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-pf-border px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
+                <div className="min-w-0">
+                  <div className="truncate text-base font-semibold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
+                </div>
+              </div>
               <Button
                 type="button"
                 variant="subtle"
                 size="sm"
-                className="flex items-center space-x-2"
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-              >
-                {isAuthenticated && user ? (
-                  <>
-                    <AccountCheckIcon className="h-5 w-5 text-pf-success" />
-                  </>
-                ) : (
-                  <>
-                    <AccountIcon className="h-5 w-5 text-pf-text-muted" />
-                    <span className="hidden sm:block text-sm">Guest</span>
-                  </>
-                )}
-              </Button>
-
-              {/* User dropdown menu */}
-              {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-64 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-10">
-                  <div className="py-1">
-                    {isAuthenticated && user ? (
-                      <>
-                          <div className="px-4 py-2 text-sm text-pf-text-secondary border-b border-pf-border">
-                          Signed in as <strong>{user.username}</strong>
-                        </div>
-                        <Button
-                          type="button"
-                          onClick={() => setUserMenuOpen(false)}
-                          variant="subtle"
-                          size="sm"
-                          className="w-full justify-start!"
-                          iconLeft={<SettingsIcon className="h-4 w-4" />}
-                        >
-                          Profile
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={handleLogout}
-                          variant="subtle"
-                          size="sm"
-                          className="w-full justify-start!"
-                          iconLeft={<LogoutIcon className="h-4 w-4" />}
-                        >
-                          Sign out
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            setShowLoginModal(true);
-                            setUserMenuOpen(false);
-                          }}
-                          variant="subtle"
-                          size="sm"
-                          className="w-full justify-start!"
-                          iconLeft={<LoginIcon className="h-4 w-4" />}
-                        >
-                          Sign In
-                        </Button>
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            setShowRegisterModal(true);
-                            setUserMenuOpen(false);
-                          }}
-                          variant="subtle"
-                          size="sm"
-                          className="flex items-center w-full justify-start!"
-                        >
-                          Register
-                        </Button>
-                      </>
-                    )}
-
-                    {/* Theme Selection - available to all users */}
-                    <div className="border-t border-pf-border mt-1 pt-1">
-                      <div className="px-4 py-2 text-xs font-medium text-pf-text-secondary uppercase tracking-wider">
-                        Theme
-                      </div>
-                      {([
-                        { value: 'github-dark' as Theme, label: 'GitHub Dark', desc: 'Dark theme inspired by GitHub' },
-                        { value: 'printfarmer-dark' as Theme, label: 'PrintFarmer Dark', desc: 'Original dark theme' },
-                        { value: 'light' as Theme, label: 'Light', desc: 'Light theme for bright environments' },
-                      ]).map((t) => (
-                        <Button
-                          key={t.value}
-                          variant="subtle"
-                          onClick={() => setTheme(t.value)}
-                          className={`w-full text-left px-4 py-2 text-sm hover:bg-pf-bg-2 flex items-center gap-2 justify-start ${
-                            theme === t.value ? 'text-pf-accent' : 'text-pf-text-primary'
-                          }`}
-                        >
-                          <span className="flex-1">
-                            <span className="block">{t.label}</span>
-                            <span className="block text-xs text-pf-text-secondary">{t.desc}</span>
-                          </span>
-                          {theme === t.value && (
-                            <CheckIcon className="h-4 w-4 text-pf-accent shrink-0" />
-                          )}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
+                className="h-9 w-9 justify-center px-0"
+                aria-label="Close navigation menu"
+                onClick={() => setSidebarOpen(false)}
+                iconCenter={<CloseIcon className="h-5 w-5" />}
+              />
             </div>
+
+            <nav className="min-h-0 flex-1 basis-0 space-y-1 overflow-y-auto overscroll-contain px-3 py-3" aria-label="Main navigation">
+              <div className="mb-3 flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={customizeNavigation ? 'secondary' : 'subtle'}
+                  size="sm"
+                  className="w-full justify-center"
+                  aria-pressed={customizeNavigation}
+                  onClick={() => setCustomizeNavigation((prev) => !prev)}
+                  iconLeft={<GearIcon className="h-4 w-4" />}
+                >
+                  Customize
+                </Button>
+              </div>
+              {renderCustomizeNavigationPanel()}
+              {renderNavigationGroups(allNavigationGroups, false, () => setSidebarOpen(false))}
+              {renderHiddenNavigation(false, () => setSidebarOpen(false))}
+            </nav>
           </div>
         </div>
-      </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <div className="fixed inset-x-0 top-12 bottom-0 z-40 lg:hidden flex">
-            {/* Backdrop - starts below header so hamburger button remains clickable */}
-            <div className="fixed inset-x-0 top-12 bottom-0 bg-black/75" onClick={() => setSidebarOpen(false)} />
-            
-            {/* Sidebar panel - matches desktop sidebar exactly */}
-            <div className="relative flex flex-col w-56 bg-pf-bg-1 border-r border-pf-border z-10 h-full">
-              {/* Navigation - identical to desktop */}
-              <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
-                {filteredNavigation.map((item, index) => {
-                  // Handle dividers
-                  if (isDivider(item)) {
-                    return (
-                      <div key={`divider-${item.name || index}`} className="my-1.5">
-                        <div className="border-t border-pf-border"></div>
-                      </div>
-                    );
-                  }
-
-                  // Handle section headers
-                  if (isSectionHeader(item)) {
-                    return (
-                      <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
-                        <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
-                      </div>
-                    );
-                  }
-
-                  const navItem = item as NavigationItem;
-                  const Icon = navItem.icon;
-                  const isExpanded = !!computedExpanded[navItem.name];
-                  
-                  const hasChildren = !!navItem.children?.length;
-                  return (
-                    <div key={navItem.name} className="flex flex-col relative">
-                      {hasChildren ? (
-                        <details open={isExpanded} className="group">
-                          <summary
-                            className="flex items-center px-2 py-1.5 text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2"
-                            onClick={e => {
-                              e.preventDefault();
-                              toggleExpand(navItem.name);
-                            }}
-                            tabIndex={0}
-                            role="button"
-                          >
-                            <Icon className="h-5 w-5 shrink-0" />
-                            <span className="flex-1 text-left ml-3">{navItem.name}</span>
-                            <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-                          </summary>
-                          <div className="ml-6 space-y-0.5 mt-0.5">
-                            {navItem.children!.map((child: NavigationItem) => {
-                              const ChildIcon = child.icon;
-                              return (
-                                <NavLink
-                                  key={child.name}
-                                  to={child.href}
-                                  onClick={() => { setSidebarOpen(false); }}
-                                  className={({ isActive }: { isActive: boolean }) =>
-                                    `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                      ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                      : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                    }`
-                                  }
-                                  end={child.href === '/harvest'}
-                                >
-                                  <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
-                                  {child.name}
-                                </NavLink>
-                              );
-                            })}
-                          </div>
-                        </details>
-                      ) : (
-                        <NavLink
-                          to={navItem.href}
-                          end
-                          onClick={() => { setSidebarOpen(false); }}
-                          className={({ isActive }: { isActive: boolean }) =>
-                            `group flex items-center px-2 py-1.5 text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                              ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                              : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                            }`
-                          }
-                        >
-                          <Icon className="h-5 w-5 shrink-0" />
-                          <span className="flex-1 text-left ml-3">{navItem.name}</span>
-                        </NavLink>
-                      )}
-                    </div>
-                  );
-                })}
-              </nav>
-            </div>
-          </div>
-        )}
-
-        {/* Desktop sidebar (elevated z-index to avoid being covered by user menu overlay) */}
-        <aside className={`hidden lg:flex lg:shrink-0 z-40 transition-all duration-300 ${navbarCollapsed ? 'w-14' : 'w-56'}`}>
-          <div className={`flex flex-col ${navbarCollapsed ? 'w-14' : 'w-56'} bg-pf-bg-1 border-r border-pf-border h-full min-h-0`}>
-            <nav className="flex-1 px-2 py-3 space-y-1 overflow-y-auto min-h-0">
-              {filteredNavigation.map((item, index) => {
-                if (isDivider(item)) {
-                  return (
-                    <div key={`divider-${item.name || index}`} className="my-1.5">
-                      <div className="border-t border-pf-border"></div>
-                    </div>
-                  );
-                }
-
-                // Section headers — hidden when collapsed, subtle uppercase label when expanded
-                if (isSectionHeader(item)) {
-                  if (navbarCollapsed) {
-                    return (
-                      <div key={`section-${item.name}`} className="my-1.5">
-                        <div className="border-t border-pf-border"></div>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={`section-${item.name}`} className={`px-2 pb-1 ${index === 0 ? 'pt-0' : 'pt-4'}`}>
-                      <div className="text-xs uppercase tracking-wider font-semibold text-pf-text-tertiary">{item.name}</div>
-                    </div>
-                  );
-                }
-
-                const navItem = item as NavigationItem;
-                const Icon = navItem.icon;
-                const isExpanded = !!computedExpanded[navItem.name];
-                const isHovered = hoveredNavItem === navItem.name;
-                
-                const hasChildren = !!navItem.children?.length;
-                return (
-                  <div 
-                    key={navItem.name} 
-                    className="flex flex-col relative"
-                    onMouseEnter={() => navbarCollapsed && hasChildren && setHoveredNavItem(navItem.name)}
-                    onMouseLeave={() => setHoveredNavItem(null)}
-                  >
-                    {hasChildren ? (
-                      <details open={isExpanded} className="group">
-                        <summary
-                          className={`flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md cursor-pointer list-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2`}
-                          title={navbarCollapsed ? item.name : undefined}
-                          onClick={e => {
-                            e.preventDefault(); // Prevent native toggle
-                            toggleExpand(item.name);
-                          }}
-                          tabIndex={0}
-                          role="button"
-                        >
-                          <Icon className="h-5 w-5 shrink-0" />
-                          {!navbarCollapsed && (
-                            <>
-                              <span className="flex-1 text-left ml-3">{item.name}</span>
-                              <ChevronDownIcon className={`ml-2 h-4 w-4 transition-transform duration-200 ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true" />
-                            </>
-                          )}
-                        </summary>
-                        {!navbarCollapsed && (
-                          <div className="ml-6 space-y-0.5 mt-0.5">
-                          {item.children!.map(child => {
-                            const ChildIcon = child.icon;
-                            return (
-                              <NavLink
-                                key={child.name}
-                                to={child.href}
-                                onClick={() => { /* child nav */ }}
-                                className={({ isActive }: { isActive: boolean }) =>
-                                  `group flex items-center px-3 py-1.5 text-sm rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                  }`
-                                }
-                                end={child.href === '/harvest'} // Exact match for parent routes
-                              >
-                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
-                                {child.name}
-                              </NavLink>
-                            );
-                          })}
-                          </div>
-                        )}
-                      </details>
-                    ) : (
-                      <NavLink
-                        to={navItem.href}
-                        end
-                        onClick={() => { /* top-level nav */ }}
-                        className={({ isActive }: { isActive: boolean }) =>
-                          `group flex items-center ${navbarCollapsed ? 'px-1.5 py-1.5 justify-center' : 'px-2 py-1.5'} text-sm font-medium rounded-md transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent ${isActive
-                            ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                            : 'text-pf-text-primary hover:text-pf-text-light hover:bg-pf-bg-2'
-                          }`
-                        }
-                        title={navbarCollapsed ? navItem.name : undefined}
-                      >
-                        <Icon className="h-5 w-5 shrink-0" />
-                        {!navbarCollapsed && <span className="flex-1 text-left ml-3">{navItem.name}</span>}
-                      </NavLink>
-                    )}
-
-                    {/* Flyout menu for collapsed nav items with children */}
-                    {navbarCollapsed && hasChildren && isHovered && (
-                      <div className="absolute left-full top-0 ml-2 w-48 bg-pf-bg-1 border border-pf-border rounded-md shadow-lg z-50">
-                        <div className="py-1">
-                          <div className="px-3 py-2 text-xs font-semibold text-pf-text-tertiary border-b border-pf-border">
-                            {navItem.name}
-                          </div>
-                          {navItem.children!.map((child: NavigationItem) => {
-                            const ChildIcon = child.icon;
-                            return (
-                              <NavLink
-                                key={child.name}
-                                to={child.href}
-                                className={({ isActive }: { isActive: boolean }) =>
-                                  `flex items-center px-3 py-2 text-sm transition-colors ${isActive
-                                    ? 'bg-pf-bg-2 text-pf-text-primary border-r-2 border-pf-accent'
-                                    : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'
-                                  }`
-                                }
-                                end={child.href === '/harvest'}
-                              >
-                                <ChildIcon className="mr-2 h-4 w-4 shrink-0" />
-                                {child.name}
-                              </NavLink>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+        <aside
+          ref={desktopRailRef}
+          className={clsx('hidden h-full max-h-full min-h-0 overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
+        >
+          <div className="flex h-full max-h-full min-h-0 w-full flex-col overflow-hidden">
+            <nav
+              className={clsx('relative min-h-0 flex-1 basis-0 overflow-y-auto overscroll-contain py-4', navbarCollapsed ? 'px-2' : 'px-3')}
+              aria-label="Main navigation"
+            >
+              {navbarCollapsed ? (
+                <>
+                  {renderNavigationGroups(allNavigationGroups, true, undefined, true)}
+                  {renderHiddenNavigation(true, undefined, true)}
+                </>
+              ) : (
+                <>
+                  {renderCustomizeNavigationPanel()}
+                  {renderNavigationGroups(allNavigationGroups, false, undefined, true)}
+                  {renderHiddenNavigation(false, undefined, true)}
+                </>
+              )}
             </nav>
 
-            {/* Navbar collapse toggle at bottom */}
-            <div className="border-t border-pf-border p-2 shrink-0">
-              <Button
-                type="button"
-                aria-label={navbarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                title={navbarCollapsed ? "Expand navigation" : "Collapse navigation"}
-                variant="subtle"
-                size="sm"
-                className="w-full flex justify-center"
-                onClick={() => setNavbarCollapsed(!navbarCollapsed)}
-              >
-                <MenuIcon className="h-5 w-5" />
-              </Button>
+            <div className="max-h-[40%] shrink-0 overflow-y-auto overscroll-contain border-t border-pf-border p-2">
+              {!navbarCollapsed && pendingAttentionCount > 0 && (
+                <div className="mb-2 flex items-center justify-end rounded-lg border border-pf-border bg-pf-bg-2 px-3 py-2">
+                  <Button
+                    type="button"
+                    variant="unstyled"
+                    onClick={() => navigate('/printers?view=collapsed')}
+                    className="relative flex h-8 w-8 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-1 focus-visible:ring-2 focus-visible:ring-pf-accent"
+                    title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
+                    aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+                  >
+                    <AlertIcon className="h-4 w-4" />
+                    <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                      {pendingAttentionCount}
+                    </span>
+                  </Button>
+                </div>
+              )}
+
+              <div className={clsx('flex items-center gap-2', navbarCollapsed ? 'flex-col' : 'justify-between')}>
+                <div className={clsx('flex items-center gap-2', navbarCollapsed && 'flex-col')}>
+                  {isAuthenticated && <TasksBadge />}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {navbarCollapsed && pendingAttentionCount > 0 && (
+                    <Button
+                      type="button"
+                      variant="unstyled"
+                      onClick={() => navigate('/printers?view=collapsed')}
+                      className="relative flex h-9 w-9 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
+                      aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+                      iconCenter={<AlertIcon className="h-4 w-4" />}
+                    >
+                      <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                        {pendingAttentionCount}
+                      </span>
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-2">
+                <Button
+                  type="button"
+                  aria-label={customizeNavigation ? 'Finish customizing navigation' : 'Customize navigation'}
+                  title={customizeNavigation ? 'Finish customizing navigation' : 'Customize navigation'}
+                  variant={customizeNavigation ? 'secondary' : 'subtle'}
+                  size="sm"
+                  className="mb-2 w-full justify-center"
+                  aria-pressed={customizeNavigation}
+                  onClick={() => {
+                    setCustomizeNavigation((prev) => !prev);
+                    setNavbarCollapsed(false);
+                  }}
+                  iconCenter={navbarCollapsed ? <GearIcon className="h-5 w-5" /> : undefined}
+                  iconLeft={!navbarCollapsed ? <GearIcon className="h-4 w-4" /> : undefined}
+                >
+                  {!navbarCollapsed && (customizeNavigation ? 'Done customizing' : 'Customize')}
+                </Button>
+              </div>
             </div>
           </div>
         </aside>
 
-        {/* Main content area */}
-        <main data-main-content className="flex-1 overflow-y-auto min-h-0">
+        <main
+          id="main-content"
+          data-main-content
+          inert={sidebarOpen || undefined}
+          tabIndex={-1}
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-full"
+        >
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
-          <div className="pt-2 pr-2 pl-2">
-            <Outlet />
+          <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
+            {/* React Router's `location.key` is a unique string generated
+                per history entry. It changes on ANY navigation — including
+                same-pathname but different search or hash — where
+                `pathname` alone would not. Using `pathname` as the reset
+                key would leave a stuck error boundary on
+                `/reports?range=week` when the operator navigates to
+                `/reports?range=day` or `/reports#summary` because the
+                pathname is identical. Reviewers explicitly flagged this
+                (Hicks #5): tests must exercise real router navigation
+                between same-path/different-query and same-path/different-
+                hash. `location.key` covers both. See:
+                https://reactrouter.com/en/main/hooks/use-location */}
+            <RouteErrorBoundary resetKey={location.key}>
+              <Suspense
+                fallback={
+                  <div className="flex min-h-[40vh] items-center justify-center" role="status" aria-label="Loading page">
+                    <div className="h-8 w-8 rounded-full border-b-2 border-pf-accent pf-animate-spin"></div>
+                  </div>
+                }
+              >
+                <GlobalCommandPaletteProvider>
+                  <Outlet />
+                </GlobalCommandPaletteProvider>
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </main>
+        </div>
       </div>
 
-      {/* Click outside handler for user menu */}
       {userMenuOpen && (
         <div
-          className="fixed inset-0 z-30 pointer-events-auto"
+          className="fixed inset-0 z-10 pointer-events-auto lg:z-30"
           onClick={() => setUserMenuOpen(false)}
           aria-hidden="true"
         />
       )}
 
-      {/* Authentication Modals */}
       <LoginModal
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
@@ -942,6 +1227,7 @@ export function Layout() {
         onSwitchToLogin={switchToLogin}
       />
       {import.meta.env.VITE_PRINTFARMER_DEBUG && <DebugPrinterSignalRPanel />}
+      <NfcPairingModal session={nfcPairingSession} />
     </div>
   );
 }

@@ -45,7 +45,7 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public Task DisposeAsync()
@@ -91,8 +91,30 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         };
 
         context.Printers.Add(printer);
+        context.PrinterDispatchStates.Add(new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+        });
         await context.SaveChangesAsync();
         return printer;
+    }
+
+    private async Task<HttpResponseMessage> PostWithDispatchEtagAsync(
+        Guid printerId,
+        string action)
+    {
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
+            $"{CurrentRouteBase}/{printerId}/status");
+        statusResponse.EnsureSuccessStatusCode();
+        AutoDispatchStatusDto status =
+            (await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions))!;
+        using HttpRequestMessage request = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printerId}/{action}");
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+        return await _client.SendAsync(request);
     }
 
     // ── Test 1: Happy path — pre-clear returns 200 ──
@@ -102,8 +124,9 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     {
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
-        HttpResponseMessage response = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage response = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -116,16 +139,74 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     // ── Test 2: Non-existent printer returns 400 (error message contains "not found") ──
 
     [Fact]
-    public async Task PreClear_NonExistentPrinter_Returns400WithNotFoundMessage()
+    public async Task PreClear_MissingPrecondition_Returns428()
     {
         var bogusId = Guid.NewGuid();
 
         HttpResponseMessage response = await _client!.PostAsync(
             $"{CurrentRouteBase}/{bogusId}/pre-clear", null);
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        string body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("not found");
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionRequired);
+    }
+
+    [Fact]
+    public async Task PreClear_StaleDispatchEtag_Returns412()
+    {
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
+        using HttpRequestMessage request = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/pre-clear");
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{Convert.ToBase64String(Guid.NewGuid().ToByteArray())}\"");
+
+        HttpResponseMessage response = await _client!.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+    }
+
+    [Fact]
+    public async Task Skip_MissingCurrentJobEtag_Returns428()
+    {
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
+        await CreateQueuedJobAsync(printer.Id, "skip-precondition", queuePosition: 1);
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
+            $"{CurrentRouteBase}/{printer.Id}/status");
+        AutoDispatchStatusDto status =
+            (await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions))!;
+        using HttpRequestMessage request = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/skip");
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionRequired);
+    }
+
+    [Fact]
+    public async Task SetEnabled_MissingPrinterEtag_Returns428()
+    {
+        Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
+            $"{CurrentRouteBase}/{printer.Id}/status");
+        AutoDispatchStatusDto status =
+            (await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions))!;
+        using HttpRequestMessage request = new(
+            HttpMethod.Put,
+            $"{CurrentRouteBase}/{printer.Id}/enabled")
+        {
+            Content = JsonContent.Create(new { enabled = false }),
+        };
+        request.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+
+        HttpResponseMessage response = await _client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionRequired);
     }
 
     // ── Test 3: Auto-dispatch disabled returns 400 ──
@@ -135,8 +216,9 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     {
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: false);
 
-        HttpResponseMessage response = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage response = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         string body = await response.Content.ReadAsStringAsync();
@@ -151,8 +233,9 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
         // Pre-clear
-        HttpResponseMessage preClearResponse = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage preClearResponse = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
         preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         // Check status
@@ -188,12 +271,14 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     {
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
-        HttpResponseMessage first = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage first = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
         first.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        HttpResponseMessage second = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage second = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
         second.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var status = await second.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
@@ -205,11 +290,12 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     {
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
 
-        HttpResponseMessage preClearResponse = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage preClearResponse = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
         preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        HttpResponseMessage statusResponse = await _client.GetAsync(
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
             $"{CurrentRouteBase}/{printer.Id}/status");
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -230,11 +316,12 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
         await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
 
-        HttpResponseMessage preClearResponse = await _client!.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/pre-clear", null);
+        HttpResponseMessage preClearResponse = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "pre-clear");
         preClearResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        HttpResponseMessage statusResponse = await _client.GetAsync(
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
             $"{CurrentRouteBase}/{printer.Id}/status");
         statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -243,8 +330,9 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         statusBeforeReady!.State.Should().Be("None");
         statusBeforeReady.BedPreConfirmed.Should().BeTrue();
 
-        HttpResponseMessage readyResponse = await _client.PostAsync(
-            $"{CurrentRouteBase}/{printer.Id}/ready", null);
+        HttpResponseMessage readyResponse = await PostWithDispatchEtagAsync(
+            printer.Id,
+            "ready");
         readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);

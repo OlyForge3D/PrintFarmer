@@ -191,4 +191,35 @@ final class DemoMaintenanceService: MaintenanceServiceProtocol, @unchecked Senda
             """),
         ]
     }
+
+    func getPrinterStatistics(printerId: UUID) async throws -> PrinterMaintenanceStatistics {
+        PrinterMaintenanceStatistics(
+            printerId: printerId,
+            totalPrintHours: 742.5,
+            totalJobsCompleted: 128,
+            totalJobsFailed: 6,
+            totalFilamentUsedGrams: 3450.0,
+            lastSyncTime: Date()
+        )
+    }
+
+    func createLog(_ request: CreateMaintenanceLogRequest) async throws -> MaintenanceLog {
+        MaintenanceLog(
+            id: UUID(),
+            printerId: request.printerId,
+            printerMaintenanceScheduleId: nil,
+            resolvedAlertId: nil,
+            maintenanceTaskId: request.taskId,
+            taskName: request.taskName ?? request.componentName ?? "Maintenance",
+            notes: request.notes,
+            component: request.componentName,
+            performedBy: request.performedBy,
+            performedAt: request.performedAt ?? Date(),
+            durationMinutes: request.durationMinutes,
+            cost: request.cost,
+            partsReplaced: request.partsReplaced,
+            printerHoursAtMaintenance: nil,
+            createdAt: Date()
+        )
+    }
 }

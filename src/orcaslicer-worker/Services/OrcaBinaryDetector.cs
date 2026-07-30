@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -16,26 +17,40 @@ public interface IOrcaBinaryDetector
 
 public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
 {
-    private const string BinaryPath = "/usr/local/bin/orcaslicer";
+    /// <summary>
+    /// Default binary path used when <c>Worker:OrcaSlicerPath</c> is not
+    /// configured. MUST match <see cref="OrcaSlicingPipelineService"/> so the
+    /// startup gate verifies the SAME executable that jobs will invoke
+    /// (issue #578 / Hicks R4 finding #4).
+    /// </summary>
+    private const string DefaultBinaryPath = "/opt/orcaslicer/bin/orca-slicer";
+
+    private readonly string _binaryPath;
+
+    public OrcaBinaryDetector(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        _binaryPath = configuration["Worker:OrcaSlicerPath"] ?? DefaultBinaryPath;
+    }
 
     public bool IsRealBinaryPresent()
     {
         try
         {
-            if (!File.Exists(BinaryPath))
+            if (!File.Exists(_binaryPath))
             {
                 return false;
             }
 
-            FileInfo fi = new FileInfo(BinaryPath);
+            FileInfo fi = new FileInfo(_binaryPath);
             if (fi.Length < 2048)
             {
-                return false; // heuristic stub threshold
+                return false;
             }
 
             using Process? proc = Process.Start(new ProcessStartInfo
             {
-                FileName = BinaryPath,
+                FileName = _binaryPath,
                 Arguments = "--help",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -72,14 +87,14 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
     {
         try
         {
-            if (!File.Exists(BinaryPath))
+            if (!File.Exists(_binaryPath))
             {
                 return null;
             }
 
             using Process? proc = Process.Start(new ProcessStartInfo
             {
-                FileName = BinaryPath,
+                FileName = _binaryPath,
                 Arguments = "--version",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

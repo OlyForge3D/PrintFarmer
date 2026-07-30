@@ -27,3 +27,6 @@ dist-ssr
 playwright-report/
 test-results/
 e2e/.auth/
+
+# Playwright auth storage state
+.auth/

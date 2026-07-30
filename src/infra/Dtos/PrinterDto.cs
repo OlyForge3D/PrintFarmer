@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Cameras;
 
 namespace Farm.Infrastructure;
 
@@ -38,6 +40,12 @@ namespace Farm.Infrastructure;
 /// <param name="Location">Location information (farm location assignment).</param>
 /// <param name="ObicoEnabled">Whether Obico AI failure detection is enabled for the printer.</param>
 /// <param name="HasCatalogUpdate">True when the printer's linked catalog model has been updated since the last template sync.</param>
+/// <param name="UseModelDispatchDefaults">Whether this printer inherits dispatch settings from its model.</param>
+/// <param name="CameraAccessMode">Client presentation mode for snapshot-only versus stream-capable cameras.</param>
+/// <param name="CameraStreamFormat">Transport format for the stream URL, such as MJPEG, WebRTC, or RTSP.</param>
+/// <param name="CameraSnapshotStrategy">Snapshot capture strategy required by the backend.</param>
+/// <param name="RowVersion">Base-64 public ETag for atomic printer mutations.</param>
+/// <param name="ConfigurationRevision">Logical safety-relevant printer configuration revision.</param>
 public record PrinterDto(
     Guid Id,
     string Name,
@@ -49,9 +57,9 @@ public record PrinterDto(
     double? Progress = null,
     string? JobName = null,
     string? FileName = null,
-    string? ThumbnailUrl = null,
-    string? CameraStreamUrl = null,
-    string? CameraSnapshotUrl = null,
+    [property: JsonIgnore] string? ThumbnailUrl = null,
+    [property: JsonIgnore] string? CameraStreamUrl = null,
+    [property: JsonIgnore] string? CameraSnapshotUrl = null,
     double? X = null,
     double? Y = null,
     double? Z = null,
@@ -60,15 +68,21 @@ public record PrinterDto(
     double? HotendTarget = null,
     double? BedTarget = null,
     PrinterBackend Backend = PrinterBackend.Moonraker,
-    string? ApiKey = null,
-    string? Username = null,
-    string? Password = null,
-    string? OriginalServerUrl = null,
-    int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
-    int? FrontendPort = null,
+    [property: JsonIgnore] string? ApiKey = null,
+    [property: JsonIgnore] string? Username = null,
+    [property: JsonIgnore] string? Password = null,
+    [property: JsonIgnore] string? OriginalServerUrl = null,
+    [property: JsonIgnore] int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
+    [property: JsonIgnore] int? FrontendPort = null,
     PrinterSpoolInfoDto? SpoolInfo = null,
-    string? BackendUrl = null,
-    string? FrontendUrl = null,
+    [property: JsonIgnore] string? BackendUrl = null,
+    [property: JsonIgnore] string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,
-    bool HasCatalogUpdate = false);
+    bool HasCatalogUpdate = false,
+    bool UseModelDispatchDefaults = true,
+    CameraAccessMode CameraAccessMode = CameraAccessMode.Unknown,
+    CameraStreamFormat CameraStreamFormat = CameraStreamFormat.Unknown,
+    CameraSnapshotStrategy CameraSnapshotStrategy = CameraSnapshotStrategy.None,
+    string? RowVersion = null,
+    long ConfigurationRevision = 0);

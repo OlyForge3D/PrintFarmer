@@ -4,7 +4,11 @@ import { Modal } from '@/common/components/modals/Modal';
 import { Button, Input, Select, FormField, Spinner } from '@/common/components/ui';
 import { useScheduleJob, useTimezones, queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import type { RecurrenceType, ScheduleJobRequest } from '@/types/api';
+import type {
+  RecurrencePattern,
+  RecurrenceType,
+  ScheduleJobRequest,
+} from '@/types/api';
 
 interface ScheduleModalProps {
   isOpen: boolean;
@@ -54,13 +58,20 @@ export function ScheduleModal({ isOpen, onClose, initialDate, jobId }: ScheduleM
       return;
     }
 
-    const scheduledDateTime = new Date(`${scheduledDate}T${scheduledTime}`);
+    const recurrencePattern: RecurrencePattern | null =
+      recurrenceType === 'once'
+        ? null
+        : recurrenceType === 'daily'
+          ? 'Daily'
+          : recurrenceType === 'weekly'
+            ? 'Weekly'
+            : 'Monthly';
 
     const request: ScheduleJobRequest = {
-      scheduledTime: scheduledDateTime.toISOString(),
-      timezone,
-      recurrenceType,
-      recurrenceInterval: recurrenceType !== 'once' ? recurrenceInterval : undefined,
+      scheduledLocalTime: `${scheduledDate}T${scheduledTime}:00`,
+      timeZone: timezone,
+      recurrencePattern,
+      recurrenceInterval: recurrenceType === 'once' ? 1 : recurrenceInterval,
     };
 
     scheduleJobMutation.mutate(

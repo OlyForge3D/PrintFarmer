@@ -6,7 +6,12 @@ import {
 } from '@microsoft/signalr';
 import { HarvestUpdateDto, JobQueueUpdateDto, PrinterStatusUpdate } from '@/types/api';
 import { apiClient } from '@/services/api';
-import { getHubUrl } from '@/common/utils/apiUrlHelpers';
+import {
+  getHubUrl,
+  getSignalRAccessToken,
+} from '@/common/utils/apiUrlHelpers';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
+import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type HarvestUpdateCallback = (operationId: string, status: HarvestUpdateDto) => void;
@@ -127,7 +132,13 @@ export class SignalRService {
   private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 30000; // Max 30 seconds
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
   private signalrSettings: { logLevel: string; consoleLoggingEnabled: boolean } | null = null;
+  private settingsLoadGeneration = 0;
+  private settingsRefreshPromise: Promise<void> | null = null;
+  private settingsRefreshQueued = false;
+  private authListener: (() => void) | null = null;
 
   // Event handlers
   private printerStatusCallbacks: PrinterStatusCallback[] = [];
@@ -146,19 +157,82 @@ export class SignalRService {
   private connectionStateCallbacks: ConnectionStateCallback[] = [];
 
   constructor() {
+    const generation = this.lifecycleGeneration;
     this.loadSettings().then(() => {
-      this.buildConnection();
+      if (generation === this.lifecycleGeneration && !this.connection) {
+        this.buildConnection();
+      }
     });
+    // The initial load above runs at module-import time, before the user has
+    // authenticated, so the anonymous GET /api/settings/SignalR fails closed
+    // (401) and falls back to defaults. Re-load once a session is established so
+    // the admin-configured log level is actually honoured for the session.
+    this.authListener = () => {
+      void this.refreshSettings();
+    };
+    window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
   }
 
-  private async loadSettings(): Promise<void> {
+  private async loadSettings(): Promise<boolean> {
+    const generation = ++this.settingsLoadGeneration;
+    let nextSettings: { logLevel: string; consoleLoggingEnabled: boolean };
     try {
-      this.signalrSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
+      nextSettings = await apiClient.getSettings<{ logLevel: string; consoleLoggingEnabled: boolean }>('SignalR');
     } catch (error) {
       if ((window as unknown as { PrintFarmerDebug?: Record<string, unknown> }).PrintFarmerDebug?.harvestSignalR) {
         console.warn('Failed to load SignalR settings, using defaults:', error);
       }
-      this.signalrSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
+      nextSettings = { logLevel: 'Information', consoleLoggingEnabled: true };
+    }
+
+    if (generation !== this.settingsLoadGeneration) {
+      return false;
+    }
+
+    this.signalrSettings = nextSettings;
+    return true;
+  }
+
+  /**
+   * Re-fetch the SignalR settings section (e.g. after the user authenticates)
+   * and, if the effective log level changed, rebuild the connection so the new
+   * level takes effect — the level is only applied when the connection is built.
+   * Authentication refreshes are queued, and newer loads supersede older ones,
+   * so a late anonymous response cannot overwrite authenticated settings.
+   */
+  public refreshSettings(): Promise<void> {
+    this.settingsRefreshQueued = true;
+    if (!this.settingsRefreshPromise) {
+      this.settingsRefreshPromise = this.runQueuedSettingsRefreshes().finally(() => {
+        this.settingsRefreshPromise = null;
+      });
+    }
+
+    return this.settingsRefreshPromise;
+  }
+
+  private async runQueuedSettingsRefreshes(): Promise<void> {
+    while (this.settingsRefreshQueued) {
+      this.settingsRefreshQueued = false;
+      const previousLevel = this.getLogLevel();
+      const settingsApplied = await this.loadSettings();
+      if (!settingsApplied) {
+        continue;
+      }
+      if (this.getLogLevel() === previousLevel) {
+        continue;
+      }
+      const wasActive =
+        this.connection?.state === HubConnectionState.Connected ||
+        this.connection?.state === HubConnectionState.Connecting;
+      if (this.connection) {
+        await this.connection.stop();
+        this.connection = null;
+      }
+      this.buildConnection();
+      if (wasActive) {
+        await this.connect();
+      }
     }
   }
 
@@ -194,7 +268,9 @@ export class SignalRService {
       console.info('[SignalR] Building harvest connection with URL:', harvestSignalrUrl);
     }
     this.connection = new HubConnectionBuilder()
-      .withUrl(harvestSignalrUrl)
+      .withUrl(harvestSignalrUrl, {
+        accessTokenFactory: getSignalRAccessToken,
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           const delay = Math.min(
@@ -521,6 +597,11 @@ export class SignalRService {
   }
 
   async connect(): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (!this.connection) {
       this.buildConnection();
     }
@@ -530,6 +611,10 @@ export class SignalRService {
       if (this.connection.state === HubConnectionState.Disconnected) {
         try {
           await this.connection.start();
+          if (generation !== this.lifecycleGeneration) {
+            await this.connection.stop();
+            return;
+          }
           try {
             const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
             if (win.PrintFarmerDebug?.harvestSignalR) {
@@ -554,7 +639,12 @@ export class SignalRService {
                 try { console.info(`Retrying SignalR (harvest) connection in ${delay}ms (attempt ${this.reconnectAttempts})`); } catch { /* ignore */ }
               }
             } catch { /* ignore guard errors */ }
-            setTimeout(() => this.connect(), delay);
+            this.reconnectTimer = setTimeout(() => {
+              this.reconnectTimer = null;
+              if (generation === this.lifecycleGeneration) {
+                void this.connect();
+              }
+            }, delay);
           } else {
             console.error('Max reconnection attempts reached');
           }
@@ -580,16 +670,24 @@ export class SignalRService {
   }
 
   async disconnect(): Promise<void> {
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.stop();
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    const connection = this.connection;
+    this.connection = null;
+    if (connection && connection.state !== HubConnectionState.Disconnected) {
+      await connection.stop();
       try {
         const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
         if (win.PrintFarmerDebug?.harvestSignalR) {
           try { console.info('SignalR disconnected'); } catch { /* ignore */ }
         }
       } catch { /* ignore guard errors */ }
-      this.notifyConnectionState(false);
     }
+    this.notifyConnectionState(false);
   }
 
   // ============ Event Subscription Methods ============
@@ -707,23 +805,18 @@ export class SignalRService {
     return this.connection?.connectionId ?? null;
   }
 
-  // Refresh SignalR settings and reconnect with new log level
-  async refreshSettings(): Promise<void> {
-    await this.loadSettings();
-
-    // If connection exists and is connected, recreate it with new settings
-    if (this.connection && this.connection.state === HubConnectionState.Connected) {
-      await this.connection.stop();
-      this.buildConnection();
-      await this.connect();
-    }
-  }
-
   // ============ Discovery Group Methods ============
 
 
   // Clean up all resources
   dispose(): void {
+    this.lifecycleGeneration++;
+    this.settingsLoadGeneration++;
+    this.settingsRefreshQueued = false;
+    if (this.authListener) {
+      window.removeEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
+      this.authListener = null;
+    }
     this.printerStatusCallbacks = [];
     this.harvestUpdateCallbacks = [];
     this.harvestFileProgressCallbacks = [];
@@ -747,3 +840,7 @@ export class SignalRService {
 
 // Export singleton instance
 export const signalRService = new SignalRService();
+registerAuthenticatedSignalRTransport(
+  'harvest',
+  () => signalRService.disconnect(),
+);

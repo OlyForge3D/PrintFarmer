@@ -38,7 +38,13 @@ x-orcaslicer-build: &orcaslicer-build
   target: orcaslicer-worker
   args:
     ALLOW_STUB: "false"
-    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    BUILD_VERSION: ${BUILD_VERSION:-development}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.1}
+    ORCASLICER_SHA256: ${ORCASLICER_SHA256}
+    SBOM_URL: ${SBOM_URL:-}
+    SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+    SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+    VCS_REF: ${VCS_REF:-unknown}
 
 # Volume definitions
 x-worker-volumes: &worker-volumes

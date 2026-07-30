@@ -1,6 +1,12 @@
-﻿using Farm.Infrastructure.Services.AutoDispatch;
+﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Controllers;
 
@@ -14,16 +20,29 @@ namespace Farm.Web.Api.Controllers;
 [Authorize]
 public class AutoDispatchController(
     IAutoDispatchService autoDispatchService,
-    ILogger<AutoDispatchController> logger) : ControllerBase
+    ILogger<AutoDispatchController> logger,
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    AppDbContext? db = null) : ControllerBase
 {
     /// <summary>
     /// Get the auto-dispatch status for a printer.
     /// </summary>
     [HttpGet("{printerId:guid}/status")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> GetStatusAsync(Guid printerId, CancellationToken ct)
     {
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             var status = await autoDispatchService.GetStatusAsync(printerId, ct);
@@ -42,15 +61,40 @@ public class AutoDispatchController(
     /// is idempotent so a redundant client call is harmless.
     /// </summary>
     [HttpPost("{printerId:guid}/ready")]
+    [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchReadyResult>> MarkReadyAsync(Guid printerId, CancellationToken ct)
     {
+        if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            var result = await autoDispatchService.MarkReadyAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            var result = await autoDispatchService.MarkReadyAsync(
+                printerId,
+                expectedDispatch,
+                ct);
             return Ok(result);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -64,14 +108,51 @@ public class AutoDispatchController(
     /// the printer stays in PendingReady; otherwise transitions to None.
     /// </summary>
     [HttpPost("{printerId:guid}/skip")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoDispatchStatusDto>> SkipNextAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<AutoDispatchStatusDto>> SkipNextAsync(
+        Guid printerId,
+        CancellationToken ct,
+        [FromHeader(Name = "X-Job-If-Match")] string? jobIfMatch = null)
     {
+        if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (await CheckQueueHeadPreconditionAsync(
+                printerId,
+                jobIfMatch,
+                ct) is { } jobPrecondition)
+        {
+            return jobPrecondition;
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            var status = await autoDispatchService.SkipNextJobAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            byte[] expectedJob = DecodeEtag(jobIfMatch!);
+            var status = await autoDispatchService.SkipNextJobAsync(
+                printerId,
+                expectedDispatch,
+                expectedJob,
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -84,14 +165,38 @@ public class AutoDispatchController(
     /// without affecting queued jobs.
     /// </summary>
     [HttpPost("{printerId:guid}/cancel")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> CancelAutoAsync(Guid printerId, CancellationToken ct)
     {
+        if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            var status = await autoDispatchService.CancelAutoAsync(printerId, ct);
+            byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            var status = await autoDispatchService.CancelAutoAsync(
+                printerId,
+                expectedDispatch,
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -104,15 +209,40 @@ public class AutoDispatchController(
     /// immediately without waiting for PendingReady confirmation.
     /// </summary>
     [HttpPost("{printerId:guid}/pre-clear")]
+    [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> MarkPreClearAsync(Guid printerId, CancellationToken ct)
     {
+        if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.Submit,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            var status = await autoDispatchService.MarkPreClearAsync(printerId, ct);
+            var status = await autoDispatchService.MarkPreClearAsync(
+                printerId,
+                QueueActorIdentity.Resolve(User),
+                DecodeEtag(Request.Headers.IfMatch[0]!),
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -125,17 +255,51 @@ public class AutoDispatchController(
     /// Enable or disable auto-dispatch for a printer.
     /// </summary>
     [HttpPut("{printerId:guid}/enabled")]
+    [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     [ProducesResponseType(typeof(AutoDispatchStatusDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<AutoDispatchStatusDto>> SetEnabledAsync(
         Guid printerId,
         [FromBody] SetAutoDispatchEnabledRequest request,
-        CancellationToken ct)
+        CancellationToken ct,
+        [FromHeader(Name = "X-Printer-If-Match")] string? printerIfMatch = null)
     {
+        if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (await CheckPrinterPreconditionAsync(
+                printerId,
+                printerIfMatch,
+                ct) is { } printerPrecondition)
+        {
+            return printerPrecondition;
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessPrinterAsync(
+                User,
+                printerId,
+                PrinterGroupAccessLevel.Manage,
+                ct))
+        {
+            return NotFound();
+        }
+
         try
         {
-            var status = await autoDispatchService.SetEnabledAsync(printerId, request.Enabled, ct);
+            var status = await autoDispatchService.SetEnabledAsync(
+                printerId,
+                request.Enabled,
+                DecodeEtag(Request.Headers.IfMatch[0]!),
+                DecodeEtag(printerIfMatch!),
+                ct);
             return Ok(status);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
         }
         catch (InvalidOperationException ex)
         {
@@ -147,10 +311,29 @@ public class AutoDispatchController(
     /// Get auto-dispatch status for all printers.
     /// </summary>
     [HttpGet("status")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(AutoDispatchGlobalStatusDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<AutoDispatchGlobalStatusDto>> GetAllStatusAsync(CancellationToken ct)
     {
-        var status = await autoDispatchService.GetAllStatusAsync(ct);
+        AutoDispatchGlobalStatusDto status = await autoDispatchService.GetAllStatusAsync(ct);
+        if (resourceAuthorization is not null)
+        {
+            var authorized = new List<AutoDispatchStatusDto>(status.Printers.Count);
+            foreach (AutoDispatchStatusDto printer in status.Printers)
+            {
+                if (await resourceAuthorization.CanAccessPrinterAsync(
+                        User,
+                        printer.PrinterId,
+                        PrinterGroupAccessLevel.View,
+                        ct))
+                {
+                    authorized.Add(printer);
+                }
+            }
+
+            status.Printers = authorized;
+        }
+
         return Ok(status);
     }
 
@@ -159,17 +342,220 @@ public class AutoDispatchController(
     /// </summary>
     [HttpPut("enabled")]
     [Authorize(Roles = "farm_admin")]
+    [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     [ProducesResponseType(typeof(List<AutoDispatchStatusDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<AutoDispatchStatusDto>>> SetAllEnabledAsync(
         [FromBody] SetAutoDispatchEnabledRequest request,
         CancellationToken ct)
     {
-        var statuses = await autoDispatchService.SetAllEnabledAsync(request.Enabled, ct);
-        return Ok(statuses);
+        if (request.ExpectedVersions is null || request.ExpectedVersions.Count == 0)
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "Per-printer dispatch and printer ETags are required.",
+                });
+        }
+
+        try
+        {
+            Dictionary<Guid, AutoDispatchExpectedVersions> expected = request.ExpectedVersions
+                .ToDictionary(
+                    pair => pair.Key,
+                    pair => new AutoDispatchExpectedVersions(
+                        DecodeEtag(pair.Value.DispatchStateETag),
+                        DecodeEtag(pair.Value.PrinterETag)));
+            var statuses = await autoDispatchService.SetAllEnabledAsync(
+                request.Enabled,
+                expected,
+                ct);
+            return Ok(statuses);
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { error = "Expected ETags must be base-64 encoded." });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return RevisionConflict();
+        }
+        catch (QueuePreconditionRequiredException exception)
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = exception.Message });
+        }
     }
+
+    private async Task<ObjectResult?> CheckDispatchPreconditionAsync(
+        Guid printerId,
+        CancellationToken ct)
+    {
+        if (db is null)
+        {
+            return null;
+        }
+
+        string? supplied = Request.Headers.IfMatch.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = "If-Match is required." });
+        }
+
+        byte[]? actual = await db.PrinterDispatchStates
+            .AsNoTracking()
+            .Where(state => state.PrinterId == printerId)
+            .Select(state => state.RowVersion)
+            .SingleOrDefaultAsync(ct);
+        if (actual is null)
+        {
+            return NotFound(new { error = "printer_not_found" });
+        }
+
+        try
+        {
+            byte[] expected = Convert.FromBase64String(
+                supplied.Trim().TrimStart('W', '/').Trim('"'));
+            return expected.SequenceEqual(actual)
+                ? null
+                : StatusCode(
+                    StatusCodes.Status412PreconditionFailed,
+                    new { error = "dispatch_revision_conflict" });
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { error = "If-Match must be a base-64 encoded ETag." });
+        }
+    }
+
+    private async Task<ObjectResult?> CheckQueueHeadPreconditionAsync(
+        Guid printerId,
+        string? supplied,
+        CancellationToken ct)
+    {
+        if (db is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "X-Job-If-Match is required to skip the current queue head.",
+                });
+        }
+
+        byte[]? actual = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job =>
+                job.AssignedPrinterId == printerId &&
+                (job.Status == PrintJobStatus.Queued ||
+                 job.Status == PrintJobStatus.Assigned))
+            .OrderByPriorityDescending()
+            .Select(job => job.RowVersion)
+            .FirstOrDefaultAsync(ct);
+        if (actual is null)
+        {
+            return Conflict(new { error = "queue_empty" });
+        }
+
+        try
+        {
+            byte[] expected = Convert.FromBase64String(
+                supplied.Trim().TrimStart('W', '/').Trim('"'));
+            return expected.SequenceEqual(actual)
+                ? null
+                : StatusCode(
+                    StatusCodes.Status412PreconditionFailed,
+                    new { error = "job_revision_conflict" });
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new
+            {
+                error = "X-Job-If-Match must be a base-64 encoded ETag.",
+            });
+        }
+    }
+
+    private async Task<ObjectResult?> CheckPrinterPreconditionAsync(
+        Guid printerId,
+        string? supplied,
+        CancellationToken ct)
+    {
+        if (db is null)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "X-Printer-If-Match is required for printer configuration changes.",
+                });
+        }
+
+        byte[]? actual = await db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.Id == printerId)
+            .Select(printer => printer.RowVersion)
+            .SingleOrDefaultAsync(ct);
+        if (actual is null)
+        {
+            return NotFound(new { error = "printer_not_found" });
+        }
+
+        try
+        {
+            byte[] expected = Convert.FromBase64String(
+                supplied.Trim().TrimStart('W', '/').Trim('"'));
+            return expected.SequenceEqual(actual)
+                ? null
+                : StatusCode(
+                    StatusCodes.Status412PreconditionFailed,
+                    new { error = "printer_revision_conflict" });
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new
+            {
+                error = "X-Printer-If-Match must be a base-64 encoded ETag.",
+            });
+        }
+    }
+
+    private static byte[] DecodeEtag(string supplied) =>
+        Convert.FromBase64String(
+            supplied.Trim().TrimStart('W', '/').Trim('"'));
+
+    private ObjectResult RevisionConflict() =>
+        StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new { error = "dispatch_revision_conflict" });
 }
 
 public class SetAutoDispatchEnabledRequest
 {
     public bool Enabled { get; set; }
+
+    public Dictionary<Guid, AutoDispatchExpectedVersionRequest>? ExpectedVersions { get; set; }
+}
+
+public sealed class AutoDispatchExpectedVersionRequest
+{
+    public required string DispatchStateETag { get; set; }
+
+    public required string PrinterETag { get; set; }
 }

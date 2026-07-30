@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,6 +24,7 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Gcode;
@@ -489,9 +491,15 @@ public class GcodeFilesService(
             throw new InvalidOperationException("Unsafe target path");
         }
 
-        await using FileStream fs = new(fullTarget, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-        await file.CopyToAsync(fs, ct);
-        await fs.FlushAsync(ct);  // Ensure all bytes are written before reading
+        await using (FileStream fs = new(
+            fullTarget,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.Read))
+        {
+            await file.CopyToAsync(fs, ct);
+            await fs.FlushAsync(ct);
+        }
 
         System.IO.FileInfo info = new(fullTarget);
 
@@ -659,6 +667,11 @@ public class GcodeFilesService(
                 EstimatedFilamentWeightG = metadata?.FilamentWeightGrams,
                 SlicerName = metadata?.SlicerName,
                 SlicerVersion = metadata?.SlicerVersion,
+                FilamentPerExtruderWeightG = SerializeArrayOrNull(metadata?.FilamentPerExtruderWeightG),
+                FilamentPerExtruderLengthMm = SerializeArrayOrNull(metadata?.FilamentPerExtruderLengthMm),
+                FilamentPerExtruderColorHex = SerializeArrayOrNull(metadata?.FilamentPerExtruderColorHex),
+                FilamentPerExtruderType = SerializeArrayOrNull(metadata?.FilamentPerExtruderType),
+                ExtruderCount = metadata?.ExtruderCount,
                 ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -702,6 +715,221 @@ public class GcodeFilesService(
             _logger.LogError(ex, "Failed to finalize chunked upload to database at {FilePath}", filePath);
             return null;
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<GcodeStreamIngestResult> IngestStreamAsync(GcodeStreamIngestRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // A replayed ingest must never write a second copy: the caller-assigned identity is the
+        // convergence point after a crash between writing bytes and committing the record.
+        GcodeFile? existingById = await _gcodeRepo.GetByIdWithIncludesAsync(request.FileId, ct);
+        if (existingById is not null)
+        {
+            return new GcodeStreamIngestResult(existingById, AlreadyExisted: true);
+        }
+
+        string extension = Path.GetExtension(request.FileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".gcode";
+        }
+
+        (string _, string targetDirectory, string virtualDirectory) = ResolveVirtualPath(
+            request.VirtualDirectory,
+            _storagePathService.GetGcodeStorageDirectory());
+        _ = Directory.CreateDirectory(targetDirectory);
+
+        string stagingPath = Path.Combine(targetDirectory, $"{request.FileId}-{Guid.NewGuid():N}.ingest");
+        string finalPath = Path.Combine(targetDirectory, $"{request.FileId}{extension}");
+        string computedHash;
+        long copiedBytes;
+        try
+        {
+            (computedHash, copiedBytes) = await CopyAndHashAsync(request.Content, stagingPath, ct);
+            if (copiedBytes != request.ExpectedSizeBytes)
+            {
+                throw new GcodeStreamIngestException(
+                    GcodeStreamIngestException.SizeMismatch,
+                    "The ingested G-code byte count does not match the verified source artifact.");
+            }
+
+            if (!string.Equals(computedHash, NormalizeHex(request.ExpectedSha256), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GcodeStreamIngestException(
+                    GcodeStreamIngestException.HashMismatch,
+                    "The ingested G-code digest does not match the verified source artifact.");
+            }
+        }
+        catch
+        {
+            TryDeleteFile(stagingPath, "failed gcode ingest");
+            throw;
+        }
+
+        // Identical bytes already in the library keep their original record: the library hash index is
+        // unique, and a promoted record is immutable once stamped.
+        GcodeFile? existingByHash = await _gcodeRepo.FindByHashAsync(computedHash, ct);
+        if (existingByHash is not null)
+        {
+            TryDeleteFile(stagingPath, "duplicate promoted content");
+            if (!existingByHash.IsImmutable && existingByHash.SourceArtifactId is null)
+            {
+                ApplyPromotionLineage(existingByHash, request, computedHash);
+                await _gcodeRepo.SaveChangesAsync(ct);
+            }
+
+            return new GcodeStreamIngestResult(existingByHash, AlreadyExisted: true);
+        }
+
+        MovePromotedBytesIntoPlace(stagingPath, finalPath);
+
+        GcodeMetadataExtracted? metadata = await ExtractMetadataAsync(finalPath, ct);
+        string? thumbnailPath = await ExtractThumbnailAsync(finalPath, ct);
+        if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
+        {
+            string finalThumbnailPath = Path.Combine(targetDirectory, $"{request.FileId}_thumb.png");
+            if (!string.Equals(thumbnailPath, finalThumbnailPath, StringComparison.Ordinal))
+            {
+                File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
+                thumbnailPath = finalThumbnailPath;
+            }
+        }
+
+        FolderNode targetFolder = await _folderService.GetOrCreateFolderAsync(
+            NormalizeVirtualPath(virtualDirectory),
+            "gcode",
+            ct);
+        Guid? printerModelId = await _gcodeRepo.ResolvePrinterModelIdAsync(metadata?.PrinterModel, ct);
+        GcodeFile file = BuildGcodeFileEntityFromMetadata(
+            request.FileId,
+            Path.GetFileName(request.FileName),
+            computedHash,
+            copiedBytes,
+            targetFolder.Id,
+            metadata,
+            thumbnailPath,
+            request.Source,
+            extension,
+            resolvedPrinterModelId: printerModelId);
+        ApplyPromotionLineage(file, request, computedHash);
+
+        try
+        {
+            await _gcodeRepo.AddAsync(file, ct);
+            await _gcodeRepo.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent ingest of the same content committed first. Detach the rejected insert so it
+            // cannot poison a later save on this shared context, then adopt the winning record.
+            await _gcodeRepo.RemoveAsync(file, ct);
+            GcodeFile? winner = await _gcodeRepo.FindByHashAsync(computedHash, ct);
+            if (winner is null)
+            {
+                _ = TryDeleteFile(finalPath, "cleanup after failed ingest");
+                throw;
+            }
+
+            if (!string.Equals(winner.FileName, file.FileName, StringComparison.OrdinalIgnoreCase))
+            {
+                // The winner published under a different identity, so these bytes are an orphan copy.
+                _ = TryDeleteFile(finalPath, "cleanup after concurrent ingest");
+            }
+
+            return new GcodeStreamIngestResult(winner, AlreadyExisted: true);
+        }
+
+        _telemetry.RecordFileOperation("promote", extension.TrimStart('.'), copiedBytes);
+        return new GcodeStreamIngestResult(file, AlreadyExisted: false);
+    }
+
+    private static void ApplyPromotionLineage(GcodeFile file, GcodeStreamIngestRequest request, string contentSha256)
+    {
+        GcodePromotionLineage lineage = request.Lineage;
+        file.SourceArtifactId = lineage.SourceArtifactId;
+        file.SourceSliceJobId = lineage.SourceSliceJobId;
+        file.SourceWorkerId = lineage.SourceWorkerId;
+        file.CalibrationProjectId = lineage.CalibrationProjectId;
+        file.CalibrationAttemptId = lineage.CalibrationAttemptId;
+        file.CalibrationOrchestrationId = lineage.CalibrationOrchestrationId;
+        file.PromotionOperationId = lineage.PromotionOperationId;
+        file.PromotionOperationKey = lineage.PromotionOperationKey;
+        file.PromotionCorrelationId = lineage.PromotionCorrelationId;
+        file.ContentSha256 = contentSha256;
+        file.SpecificationSha256 = lineage.SpecificationSha256;
+        file.SourceModelSha256 = lineage.SourceModelSha256;
+        file.MachineProfileSha256 = lineage.MachineProfileSha256;
+        file.ProcessProfileSha256 = lineage.ProcessProfileSha256;
+        file.FilamentProfileSha256 = lineage.FilamentProfileSha256;
+        file.SlicerEngineName = lineage.SlicerEngineName;
+        file.SlicerDistribution = lineage.SlicerDistribution;
+        file.PinnedSlicerVersion = lineage.PinnedSlicerVersion;
+        file.SlicerContainerDigest = lineage.SlicerContainerDigest;
+        file.FirmwareFamily = lineage.FirmwareFamily;
+        file.GcodeDialect = lineage.GcodeDialect;
+        file.GeneratorName = lineage.GeneratorName;
+        file.GeneratorVersion = lineage.GeneratorVersion;
+        file.CalibrationManifestJson = lineage.CalibrationManifestJson;
+        file.CalibrationManifestSha256 = lineage.CalibrationManifestSha256;
+        file.IsImmutable = true;
+        file.PromotedAtUtc = DateTime.UtcNow;
+    }
+
+    private static string NormalizeHex(string value) =>
+        value.Trim().Replace("-", string.Empty, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Publishes verified staged bytes under the final identity, tolerating a concurrent ingest that
+    /// already published byte-identical content.
+    /// </summary>
+    /// <param name="stagingPath">The verified staging file.</param>
+    /// <param name="finalPath">The final storage path for the file identity.</param>
+    private void MovePromotedBytesIntoPlace(string stagingPath, string finalPath)
+    {
+        try
+        {
+            File.Move(stagingPath, finalPath, overwrite: true);
+        }
+        catch (IOException) when (File.Exists(finalPath))
+        {
+            // Both copies passed the same digest check, so the published file is already correct.
+            _ = TryDeleteFile(stagingPath, "concurrent gcode ingest");
+        }
+        catch (UnauthorizedAccessException) when (File.Exists(finalPath))
+        {
+            // A concurrent ingest holds the destination open while publishing identical bytes.
+            _ = TryDeleteFile(stagingPath, "concurrent gcode ingest");
+        }
+    }
+
+    private static async Task<(string Sha256, long Length)> CopyAndHashAsync(
+        Stream source,
+        string destinationPath,
+        CancellationToken ct)
+    {
+        byte[] buffer = new byte[81920];
+        long total = 0;
+        await using FileStream destination = new(
+            destinationPath,
+            FileMode.Create,
+            FileAccess.Write,
+            FileShare.None,
+            buffer.Length,
+            useAsync: true);
+        using SHA256 hasher = SHA256.Create();
+        int read;
+        while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+        {
+            await destination.WriteAsync(buffer.AsMemory(0, read), ct);
+            _ = hasher.TransformBlock(buffer, 0, read, null, 0);
+            total += read;
+        }
+
+        _ = hasher.TransformFinalBlock([], 0, 0);
+        await destination.FlushAsync(ct);
+        return (Convert.ToHexString(hasher.Hash!), total);
     }
 
     /// <summary>
@@ -854,26 +1082,73 @@ public class GcodeFilesService(
             }
         }
 
-        // Step 3: Clear FK references that would otherwise block deletion.
-        // - PrintJobs keep history; we null out the FK.
-        // - Harvest import mappings are safe to remove when deleting the library file.
-        foreach (GcodeFile file in filesToDelete)
+        // F4 — Wrap Step 3 compensating deletes + Step 4 parent GcodeFile removal in a
+        // single transaction so a failure late in the sequence rolls back the earlier
+        // ExecuteDeleteAsync writes (queue references cleared, harvest import mappings
+        // deleted, direct PartOutputMappings deleted). Cooperate with any outer
+        // transaction opened by a caller. Physical file deletion (Step 5) is intentionally
+        // OUTSIDE the transaction — filesystem operations cannot participate in an EF
+        // transaction, and the code already tolerates the "DB removed / physical file
+        // missing" state further down.
+        IDbContextTransaction? ownedTransaction = await _unitOfWork.BeginOwnedTransactionAsync(ct);
+        try
         {
-            await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
-            await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+            // Step 3: Clear FK references that would otherwise block deletion.
+            // - PrintJobs keep history; we null out the FK.
+            // - Harvest import mappings are safe to remove when deleting the library file.
+            // - Direct PartOutputMappings (GcodeFileId path) must be explicitly deleted
+            //   because their FK to GcodeFiles is Restrict, not Cascade, after the Dallas
+            //   cascade adjudication for #953 (broke the SQL Server 1785 multi-cascading-path
+            //   graph GcodeFiles ⇒ PartOutputMappings via {direct, via PrintProjectFiles}).
+            //   Mappings that reach the file indirectly via PrintProjectFileId are NOT touched
+            //   here — they cascade normally when the PrintProjectFile is removed.
+            foreach (GcodeFile file in filesToDelete)
+            {
+                await _unitOfWork.Queue.ClearGcodeFileReferencesAsync(file.Id, ct);
+                await _unitOfWork.HarvestOperations.DeleteFileImportMappingsForGcodeFileAsync(file.Id, ct);
+                await _unitOfWork.PartOutputMappings.DeleteDirectMappingsForGcodeFileAsync(file.Id, ct);
+            }
+
+            // Step 4: Delete database records first (before deleting physical files)
+            _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
+
+            foreach (GcodeFile file in filesToDelete)
+            {
+                _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
+                await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
+            }
+
+            await _unitOfWork.SaveChangesAsync(ct);
+            _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
+
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.CommitAsync(ct);
+            }
         }
-
-        // Step 4: Delete database records first (before deleting physical files)
-        _logger.LogInformation("[DeleteFilesAsync] Deleting {FilesToDeleteCount} record(s) from database", filesToDelete.Count);
-
-        foreach (GcodeFile file in filesToDelete)
+        catch
         {
-            _logger.LogInformation("[DeleteFilesAsync]   - Removing from DB: {FileFileName} (ID: {FileId})", file.FileName, file.Id);
-            await _unitOfWork.GcodeFiles.RemoveAsync(file, ct);
-        }
+            if (ownedTransaction is not null)
+            {
+                try
+                {
+                    await ownedTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch
+                {
+                    // Rollback best-effort; original exception propagates.
+                }
+            }
 
-        await _unitOfWork.SaveChangesAsync(ct);
-        _logger.LogInformation("[DeleteFilesAsync] Successfully saved database changes, {FilesToDeleteCount} record(s) deleted from DB", filesToDelete.Count);
+            throw;
+        }
+        finally
+        {
+            if (ownedTransaction is not null)
+            {
+                await ownedTransaction.DisposeAsync();
+            }
+        }
 
         // Step 5: Delete physical files (gcode + thumbnails)
         // If a physical file is missing, we still count it as deleted since the DB record was removed
@@ -1396,11 +1671,19 @@ public class GcodeFilesService(
             BottomSolidLayers = metadata?.BottomSolidLayers,
             MaxVolumetricSpeed = metadata?.MaxVolumetricSpeed,
             IroningEnabled = metadata?.IroningEnabled,
+            FilamentPerExtruderWeightG = SerializeArrayOrNull(metadata?.FilamentPerExtruderWeightG),
+            FilamentPerExtruderLengthMm = SerializeArrayOrNull(metadata?.FilamentPerExtruderLengthMm),
+            FilamentPerExtruderColorHex = SerializeArrayOrNull(metadata?.FilamentPerExtruderColorHex),
+            FilamentPerExtruderType = SerializeArrayOrNull(metadata?.FilamentPerExtruderType),
+            ExtruderCount = metadata?.ExtruderCount,
             ThumbnailFileName = thumbnailPath != null ? Path.GetFileName(thumbnailPath) : null,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
     }
+
+    private static string? SerializeArrayOrNull<T>(T[]? values)
+        => values is { Length: > 0 } ? JsonSerializer.Serialize(values) : null;
 
     #endregion
 
@@ -1763,6 +2046,8 @@ public class GcodeFilesService(
             IroningEnabled: file.IroningEnabled,
             FilamentPerExtruderWeightG: file.FilamentPerExtruderWeightG,
             FilamentPerExtruderLengthMm: file.FilamentPerExtruderLengthMm,
+            FilamentPerExtruderColorHex: file.FilamentPerExtruderColorHex,
+            FilamentPerExtruderType: file.FilamentPerExtruderType,
             ExtruderCount: file.ExtruderCount);
     }
 

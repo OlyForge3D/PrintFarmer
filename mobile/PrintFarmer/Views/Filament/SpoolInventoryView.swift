@@ -12,6 +12,7 @@ struct SpoolInventoryView: View {
     @Environment(AppRouter.self) private var router
     @State private var viewModel = SpoolInventoryViewModel()
     @State private var showAddSpool = false
+    @State private var showBarcodeIntake = false
     @State private var nfcWriteTarget: NFCWriteTarget?
     @State private var activeTasks: [Task<Void, Never>] = []
 
@@ -80,6 +81,13 @@ struct SpoolInventoryView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
                         Button {
+                            showBarcodeIntake = true
+                        } label: {
+                            Image(systemName: "barcode.viewfinder")
+                        }
+                        .accessibilityLabel("Barcode intake")
+
+                        Button {
                             viewModel.handleNFCScan()
                         } label: {
                             Image(systemName: "wave.3.right")
@@ -124,6 +132,13 @@ struct SpoolInventoryView: View {
                         activeTasks.append(task)
                     }
             }
+            .sheet(isPresented: $showBarcodeIntake) {
+                BarcodeIntakeView()
+                    .onDisappear {
+                        let task = Task { await viewModel.loadSpools() }
+                        activeTasks.append(task)
+                    }
+            }
             .sheet(isPresented: $viewModel.showScannedDataSheet) {
                 if let data = viewModel.scannedSpoolData {
                     AddSpoolView(scannedData: data)
@@ -148,12 +163,13 @@ struct SpoolInventoryView: View {
                 await viewModel.loadSpools()
                 if let spoolId = router.pendingSpoolHighlightId {
                     router.pendingSpoolHighlightId = nil
-                    viewModel.highlightedSpoolId = spoolId
+                    viewModel.setHighlight(spoolId: spoolId)
                 }
             }
             .onAppear { viewModel.isViewActive = true }
             .onDisappear {
                 viewModel.isViewActive = false
+                viewModel.invalidateHighlightOwnership()
                 activeTasks.forEach { $0.cancel() }
             }
         }
@@ -314,14 +330,13 @@ struct SpoolInventoryView: View {
             }
             }
             .onChange(of: viewModel.highlightedSpoolId) { _, newId in
+                // Scroll animation only. Highlight expiry is owned synchronously
+                // by the view model inside `setHighlight`, so no expiry task is
+                // spawned here — this avoids the assignment-to-authority gap
+                // that previously let a stale timer clear a newer highlight.
                 if let newId {
                     withAnimation {
                         proxy.scrollTo(newId, anchor: .center)
-                    }
-                    Task {
-                        try? await Task.sleep(for: .seconds(2))
-                        guard !Task.isCancelled else { return }
-                        withAnimation { viewModel.clearHighlight() }
                     }
                 }
             }
@@ -364,7 +379,7 @@ struct SpoolInventoryRowView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(Color.pfTextPrimary)
 
-                    if spool.inUse ?? false {
+                    if spool.inUse {
                         Image(systemName: "printer.fill")
                             .font(.caption2)
                             .foregroundStyle(Color.pfAccent)

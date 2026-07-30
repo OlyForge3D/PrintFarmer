@@ -36,6 +36,17 @@ public interface ITagService
     Task<TagDto> CreateTagAsync(CreateTagDto dto, CancellationToken ct);
 
     /// <summary>
+    /// Update an existing tag's metadata using optimistic concurrency (#844). The tag's current
+    /// revision must equal <see cref="UpdateTagDto.ExpectedRevision"/>; otherwise a
+    /// <see cref="Farm.Infrastructure.Exceptions.TagConcurrencyException"/> is thrown.
+    /// </summary>
+    /// <param name="tagId">The unique identifier of the tag to update.</param>
+    /// <param name="dto">The tag update data (fields left null are unchanged).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The updated tag with its new revision and concurrency token.</returns>
+    Task<TagDto> UpdateTagAsync(Guid tagId, UpdateTagDto dto, CancellationToken ct);
+
+    /// <summary>
     /// Delete a tag
     /// </summary>
     /// <param name="tagId">The unique identifier of the tag to delete.</param>

@@ -50,6 +50,18 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         _context.PrintJobs.Add(job);
     }
 
+    public async Task AddWithoutSaveAsync(PrintJob job, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        _ = await _context.PrintJobs.AddAsync(job, ct);
+    }
+
+    public void AddDispatchLog(DispatchLog log)
+    {
+        ArgumentNullException.ThrowIfNull(log);
+        _ = _context.DispatchLogs.Add(log);
+    }
+
     public void Remove(PrintJob job)
     {
         _context.PrintJobs.Remove(job);
@@ -77,13 +89,23 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public Task SaveChangesAsync(CancellationToken ct = default) => _context.SaveChangesAsync(ct);
 
+    public void ClearTrackedChanges()
+    {
+        _context.ChangeTracker.Clear();
+    }
+
     // ============= FILTERED QUERIES =============
     public async Task<List<PrintJob>> GetFilteredJobsAsync(
         PrintJobStatus? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
@@ -131,9 +153,44 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
                 pj.GcodeFile.RequiredMaterial.Contains(filterMaterial)));
         }
 
+        if (deadlineStartUtc.HasValue)
+        {
+            query = query.Where(pj => pj.DeadlineAtUtc.HasValue && pj.DeadlineAtUtc.Value >= deadlineStartUtc.Value);
+        }
+
+        if (deadlineEndUtc.HasValue)
+        {
+            query = query.Where(pj => pj.DeadlineAtUtc.HasValue && pj.DeadlineAtUtc.Value <= deadlineEndUtc.Value);
+        }
+
+        if (queuedFrom.HasValue)
+        {
+            query = query.Where(pj => pj.QueuedAt >= queuedFrom.Value);
+        }
+
+        if (queuedTo.HasValue)
+        {
+            query = query.Where(pj => pj.QueuedAt <= queuedTo.Value);
+        }
+
+        query = sortBy.ToLowerInvariant() switch
+        {
+            "deadline" => query
+                .OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1)
+                .ThenBy(pj => pj.DeadlineAtUtc)
+                .ThenByDescending(pj => pj.Priority)
+                .ThenBy(pj => pj.QueuePosition),
+            "deadline_desc" => query
+                .OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1)
+                .ThenByDescending(pj => pj.DeadlineAtUtc)
+                .ThenByDescending(pj => pj.Priority)
+                .ThenBy(pj => pj.QueuePosition),
+            _ => query
+                .OrderByDescending(pj => pj.Priority)
+                .ThenBy(pj => pj.QueuePosition)
+        };
+
         return await query
-            .OrderByDescending(pj => pj.Priority)
-            .ThenBy(pj => pj.QueuePosition)
             .Skip(offset)
             .Take(limit)
             .ToListAsync(ct);
@@ -206,7 +263,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         }
 
         double totalWaitMinutes = completedJobs
-            .Sum(j => (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes);
+            .Sum(j => Math.Max(0.0, (j.ActualStartTime!.Value - j.QueuedAt).TotalMinutes));
 
         return totalWaitMinutes / completedJobs.Count;
     }
@@ -233,13 +290,16 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
-            .Include(pj => pj.ToolheadUsages);
+            .Include(pj => pj.ToolheadUsages)
+            .Include(pj => pj.Tags);
 
         // Filter by statuses - default to completed/failed/cancelled if not specified
         if (statuses != null && statuses.Count > 0)
@@ -274,6 +334,16 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             query = query.Where(pj => (pj.ActualEndTime ?? pj.QueuedAt) <= dateEnd.Value);
         }
 
+        if (deadlineStartUtc.HasValue)
+        {
+            query = query.Where(pj => pj.DeadlineAtUtc.HasValue && pj.DeadlineAtUtc.Value >= deadlineStartUtc.Value);
+        }
+
+        if (deadlineEndUtc.HasValue)
+        {
+            query = query.Where(pj => pj.DeadlineAtUtc.HasValue && pj.DeadlineAtUtc.Value <= deadlineEndUtc.Value);
+        }
+
         // Calculate statistics for the entire filtered result set (before pagination)
         int totalCount = await query.CountAsync(ct);
         int completedCount = await query.CountAsync(pj => pj.Status == PrintJobStatus.Completed, ct);
@@ -294,6 +364,8 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             "name" => query.OrderBy(pj => pj.GcodeFile != null ? pj.GcodeFile.Name : pj.Name),
             "status" => query.OrderBy(pj => pj.Status),
             "oldest" => query.OrderBy(pj => pj.ActualEndTime ?? pj.QueuedAt),
+            "deadline" => query.OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1).ThenBy(pj => pj.DeadlineAtUtc),
+            "deadline_desc" => query.OrderBy(pj => pj.DeadlineAtUtc.HasValue ? 0 : 1).ThenByDescending(pj => pj.DeadlineAtUtc),
             _ => query.OrderByDescending(pj => pj.ActualEndTime ?? pj.QueuedAt)
         };
 
@@ -429,6 +501,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     {
         return await _context.Printers
             .AsNoTracking()
+            .Include(p => p.ServiceState)
             .Where(p => p.IsEnabled)
             .ToListAsync(ct);
     }
@@ -451,6 +524,37 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .ToListAsync(ct);
 
         return externalIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default)
+    {
+        List<DateTime> rawStartTimes = await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => (pj.SourcePrinterId == printerId || pj.AssignedPrinterId == printerId) && pj.ActualStartTime.HasValue)
+            .Select(pj => pj.ActualStartTime!.Value)
+            .ToListAsync(ct);
+
+        return rawStartTimes
+            .Select(startTime => startTime.AddTicks(-(startTime.Ticks % TimeSpan.TicksPerSecond)))
+            .ToHashSet();
+    }
+
+    public async Task<List<HistoryDuplicateCandidate>> GetHistoryDuplicateCandidatesAsync(CancellationToken ct = default)
+    {
+        // Post-epoch guard mirrors the harvest dedup: start-less jobs (epoch) are never duplicates.
+        return await _context.PrintJobs
+            .AsNoTracking()
+            .Where(pj => pj.ActualStartTime.HasValue && pj.ActualStartTime.Value > DateTime.UnixEpoch)
+            .Select(pj => new HistoryDuplicateCandidate(
+                pj.Id,
+                pj.SourcePrinterId,
+                pj.AssignedPrinterId,
+                pj.ActualStartTime!.Value,
+                pj.WasSeededFromHistory,
+                pj.IsExternalPrint,
+                pj.ExternalJobId,
+                pj.CreatedAt))
+            .ToListAsync(ct);
     }
 
     public async Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default)

@@ -47,7 +47,7 @@ public class BatchDispatchTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _client = await _factory.CreateAuthenticatedClientAsync();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -63,6 +63,8 @@ public class BatchDispatchTests : IAsyncLifetime
     private sealed class BatchDispatchRequest
     {
         public List<Guid> JobIds { get; set; } = [];
+
+        public Dictionary<Guid, string> JobETags { get; set; } = [];
     }
 
     private sealed class BatchDispatchResponse
@@ -176,6 +178,16 @@ public class BatchDispatchTests : IAsyncLifetime
         return jobId;
     }
 
+    private static async Task<Dictionary<Guid, string>> GetJobETagsAsync(
+        AppDbContext db,
+        IEnumerable<Guid> jobIds) =>
+        await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => jobIds.Contains(job.Id))
+            .ToDictionaryAsync(
+                job => job.Id,
+                job => Convert.ToBase64String(job.RowVersion ?? []));
+
     // =========================================================================
     // BATCH DISPATCH ENDPOINT TESTS
     // =========================================================================
@@ -196,7 +208,12 @@ public class BatchDispatchTests : IAsyncLifetime
         Guid jobId2 = await SeedQueuedJobAsync(db, folderId, 2);
         Guid jobId3 = await SeedQueuedJobAsync(db, folderId, 3);
 
-        var request = new BatchDispatchRequest { JobIds = [jobId1, jobId2, jobId3] };
+        List<Guid> jobIds = [jobId1, jobId2, jobId3];
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobIds,
+            JobETags = await GetJobETagsAsync(db, jobIds),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/job-queue/batch-dispatch", request);
 
@@ -249,7 +266,12 @@ public class BatchDispatchTests : IAsyncLifetime
         Guid jobId2 = await SeedQueuedJobAsync(db, folderId, 11);
         Guid jobId3 = await SeedQueuedJobAsync(db, folderId, 12);
 
-        var request = new BatchDispatchRequest { JobIds = [jobId1, jobId2, jobId3] };
+        List<Guid> jobIds = [jobId1, jobId2, jobId3];
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobIds,
+            JobETags = await GetJobETagsAsync(db, jobIds),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/job-queue/batch-dispatch", request);
 
@@ -276,7 +298,12 @@ public class BatchDispatchTests : IAsyncLifetime
         Guid assignedJobId = await SeedQueuedJobAsync(db, folderId, 20, assignedPrinterId: printerId);
         Guid unassignedJobId = await SeedQueuedJobAsync(db, folderId, 21);
 
-        var request = new BatchDispatchRequest { JobIds = [assignedJobId, unassignedJobId] };
+        List<Guid> jobIds = [assignedJobId, unassignedJobId];
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobIds,
+            JobETags = await GetJobETagsAsync(db, jobIds),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/job-queue/batch-dispatch", request);
 
@@ -307,7 +334,12 @@ public class BatchDispatchTests : IAsyncLifetime
         Guid jobId1 = await SeedQueuedJobAsync(db, folderId, 30);
         Guid jobId2 = await SeedQueuedJobAsync(db, folderId, 31);
 
-        var request = new BatchDispatchRequest { JobIds = [jobId1, jobId2] };
+        List<Guid> jobIds = [jobId1, jobId2];
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobIds,
+            JobETags = await GetJobETagsAsync(db, jobIds),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/job-queue/batch-dispatch", request);
 
@@ -354,7 +386,11 @@ public class BatchDispatchTests : IAsyncLifetime
         Guid validJobId = await SeedQueuedJobAsync(db, folderId, 40);
         Guid nonExistentJobId = Guid.NewGuid();
 
-        var request = new BatchDispatchRequest { JobIds = [validJobId, nonExistentJobId] };
+        var request = new BatchDispatchRequest
+        {
+            JobIds = [validJobId, nonExistentJobId],
+            JobETags = await GetJobETagsAsync(db, [validJobId]),
+        };
 
         HttpResponseMessage response = await _client.PostAsJsonAsync("/api/job-queue/batch-dispatch", request);
 

@@ -3,6 +3,15 @@
 namespace Farm.Backend.Plugin.Core;
 
 /// <summary>
+/// Backend-advertised telemetry timing used by physical safety gates.
+/// </summary>
+/// <param name="ExpectedUpdateInterval">Normal status update cadence.</param>
+/// <param name="MaximumObservationAge">Oldest observation safe for physical actuation.</param>
+public sealed record BackendTelemetryCadence(
+    TimeSpan ExpectedUpdateInterval,
+    TimeSpan MaximumObservationAge);
+
+/// <summary>
 /// Extended interface for backend plugins that provide additional functionality beyond basic client support.
 /// This interface allows plugins to register custom services, status clients, and other components.
 /// Plugins that implement this interface can provide more sophisticated backend implementations.
@@ -20,6 +29,12 @@ public interface IExtendedBackendPlugin : IBackendClientPlugin
     /// If the plugin doesn't have a dedicated status client, return null.
     /// </summary>
     Type? StatusClientInterfaceType { get; }
+
+    /// <summary>
+    /// Gets the backend's actual status cadence and physical-safety freshness SLA.
+    /// A missing advertisement makes physical dispatch fail closed.
+    /// </summary>
+    BackendTelemetryCadence? TelemetryCadence => null;
 
     /// <summary>
     /// Registers additional services beyond the basic client implementation.

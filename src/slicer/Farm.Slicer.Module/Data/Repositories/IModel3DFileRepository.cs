@@ -19,10 +19,29 @@ public interface IModel3DFileRepository
     /// <param name="ct">Cancellation token.</param>
     Task<Model3D?> GetByIdAsync(Guid id, CancellationToken ct);
 
+    /// <summary>Retrieves a model by its unique identifier without filtering by IsValid status.</summary>
+    /// <param name="id">The model identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>Used for file download operations where physical file access is needed regardless of validation status.</remarks>
+    Task<Model3D?> GetByIdUnfilteredAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Clears pending tracking state and reloads a model by stable identity after an unknown save outcome.
+    /// </summary>
+    /// <param name="id">The model identity whose commit outcome is being reconciled.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3D?> GetByIdForReconciliationAsync(Guid id, CancellationToken ct);
+
     /// <summary>Retrieves a model by its SHA-256 file hash (deduplication).</summary>
     /// <param name="fileHash">The SHA-256 hash of the model file.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<Model3D?> GetByHashAsync(string fileHash, CancellationToken ct);
+
+    /// <summary>Retrieves an idempotent upload for a specific user.</summary>
+    /// <param name="userId">The upload owner.</param>
+    /// <param name="clientUploadId">The caller-provided idempotency identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<Model3D?> GetByClientUploadIdAsync(Guid userId, Guid clientUploadId, CancellationToken ct);
 
     /// <summary>Retrieves all valid models ordered by upload date descending.</summary>
     /// <param name="ct">Cancellation token.</param>

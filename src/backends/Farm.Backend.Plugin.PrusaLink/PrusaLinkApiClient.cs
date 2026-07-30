@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -418,6 +419,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         {
             string body = await response.Content.ReadAsStringAsync(ct);
             _logger.LogWarning("PrusaLink upload failed: HTTP {StatusCode} {ReasonPhrase} - {Body}", (int)response.StatusCode, response.ReasonPhrase, body);
+            if (printAfterUpload &&
+                (int)response.StatusCode is >= 400 and < 500)
+            {
+                throw new PrusaLinkCommandRejectedException(response.StatusCode);
+            }
         }
 
         return response.IsSuccessStatusCode;
@@ -676,6 +682,491 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return allFiles;
     }
 
+    public async Task<HistoryListResponse?> GetHistoryListAsync(
+        string baseUrl,
+        int? limit = null,
+        int? start = null,
+        DateTime? since = null,
+        DateTime? before = null,
+        string? order = null,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default)
+    {
+        HttpClient client = GetClientForCredentials(credentials);
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        try
+        {
+            int requestedStart = Math.Max(0, start ?? 0);
+            int? requestedLimit = limit is > 0 ? limit : null;
+            bool requiresFullScan =
+                since.HasValue ||
+                before.HasValue ||
+                !string.IsNullOrWhiteSpace(order) ||
+                !requestedLimit.HasValue;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
+
+            const int PageSize = 100;
+            int offset = 0;
+            int sourceCount = 0;
+            int examinedCount = 0;
+            bool reachedSourceEnd = false;
+            var allJobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
+            while (true)
+            {
+                int pageSize = !requiresFullScan && requestedLimit.HasValue
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - allJobs.Count))
+                    : PageSize;
+                HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
+                    client,
+                    normalizedBaseUrl,
+                    pageSize,
+                    offset,
+                    credentials,
+                    ct);
+                int examined = page.ExaminedSourceEntries;
+                if (examined > 0 && page.Count < offset + examined)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history count did not cover the returned source page.");
+                }
+
+                sourceCount = Math.Max(sourceCount, page.Count);
+                allJobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
+                examinedCount += examined;
+                offset += examined;
+                reachedSourceEnd = offset >= sourceCount;
+                bool requestedRangeFilled =
+                    !requiresFullScan &&
+                    requestedLimit.HasValue &&
+                    allJobs.Count >= requestedEnd;
+                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                {
+                    break;
+                }
+            }
+
+            IEnumerable<HistoryJob> filtered = allJobs;
+            if (since.HasValue)
+            {
+                double sinceSeconds = new DateTimeOffset(NormalizeUtc(since.Value))
+                    .ToUnixTimeMilliseconds() / 1000d;
+                filtered = filtered.Where(job => job.StartTime > sinceSeconds);
+            }
+
+            if (before.HasValue)
+            {
+                double beforeSeconds = new DateTimeOffset(NormalizeUtc(before.Value))
+                    .ToUnixTimeMilliseconds() / 1000d;
+                filtered = filtered.Where(job => job.StartTime < beforeSeconds);
+            }
+
+            filtered = string.Equals(order, "asc", StringComparison.OrdinalIgnoreCase)
+                ? filtered.OrderBy(job => job.StartTime)
+                : string.Equals(order, "desc", StringComparison.OrdinalIgnoreCase)
+                    ? filtered.OrderByDescending(job => job.StartTime)
+                    : filtered;
+            HistoryJob[] filteredJobs = filtered.ToArray();
+            HistoryJob[] requestedJobs = filteredJobs
+                .Skip(requestedStart)
+                .Take(requestedLimit ?? int.MaxValue)
+                .ToArray();
+            bool coversRequestedRange = requiresFullScan
+                ? reachedSourceEnd
+                : requestedLimit.HasValue &&
+                  (requestedJobs.Length >= requestedLimit.Value || reachedSourceEnd);
+            return new HistoryListResponse
+            {
+                Count = requiresFullScan ? filteredJobs.Length : sourceCount,
+                Jobs = requestedJobs,
+                ExaminedSourceEntries = examinedCount,
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                    "prusalink",
+                    Math.Max(sourceCount, examinedCount),
+                    examinedCount,
+                    StartsAtBeginning: true,
+                    HasUnambiguousEnd: reachedSourceEnd,
+                    CoversRequestedRange: coversRequestedRange,
+                    ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "PrusaLink history request threw for {BaseUrl} (limit={Limit}, start={Start}, since={Since})",
+                normalizedBaseUrl,
+                limit,
+                start,
+                since);
+            return null;
+        }
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private static async Task<HistoryListResponse> FetchPrusaLinkHistoryPageAsync(
+        HttpClient client,
+        string normalizedBaseUrl,
+        int? limit,
+        int start,
+        PrinterCredential? credentials,
+        CancellationToken ct)
+    {
+        var queryParams = new List<string>();
+        if (limit.HasValue)
+        {
+            queryParams.Add($"limit={limit.Value}");
+        }
+
+        queryParams.Add($"start={start}");
+        string requestUrl =
+            $"{normalizedBaseUrl}/api/history?{string.Join("&", queryParams)}";
+        using HttpRequestMessage request =
+            CreateRequest(HttpMethod.Get, requestUrl, credentials);
+        using HttpResponseMessage response = await client.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+        string content = await response.Content.ReadAsStringAsync(ct);
+        return ParseOctoPrintHistoryList(content)
+            ?? throw new InvalidDataException(
+                "PrusaLink returned malformed history list data.");
+    }
+
+    public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
+    {
+        HttpClient client = GetClientForCredentials(credentials);
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        HttpRequestMessage request = CreateRequest(HttpMethod.Get, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
+
+        try
+        {
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                throw new HistoryJobNotFoundException(
+                    $"PrusaLink history job {jobId} was not found.");
+            }
+
+            response.EnsureSuccessStatusCode();
+            string content = await response.Content.ReadAsStringAsync(ct);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
+            {
+                throw new InvalidDataException(
+                    $"PrusaLink returned malformed history detail for {jobId}.");
+            }
+
+            return parsed;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "PrusaLink history probe failed for job {JobId}",
+                jobId);
+            throw;
+        }
+    }
+
+    public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
+    {
+        HistoryListResponse? history = await GetHistoryListAsync(
+            baseUrl,
+            limit: 10000,
+            start: 0,
+            since: null,
+            before: null,
+            order: null,
+            credentials: credentials,
+            ct: ct);
+        if (history == null)
+        {
+            return null;
+        }
+
+        double totalPrintTime = 0;
+        double totalFilamentUsed = 0;
+        int completedCount = 0;
+
+        foreach (HistoryJob job in history.Jobs)
+        {
+            if (job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase))
+            {
+                totalPrintTime += job.PrintDuration;
+                totalFilamentUsed += job.FilamentUsed;
+                completedCount++;
+            }
+        }
+
+        return new HistoryTotals
+        {
+            JobTotals = new JobTotals
+            {
+                TotalJobs = completedCount,
+                TotalPrintTime = totalPrintTime,
+                TotalFilamentUsed = totalFilamentUsed
+            }
+        };
+    }
+
+    public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
+    {
+        HttpClient client = GetClientForCredentials(credentials);
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        HttpRequestMessage request = CreateRequest(HttpMethod.Delete, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
+
+        try
+        {
+            using HttpResponseMessage response = await client.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static HistoryListResponse? ParseOctoPrintHistoryList(string historyJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(historyJson);
+            JsonElement root = doc.RootElement;
+
+            if (!root.TryGetProperty("success", out JsonElement successProp) || !successProp.GetBoolean())
+            {
+                return null;
+            }
+
+            List<HistoryJob> jobs = [];
+            List<HistoryExcludedEntryEvidence> excludedEntries = [];
+            if (!root.TryGetProperty("results", out JsonElement resultsProp) ||
+                resultsProp.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            int examinedEntries = resultsProp.GetArrayLength();
+            foreach (JsonElement jobElement in resultsProp.EnumerateArray())
+            {
+                HistoryJob? job = ParseOctoPrintJobElement(
+                    jobElement,
+                    requireCompleteListEntry: true);
+                if (job is null)
+                {
+                    try
+                    {
+                        excludedEntries.Add(
+                            CreateExcludedHistoryEvidence(jobElement));
+                    }
+                    catch (Exception)
+                    {
+                        excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                            BackendJobId: null,
+                            Filename: null,
+                            StartTime: null,
+                            Reason: "malformed_history_entry"));
+                    }
+
+                    continue;
+                }
+
+                jobs.Add(job);
+            }
+
+            if (!root.TryGetProperty("count", out JsonElement countProp) ||
+                !countProp.TryGetInt32(out int count) ||
+                count < 0 ||
+                count < examinedEntries)
+            {
+                return null;
+            }
+
+            return new HistoryListResponse
+            {
+                Count = count,
+                Jobs = jobs.ToArray(),
+                ExaminedSourceEntries = examinedEntries,
+                ExcludedEntries = excludedEntries.ToArray(),
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static HistoryJob? ParseOctoPrintHistoryJob(string jobJson)
+    {
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(jobJson);
+            return ParseOctoPrintJobElement(doc.RootElement);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static HistoryJob? ParseOctoPrintJobElement(
+        JsonElement jobElement,
+        bool requireCompleteListEntry = false)
+    {
+        if (jobElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        try
+        {
+            var job = new HistoryJob();
+
+            if (jobElement.TryGetProperty("id", out JsonElement idProp))
+            {
+                job.JobId = idProp.GetString() ?? string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(job.JobId))
+            {
+                return null;
+            }
+
+            bool hasState =
+                jobElement.TryGetProperty("state", out JsonElement stateProp) &&
+                stateProp.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(stateProp.GetString());
+            string? filename = null;
+            if (jobElement.TryGetProperty("job", out JsonElement jobProp) &&
+                jobProp.ValueKind == JsonValueKind.Object &&
+                jobProp.TryGetProperty("file", out JsonElement fileProp) &&
+                fileProp.ValueKind == JsonValueKind.Object &&
+                fileProp.TryGetProperty("name", out JsonElement nameProp) &&
+                nameProp.ValueKind == JsonValueKind.String)
+            {
+                filename = nameProp.GetString();
+            }
+
+            bool hasFilename = !string.IsNullOrWhiteSpace(filename);
+            bool hasStartTime =
+                jobElement.TryGetProperty("startTime", out JsonElement startProp) &&
+                startProp.ValueKind == JsonValueKind.Number;
+            if (requireCompleteListEntry &&
+                (!hasState || !hasFilename || !hasStartTime))
+            {
+                return null;
+            }
+
+            if (hasState)
+            {
+                job.Status = stateProp.GetString() ?? string.Empty;
+            }
+
+            if (hasFilename)
+            {
+                job.Filename = filename!;
+            }
+
+            if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind == JsonValueKind.Number)
+            {
+                job.PrintDuration = printTimeProp.GetDouble();
+            }
+
+            if (hasStartTime)
+            {
+                job.StartTime = startProp.GetDouble();
+            }
+
+            if (jobElement.TryGetProperty("endTime", out JsonElement endProp) && endProp.ValueKind == JsonValueKind.Number)
+            {
+                job.EndTime = endProp.GetDouble();
+            }
+
+            if (jobElement.TryGetProperty("filament", out JsonElement filamentProp)
+                && filamentProp.TryGetProperty("tool0", out JsonElement tool0Prop)
+                && tool0Prop.TryGetProperty("length", out JsonElement lengthProp)
+                && lengthProp.ValueKind == JsonValueKind.Number)
+            {
+                job.FilamentUsed = lengthProp.GetDouble();
+            }
+
+            return job;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
+        string? backendJobId = TryReadHistoryString(entry, "id");
+        string? filename = null;
+        if (entry.TryGetProperty("job", out JsonElement job) &&
+            job.ValueKind == JsonValueKind.Object &&
+            job.TryGetProperty("file", out JsonElement file) &&
+            file.ValueKind == JsonValueKind.Object)
+        {
+            filename = TryReadHistoryString(file, "name");
+        }
+
+        double? startTime =
+            entry.TryGetProperty("startTime", out JsonElement start) &&
+            start.ValueKind == JsonValueKind.Number &&
+            start.TryGetDouble(out double value)
+                ? value
+                : null;
+        return new HistoryExcludedEntryEvidence(
+            backendJobId,
+            filename,
+            startTime,
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadHistoryString(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+    }
+
     /// <summary>
     /// Creates an HTTP request message with appropriate authentication headers.
     /// Digest authentication is handled by DigestAuthHandler at the HttpClient level.
@@ -780,7 +1271,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused tool temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -810,7 +1311,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused bed temperature (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -847,7 +1358,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
             using HttpResponseMessage response = await client.SendAsync(request, ct);
+            if (response.StatusCode == HttpStatusCode.Conflict)
+            {
+                throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
+                    $"PrusaLink refused jog (409 Conflict) at {baseUrl}.");
+            }
+
             return response.IsSuccessStatusCode;
+        }
+        catch (Farm.Infrastructure.Services.Printers.PrinterBackendBusyException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

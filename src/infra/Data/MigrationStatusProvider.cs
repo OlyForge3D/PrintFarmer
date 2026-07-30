@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using System.Data.Common;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Data;
 
@@ -6,18 +7,11 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
 {
     public MigrationStatus GetStatus()
     {
-        string? provider = null;
-        try
-        {
-            provider = context.Database.ProviderName;
-        }
-        catch
-        { /* ignore */
-        }
+        string? provider = context.Database.ProviderName;
 
         bool hasMigrations = false;
         bool appliedAny = false;
-        string mode = "EnsureCreated"; // default assumption given current strategy
+        string mode = "Unavailable";
         try
         {
             IEnumerable<string> available = context.Database.GetMigrations();
@@ -26,12 +20,20 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
             {
                 IEnumerable<string> applied = context.Database.GetAppliedMigrations();
                 appliedAny = applied.Any();
-                mode = "Migrations"; // if any migrations exist we consider migrations mode
+                mode = "Migrations";
+            }
+            else
+            {
+                mode = "MigrationAssemblyMissing";
             }
         }
-        catch
+        catch (InvalidOperationException)
         {
-            // Accessing migrations can throw if no design-time services; treat as EnsureCreated.
+            mode = "Unavailable";
+        }
+        catch (DbException)
+        {
+            mode = "Unavailable";
         }
 
         return new MigrationStatus(mode, hasMigrations, appliedAny, provider);

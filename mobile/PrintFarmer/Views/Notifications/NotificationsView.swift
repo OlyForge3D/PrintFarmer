@@ -9,7 +9,7 @@ struct NotificationsView: View {
     var body: some View {
         @Bindable var router = router
 
-        NavigationStack(path: $router.notificationsPath) {
+        NavigationStack(path: $router.notificationsSheetPath) {
             Group {
                 if viewModel.isLoading && viewModel.notifications.isEmpty {
                     ProgressView("Loading notifications…")
@@ -56,6 +56,7 @@ struct NotificationsView: View {
             }
         }
         .task {
+            viewModel.isViewActive = true
             viewModel.configure(notificationService: services.notificationService)
             await viewModel.loadNotifications()
         }
@@ -98,6 +99,7 @@ struct NotificationsView: View {
                     .onTapGesture {
                         handleTap(notification)
                     }
+                    .accessibilityIdentifier("notifications.row.\(notification.id)")
             }
         }
         .listStyle(.plain)
@@ -112,7 +114,7 @@ struct NotificationsView: View {
 
         // Navigate to related resource if job is associated
         if let jobId = notification.jobId {
-            router.notificationsPath.append(AppDestination.jobDetail(id: jobId))
+            router.notificationsSheetPath.append(AppDestination.jobDetail(id: jobId))
         }
     }
 }

@@ -3,37 +3,60 @@ name: OrcaSlicer Strict Build
 # Manual dispatch only. This workflow previously ran on push/PR changes to specific paths.
 # We keep the workflow file for historical and manual use but make it manual-only and add
 # a double-guard (repo var + workflow input) so it remains effectively disabled by default.
+#
+# Scope: this workflow owns the *pinned* 2.3.1 calibration worker only. General 2.4.x slicing is
+# built and published separately by docker-publish.yml and orcaslicer-base-image.yml, which are
+# untouched by anything here.
 on:
   workflow_dispatch:
     inputs:
       disable_slicer_builds:
         description: 'Set to true to skip the Orca strict build when dispatching manually'
         required: false
-        default: 'true'
+        type: boolean
+        default: true
+      publish_pinned_worker:
+        description: 'Publish the verified worker to GHCR and run the mandatory calibration smoke gate'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+env:
+  ORCASLICER_VERSION: 2.3.1
+  ORCASLICER_SHA256: f199e5408914efdbbbfa4fd6752cd6ad4727209b488bc47bff9a0da5f053a701
+  ALLOW_STUB: 'false'
+  REGISTRY: ghcr.io
+  PINNED_WORKER_IMAGE_NAME: printfarmer-orcaslicer-worker-pinned
+
 jobs:
   build-orcaslicer-strict:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        orca_version: ["2.3.1"]
-        allow_stub: [false] # Can extend later with true for a soft-mode build
+    timeout-minutes: 60
+
+    # Least privilege: read the repository, write packages. Nothing else is granted, and the
+    # GITHUB_TOKEN is only ever used to authenticate to GHCR.
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      image: ${{ steps.publish.outputs.image }}
+      digest: ${{ steps.publish.outputs.digest }}
+      image_ref: ${{ steps.publish.outputs.image_ref }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Check dispatch input (disable_slicer_builds)
         id: check
+        env:
+          DISABLE_SLICER_BUILDS: ${{ inputs.disable_slicer_builds }}
         run: |
-          # Only honor the workflow_dispatch input. Default is 'true' so manual dispatch will skip by default.
           SKIP=false
-          INPUT_VAL="${{ github.event.inputs.disable_slicer_builds || 'true' }}"
-          if [ "${INPUT_VAL}" = 'true' ] || [ "${INPUT_VAL}" = '1' ]; then
+          if [ "${DISABLE_SLICER_BUILDS}" = 'true' ]; then
             SKIP=true
           fi
           echo "skip=$SKIP" >> $GITHUB_OUTPUT
@@ -53,9 +76,9 @@ jobs:
         id: preseed
         run: |
           set -e
-          ART_NAME=orca-appimage-${{ matrix.orca_version }}.AppImage
+          ART_NAME=orca-appimage-${ORCASLICER_VERSION}.AppImage
           echo "Looking for artifact $ART_NAME in previous artifact storage (if available)"
-          if curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | jq -r '.artifacts[].name' | grep -q "orca-appimage-${{ matrix.orca_version }}"; then
+          if curl -sS -H "Accept: application/vnd.github+json" -H "Authorization: ****** secrets.GITHUB_TOKEN }}" "https://api.github.com/repos/${{ github.repository }}/actions/artifacts" | jq -r '.artifacts[].name' | grep -q "orca-appimage-${ORCASLICER_VERSION}"; then
             echo "Found artifact listing entry; attempting to download via actions/download-artifact"
             mkdir -p preseed || true
             echo "No direct download implemented; skipping automated artifact download in this runner."
@@ -80,44 +103,281 @@ jobs:
             RELEASE_BODY='${{ github.event.release.body }}'
           elif echo "${GITHUB_REF:-}" | grep -q '^refs/tags/'; then
             TAG=${GITHUB_REF#refs/tags/}
-            RELEASE_BODY=$(curl -s -H "Authorization: Bearer $TOKEN" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$TAG" | jq -r '.body // ""' 2>/dev/null || true)
+            RELEASE_BODY=$(curl -s -H "Authorization: ******" "https://api.github.com/repos/${{ github.repository_owner }}/${{ github.event.repository.name }}/releases/tags/$TAG" | jq -r '.body // ""' 2>/dev/null || true)
           else
             RELEASE_BODY=''
           fi
           RELEASE_BODY_SANITIZED=$(printf "%s" "$RELEASE_BODY" | tr '\n' ' ' | sed 's/"/'"'"'/g' | cut -c1-1000)
 
-          echo "Building OrcaSlicer worker version=${{ matrix.orca_version }} ALLOW_STUB=${{ matrix.allow_stub }} using Dockerfile.multistage"
-          if [ "${{ steps.preseed.outputs.found }}" = "true" ] && [ -f preseed/orca.AppImage ]; then
-            echo "Using preseeded orca.AppImage via buildkit secret"
-            docker build --platform linux/amd64 --secret id=orca,src=preseed/orca.AppImage \
-              --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
-              --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
-              $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-              -f Dockerfile.multistage --target orcaslicer-worker -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
-          else
-            echo "No preseeded AppImage available; performing normal build (will attempt remote download)"
-            docker build --platform linux/amd64 --build-arg ORCASLICER_VERSION=${{ matrix.orca_version }} --build-arg ALLOW_STUB=${{ matrix.allow_stub }} --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
-              --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
-              $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
-              -f Dockerfile.multistage --target orcaslicer-worker -t orcaslicer-worker:strict-${{ matrix.orca_version }} .
-          fi
+          echo "Building OrcaSlicer worker version=${ORCASLICER_VERSION} ALLOW_STUB=${ALLOW_STUB} using Dockerfile.multistage"
+          docker build --platform linux/amd64 \
+            $( [ -f preseed/orca.AppImage ] && printf -- "--secret id=orca,src=preseed/orca.AppImage " || true) \
+            --build-arg ORCASLICER_VERSION=${ORCASLICER_VERSION} \
+            --build-arg ORCASLICER_SHA256=${ORCASLICER_SHA256} \
+            --build-arg ALLOW_STUB=${ALLOW_STUB} \
+            --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
+            $( [ -n "$RELEASE_BODY_SANITIZED" ] && printf -- "--label \"org.opencontainers.image.description=%s\" " "$RELEASE_BODY_SANITIZED" || true) \
+            -f scripts/docker/dockerfiles/Dockerfile.multistage \
+            --target orcaslicer-worker \
+            -t orcaslicer-worker:strict-${ORCASLICER_VERSION} .
 
       - name: Run verification (require-real)
         if: steps.check.outputs.skip != 'true'
         run: |
           chmod +x scripts/verify-orcaslicer-worker.sh
-          docker run -d --name orca-test-${{ matrix.orca_version }} orcaslicer-worker:strict-${{ matrix.orca_version }}
-          sleep 6
-          scripts/verify-orcaslicer-worker.sh require-real
+          scripts/verify-orcaslicer-worker.sh \
+            require-real \
+            orcaslicer-worker:strict-${ORCASLICER_VERSION} \
+            orca-test-${ORCASLICER_VERSION}
+
+      # ------------------------------------------------------------------
+      # Publication. Only a locally verified image is ever pushed, and the
+      # identity used downstream is the manifest digest the registry reports.
+      # ------------------------------------------------------------------
+      - name: Decide whether to publish the verified worker
+        if: steps.check.outputs.skip != 'true'
+        id: gate
+        env:
+          PUBLISH_PINNED_WORKER: ${{ inputs.publish_pinned_worker }}
+        run: |
+          set -euo pipefail
+          PUBLISH=false
+          if [ "${PUBLISH_PINNED_WORKER}" = 'true' ]; then
+            PUBLISH=true
+          fi
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute immutable tags
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        id: tags
+        run: |
+          set -euo pipefail
+          OWNER=$(printf '%s' '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          IMAGE="${REGISTRY}/${OWNER}/${PINNED_WORKER_IMAGE_NAME}"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "commit_tag=${IMAGE}:sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "version_tag=${IMAGE}:${ORCASLICER_VERSION}-sha-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Push the verified worker to GHCR
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        id: push
+        run: |
+          set -euo pipefail
+          docker tag orcaslicer-worker:strict-${ORCASLICER_VERSION} '${{ steps.tags.outputs.commit_tag }}'
+          docker tag orcaslicer-worker:strict-${ORCASLICER_VERSION} '${{ steps.tags.outputs.version_tag }}'
+
+          # The push output is the first place the registry reports the manifest digest.
+          docker push '${{ steps.tags.outputs.commit_tag }}' | tee push-commit.log
+          docker push '${{ steps.tags.outputs.version_tag }}' | tee push-version.log
+
+          PUSH_DIGEST=$(grep -oE 'sha256:[0-9a-f]{64}' push-commit.log | tail -n 1)
+          echo "push_digest=${PUSH_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve and validate the registry manifest digest
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        id: publish
+        run: |
+          set -euo pipefail
+          IMAGE='${{ steps.tags.outputs.image }}'
+          PUSH_DIGEST='${{ steps.push.outputs.push_digest }}'
+
+          # Ask the registry itself rather than trusting the push transcript alone.
+          REGISTRY_DIGEST=$(docker buildx imagetools inspect '${{ steps.tags.outputs.commit_tag }}' \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+
+          if ! printf '%s' "$REGISTRY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::The registry did not report an immutable sha256:<64 hex> manifest digest."
+            exit 1
+          fi
+          if [ "$REGISTRY_DIGEST" != "$PUSH_DIGEST" ]; then
+            echo "::error::The push digest and the registry manifest digest disagree."
+            exit 1
+          fi
+
+          VERSION_DIGEST=$(docker buildx imagetools inspect '${{ steps.tags.outputs.version_tag }}' \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          if [ "$VERSION_DIGEST" != "$REGISTRY_DIGEST" ]; then
+            echo "::error::The commit and version tags do not resolve to the same manifest."
+            exit 1
+          fi
+
+          echo "published=true" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "digest=${REGISTRY_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "image_ref=${IMAGE}@${REGISTRY_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the published image by digest
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          docker pull '${{ steps.publish.outputs.image_ref }}'
+          chmod +x scripts/verify-orcaslicer-worker.sh
+          scripts/verify-orcaslicer-worker.sh \
+            require-real \
+            '${{ steps.publish.outputs.image_ref }}' \
+            orca-published-${ORCASLICER_VERSION}
+
+      - name: Record publication evidence
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p pinned-worker-evidence
+          # Public identity only: repository, tags, digest and the pinned upstream checksum.
+          cat > pinned-worker-evidence/pinned-orca-publication.json <<JSON
+          {
+            "image": "${{ steps.publish.outputs.image }}",
+            "manifestDigest": "${{ steps.publish.outputs.digest }}",
+            "commitTag": "${{ steps.tags.outputs.commit_tag }}",
+            "versionTag": "${{ steps.tags.outputs.version_tag }}",
+            "orcaSlicerVersion": "${ORCASLICER_VERSION}",
+            "orcaSlicerSha256": "${{ env.ORCASLICER_SHA256 }}",
+            "revision": "${{ github.sha }}"
+          }
+          JSON
+          cat pinned-worker-evidence/pinned-orca-publication.json
+
+      - name: Upload publication evidence
+        if: steps.check.outputs.skip != 'true' && steps.gate.outputs.publish == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pinned-orca-publication-${{ env.ORCASLICER_VERSION }}
+          path: pinned-worker-evidence/pinned-orca-publication.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Show logs on failure
         if: steps.check.outputs.skip != 'true' && failure()
         run: |
           echo '--- Container Logs ---'
-          docker logs orca-test-${{ matrix.orca_version }} || true
+          docker logs orca-test-${ORCASLICER_VERSION} || true
+          docker logs orca-published-${ORCASLICER_VERSION} || true
 
       - name: Cleanup
         if: always()
         run: |
-          docker rm -f orca-test-${{ matrix.orca_version }} || true
-          docker image rm orcaslicer-worker:strict-${{ matrix.orca_version }} || true
+          docker rm -f orca-test-${ORCASLICER_VERSION} || true
+          docker rm -f orca-published-${ORCASLICER_VERSION} || true
+          docker image rm orcaslicer-worker:strict-${ORCASLICER_VERSION} || true
+
+  # --------------------------------------------------------------------------
+  # Mandatory operational gate. Calibration generation capability may only be
+  # advertised once the published, digest-pinned worker has completed a real
+  # calibration run against a real listening API. A failure here fails the
+  # workflow and the capability never flips.
+  # --------------------------------------------------------------------------
+  calibration-pinned-smoke:
+    name: Calibration pinned worker smoke
+    needs: build-orcaslicer-strict
+    if: needs.build-orcaslicer-strict.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate the digest handed to the smoke gate
+        run: |
+          set -euo pipefail
+          DIGEST='${{ needs.build-orcaslicer-strict.outputs.digest }}'
+          if ! printf '%s' "$DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+            echo "::error::The pinned worker smoke gate was handed a non-immutable image identity."
+            exit 1
+          fi
+
+      - name: Pull the published pinned worker by digest
+        run: docker pull '${{ needs.build-orcaslicer-strict.outputs.image_ref }}'
+
+      - name: Run the mandatory calibration pinned worker smoke
+        env:
+          RunIntegrationTests: 'true'
+          PRINTFARMER_ORCA_SMOKE: required
+          PRINTFARMER_ORCASLICER_IMAGE: ${{ needs.build-orcaslicer-strict.outputs.image }}
+          PRINTFARMER_ORCASLICER_IMAGE_DIGEST: ${{ needs.build-orcaslicer-strict.outputs.digest }}
+        working-directory: src
+        run: |
+          set -euo pipefail
+          dotnet test ./tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj \
+            -c Release \
+            -p:RunIntegrationTests=true \
+            --filter 'Category=PinnedOrcaSmoke' \
+            --logger 'console;verbosity=detailed' \
+            --logger 'trx;LogFileName=pinned-orca-smoke.trx' \
+            --results-directory TestResults \
+            -- RunConfiguration.TreatNoTestsAsError=true
+
+      - name: Assert the mandatory smoke executed
+        working-directory: src
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          path = os.path.join("TestResults", "pinned-orca-smoke.trx")
+          if not os.path.isfile(path):
+              print(f"::error::TRX not found at {path}")
+              sys.exit(1)
+          root = ET.parse(path).getroot()
+          ns = "{http://microsoft.com/schemas/VisualStudio/TeamTest/2010}"
+          counters = root.find(f"{ns}ResultSummary/{ns}Counters")
+          if counters is None:
+              print("::error::TRX missing ResultSummary/Counters")
+              sys.exit(1)
+          total = int(counters.get("total", "0"))
+          executed = int(counters.get("executed", "0"))
+          passed = int(counters.get("passed", "0"))
+          if total <= 0 or executed <= 0 or passed <= 0:
+              print(f"::error::Pinned smoke reports total={total} executed={executed} passed={passed}")
+              sys.exit(1)
+          print(f"Pinned smoke: total={total} executed={executed} passed={passed}")
+          PY
+
+      - name: Record smoke evidence
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p pinned-worker-evidence
+          # Public identity plus the run outcome. No credential, private URL or host path is recorded.
+          cat > pinned-worker-evidence/pinned-orca-smoke.json <<JSON
+          {
+            "image": "${{ needs.build-orcaslicer-strict.outputs.image }}",
+            "manifestDigest": "${{ needs.build-orcaslicer-strict.outputs.digest }}",
+            "smokeRequired": true,
+            "outcome": "${{ job.status }}",
+            "revision": "${{ github.sha }}"
+          }
+          JSON
+          cat pinned-worker-evidence/pinned-orca-smoke.json
+
+      - name: Upload smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pinned-orca-smoke
+          path: pinned-worker-evidence/pinned-orca-smoke.json
+          if-no-files-found: error
+          retention-days: 30

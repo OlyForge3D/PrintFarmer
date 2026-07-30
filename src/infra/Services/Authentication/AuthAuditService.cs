@@ -20,6 +20,29 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         _logging.LogInformation("[AuthAudit] Saved audit {AuditLogEventType} Id={AuditLogId}", auditLog.EventType, auditLog.Id);
     }
 
+    private static string MaskIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "unknown";
+        }
+
+        if (value.Contains('@'))
+        {
+            string[] parts = value.Split('@', 2, StringSplitOptions.TrimEntries);
+            string local = parts[0];
+            string domain = parts.Length > 1 ? parts[1] : string.Empty;
+            if (local.Length <= 2)
+            {
+                return $"***@{domain}";
+            }
+
+            return $"{local[0]}***{local[^1]}@{domain}";
+        }
+
+        return value.Length <= 2 ? "***" : $"{value[..2]}***";
+    }
+
     public async Task LogLoginAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
         AuthAuditLog auditLog = new()
@@ -39,7 +62,8 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
 
     public async Task LogLoginFailedAsync(string usernameOrEmail, string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var metadata = new { UsernameOrEmail = usernameOrEmail };
+        string maskedIdentifier = MaskIdentifier(usernameOrEmail);
+        var metadata = new { UsernameOrEmail = maskedIdentifier };
 
         AuthAuditLog auditLog = new()
         {
@@ -56,7 +80,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning("[AuthAudit] Login failed for '{UsernameOrEmail}' from IP: {IpAddress} - Reason: {Reason}", usernameOrEmail, ipAddress, reason);
+        _logging.LogWarning("[AuthAudit] Login failed for '{UsernameOrEmail}' from IP: {IpAddress} - Reason: {Reason}", maskedIdentifier, ipAddress, reason);
     }
 
     public async Task LogLogoutAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -115,7 +139,8 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
 
     public async Task LogPasswordResetInitiatedAsync(string email, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var metadata = new { Email = email };
+        string maskedEmail = MaskIdentifier(email);
+        var metadata = new { Email = maskedEmail };
 
         AuthAuditLog auditLog = new()
         {
@@ -131,7 +156,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Password reset initiated for email: {Email} from IP: {IpAddress}", email, ipAddress);
+        _logging.LogInformation("[AuthAudit] Password reset initiated for email: {Email} from IP: {IpAddress}", maskedEmail, ipAddress);
     }
 
     public async Task LogPasswordResetAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -239,6 +264,46 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
 
         await SaveAuditAsync(auditLog, cancellationToken);
         _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
+    }
+
+    public async Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
+    {
+        var metadata = new { ApiKeyId = apiKeyId };
+
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            EventType = AuthEventType.ApiKeyExchange,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = userAgent,
+            Success = true,
+            Metadata = JsonSerializer.Serialize(metadata),
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogInformation("[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}", userId, apiKeyId, ipAddress);
+    }
+
+    public async Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
+    {
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = null, // Identity not established for a failed exchange
+            EventType = AuthEventType.ApiKeyExchangeFailed,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = userAgent,
+            Success = false,
+            FailureReason = reason,
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", ipAddress, reason);
     }
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)

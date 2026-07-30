@@ -34,6 +34,9 @@ public class FlashForgeBackendPlugin : IExtendedBackendPlugin
     /// <inheritdoc />
     public Type? StatusClientInterfaceType => null;
 
+    public BackendTelemetryCadence TelemetryCadence =>
+        new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+
     /// <inheritdoc />
     public Version Version => new(1, 0, 0);
 

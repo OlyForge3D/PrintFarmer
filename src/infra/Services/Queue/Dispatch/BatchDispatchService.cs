@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,7 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
 /// <summary>
 /// Implements batch dispatch with configurable load-balancing strategies.
-/// Thread-safe via SemaphoreSlim to prevent double-assignment during concurrent operations.
+/// Cross-process safety is provided by the shared database dispatch claim.
 /// </summary>
 public class BatchDispatchService(
     IDispatchScorer scorer,
@@ -19,8 +20,6 @@ public class BatchDispatchService(
     IHubContext<PrinterHub> hub,
     ILogger<BatchDispatchService> logger) : IBatchDispatchService
 {
-    private static readonly SemaphoreSlim BatchLock = new(1, 1);
-
     public async Task<BatchDispatchResult> BatchDispatchAsync(
         BatchDispatchRequest request, string userId, CancellationToken ct = default)
     {
@@ -34,9 +33,7 @@ public class BatchDispatchService(
         {
             jobs = await db.PrintJobs
                 .Where(j => j.Status == PrintJobStatus.Queued && j.AssignedPrinterId == null)
-                .OrderBy(j => j.Priority)
-                .ThenBy(j => j.QueuePosition)
-                .ThenBy(j => j.QueuedAt)
+                .OrderByPriorityDescending()
                 .ToListAsync(ct);
         }
         else if (request.JobIds is { Count: > 0 })
@@ -45,9 +42,7 @@ public class BatchDispatchService(
                 .Where(j => request.JobIds.Contains(j.Id)
                     && j.Status == PrintJobStatus.Queued
                     && j.AssignedPrinterId == null)
-                .OrderBy(j => j.Priority)
-                .ThenBy(j => j.QueuePosition)
-                .ThenBy(j => j.QueuedAt)
+                .OrderByPriorityDescending()
                 .ToListAsync(ct);
         }
         else
@@ -60,10 +55,19 @@ public class BatchDispatchService(
             return new BatchDispatchResult();
         }
 
+        foreach (PrintJob job in jobs)
+        {
+            request.JobETags.TryGetValue(job.Id, out string? etag);
+            QueueRevisionGuard.EnsureIfMatch(
+                string.IsNullOrWhiteSpace(etag) ? string.Empty : etag,
+                job.RowVersion,
+                "batch dispatch");
+        }
+
         Guid batchId = Guid.NewGuid();
 
         // Broadcast batch started
-        await hub.Clients.All.SendAsync("batchdispatchstarted", new BatchDispatchStartedEvent
+        await hub.Clients.Group(AuthorizedHubGroups.Administrators).SendAsync("batchdispatchstarted", new BatchDispatchStartedEvent
         {
             BatchId = batchId,
             JobCount = jobs.Count,
@@ -72,24 +76,16 @@ public class BatchDispatchService(
 
         BatchDispatchResult result = new() { TotalCount = jobs.Count };
 
-        await BatchLock.WaitAsync(ct);
-        try
+        result = strategy switch
         {
-            result = strategy switch
-            {
-                LoadBalancingStrategy.RoundRobin => await DispatchRoundRobinAsync(jobs, userId, settings, ct),
-                LoadBalancingStrategy.LeastBusy => await DispatchLeastBusyAsync(jobs, userId, settings, ct),
-                _ => await DispatchBestFitAsync(jobs, userId, settings, ct),
-            };
-            result.TotalCount = jobs.Count;
-        }
-        finally
-        {
-            BatchLock.Release();
-        }
+            LoadBalancingStrategy.RoundRobin => await DispatchRoundRobinAsync(jobs, userId, settings, ct),
+            LoadBalancingStrategy.LeastBusy => await DispatchLeastBusyAsync(jobs, userId, settings, ct),
+            _ => await DispatchBestFitAsync(jobs, userId, settings, ct),
+        };
+        result.TotalCount = jobs.Count;
 
         // Broadcast batch completed
-        await hub.Clients.All.SendAsync("batchdispatchcompleted", new BatchDispatchCompletedEvent
+        await hub.Clients.Group(AuthorizedHubGroups.Administrators).SendAsync("batchdispatchcompleted", new BatchDispatchCompletedEvent
         {
             BatchId = batchId,
             DispatchedCount = result.DispatchedCount,
@@ -136,6 +132,7 @@ public class BatchDispatchService(
                     result.DispatchedCount++;
                     break;
                 case "Failed":
+                case "Unknown":
                     result.FailedCount++;
                     break;
                 default:
@@ -227,6 +224,7 @@ public class BatchDispatchService(
                     result.DispatchedCount++;
                     break;
                 case "Failed":
+                case "Unknown":
                     result.FailedCount++;
                     break;
                 default:
@@ -325,6 +323,7 @@ public class BatchDispatchService(
                     batchAssignments[chosen.PrinterId] = batchAssignments.GetValueOrDefault(chosen.PrinterId, 0) + 1;
                     break;
                 case "Failed":
+                case "Unknown":
                     result.FailedCount++;
                     break;
                 default:
@@ -378,7 +377,22 @@ public class BatchDispatchService(
                 score = bestCandidate.TotalScore;
             }
 
-            await dispatchService.DispatchJobAsync(job.Id, printerId, userId, ct);
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+                await dispatchService.DispatchJobAsync(job.Id, printerId, userId, ct);
+
+            DispatchAttemptOutcome? outcome = dispatched.DispatchResult?.Outcome;
+            if (outcome != DispatchAttemptOutcome.Accepted)
+            {
+                return new BatchDispatchItemResult
+                {
+                    JobId = job.Id,
+                    JobName = job.Name ?? "Unknown",
+                    PrinterId = printerId,
+                    Score = score,
+                    Status = outcome == DispatchAttemptOutcome.Unknown ? "Unknown" : "Failed",
+                    Reason = dispatched.DispatchResult?.ErrorCode ?? "Dispatch was not accepted by the backend.",
+                };
+            }
 
             Printer? printer = await db.Printers.AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == printerId, ct);
@@ -486,14 +500,26 @@ public class BatchDispatchService(
     }
 
     public async Task<(List<DispatchHistoryDto> Items, int TotalCount)> GetDispatchHistoryAsync(
-        int page, int pageSize, CancellationToken ct = default)
+        int page, int pageSize, DateTime? dateFrom = null, DateTime? dateTo = null, CancellationToken ct = default)
     {
         int clampedPage = Math.Max(1, page);
         int clampedSize = Math.Clamp(pageSize, 1, 100);
 
-        int totalCount = await db.DispatchLogs.CountAsync(ct);
+        IQueryable<DispatchLog> baseQuery = db.DispatchLogs;
 
-        List<DispatchHistoryDto> items = await db.DispatchLogs
+        if (dateFrom.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.CreatedAtUtc >= dateFrom.Value);
+        }
+
+        if (dateTo.HasValue)
+        {
+            baseQuery = baseQuery.Where(l => l.CreatedAtUtc <= dateTo.Value);
+        }
+
+        int totalCount = await baseQuery.CountAsync(ct);
+
+        List<DispatchHistoryDto> items = await baseQuery
             .AsNoTracking()
             .Include(l => l.PrintJob)
             .Include(l => l.Printer)

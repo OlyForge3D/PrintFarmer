@@ -92,31 +92,35 @@ public interface IMaintenanceLogRepository
     /// </summary>
     /// <param name="startDate">Start date for the trend period.</param>
     /// <param name="endDate">End date for the trend period.</param>
+    /// <param name="includeToolheadScope">When false, per-toolhead logs (ToolheadId != null) are excluded so only printer-wide maintenance is reported. Gated by the MultiSlotFallback operator feature (Finding H5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of maintenance trend entries.</returns>
-    Task<List<MaintenanceTrendEntry>> GetTrendsAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
+    Task<List<MaintenanceTrendEntry>> GetTrendsAsync(DateTime startDate, DateTime endDate, bool includeToolheadScope = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets component lifespan statistics based on maintenance history.
     /// </summary>
+    /// <param name="includeToolheadScope">When false, per-toolhead logs (ToolheadId != null) are excluded so only printer-wide maintenance is reported. Gated by the MultiSlotFallback operator feature (Finding H5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of component lifespan statistics.</returns>
-    Task<List<ComponentLifespanEntry>> GetComponentLifespanAsync(CancellationToken cancellationToken = default);
+    Task<List<ComponentLifespanEntry>> GetComponentLifespanAsync(bool includeToolheadScope = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets maintenance cost analysis grouped by month.
     /// </summary>
     /// <param name="months">Number of months to analyze.</param>
+    /// <param name="includeToolheadScope">When false, per-toolhead logs (ToolheadId != null) are excluded so only printer-wide maintenance is reported. Gated by the MultiSlotFallback operator feature (Finding H5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of monthly cost entries.</returns>
-    Task<List<MaintenanceCostEntry>> GetCostAnalysisAsync(int months = 12, CancellationToken cancellationToken = default);
+    Task<List<MaintenanceCostEntry>> GetCostAnalysisAsync(int months = 12, bool includeToolheadScope = true, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gets printer uptime statistics based on maintenance downtime.
     /// </summary>
+    /// <param name="includeToolheadScope">When false, per-toolhead logs (ToolheadId != null) are excluded from maintenance counts and downtime so only printer-wide maintenance is reported. Gated by the MultiSlotFallback operator feature (Finding H5).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>List of printer uptime entries.</returns>
-    Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(CancellationToken cancellationToken = default);
+    Task<List<PrinterUptimeEntry>> GetPrinterUptimeAsync(bool includeToolheadScope = true, CancellationToken cancellationToken = default);
 
     #endregion
 }

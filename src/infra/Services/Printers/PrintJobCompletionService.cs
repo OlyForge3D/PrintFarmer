@@ -1,15 +1,22 @@
 ﻿using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Diagnostics;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Notifications;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -30,6 +37,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     private readonly IAutoDispatchTrigger? _autoDispatchTrigger;
     private readonly IDiagnosticChannelService? _diagnostics;
     private readonly IJobCostCalculationService? _jobCostCalculationService;
+    private readonly IAutoTagService? _autoTagService;
+    private readonly ICameraSnapshotService? _cameraSnapshotService;
+    private readonly IServiceScopeFactory? _serviceScopeFactory;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster;
+    private readonly IDbOutboxSequenceAllocator? _sequenceAllocator;
 
     /// <summary>
     /// Printer states that indicate a print has completed successfully.
@@ -90,7 +102,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         ISpoolmanService? spoolmanService = null,
         IAutoDispatchTrigger? autoDispatchTrigger = null,
         IDiagnosticChannelService? diagnostics = null,
-        IJobCostCalculationService? jobCostCalculationService = null)
+        IJobCostCalculationService? jobCostCalculationService = null,
+        IAutoTagService? autoTagService = null,
+        ICameraSnapshotService? cameraSnapshotService = null,
+        IServiceScopeFactory? serviceScopeFactory = null,
+        Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+        IDbOutboxSequenceAllocator? sequenceAllocator = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _hub = hub ?? throw new ArgumentNullException(nameof(hub));
@@ -103,6 +120,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         _autoDispatchTrigger = autoDispatchTrigger;
         _diagnostics = diagnostics;
         _jobCostCalculationService = jobCostCalculationService;
+        _autoTagService = autoTagService;
+        _cameraSnapshotService = cameraSnapshotService;
+        _serviceScopeFactory = serviceScopeFactory;
+        _coverageBroadcaster = coverageBroadcaster;
+        _sequenceAllocator = sequenceAllocator;
     }
 
     /// <summary>
@@ -125,23 +147,21 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         state != null && PrintingStates.Contains(state.ToLowerInvariant());
 
     /// <inheritdoc />
-    public async Task<bool> MarkCurrentJobAsCompletedAsync(Guid printerId, string completionState, CancellationToken ct = default)
+    public async Task<bool> MarkCurrentJobAsCompletedAsync(
+        Guid printerId,
+        string completionState,
+        PrinterTerminalObservation observation,
+        CancellationToken ct = default)
     {
         _logger.LogInformation(
             "[PrintJobCompletionService] Marking current job as completed for printer {PrinterId} (state: {CompletionState})",
             printerId,
             completionState);
 
-        // A printer can only have one real "current job", but the DB may end up with
-        // multiple active rows (e.g., history seeding/import edge cases). Reconcile all.
-        List<PrintJob> activeJobs = await _db.PrintJobs
-            .Include(j => j.GcodeFile)
-            .Include(j => j.AssignedPrinter)
-            .Where(j =>
-                j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
-            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
-            .ToListAsync(ct);
+        List<PrintJob> activeJobs = await LoadFencedTerminalJobsAsync(
+            printerId,
+            observation,
+            ct);
 
         if (activeJobs.Count == 0)
         {
@@ -205,12 +225,42 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         }
 
         // Fetch actual filament usage from backend and record consumption in Spoolman
-        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+        bool spoolWeightChanged = await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
+        // Auto-tag the completed job with material, color, and nozzle info
+        if (_autoTagService is not null && primaryJob.Status == PrintJobStatus.Completed)
+        {
+            try
+            {
+                await _autoTagService.GenerateTagsAsync(primaryJob, printerId, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Auto-tagging failed for job {JobId}", primaryJob.Id);
+            }
+        }
+
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
+
+        // Atomically release the matching queue lease in the same terminal transaction.
+        await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.Accepted, ct);
+
+        // Emit a durable lifecycle event so the outbox publisher broadcasts the completion
+        // to authorized groups. Written in the SAME transaction as the status change.
+        await WriteTerminalOutboxEventAsync(
+            primaryJob,
+            printerId,
+            DispatchClaimService.EventTypeJobCompleted,
+            failureCode: null,
+            extraDetails: new { completionState, allCopiesDone = true },
+            ct);
 
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
-        // Calculate detailed cost breakdown (runs after SaveChanges to ensure ActualFilamentUsage is persisted)
-        await CalculateDetailedCostBreakdownAsync(primaryJob.Id, ct);
+        // Calculate detailed cost breakdown after persistence without blocking the status update.
+        ScheduleDetailedCostBreakdown(primaryJob.Id);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as completed. Duration: {Duration}",
@@ -220,6 +270,45 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
+
+        // #709 item 5: job completion changes coverage — the completed job
+        // no longer contributes to active/queued demand, and spool weight was
+        // reconciled by RecordFilamentUsageAsync above. Broadcast per-printer;
+        // the coalescer swallows the case where multiple reasons stack up.
+        if (_coverageBroadcaster is not null)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+            if (spoolWeightChanged)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    printerId,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+        }
+
+        // Capture camera snapshots (true fire-and-forget — never blocks completion)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
+        {
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintCompleted", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
+        }
 
         // Send notification if configured
         if (_notificationService != null)
@@ -262,23 +351,21 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     }
 
     /// <inheritdoc />
-    public async Task<bool> MarkCurrentJobAsFailedAsync(Guid printerId, string failureReason, CancellationToken ct = default)
+    public async Task<bool> MarkCurrentJobAsFailedAsync(
+        Guid printerId,
+        string failureReason,
+        PrinterTerminalObservation observation,
+        CancellationToken ct = default)
     {
         _logger.LogWarning(
             "[PrintJobCompletionService] Marking current job as failed for printer {PrinterId} (reason: {FailureReason})",
             printerId,
             failureReason);
 
-        // A printer can only have one real "current job", but the DB may end up with
-        // multiple active rows (e.g., history seeding/import edge cases). Reconcile all.
-        List<PrintJob> activeJobs = await _db.PrintJobs
-            .Include(j => j.GcodeFile)
-            .Include(j => j.AssignedPrinter)
-            .Where(j =>
-                j.AssignedPrinterId == printerId &&
-                (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing))
-            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
-            .ToListAsync(ct);
+        List<PrintJob> activeJobs = await LoadFencedTerminalJobsAsync(
+            printerId,
+            observation,
+            ct);
 
         if (activeJobs.Count == 0)
         {
@@ -307,9 +394,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         PrintJob primaryJob = activeJobs[0];
 
         // Record partial filament consumption for failed/cancelled prints
-        await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+        bool spoolWeightChanged = await FetchAndRecordFilamentUsageAsync(primaryJob, printerId, ct);
+
+        await using QueueOutboxTransactionScope transaction =
+            await QueueOutboxTransactionScope.BeginAsync(_db, ct);
+
+        // Atomically release the matching queue lease in the same terminal transaction.
+        await ReleaseLeaseForTerminalJobsAsync(printerId, activeJobs, DispatchAttemptOutcome.FailedBeforeStart, ct);
+
+        // Emit a durable lifecycle event so the outbox publisher broadcasts the failure
+        // to authorized groups. Written in the SAME transaction as the status change.
+        await WriteTerminalOutboxEventAsync(
+            primaryJob,
+            printerId,
+            DispatchClaimService.EventTypeJobFailed,
+            failureCode: "backend_failure",
+            extraDetails: new { failureReason },
+            ct);
 
         await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Job {JobId} ({JobName}) marked as failed. Reason: {FailureReason}",
@@ -320,6 +424,42 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // Broadcast job queue update via SignalR
         await BroadcastJobQueueUpdateAsync(printerId, ct);
 
+        // #709 item 5: job failure removes the job from active/queued demand.
+        if (_coverageBroadcaster is not null)
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.QueueChanged,
+                ct).ConfigureAwait(false);
+            if (spoolWeightChanged)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    printerId,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolWeight,
+                    ct).ConfigureAwait(false);
+            }
+        }
+
+        // Capture camera snapshots on failure (true fire-and-forget)
+        if (_cameraSnapshotService is not null && _serviceScopeFactory is not null)
+        {
+            Guid captureForPrinter = printerId;
+            Guid captureForJob = primaryJob.Id;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    ICameraSnapshotService svc = scope.ServiceProvider.GetRequiredService<ICameraSnapshotService>();
+                    await svc.CaptureSnapshotAsync(captureForPrinter, "PrintFailed", captureForJob, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background snapshot capture failed for printer {PrinterId}", captureForPrinter);
+                }
+            });
+        }
+
         return true;
     }
 
@@ -327,11 +467,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     /// Fetches actual filament usage from the backend and records consumption in Spoolman.
     /// Fire-and-forget — never fails the job completion if Spoolman is unavailable.
     /// </summary>
-    private async Task FetchAndRecordFilamentUsageAsync(PrintJob job, Guid printerId, CancellationToken ct)
+    private async Task<bool> FetchAndRecordFilamentUsageAsync(PrintJob job, Guid printerId, CancellationToken ct)
     {
         if (_backendFactory is null || _spoolmanService is null)
         {
-            return;
+            return false;
         }
 
         try
@@ -339,7 +479,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             Printer? printer = job.AssignedPrinter ?? await _db.Printers.FindAsync([printerId], ct);
             if (printer is null)
             {
-                return;
+                return false;
             }
 
             // Try to get actual filament usage from the backend
@@ -381,13 +521,22 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 {
                     if (existingByIndex.TryGetValue(toolIndex, out var existing))
                     {
-                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
-                        existing.FilamentUsageGrams = grams;
+                        CanonicalSpoolIdentity? identity = CreateSpoolIdentity(
+                            printer,
+                            existing.SpoolmanSpoolId);
+                        _ = existing.RecordAuthoritativeUsage(grams, identity);
                     }
                     else
                     {
-                        // No snapshot row — create a new one using live toolhead data
-                        var toolhead = toolheads.FirstOrDefault(t => t.Index == toolIndex);
+                        // No snapshot row — create a new one using live toolhead data. Backend
+                        // per-extruder usage is keyed by 0-based G-code tool index, so translate
+                        // each stored toolhead through the mapper to bind MMU gates (stored 1-based)
+                        // to the correct extruder instead of shifting by one gate (issue #711
+                        // round-10 Finding 2).
+                        var toolhead = toolheads.FirstOrDefault(t =>
+                            ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(
+                                t,
+                                toolheads) == toolIndex);
                         var usage = new PrintJobToolheadUsage
                         {
                             Id = Guid.NewGuid(),
@@ -398,6 +547,9 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                             FilamentName = toolhead?.CurrentMaterial,
                             FilamentColor = toolhead?.CurrentFilamentColor
                         };
+                        _ = usage.RecordAuthoritativeUsage(
+                            grams,
+                            CreateSpoolIdentity(printer, usage.SpoolmanSpoolId));
                         _db.Set<PrintJobToolheadUsage>().Add(usage);
                         existing = usage;
                     }
@@ -416,16 +568,20 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     _logger.LogInformation(
                         "[PrintJobCompletionService] Batch-consumed filament from {SuccessCount}/{TotalCount} spools for multi-toolhead job {JobId}",
                         successCount, consumptions.Count, job.Id);
+
+                    return successCount > 0;
                 }
             }
             else
             {
                 // Single-spool path (existing behavior)
                 double? usageGrams = null;
+                bool isAuthoritative = false;
                 if (client is ISupportsFilamentUsageQuery usageQuery)
                 {
                     usageGrams = await usageQuery.GetLastJobFilamentUsageGramsAsync(
                         printer.ServerUrl, credential, ct);
+                    isAuthoritative = usageGrams.HasValue;
                 }
 
                 // Fallback to slicer estimate if no actual data
@@ -441,8 +597,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                     if (existingSingle is not null)
                     {
-                        // Update the dispatch snapshot row — preserve snapshotted SpoolmanSpoolId
-                        existingSingle.FilamentUsageGrams = usageGrams;
+                        if (isAuthoritative)
+                        {
+                            _ = existingSingle.RecordAuthoritativeUsage(
+                                usageGrams.Value,
+                                CreateSpoolIdentity(printer, existingSingle.SpoolmanSpoolId));
+                        }
+                        else
+                        {
+                            existingSingle.RecordEstimatedUsage(usageGrams.Value);
+                        }
                     }
                     else
                     {
@@ -461,6 +625,17 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                                 FilamentName = primaryToolhead.CurrentMaterial,
                                 FilamentColor = primaryToolhead.CurrentFilamentColor
                             };
+                            if (isAuthoritative)
+                            {
+                                _ = usage.RecordAuthoritativeUsage(
+                                    usageGrams.Value,
+                                    CreateSpoolIdentity(printer, usage.SpoolmanSpoolId));
+                            }
+                            else
+                            {
+                                usage.RecordEstimatedUsage(usageGrams.Value);
+                            }
+
                             _db.Set<PrintJobToolheadUsage>().Add(usage);
                         }
                     }
@@ -477,9 +652,13 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                         _logger.LogInformation(
                             "[PrintJobCompletionService] Recorded {UsedGrams:F1}g filament consumption on spool {SpoolId} for job {JobId}",
                             usageGrams.Value, printer.CurrentSpoolId.Value, job.Id);
+
+                        return true;
                     }
                 }
             }
+
+            return false;
         }
         catch (Exception ex)
         {
@@ -487,8 +666,19 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 ex,
                 "[PrintJobCompletionService] Failed to fetch/record filament usage for job {JobId} — continuing completion",
                 job.Id);
+            return false;
         }
     }
+
+    private CanonicalSpoolIdentity? CreateSpoolIdentity(
+        Printer printer,
+        int? spoolId)
+        => spoolId.HasValue
+            ? CanonicalSpoolIdentity.FromPrinter(
+                printer,
+                spoolId.Value,
+                _spoolmanService?.GetConfig()?.BaseUrl)
+            : null;
 
     /// <summary>
     /// Broadcasts a job queue update via SignalR to notify clients of the status change.
@@ -521,7 +711,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 Jobs = jobs
             };
 
-            await _hub.Clients.All.SendAsync("jobqueueupdate", update, ct);
+            await _hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync("jobqueueupdate", update, ct);
 
             _logger.LogDebug(
                 "[PrintJobCompletionService] Broadcasted jobqueueupdate for printer {PrinterId} with {JobCount} jobs",
@@ -539,11 +729,25 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     {
         _logger.LogDebug("[PrintJobCompletionService] Running orphaned job reconciliation...");
 
-        // Find all jobs in Starting or Printing status
+        // Generic cached-state reconciliation is safe only for jobs whose backend
+        // acceptance was already proven. Starting/Paused and uncertain attempts are
+        // resolved exclusively by exact backend reconciliation.
         List<PrintJob> orphanedJobs = await _db.PrintJobs
             .Include(j => j.GcodeFile)
             .Include(j => j.AssignedPrinter)
-            .Where(j => j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing)
+            .Where(j =>
+                j.Status == PrintJobStatus.Printing &&
+                !_db.QueueDispatchOutbox.Any(command =>
+                    command.AggregateId == j.Id &&
+                    command.EventType == BackendControlCommandConsumerService.EventType &&
+                    (command.Status == QueueOutboxEventStatus.Processing ||
+                     (command.Status == QueueOutboxEventStatus.DeadLettered &&
+                      command.FailureCode == "manual_control_reconciliation_required"))) &&
+                !_db.QueueDispatchAttempts.Any(attempt =>
+                    attempt.PrintJobId == j.Id &&
+                    (attempt.Outcome == DispatchAttemptOutcome.InProgress ||
+                     attempt.Outcome == DispatchAttemptOutcome.Unknown ||
+                     attempt.RequiresReconciliation)))
             .ToListAsync(ct);
 
         if (orphanedJobs.Count == 0)
@@ -558,6 +762,11 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         int syncedCount = 0;
         HashSet<Guid> printersToNotify = [];
+        List<Guid> completedJobIds = [];
+
+        // Track which jobs went terminal on each printer so we can release leases atomically.
+        // Key = printerId; Value = (list of terminal jobs, outcome to record)
+        var terminalJobsByPrinter = new Dictionary<Guid, (List<PrintJob> jobs, DispatchAttemptOutcome outcome)>();
 
         foreach (PrintJob job in orphanedJobs)
         {
@@ -598,6 +807,26 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                 elapsed);
 
             Guid printerId = job.AssignedPrinterId.Value;
+            PrinterDispatchState? activeState = await _db.PrinterDispatchStates
+                .FirstOrDefaultAsync(
+                    state => state.PrinterId == printerId,
+                    ct);
+            QueueDispatchAttempt? activeAttempt =
+                activeState?.ActiveDispatchAttemptId is Guid activeAttemptId
+                    ? await _db.QueueDispatchAttempts.FirstOrDefaultAsync(
+                        attempt =>
+                            attempt.Id == activeAttemptId &&
+                            attempt.PrintJobId == job.Id &&
+                            attempt.Outcome == DispatchAttemptOutcome.Accepted,
+                        ct)
+                    : null;
+            if (activeState?.ActiveJobId != job.Id ||
+                activeAttempt is null ||
+                activeState.PhysicalControlCommandId.HasValue)
+            {
+                continue;
+            }
+
             string? currentPrinterState = printerStateLookup(printerId);
 
             _logger.Log(
@@ -628,6 +857,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     currentPrinterState);
 
                 job.Status = PrintJobStatus.Completed;
+                job.ActiveExternalPrinterId = null;
                 job.ActualEndTime = DateTime.UtcNow;
 
                 if (job.ActualStartTime.HasValue)
@@ -637,6 +867,16 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
+                completedJobIds.Add(job.Id);
+
+                if (!terminalJobsByPrinter.TryGetValue(printerId, out var completedEntry))
+                {
+                    terminalJobsByPrinter[printerId] = ([job], DispatchAttemptOutcome.Accepted);
+                }
+                else
+                {
+                    completedEntry.jobs.Add(job);
+                }
             }
             else if (IsFailureState(currentPrinterState))
             {
@@ -648,11 +888,21 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     currentPrinterState);
 
                 job.Status = PrintJobStatus.Failed;
+                job.ActiveExternalPrinterId = null;
                 job.ActualEndTime = DateTime.UtcNow;
                 job.FailureReason = $"Orphaned job synced - printer was in {currentPrinterState} state after restart";
 
                 syncedCount++;
                 printersToNotify.Add(printerId);
+
+                if (!terminalJobsByPrinter.TryGetValue(printerId, out var failedEntry))
+                {
+                    terminalJobsByPrinter[printerId] = ([job], DispatchAttemptOutcome.FailedBeforeStart);
+                }
+                else
+                {
+                    failedEntry.jobs.Add(job);
+                }
             }
             else if (IsPrintingState(currentPrinterState))
             {
@@ -665,11 +915,45 @@ public class PrintJobCompletionService : IPrintJobCompletionService
 
         if (syncedCount > 0)
         {
+            await using QueueOutboxTransactionScope transaction =
+                await QueueOutboxTransactionScope.BeginAsync(_db, ct);
+
+            // Release the matching dispatch lease for each terminal printer atomically
+            // in the same SaveChangesAsync call as the job status changes.
+            foreach (KeyValuePair<Guid, (List<PrintJob> jobs, DispatchAttemptOutcome outcome)> kv in terminalJobsByPrinter)
+            {
+                await ReleaseLeaseForTerminalJobsAsync(kv.Key, kv.Value.jobs, kv.Value.outcome, ct);
+
+                // Emit one durable lifecycle event per terminal job so the outbox publisher
+                // broadcasts the orphan-sync result to authorized groups. All events are
+                // committed in the SAME SaveChangesAsync call as the lease releases.
+                foreach (PrintJob terminalJob in kv.Value.jobs)
+                {
+                    string eventType = terminalJob.Status == PrintJobStatus.Completed
+                        ? DispatchClaimService.EventTypeJobCompleted
+                        : DispatchClaimService.EventTypeJobOrphanSynced;
+
+                    await WriteTerminalOutboxEventAsync(
+                        terminalJob,
+                        kv.Key,
+                        eventType,
+                        failureCode: terminalJob.Status == PrintJobStatus.Failed ? "orphan_sync_failure" : null,
+                        extraDetails: new { outcome = kv.Value.outcome.ToString(), source = "orphan_sync" },
+                        ct);
+                }
+            }
+
             await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
 
             _logger.LogInformation(
                 "[PrintJobCompletionService] Synced {Count} orphaned jobs",
                 syncedCount);
+
+            foreach (Guid completedJobId in completedJobIds)
+            {
+                ScheduleDetailedCostBreakdown(completedJobId);
+            }
 
             // Broadcast updates for affected printers
             foreach (Guid printerId in printersToNotify)
@@ -682,42 +966,308 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     }
 
     /// <summary>
-    /// Calculates detailed cost breakdown using the JobCostCalculationService if available.
+    /// Adds a durable terminal lifecycle outbox event to the context in preparation for the
+    /// next <see cref="AppDbContext.SaveChangesAsync"/> call. Only writes when
+    /// <see cref="_sequenceAllocator"/> is available so backward-compatible callers that omit
+    /// the allocator are not affected.
     /// </summary>
-    private async Task CalculateDetailedCostBreakdownAsync(Guid jobId, CancellationToken ct)
+    private async Task WriteTerminalOutboxEventAsync(
+        PrintJob job,
+        Guid printerId,
+        string eventType,
+        string? failureCode,
+        object extraDetails,
+        CancellationToken ct)
     {
-        if (_jobCostCalculationService == null)
+        if (_sequenceAllocator is null)
         {
             return;
         }
 
-        try
+        QueueDispatchAttempt? dispatchAttempt = _db.QueueDispatchAttempts.Local
+            .Where(attempt => attempt.PrintJobId == job.Id)
+            .OrderByDescending(attempt => attempt.AttemptNumber)
+            .ThenByDescending(attempt => attempt.ClaimedAtUtc)
+            .FirstOrDefault()
+            ?? await _db.QueueDispatchAttempts
+                .AsNoTracking()
+                .Where(attempt => attempt.PrintJobId == job.Id)
+                .OrderByDescending(attempt => attempt.AttemptNumber)
+                .ThenByDescending(attempt => attempt.ClaimedAtUtc)
+                .FirstOrDefaultAsync(ct);
+        await DispatchClaimService.AddLifecycleOutboxEventAsync(
+            _db,
+            _sequenceAllocator,
+            eventType,
+            aggregateId: job.Id,
+            printerId: printerId,
+            attemptId: dispatchAttempt?.Id,
+            aggregateRowVersion: job.RowVersion,
+            failureCode: failureCode,
+            payloadJson: System.Text.Json.JsonSerializer.Serialize(new
+            {
+                jobId = job.Id,
+                printerId,
+                attemptId = dispatchAttempt?.Id,
+                jobStatus = job.Status.ToString(),
+                jobKind = job.JobKind?.ToString() ?? "Standard",
+                failureReason = job.FailureReason,
+                details = extraDetails,
+            }),
+            ct);
+    }
+
+    /// <summary>
+    /// Schedules detailed cost breakdown using the JobCostCalculationService if available.
+    /// </summary>
+    private void ScheduleDetailedCostBreakdown(Guid jobId)
+    {
+        if (_serviceScopeFactory is not null)
         {
-            await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, ct);
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using IServiceScope scope = _serviceScopeFactory.CreateScope();
+                    IJobCostCalculationService costService = scope.ServiceProvider.GetRequiredService<IJobCostCalculationService>();
+                    await costService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+                }
+            });
+
+            return;
         }
-        catch (Exception ex)
+
+        if (_jobCostCalculationService is null)
         {
-            _logger.LogWarning(ex, "[PrintJobCompletionService] Failed to calculate detailed cost breakdown for job {JobId}", jobId);
+            return;
         }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _jobCostCalculationService.CalculateAndStoreCostsAsync(jobId, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PrintJobCompletionService] Background cost calculation failed for job {JobId}", jobId);
+            }
+        });
+    }
+
+    private async Task<List<PrintJob>> LoadFencedTerminalJobsAsync(
+        Guid printerId,
+        PrinterTerminalObservation observation,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(observation);
+
+        PrinterDispatchState? state = await _db.PrinterDispatchStates
+            .AsNoTracking()
+            .SingleOrDefaultAsync(candidate => candidate.PrinterId == printerId, ct);
+        if (state?.ActiveDispatchAttemptId is Guid activeAttemptId)
+        {
+            bool hasUnresolvedControl = await _db.QueueDispatchOutbox
+                .AsNoTracking()
+                .AnyAsync(
+                    command =>
+                        command.AggregateId == state.ActiveJobId &&
+                        command.AttemptId == activeAttemptId &&
+                        command.EventType == BackendControlCommandConsumerService.EventType &&
+                        (command.Status == QueueOutboxEventStatus.Pending ||
+                         command.Status == QueueOutboxEventStatus.Processing ||
+                         (command.Status == QueueOutboxEventStatus.DeadLettered &&
+                          command.FailureCode == "manual_control_reconciliation_required")),
+                    ct);
+            if (hasUnresolvedControl ||
+                state.PhysicalControlCommandId.HasValue)
+            {
+                _logger.LogInformation(
+                    "Deferred terminal callback for printer {PrinterId}; control command for " +
+                    "attempt {AttemptId} requires exact reconciliation",
+                    printerId,
+                    activeAttemptId);
+                return [];
+            }
+
+            if (observation.DispatchAttemptId.HasValue &&
+                observation.DispatchAttemptId.Value != activeAttemptId)
+            {
+                return [];
+            }
+
+            QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+                .AsNoTracking()
+                .SingleOrDefaultAsync(candidate => candidate.Id == activeAttemptId, ct);
+            if (attempt?.PrintJobId is null ||
+                state.ActiveJobId != attempt.PrintJobId ||
+                !MatchesAttemptIdentity(attempt, observation.BackendIdentity))
+            {
+                _logger.LogWarning(
+                    "Ignored stale terminal callback for printer {PrinterId}; active attempt {AttemptId} " +
+                    "did not match backend identity '{BackendIdentity}'",
+                    printerId,
+                    activeAttemptId,
+                    observation.BackendIdentity ?? "(missing)");
+                return [];
+            }
+
+            return await _db.PrintJobs
+                .Include(job => job.GcodeFile)
+                .Include(job => job.AssignedPrinter)
+                .Where(job =>
+                    job.Id == attempt.PrintJobId.Value &&
+                    job.AssignedPrinterId == printerId &&
+                    (job.Status == PrintJobStatus.Starting ||
+                     job.Status == PrintJobStatus.Printing ||
+                     job.Status == PrintJobStatus.Paused))
+                .ToListAsync(ct);
+        }
+
+        if (observation.DispatchAttemptId.HasValue ||
+            string.IsNullOrWhiteSpace(observation.BackendIdentity))
+        {
+            return [];
+        }
+
+        // Backward compatibility for external/pre-upgrade active rows without a lease:
+        // identify one exact job by its persisted G-code/name rather than completing every
+        // active row on the printer.
+        List<PrintJob> legacyCandidates = await _db.PrintJobs
+            .Include(job => job.GcodeFile)
+            .Include(job => job.AssignedPrinter)
+            .Where(job =>
+                job.AssignedPrinterId == printerId &&
+                (job.Status == PrintJobStatus.Starting ||
+                 job.Status == PrintJobStatus.Printing ||
+                 job.Status == PrintJobStatus.Paused))
+            .OrderByDescending(job => job.ActualStartTime ?? job.QueuedAt)
+            .ToListAsync(ct);
+        PrintJob? exactLegacy = legacyCandidates.FirstOrDefault(
+            job => MatchesIdentity(
+                observation.BackendIdentity,
+                job.GcodeFile?.Name,
+                job.GcodeFile?.FileName,
+                job.Name,
+                job.ExternalJobId));
+        return exactLegacy is null ? [] : [exactLegacy];
+    }
+
+    private static bool MatchesAttemptIdentity(
+        QueueDispatchAttempt attempt,
+        string? observedIdentity) =>
+        MatchesIdentity(
+            observedIdentity,
+            attempt.BackendJobId,
+            attempt.BackendCommandId,
+            attempt.BackendFileIdentity,
+            attempt.BackendFileName);
+
+    private static bool MatchesIdentity(string? observedIdentity, params string?[] expected)
+    {
+        if (string.IsNullOrWhiteSpace(observedIdentity))
+        {
+            return false;
+        }
+
+        string normalizedObserved = NormalizeIdentity(observedIdentity);
+        string observedFileName = Path.GetFileName(normalizedObserved);
+        return expected
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => NormalizeIdentity(value!))
+            .Any(value =>
+                string.Equals(value, normalizedObserved, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    Path.GetFileName(value),
+                    observedFileName,
+                    StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeIdentity(string value) =>
+        value.Trim().Replace('\\', '/').TrimStart('/');
+
+    /// <summary>
+    /// Releases the dispatch lease when the active job on the printer matches one of the
+    /// terminal jobs. Runs within the same <see cref="AppDbContext"/> transaction as the
+    /// job-status update so the lease is never left dangling after a completion or failure.
+    /// </summary>
+    private async Task ReleaseLeaseForTerminalJobsAsync(
+        Guid printerId,
+        IEnumerable<PrintJob> terminalJobs,
+        DispatchAttemptOutcome terminalOutcome,
+        CancellationToken ct)
+    {
+        PrinterDispatchState? dispatchState = await _db.PrinterDispatchStates
+            .FirstOrDefaultAsync(s => s.PrinterId == printerId, ct);
+
+        if (dispatchState is null || !dispatchState.ActiveDispatchAttemptId.HasValue)
+        {
+            return; // No lease to release.
+        }
+
+        // Only release when the active job is one of the jobs going terminal.
+        Guid? activeJobId = dispatchState.ActiveJobId;
+        bool matchesTerminal = activeJobId.HasValue &&
+            terminalJobs.Any(j => j.Id == activeJobId.Value);
+
+        if (!matchesTerminal)
+        {
+            return;
+        }
+
+        Guid attemptId = dispatchState.ActiveDispatchAttemptId.Value;
+
+        // Release the exclusive printer lease.
+        dispatchState.ActiveJobId = null;
+        dispatchState.ActiveDispatchAttemptId = null;
+
+        // A dispatch attempt records whether the backend accepted the start, not the later
+        // print lifecycle result. Preserve Accepted when a normally-started print later fails.
+        // Only an unresolved InProgress attempt inherits the terminal observation.
+        QueueDispatchAttempt? attempt = await _db.QueueDispatchAttempts
+            .FirstOrDefaultAsync(a => a.Id == attemptId, ct);
+
+        if (attempt?.Outcome == DispatchAttemptOutcome.InProgress)
+        {
+            attempt.Outcome = terminalOutcome;
+            attempt.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        string reasonCode = terminalOutcome == DispatchAttemptOutcome.Accepted
+            ? "job_completed"
+            : "job_failed";
+
+        _ = QueueAuditWriter.Add(
+            _db,
+            actorSubject: attempt?.ActorSubject ?? "system",
+            QueueAuditOperations.DispatchRelease,
+            QueueAuditOutcomes.Success,
+            nameof(PrintJob),
+            resourceId: activeJobId,
+            printerId: printerId,
+            printJobId: activeJobId,
+            dispatchAttemptId: attemptId,
+            reasonCode: reasonCode,
+            dispatchStateRowVersion: dispatchState.RowVersion,
+            detail: new
+            {
+                dispatchOutcome = attempt?.Outcome.ToString(),
+                printTerminalOutcome = terminalOutcome.ToString(),
+                leaseReleasedAtTerminal = true,
+            });
+
+        _logger.LogInformation(
+            "[PrintJobCompletionService] Released dispatch lease for printer {PrinterId} attempt {AttemptId} (outcome={Outcome})",
+            printerId, attemptId, terminalOutcome);
     }
 
     /// <inheritdoc />
     public async Task<bool> EnsureExternalPrintJobExistsAsync(Guid printerId, string? fileName, CancellationToken ct = default)
     {
-        bool hasActiveJob = await _db.PrintJobs
-            .AnyAsync(
-                j => j.AssignedPrinterId == printerId &&
-                     (j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Printing),
-                ct);
-
-        if (hasActiveJob)
-        {
-            _logger.LogDebug(
-                "[PrintJobCompletionService] Active job already exists for printer {PrinterId}, skipping external print creation",
-                printerId);
-            return false;
-        }
-
         string displayName = !string.IsNullOrWhiteSpace(fileName)
             ? Path.GetFileName(fileName)
             : "External Print";
@@ -736,11 +1286,58 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             UpdatedAt = now,
             QueuedAt = now,
             IsExternalPrint = true,
+            ActiveExternalPrinterId = printerId,
             ExternalJobId = $"ext-{printerId:N}-{now:yyyyMMddHHmmss}",
         };
 
-        _db.PrintJobs.Add(externalJob);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await using IDbContextTransaction? transaction = _db.Database.IsRelational()
+                ? await _db.Database.BeginTransactionAsync(ct)
+                : null;
+            bool hasActiveJob = await _db.PrintJobs
+                .AnyAsync(
+                    job =>
+                        job.AssignedPrinterId == printerId &&
+                        (job.Status == PrintJobStatus.Starting ||
+                         job.Status == PrintJobStatus.Printing ||
+                         job.Status == PrintJobStatus.Paused),
+                    ct);
+            if (hasActiveJob)
+            {
+                return false;
+            }
+
+            _db.PrintJobs.Add(externalJob);
+            await _db.SaveChangesAsync(ct);
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+        }
+        catch (DbUpdateException)
+        {
+            _db.ChangeTracker.Clear();
+            bool winnerExists = await _db.PrintJobs
+                .AsNoTracking()
+                .AnyAsync(
+                    job =>
+                        job.ActiveExternalPrinterId == printerId &&
+                        job.IsExternalPrint &&
+                        (job.Status == PrintJobStatus.Starting ||
+                         job.Status == PrintJobStatus.Printing ||
+                         job.Status == PrintJobStatus.Paused),
+                    ct);
+            if (winnerExists)
+            {
+                _logger.LogDebug(
+                    "[PrintJobCompletionService] Concurrent observer already created the active external print for printer {PrinterId}",
+                    printerId);
+                return false;
+            }
+
+            throw;
+        }
 
         _logger.LogInformation(
             "[PrintJobCompletionService] Created external print job {JobId} for printer {PrinterId} (file: {FileName})",

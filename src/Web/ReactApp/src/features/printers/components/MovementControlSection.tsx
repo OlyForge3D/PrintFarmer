@@ -276,7 +276,7 @@ export function MovementControlSection({
       </div>
 
       {/* Manual position inputs */}
-      <div className="grid grid-cols-4 gap-2 mt-3 w-72 pt-2">
+      <div className="grid grid-cols-4 gap-2 mt-3 w-full max-w-[24rem] pt-2">
         <MovementInput
           axis="X"
           currentPosition={printerX}
@@ -301,7 +301,7 @@ export function MovementControlSection({
           onChange={(e) => onMoveZChange(e.target.value === '' ? '' : Number(e.target.value))}
           className="w-full!"
         />
-        <div className="pt-2">
+        <div className="pt-2 h-full flex items-stretch">
           <ControlPadButton
             disabled={
               movementActionPending ||
@@ -314,7 +314,8 @@ export function MovementControlSection({
               if (moveZ !== '') await onMove('Z', Number(moveZ));
             }}
             title="Go to position"
-            padSize="small"
+            padSize="medium"
+            className="w-full h-11 text-xs font-semibold"
           >
             GO
           </ControlPadButton>

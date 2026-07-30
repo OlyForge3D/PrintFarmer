@@ -5,6 +5,7 @@ using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
@@ -12,7 +13,14 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public static readonly string[] Capabilities = ["orcaslicer", "stl-processing", "gcode-generation"];
+    public const string SlicerVersion = "2.3.1";
+    public const string UpstreamDistributionCapability = "orcaslicer-upstream";
+
+    // Legacy static capability list — retained for the diagnostic root endpoint.
+    // Live routing uses WorkerCapabilityProvider so the version-specific tag
+    // (issue #578) is emitted from configuration.
+    public static readonly string[] Capabilities =
+        ["orcaslicer", UpstreamDistributionCapability, "stl-processing", "gcode-generation"];
 }
 
 public static class Program
@@ -39,6 +47,7 @@ public static class Program
         _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
+        _ = builder.Services.AddSingleton<WorkerCapabilityProvider>(); // versioned capability advertising (issue #578)
 
         // Profile services - use SQLite-cached service for fast queries
         _ = builder.Services.AddSingleton<CachedOrcaProfilesService>(sp =>
@@ -118,20 +127,81 @@ public static class Program
         _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
         {
             service = "orcaslicer-worker",
-            version = "1.0.0",
+            version = WorkerConstants.SlicerVersion,
             status = "running",
             realBinary = detector.IsRealBinaryPresent(),
             capabilities = WorkerConstants.Capabilities
         }));
 
-        _ = app.MapGet("/version", async (IOrcaBinaryDetector detector) =>
+        // Version endpoint handler shared by /version and /api/system/version
+        async Task<IResult> GetVersionInfoAsync(IOrcaBinaryDetector detector)
         {
             string? orcaVersion = await detector.GetVersionAsync();
+            var asm = System.Reflection.Assembly.GetEntryAssembly();
+            string? infoVersion = (asm is not null
+                ? Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+                    as System.Reflection.AssemblyInformationalVersionAttribute
+                : null)?.InformationalVersion;
+            string workerVersion = "1.0.0";
+            string? commit = null;
+            if (infoVersion != null)
+            {
+                string[] parts = infoVersion.Split('+', 2);
+                workerVersion = parts[0];
+                commit = parts.Length > 1 ? parts[1] : null;
+            }
+
             return Results.Ok(new
             {
+                service = "orcaslicer-worker",
+                version = workerVersion,
+                commit,
                 orcaslicerVersion = orcaVersion,
-                workerVersion = "1.0.0",
-                timestamp = DateTime.UtcNow
+                environment = app.Environment.EnvironmentName,
+                runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                workerVersion = WorkerConstants.SlicerVersion,
+                timestamp = DateTime.UtcNow,
+            });
+        }
+
+        _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+        _ = app.MapGet("/api/system/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+
+        // Diagnostic endpoint: check process profile expression evaluation results
+        _ = app.MapGet("/api/debug/process-eval/{manufacturer}", async (string manufacturer, ISlicerProfilesService profilesService) =>
+        {
+            IList<ProcessProfileDto> allProfiles = await profilesService.ListAvailableProcessProfilesAsync();
+
+            // Filter by name containing manufacturer (process profiles don't have a Manufacturer field)
+            var mfgProfiles = allProfiles.Where(p =>
+                (p.Name ?? string.Empty).Contains(manufacturer, StringComparison.OrdinalIgnoreCase) ||
+                (p.CompatiblePrinters?.Any(cp => cp.Contains(manufacturer, StringComparison.OrdinalIgnoreCase)) ?? false)).ToList();
+
+            var withCp = mfgProfiles.Where(p => p.CompatiblePrinters?.Count > 0).ToList();
+            var withoutCp = mfgProfiles.Where(p => p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0).ToList();
+
+            // Also show overall stats
+            var allWithCp = allProfiles.Count(p => p.CompatiblePrinters?.Count > 0);
+
+            return Results.Ok(new
+            {
+                manufacturer,
+                totalAllProfiles = allProfiles.Count,
+                allWithCompatiblePrinters = allWithCp,
+                allWithoutCompatiblePrinters = allProfiles.Count - allWithCp,
+                matchingProfiles = mfgProfiles.Count,
+                withCompatiblePrinters = withCp.Count,
+                withoutCompatiblePrinters = withoutCp.Count,
+                sampleWithCp = withCp.Take(5).Select(p => new
+                {
+                    p.Name,
+                    compatiblePrinters = p.CompatiblePrinters
+                }),
+                sampleWithoutCp = withoutCp.Take(10).Select(p => new
+                {
+                    p.Name,
+                    condition = p.CompatiblePrintersCondition ?? string.Empty
+                }),
             });
         });
 
@@ -152,6 +222,30 @@ public static class Program
         {
             app.Logger.LogError("Failed to preload profiles at startup: {Exception}", ex.Message);
             throw; // Fail startup if profiles cannot be preloaded
+        }
+
+        // Issue #578: Gate startup on OrcaBinaryHealthCheck when binary verification
+        // is enabled. Without this the RegistrationBackgroundService + QueueConsumerService
+        // start advertising and claiming version-pinned jobs even when the binary
+        // reports a different version than the worker advertises — the queue would
+        // silently deliver v2.3.1 work to a v2.4.0 binary. WORKER_RELAXED_READINESS
+        // (already respected below for the readiness endpoint) also disables this
+        // startup gate so local dev containers without a real binary still boot.
+        if (!relaxedReadiness)
+        {
+            OrcaBinaryHealthCheck versionCheck = ActivatorUtilities.CreateInstance<OrcaBinaryHealthCheck>(app.Services);
+            HealthCheckResult probe = await versionCheck.CheckHealthAsync(new HealthCheckContext());
+            if (probe.Status != HealthStatus.Healthy)
+            {
+                app.Logger.LogCritical(
+                    "OrcaBinaryHealthCheck refused startup with status {Status}: {Description}",
+                    probe.Status,
+                    probe.Description);
+                throw new InvalidOperationException(
+                    $"Refusing to start worker: OrcaBinaryHealthCheck returned {probe.Status}. {probe.Description}. " +
+                    "The advertised engine version could not be verified against the binary. " +
+                    "Set WORKER_RELAXED_READINESS=true to bypass in dev.");
+            }
         }
 
         await app.RunAsync();

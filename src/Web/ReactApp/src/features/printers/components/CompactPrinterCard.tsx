@@ -16,7 +16,11 @@ import { PrintProgressBar } from '@/features/printers/components/PrintProgressBa
 import { FailureDetectionBadge } from '@/features/printers/components/FailureDetectionBadge';
 import { FailureDetectionMonitoringBadge } from '@/features/printers/components/FailureDetectionMonitoringBadge';
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
+import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
+import { PrinterCoverageSummary } from '@/features/filament-coverage/components/FilamentCoverageBadge';
+import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { apiClient } from '@/services/api';
@@ -36,15 +40,59 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import type { TagDto } from '@/services/tagService';
+import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
 
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
-  onExpand: () => void;
+  /** Receives the printer ID so parents can pass one stable callback for all cards */
+  onExpand: (printerId: string) => void;
   onEdit?: (printer: Printer) => void;
 }
 
-export function CompactPrinterCard({
+function BedTypeBadge({ name, color }: { name: string; color?: string | null }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = color ? `${color}33` : 'rgba(0,0,0,0.3)';
+    ref.current.style.borderColor = color ? `${color}66` : 'rgba(255,255,255,0.1)';
+  }, [color]);
+
+  return (
+    <span
+      ref={ref}
+      className="text-xs px-1.5 py-0.5 rounded-full border text-pf-text-secondary"
+      title={`Bed type: ${name}`}
+    >
+      {name}
+    </span>
+  );
+}
+
+function MmuGateDot({ isLoaded, color, tooltip }: { isLoaded: boolean; color: string; tooltip: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    ref.current.style.backgroundColor = isLoaded ? color : 'transparent';
+    ref.current.style.borderStyle = isLoaded ? 'solid' : 'dashed';
+    ref.current.style.opacity = isLoaded ? '1' : '0.4';
+  }, [color, isLoaded]);
+
+  return (
+    <span
+      ref={ref}
+      className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
+      title={tooltip}
+      aria-label={tooltip}
+    />
+  );
+}
+
+// Memoized: with stable callbacks and structural sharing upstream, a card only
+// re-renders when its own printer's data actually changed.
+export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   printer: printerProp,
   backendCapabilities,
   onExpand,
@@ -90,6 +138,7 @@ export function CompactPrinterCard({
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
+  const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
   // Per-printer job queue for "X of Y" indicator
@@ -105,7 +154,15 @@ export function CompactPrinterCard({
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
-      await setAutoDispatchEnabled.mutateAsync({ printerId: printer.id, enabled: newEnabled });
+      if (!autoDispatchStatus?.dispatchStateETag || !autoDispatchStatus.printerETag) {
+        throw new Error('Refresh the printer before changing auto-dispatch.');
+      }
+      await setAutoDispatchEnabled.mutateAsync({
+        printerId: printer.id,
+        enabled: newEnabled,
+        dispatchStateETag: autoDispatchStatus.dispatchStateETag,
+        printerETag: autoDispatchStatus.printerETag,
+      });
       toast.success(newEnabled ? 'Auto-dispatch enabled' : 'Auto-dispatch disabled');
     } catch {
       toast.error('Failed to toggle auto-dispatch');
@@ -142,7 +199,7 @@ export function CompactPrinterCard({
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
-  // Check if printer has camera URLs - just verify if URLs have values from database
+  // Check if this printer has a camera source available for preview.
   const cameraSnapshotUrl = printer.cameraSnapshotUrl;
   const cameraStreamUrl = printer.cameraStreamUrl;
   const hasCameraUrls = !!(cameraSnapshotUrl || cameraStreamUrl);
@@ -150,7 +207,10 @@ export function CompactPrinterCard({
   const headerClassName = getStatusHeaderClassName({ state, isOnline, isPrinting, isPaused, isShutdown });
 
   return (
-    <div className="relative rounded-xl shadow-lg bg-pf-card border border-white/10 w-full">
+    <article
+      className="group relative rounded-xl border border-white/10 bg-pf-card shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
+      style={{ transform: 'translateZ(0)' }}
+    >
       {/* Bed clear banner — overlay on top of card */}
       {autoDispatchStatus && isPendingReady && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
@@ -196,9 +256,12 @@ export function CompactPrinterCard({
             </span>
           )}
         </div>
-        {/* Tags row */}
-        {printerTags.length > 0 && (
+        {/* Tags row + bed type badge */}
+        {(printerTags.length > 0 || printer.bedTypeName) && (
           <div className="flex flex-wrap gap-1 mt-1.5">
+            {printer.bedTypeName && (
+              <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
+            )}
             {printerTags.map(tag => (
               <span
                 key={tag.id}
@@ -234,6 +297,10 @@ export function CompactPrinterCard({
             />
           </div>
 
+          {(isPrinting || isPaused) && (printer.estimatedCompletionTimeUtc || printer.printTimeLeftSeconds != null) && (
+            <EstimatedCompletionBadge completionTimeUtc={printer.estimatedCompletionTimeUtc} printTimeLeftSeconds={printer.printTimeLeftSeconds} />
+          )}
+
           {(isPrinting || isPaused) && (
             <FailureDetectionMonitoringSummary
               enabled={!!printer.obicoEnabled}
@@ -252,8 +319,22 @@ export function CompactPrinterCard({
               printerName={printer.name}
               cameraStreamUrl={cameraStreamUrl}
               cameraSnapshotUrl={cameraSnapshotUrl}
+              cameraAccessMode={printer.cameraAccessMode}
+              cameraStreamFormat={printer.cameraStreamFormat}
+              cameraSnapshotStrategy={printer.cameraSnapshotStrategy}
               isPrinting={isPrinting}
               className="mt-2"
+            />
+          )}
+
+          {/* Offline troubleshooting guide */}
+          {!isOnline && (
+            <OfflineTroubleshootingGuide
+              printerBackend={printer.backend}
+              printerIp={printer.ipAddress}
+              serverUrl={printer.serverUrl ?? printer.backendUrl}
+              frontendUrl={printer.frontendUrl}
+              variant="compact"
             />
           )}
 
@@ -269,7 +350,7 @@ export function CompactPrinterCard({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={onExpand}
+            onClick={() => onExpand(printer.id)}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             title="Open details sidebar"
             aria-label="Open details sidebar"
@@ -283,7 +364,7 @@ export function CompactPrinterCard({
             disabled={!hasCameraUrls || !isEnabled}
             className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
             aria-label={showCamera ? 'Hide camera preview' : 'Show camera preview'}
-            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No camera configured'}
+            title={!isEnabled ? 'Printer disabled' : hasCameraUrls ? 'Camera preview available' : 'No linked camera configured'}
             iconCenter={<CameraIcon className="h-4 w-4" />}
           />
           <Button
@@ -323,16 +404,11 @@ export function CompactPrinterCard({
                         ? `T${gate.index}: ${gate.filamentName ?? gate.material ?? 'Unknown'}`
                         : `T${gate.index}: Empty`;
                       return (
-                        <span
+                        <MmuGateDot
                           key={gate.index}
-                          className="w-3.5 h-3.5 rounded-full border border-white/20 shrink-0"
-                          title={tooltip}
-                          aria-label={tooltip}
-                          style={{
-                            backgroundColor: isLoaded ? color : 'transparent',
-                            borderStyle: isLoaded ? 'solid' : 'dashed',
-                            opacity: isLoaded ? 1 : 0.4,
-                          }}
+                          isLoaded={isLoaded}
+                          color={color}
+                          tooltip={tooltip}
                         />
                       );
                     })}
@@ -345,7 +421,6 @@ export function CompactPrinterCard({
                 </>
               );
             }
-
             if (printer.spoolInfo?.hasActiveSpool) {
               const color = printer.spoolInfo.colorHex ?? '#888';
               const remaining = printer.spoolInfo.remainingWeightG;
@@ -412,6 +487,7 @@ export function CompactPrinterCard({
 
             return <span className="italic text-pf-text-tertiary">No spool loaded</span>;
           })()}
+          <PrinterCoverageSummary coverage={coverage} compact className="ml-1" />
         </div>
         <div className="relative shrink-0 ml-2">
           <Button
@@ -515,6 +591,6 @@ export function CompactPrinterCard({
         }}
       />
       {/* end card body */}
-    </div>
+    </article>
   );
-}
+}, areCompactPrinterCardPropsEqual);

@@ -125,7 +125,15 @@ export function usePrinterStatusUpdates(
         // Swallow debug failures
       }
       if (printerIdsRef.current && !printerIdsRef.current.includes(status.id)) return;
-      
+
+      // Drop no-op updates so unchanged printers keep their object identity —
+      // downstream memoization (usePrinterDisplays, memoized cards) relies on it.
+      const existing = pendingRef.current.get(status.id);
+      if (existing && JSON.stringify(existing) === JSON.stringify(status)) {
+        onUpdateRef.current?.(status);
+        return;
+      }
+
       // Accumulate in ref (no re-render). The flush interval syncs to state.
       pendingRef.current.set(status.id, status);
       latestRef.current = status;
@@ -376,7 +384,7 @@ export function useDiscoveryPrinterFound(
   onPrinterFound?: (found: import('@/types/api').DiscoveryPrinterFoundDto) => void
 ) {
   // State is reset by parent remounting with key prop when sessionId changes
-  const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterDto[]>([]);
+  const [foundPrinters, setFoundPrinters] = useState<import('@/types/api').DiscoveredPrinterSummaryDto[]>([]);
 
   useEffect(() => {
     if (!sessionId) return;

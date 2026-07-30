@@ -15,11 +15,36 @@ namespace Farm.Web.Api.Controllers;
 public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
     DiscoveryHeartbeatMonitorService discoveryMonitor,
-    ILogger<UnifiedSettingsController> logger) : ControllerBase
+    ILogger<UnifiedSettingsController> logger,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Keys for settings types that own their own secret fields (encrypted tokens, etc.) and must
+    // not be exposed or mutated through the generic settings surface.  Each such type has a
+    // dedicated admin controller that handles masking / encryption correctly.
+    private static readonly HashSet<string> _settingsBlocklist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        HomeAssistantSettings.SectionName,
+        TelegramSettings.SectionName
+    };
+
+    // Section keys that may be read WITHOUT authentication. This is an allowlist, not a blocklist:
+    // it fails CLOSED. Only sections that a trusted, tokenless internal component genuinely needs
+    // are listed here; every other section requires a signed-in user. The printer-discovery
+    // microservice runs out-of-process, holds no user credential, and polls its own configuration
+    // (NetworkDiscovery) to decide when/what to scan — see
+    // src/printer-discovery/BackgroundServices/PeriodicDiscoveryBackgroundService.cs. Adding a new
+    // setting can never silently expose it anonymously; a key must be listed here deliberately.
+    private static readonly HashSet<string> _anonymousReadAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        NetworkDiscoverySettings.SectionName
+    };
+
+    private bool IsAuthenticated() => User.Identity?.IsAuthenticated == true;
 
     // Lazy-initialize this since it depends on _modularSettingsService
     private Dictionary<string, string>? _keyNameToClassNameMap;
@@ -31,9 +56,12 @@ public class UnifiedSettingsController(
     /// </summary>
     /// <remarks>
     /// Returns a dictionary where each key is a settings section name (keyName) and the value is the current settings object for that section.
+    /// Requires authentication (class-level <c>[Authorize]</c>): the aggregate surface exposes internal
+    /// URLs, intervals, file paths, feature flags and hostnames, and has no anonymous consumer. The
+    /// printer-discovery microservice reads only a single section via the per-key endpoint, so this
+    /// endpoint deliberately does not carry <c>[AllowAnonymous]</c>.
     /// </remarks>
     /// <returns>Dictionary of all settings sections keyed by section name.</returns>
-    [AllowAnonymous]
     [HttpGet]
     public ActionResult<IDictionary<string, object>> Get()
     {
@@ -42,6 +70,13 @@ public class UnifiedSettingsController(
         Dictionary<string, object> result = new();
         foreach (SettingMetadata meta in allMetadata)
         {
+            // Skip settings types that manage their own secret fields.
+            // These must be accessed via their dedicated admin controllers.
+            if (_settingsBlocklist.Contains(meta.Key))
+            {
+                continue;
+            }
+
             object settings = _modularSettingsService.GetByKey(meta.Key);
             result[meta.Key] = settings ?? new { };
         }
@@ -59,11 +94,19 @@ public class UnifiedSettingsController(
     /// <returns>Result of save operation, including validation errors if any.</returns>
     [Authorize(Roles = "farm_admin")]
     [HttpPost]
-    public ActionResult Update([FromBody] Dictionary<string, object> settingsSections)
+    public async Task<ActionResult> UpdateAsync([FromBody] Dictionary<string, object> settingsSections)
     {
+        // Track whether SpoolCoverage settings changed so we can broadcast a
+        // coverage-invalidation event after all sections persist (#709 item 5).
+        bool spoolCoverageChanged = false;
+
+        // Tracks the section being processed so the outer catch can attribute a memberless
+        // ValidationException (thrown from Save via reflection) to a real section key rather than
+        // an empty string. See the outer catch and BuildValidationErrorResponse for the shape.
+        string? currentKey = null;
         try
         {
-            _logger.LogDebug("Settings POST: Raw payload object: {@SettingsSections}", settingsSections);
+            _logger.LogDebug("Settings POST: Raw payload object keys: {Keys}", string.Join(", ", settingsSections.Keys));
             Dictionary<string, Type> keyToType = AppDomain.CurrentDomain.GetAssemblies()
                 .SelectMany(a => a.GetTypes())
                 .Where(t => System.Reflection.CustomAttributeExtensions.GetCustomAttribute<AppSettingAttribute>(t) != null)
@@ -75,7 +118,16 @@ public class UnifiedSettingsController(
             {
                 string key = kvp.Key;
                 object value = kvp.Value;
+                currentKey = key;
                 _logger.LogDebug("Settings POST: Processing section key '{Key}'", key);
+
+                // Skip settings types that manage their own secret fields.
+                if (_settingsBlocklist.Contains(key))
+                {
+                    _logger.LogWarning("Settings POST: Skipping blocked section '{Key}' — use the dedicated admin endpoint", key);
+                    continue;
+                }
+
                 if (!keyToType.TryGetValue(key, out Type? settingsType))
                 {
                     _logger.LogWarning("Settings POST: Unknown section key '{Key}'", key);
@@ -88,7 +140,7 @@ public class UnifiedSettingsController(
                     try
                     {
                         object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
-                        _logger.LogDebug("Settings POST: Deserialized object for '{Key}': {@TypedSettings}", key, typedSettings);
+                        _logger.LogDebug("Settings POST: Deserialized section '{Key}' successfully", key);
                         if (typedSettings != null)
                         {
                             // Verify the type implements IAppSetting (required for Save<T>)
@@ -110,22 +162,7 @@ public class UnifiedSettingsController(
                                 catch (ValidationException vex)
                                 {
                                     _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", key, vex.Message);
-
-                                    // Return structured validation error for this section
-                                    Dictionary<string, string> errors = new();
-                                    if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-                                    {
-                                        foreach (string member in vex.ValidationResult.MemberNames)
-                                        {
-                                            errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        errors[key] = vex.Message;
-                                    }
-
-                                    return BadRequest(new { message = $"Validation failed for section '{key}'", errors });
+                                    return BuildValidationErrorResponse(vex, key);
                                 }
                             }
 
@@ -138,6 +175,12 @@ public class UnifiedSettingsController(
                                     _logger.LogDebug("Settings POST: Invoking Save for section '{Key}'", key);
                                     _ = genericSaveMethod.Invoke(_modularSettingsService, new object[] { typedSettings });
                                     _logger.LogDebug("Settings POST: Save completed for section '{Key}'", key);
+
+                                    // #709 item 5: coverage thresholds changed.
+                                    if (string.Equals(key, SpoolCoverageSettings.SectionName, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        spoolCoverageChanged = true;
+                                    }
                                 }
                                 catch (System.Reflection.TargetInvocationException tie)
                                 {
@@ -167,6 +210,13 @@ public class UnifiedSettingsController(
 
             // No need to reload - Save() already updated the in-memory _settings dictionary
             // and cleared the change tracker to ensure fresh data on next query
+            if (spoolCoverageChanged && _coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastFleetChangedAsync(
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.ThresholdChanged,
+                    HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             return Ok();
         }
         catch (Exception ex)
@@ -178,23 +228,13 @@ public class UnifiedSettingsController(
 
             _logger.LogError(actualException, "Settings POST: Exception during settings update");
 
-            // If it's a ValidationException thrown from Save via reflection, return structured response
+            // If it's a ValidationException thrown from Save via reflection, return the same
+            // structured response the inline/per-key paths produce: top-level `message` carries the
+            // concrete reason (not a generic "Validation failed"), and a memberless exception is
+            // keyed under the section being processed rather than an unlookup-able empty string.
             if (actualException is ValidationException vex)
             {
-                Dictionary<string, string> errors = new();
-                if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-                {
-                    foreach (string member in vex.ValidationResult.MemberNames)
-                    {
-                        errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                    }
-                }
-                else
-                {
-                    errors[string.Empty] = vex.Message;
-                }
-
-                return BadRequest(new { message = "Validation failed", errors });
+                return BuildValidationErrorResponse(vex, currentKey ?? "settings");
             }
 
             return BadRequest(new { message = $"Failed to save settings: {actualException.Message}" });
@@ -213,12 +253,19 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata();
+            // Materialize inside the try: GetAllMetadata() is a lazy yield iterator, so without
+            // this the enumeration (and any exception, e.g. a settings property missing
+            // [JsonPropertyName]) would happen during response serialization — after the 200 status
+            // and headers are already on the wire — surfacing to the browser as a truncated
+            // ERR_INCOMPLETE_CHUNKED_ENCODING instead of a clean error. ToList() forces failure here.
+            List<SettingMetadata> metadata = _modularSettingsService.GetAllMetadata()
+                .Where(meta => !_settingsBlocklist.Contains(meta.Key))
+                .ToList();
             return Ok(metadata);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings metadata: {ex.Message}");
         }
     }
 
@@ -235,24 +282,47 @@ public class UnifiedSettingsController(
     {
         try
         {
-            IEnumerable<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata();
+            // Materialize inside the try (lazy yield iterator) so failures surface as a clean
+            // 500 rather than a mid-stream truncated response. See GetMetadata() for details.
+            List<SettingGroupMetadata> groups = _modularSettingsService.GetAllGroupMetadata().ToList();
             return Ok(groups);
         }
         catch (Exception ex)
         {
-            return BadRequest($"Failed to get settings group metadata: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, $"Failed to get settings group metadata: {ex.Message}");
         }
     }
 
     /// <summary>
     /// Gets the settings for a specific section by keyName.
     /// </summary>
+    /// <remarks>
+    /// Carries <c>[AllowAnonymous]</c> so the tokenless printer-discovery microservice can read its
+    /// own configuration, but anonymous access is restricted to <see cref="_anonymousReadAllowlist"/>
+    /// (fails closed). Any other section requires a signed-in user; secret-bearing sections in
+    /// <see cref="_settingsBlocklist"/> are hidden entirely.
+    /// </remarks>
     /// <param name="keyName">The key name of the settings section.</param>
     /// <returns>The settings object for the specified section.</returns>
     [AllowAnonymous]
     [HttpGet("{keyName}")]
     public ActionResult<object> GetSettingsByKeyName(string keyName)
     {
+        // Block settings types that manage their own secret fields.
+        if (_settingsBlocklist.Contains(keyName))
+        {
+            return NotFound($"Settings key '{keyName}' not found");
+        }
+
+        // Fail closed for anonymous callers: only allowlisted sections may be read without a user
+        // token. This prevents the endpoint from leaking internal URLs, intervals, paths and feature
+        // flags to unauthenticated callers, while still letting the discovery microservice read the
+        // one section it depends on.
+        if (!IsAuthenticated() && !_anonymousReadAllowlist.Contains(keyName))
+        {
+            return Unauthorized();
+        }
+
         try
         {
             string? className = MapKeyNameToClassName(keyName);
@@ -274,6 +344,18 @@ public class UnifiedSettingsController(
     /// Heartbeat endpoint for discovery service.
     /// Updates the LastHeartbeat timestamp in NetworkDiscoverySettings to confirm service is alive.
     /// </summary>
+    /// <remarks>
+    /// Deliberately <c>[AllowAnonymous]</c>: the printer-discovery microservice posts this heartbeat
+    /// on a timer (src/printer-discovery/BackgroundServices/HeartbeatBackgroundService.cs) and holds
+    /// no user credential. The endpoint is narrowly scoped — it rejects any keyName other than
+    /// <c>NetworkDiscovery</c> and only writes <c>LastHeartbeat</c> — so the residual abuse is
+    /// limited to an anonymous caller keeping discovery <em>looking</em> alive and suppressing a
+    /// genuine "discovery down" dashboard signal. It cannot read or mutate any other setting.
+    /// Fully removing anonymous access here requires a coordinated change: a shared service
+    /// credential provisioned to both the API and the discovery microservice (and wired through the
+    /// compose templates). That is out of scope for this fix and tracked as a follow-up; closing it
+    /// here without updating the microservice would silently break discovery heartbeats.
+    /// </remarks>
     /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
     /// <returns>NoContent on success.</returns>
     [AllowAnonymous]
@@ -321,31 +403,36 @@ public class UnifiedSettingsController(
     /// <param name="keyName">The key name of the settings section.</param>
     /// <param name="settingsValues">The updated settings object for the section.</param>
     /// <returns>Result of save operation for the specified section.</returns>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("{keyName}")]
     public async Task<ActionResult> UpdateSettingsByKeyNameAsync(string keyName, [FromBody] object settingsValues)
     {
+        // Block settings types that manage their own secret fields.
+        if (_settingsBlocklist.Contains(keyName))
+        {
+            return NotFound($"Settings key '{keyName}' not found");
+        }
+
         try
         {
             // Use the modular settings service to save the individual settings
             await UpdateAppSettingsPropertyAsync(keyName, settingsValues);
+
+            // #709 item 5: coverage thresholds changed → fleet-wide invalidation.
+            if (_coverageBroadcaster is not null
+                && string.Equals(keyName, SpoolCoverageSettings.SectionName, StringComparison.OrdinalIgnoreCase))
+            {
+                await _coverageBroadcaster.BroadcastFleetChangedAsync(
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.ThresholdChanged,
+                    HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+
             return Ok();
         }
         catch (ValidationException vex)
         {
-            Dictionary<string, string> errors = new();
-            if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
-            {
-                foreach (string member in vex.ValidationResult.MemberNames)
-                {
-                    errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
-                }
-            }
-            else
-            {
-                errors[string.Empty] = vex.Message;
-            }
-
-            return BadRequest(new { message = $"Validation failed for class '{keyName}'", errors });
+            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", keyName, vex.Message);
+            return BuildValidationErrorResponse(vex, keyName);
         }
         catch (Exception ex)
         {
@@ -392,6 +479,17 @@ public class UnifiedSettingsController(
             object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
             if (typedSettings != null)
             {
+                // Run the same validation the bulk POST path runs. Without this, invalid values
+                // that the bulk endpoint would reject with a structured 400 would silently persist
+                // through the per-key endpoint. ValidationException bubbles to the caller, which
+                // translates it into the shared structured 400 response.
+                if (typedSettings is IValidatableSetting validatable)
+                {
+                    _logger.LogDebug("Settings POST (per-key): Validating section '{Key}'", keyName);
+                    validatable.Validate();
+                    _logger.LogDebug("Settings POST (per-key): Validation succeeded for section '{Key}'", keyName);
+                }
+
                 // Save using the modular service
                 await Task.Run(() =>
                 {
@@ -407,5 +505,43 @@ public class UnifiedSettingsController(
                 // and cleared the change tracker to ensure fresh data on next query
             }
         }
+    }
+
+    /// <summary>
+    /// Translates a <see cref="ValidationException"/> into the structured <c>400 Bad Request</c>
+    /// response the settings UI expects: an object with <c>message</c> (string) and
+    /// <c>errors</c> (dictionary of field-name → error-message). The React SettingsPage parses
+    /// <c>errors</c> keys, splitting on '.' into <c>section.field</c> and mapping unqualified
+    /// keys back to their section via metadata. Called from both the bulk and per-key POST
+    /// paths so both endpoints produce byte-for-byte identical error bodies.
+    /// </summary>
+    /// <remarks>
+    /// The top-level <c>message</c> is the string the React SettingsPage renders in its save-error
+    /// banner (<c>firstMessage ?? summary</c>). It carries <see cref="Exception.Message"/> — the
+    /// concrete reason (e.g. "Invalid CIDR subnet: 10.0.0.0/foo") — rather than a generic
+    /// "Validation failed for section 'X'". Most settings classes raise memberless
+    /// <see cref="ValidationException"/>s (21 of the 23 <c>throw new ValidationException(...)</c>
+    /// sites at time of writing); for those the <c>errors[sectionKey]</c> entry does not map to
+    /// any rendered <c>prop.name</c> in <c>SettingsPagelet</c>, so the top-level <c>message</c>
+    /// is the only place the concrete reason reaches the user.
+    /// </remarks>
+    private static BadRequestObjectResult BuildValidationErrorResponse(ValidationException vex, string sectionKey)
+    {
+        Dictionary<string, string> errors = new();
+        if (vex.ValidationResult != null && vex.ValidationResult.MemberNames != null && vex.ValidationResult.MemberNames.Any())
+        {
+            foreach (string member in vex.ValidationResult.MemberNames)
+            {
+                errors[member] = vex.ValidationResult.ErrorMessage ?? vex.Message;
+            }
+        }
+        else
+        {
+            // Memberless throws — the frontend recognises a bare key that equals the section key
+            // as a section-level error and renders it via SettingsPagelet's `error` prop.
+            errors[sectionKey] = vex.Message;
+        }
+
+        return new BadRequestObjectResult(new { message = vex.Message, errors });
     }
 }

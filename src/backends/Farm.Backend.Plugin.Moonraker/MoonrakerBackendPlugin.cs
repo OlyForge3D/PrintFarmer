@@ -1,4 +1,6 @@
 ﻿using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Contracts.Printers.Moonraker;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -48,6 +50,9 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// </summary>
     public Type? StatusClientInterfaceType => typeof(IPrinterStatusClient);
 
+    public BackendTelemetryCadence TelemetryCadence =>
+        new(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(60));
+
     /// <summary>
     /// Gets the version of this plugin.
     /// </summary>
@@ -69,6 +74,10 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
+        services.AddScoped<IPrinterCameraProbe, MoonrakerPrinterCameraProbe>();
+        services.AddSingleton<IMoonrakerJsonRpcClient, MoonrakerJsonRpcClient>();
+        services.AddSingleton<ISnapmakerU1CameraMonitorManager, SnapmakerU1CameraMonitorManager>();
+
         // Register the Moonraker client interface with its implementation
         services.AddScoped<IMoonrakerClient>(provider =>
         {
@@ -81,7 +90,8 @@ public class MoonrakerBackendPlugin : IExtendedBackendPlugin
             var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             ILogger<MoonrakerClient> logger = provider.GetRequiredService<ILoggerFactory>().CreateLogger<MoonrakerClient>();
-            return new MoonrakerClient(httpClient, logger, timeouts);
+            ISnapmakerU1CameraMonitorManager monitorManager = provider.GetRequiredService<ISnapmakerU1CameraMonitorManager>();
+            return new MoonrakerClient(httpClient, logger, timeouts, monitorManager);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

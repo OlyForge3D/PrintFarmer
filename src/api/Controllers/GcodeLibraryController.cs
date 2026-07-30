@@ -26,6 +26,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// <param name="nozzleDiameter">Optional filter by nozzle diameter.</param>
     /// <param name="printerModelId">Optional filter by printer model ID.</param>
     [HttpGet]
+    [Authorize(Policy = "LibrarySync")]
     [ProducesResponseType(typeof(IEnumerable<GcodeFileDto>), 200)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<IEnumerable<GcodeFileDto>>> GetLibraryAsync(
@@ -52,6 +53,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// </summary>
     /// <param name="id">The unique identifier of the G-code file.</param>
     [HttpGet("{id}")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(GcodeFileDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -75,6 +77,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// <param name="file">The G-code file to upload.</param>
     /// <param name="metadata">Metadata for the G-code file.</param>
     [HttpPost("upload")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(GcodeFileDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
@@ -118,6 +121,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// <param name="id">The unique identifier of the G-code file to update.</param>
     /// <param name="request">The updated metadata for the G-code file.</param>
     [HttpPut("{id}")]
+    [Authorize(Policy = "ModelWrite")]
     [ProducesResponseType(typeof(GcodeFileDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -172,6 +176,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// </summary>
     /// <param name="id">The unique identifier of the G-code file to download.</param>
     [HttpGet("{id}/download")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]

@@ -3,8 +3,10 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -20,12 +22,15 @@ public sealed class PrusaLinkPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<PrusaLinkPollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable
 {
     private readonly ILogger<PrusaLinkPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -58,6 +63,11 @@ public sealed class PrusaLinkPollingService(
         public DateTime LastPollTime { get; set; }
 
         public int ConsecutiveFailures { get; set; }
+
+        /// <summary>
+        /// Whether printer info (NozzleDiameter, HasMmu) has been synced to the entity on this polling session.
+        /// </summary>
+        public bool HasSyncedPrinterInfo { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -193,6 +203,9 @@ public sealed class PrusaLinkPollingService(
                     ManagedSpoolProviderHelper spoolProvider = scope.ServiceProvider.GetRequiredService<ManagedSpoolProviderHelper>();
 
                     // Use the Credential property populated by the repository layer
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "PrusaLink status", ct)
+                        .ConfigureAwait(false);
                     PrusaCompositeStatus status = await prusaLinkClient.GetCompositeStatusAsync(
                         printer.ServerUrl,
                         printer.Credential,
@@ -214,6 +227,7 @@ public sealed class PrusaLinkPollingService(
 
                     // Check for state transition from printing to idle/finished for job completion sync
                     string? previousState = state.LastKnownState;
+                    string? previousJobName = state.LastKnownJobName;
                     bool stateChanged = status.State != previousState;
 
                     // Update state tracking (including PreviousState for transition detection)
@@ -224,17 +238,28 @@ public sealed class PrusaLinkPollingService(
                     state.LastKnownJobName = status.JobName;
                     state.ConsecutiveFailures = 0;
 
+                    // One-time sync of PrusaLink printer info (NozzleDiameter, HasMmu) to the entity
+                    if (!state.HasSyncedPrinterInfo)
+                    {
+                        state.HasSyncedPrinterInfo = await SyncPrinterInfoAsync(printer, ct);
+                    }
+
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null)
                     {
-                        await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State!, ct);
+                        await CheckAndSyncJobCompletionAsync(
+                            printerId,
+                            previousState,
+                            status.State!,
+                            previousJobName,
+                            ct);
                     }
 
                     // Resolve spool info from DB assignment
                     PrinterSpoolInfoDto? spoolInfo = await spoolProvider.GetManagedSpoolInfoAsync(printer, ct);
 
-                    // Broadcast update via SignalR using PrinterStatusDto
-                    var update = new PrinterStatusDto(
+                    // Update cache before broadcasting to clients
+                    var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -250,12 +275,36 @@ public sealed class PrusaLinkPollingService(
                         BedTemp: status.BedTemp,
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
-                        SpoolInfo: spoolInfo);
+                        SpoolInfo: spoolInfo,
+                        PrintTimeLeftSeconds: status.TimeRemainingSeconds,
+                        SpeedMultiplier: status.SpeedMultiplier);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
-                    // Update cache before broadcasting to clients
-                    _statusCacheWriter.UpdateStatus(update);
+                    var signalRUpdate = new PrinterStatusUpdate(
+                        Id: printerId,
+                        IsOnline: status.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(status.State),
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.AxisX,
+                        Y: status.AxisY,
+                        Z: status.AxisZ,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null,
+                        SpoolInfo: spoolInfo,
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.Group(
+                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                        .SendAsync("printerupdated", signalRUpdate, ct);
+                    await _coverageBroadcaster
+                        .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                        .ConfigureAwait(false);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -269,7 +318,7 @@ public sealed class PrusaLinkPollingService(
                     {
                         _logger.LogWarning("PrusaLink printer {PrinterId} marked offline after {StateConsecutiveFailures} failures", printerId, state.ConsecutiveFailures);
                         state.LastKnownIsOnline = false;
-                        var offlineUpdate = new PrinterStatusDto(
+                        var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -285,12 +334,33 @@ public sealed class PrusaLinkPollingService(
                             BedTemp: null,
                             HotendTarget: null,
                             BedTarget: null,
-                            SpoolInfo: null);
+                            SpoolInfo: null,
+                            PrintTimeLeftSeconds: null,
+                            SpeedMultiplier: null);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
-                        // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineUpdate);
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            HomedAxes: null,
+                            SpoolInfo: null,
+                            FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 
@@ -334,7 +404,12 @@ public sealed class PrusaLinkPollingService(
     /// Checks for print completion/failure state transitions and synchronizes job status in database.
     /// Called when printer state changes from "printing" to idle/finished (completion) or error (failure).
     /// </summary>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -353,7 +428,11 @@ public sealed class PrusaLinkPollingService(
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
                 // Print completed successfully
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[PrusaLinkPollingService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -362,7 +441,11 @@ public sealed class PrusaLinkPollingService(
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
                 // Print failed
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[PrusaLinkPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);
@@ -372,6 +455,61 @@ public sealed class PrusaLinkPollingService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[PrusaLinkPollingService] Failed to sync job completion for printer {PrinterId}", printerId);
+        }
+    }
+
+    /// <summary>
+    /// Fetches PrusaLink printer info and syncs NozzleDiameter and HasMmu to the Printer entity.
+    /// </summary>
+    private async Task<bool> SyncPrinterInfoAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            using IServiceScope scope = _scopeFactory.CreateScope();
+            IPrusaLinkClient prusaLinkClient = scope.ServiceProvider.GetRequiredService<IPrusaLinkClient>();
+
+            PrinterInformation? info = await prusaLinkClient.GetPrinterInformationAsync(printer.ServerUrl, printer.Credential, ct);
+            if (info is null)
+            {
+                return false;
+            }
+
+            bool changed = false;
+            if (printer.NozzleDiameter is null || Math.Abs(printer.NozzleDiameter.Value - info.NozzleDiameter) > 0.0001)
+            {
+                printer.NozzleDiameter = info.NozzleDiameter;
+                changed = true;
+            }
+
+            if (printer.HasMmu != info.HasMmu)
+            {
+                printer.HasMmu = info.HasMmu;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                IUnitOfWork unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
+
+                // Re-load the entity in this scope's context so EF tracks changes
+                Printer? tracked = await unitOfWork.Printers.FindByIdAsync(printer.Id, ct);
+                if (tracked is not null)
+                {
+                    tracked.NozzleDiameter = printer.NozzleDiameter;
+                    tracked.HasMmu = printer.HasMmu;
+                    await unitOfWork.SaveChangesAsync(ct);
+                    _logger.LogInformation(
+                        "[PrusaLinkPollingService] Synced printer info for {PrinterId}: NozzleDiameter={NozzleDiameter}, HasMmu={HasMmu}",
+                        printer.Id, info.NozzleDiameter, info.HasMmu);
+                }
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PrusaLinkPollingService] Failed to sync printer info for {PrinterId}", printer.Id);
+            return false;
         }
     }
 }

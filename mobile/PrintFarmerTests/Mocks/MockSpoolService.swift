@@ -3,7 +3,16 @@ import Foundation
 
 final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     var spoolsPageToReturn = SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
+    /// When set, `listSpools` returns these pages in order (one per call,
+    /// indexed by call number) instead of always returning
+    /// `spoolsPageToReturn` — lets tests simulate a paginated
+    /// `spoolExists(id:)` walk across multiple server pages. Requesting
+    /// more pages than were provided returns an empty, zero-`totalCount`
+    /// page so a runaway test bug is loud rather than silently re-serving
+    /// the last page forever.
+    var spoolsPagesToReturn: [SpoolmanPagedResult<SpoolmanSpool>]?
     var spoolToReturn: SpoolmanSpool?
+    var filamentToReturn: SpoolmanFilament?
     var filamentsToReturn: [SpoolmanFilament] = []
     var vendorsToReturn: [SpoolmanVendor] = []
     var materialsToReturn: [SpoolmanMaterial] = []
@@ -14,7 +23,14 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     var listSpoolsCalled = false
     // swiftlint:disable:next large_tuple
     var listSpoolsArgs: (limit: Int, offset: Int, search: String?, material: String?, vendor: String?)?
+    /// Every `listSpools` call's arguments, in order — needed to assert
+    /// exact offsets/no-extra-requests for the paginated
+    /// `spoolExists(id:)` walk (`listSpoolsArgs` alone only reflects the
+    /// last call).
+    // swiftlint:disable:next large_tuple
+    var listSpoolsCallHistory: [(limit: Int, offset: Int, search: String?, material: String?, vendor: String?)] = []
     var createSpoolCalledWith: SpoolmanSpoolRequest?
+    var createFilamentCalledWith: SpoolmanFilamentRequest?
     var updateSpoolCalledWith: (id: Int, request: SpoolmanSpoolRequest)?
     var deleteSpoolCalledWith: Int?
     var listFilamentsCalled = false
@@ -25,7 +41,15 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
     func listSpools(limit: Int, offset: Int, search: String?, material: String?, vendor: String?) async throws -> SpoolmanPagedResult<SpoolmanSpool> {
         listSpoolsCalled = true
         listSpoolsArgs = (limit, offset, search, material, vendor)
+        listSpoolsCallHistory.append((limit, offset, search, material, vendor))
         if let error = errorToThrow { throw error }
+        if let pages = spoolsPagesToReturn {
+            let callIndex = listSpoolsCallHistory.count - 1
+            guard callIndex < pages.count else {
+                return SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
+            }
+            return pages[callIndex]
+        }
         return spoolsPageToReturn
     }
 
@@ -54,6 +78,13 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         return filamentsToReturn
     }
 
+    func createFilament(_ request: SpoolmanFilamentRequest) async throws -> SpoolmanFilament {
+        createFilamentCalledWith = request
+        if let error = errorToThrow { throw error }
+        guard let filament = filamentToReturn else { throw NetworkError.notFound }
+        return filament
+    }
+
     func listVendors() async throws -> [SpoolmanVendor] {
         listVendorsCalled = true
         if let error = errorToThrow { throw error }
@@ -74,7 +105,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
 
     func reset() {
         spoolsPageToReturn = SpoolmanPagedResult<SpoolmanSpool>(items: [], totalCount: 0)
+        spoolsPagesToReturn = nil
         spoolToReturn = nil
+        filamentToReturn = nil
         filamentsToReturn = []
         vendorsToReturn = []
         materialsToReturn = []
@@ -82,7 +115,9 @@ final class MockSpoolService: SpoolServiceProtocol, @unchecked Sendable {
         errorToThrow = nil
         listSpoolsCalled = false
         listSpoolsArgs = nil
+        listSpoolsCallHistory = []
         createSpoolCalledWith = nil
+        createFilamentCalledWith = nil
         updateSpoolCalledWith = nil
         deleteSpoolCalledWith = nil
         listFilamentsCalled = false

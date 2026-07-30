@@ -15,6 +15,13 @@ public class DispatchSettings
     [Key]
     public int Id { get; set; } = 1;
 
+    /// <summary>Public optimistic concurrency token returned as an ETag.</summary>
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
+    /// <summary>Provider-independent logical revision.</summary>
+    public long Revision { get; set; } = 1;
+
     /// <summary>
     /// Master switch: enables or disables the entire auto-dispatch system.
     /// When false, printers that go idle take no automatic action.

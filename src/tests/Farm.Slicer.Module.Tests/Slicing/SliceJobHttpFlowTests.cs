@@ -42,7 +42,7 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
             UserId = Guid.NewGuid(), // explicit to bypass NameIdentifier fallback path
             ModelFileUrl = "http://example.com/model.stl",
             ModelFileName = "model.stl",
-            SlicerEngine = 0,
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
             SlicerProfileJson = "{}"
         };
 
@@ -56,18 +56,19 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
         // 2. Claim via worker endpoint
         ClaimJobRequest claimReq = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = Guid.Parse(_client.DefaultRequestHeaders.GetValues("X-Worker-Id").Single()),
             Capabilities = new[] { "orcaslicer" },
             LeaseDurationSeconds = 300
         };
         HttpResponseMessage claimResp = await _client.PostAsJsonAsync("/api/slice/claim", claimReq);
         string claimBody = await claimResp.Content.ReadAsStringAsync();
         _ = claimResp.StatusCode.Should().Be(HttpStatusCode.OK, $"Claim failed. Status {(int)claimResp.StatusCode}. Body: {claimBody}");
-        SliceJobStatusResponse? claimed = await claimResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
+        WorkerSliceJobResponse? claimed = await claimResp.Content.ReadFromJsonAsync<WorkerSliceJobResponse>();
         _ = claimed.Should().NotBeNull();
         _ = claimed!.Id.Should().Be(submitted.JobId);
         _ = claimed.Status.Should().Be("Processing");
-        _ = claimed.WorkerId.Should().NotBeNull();
+        _ = claimed.ModelFileUrl.Should().Be($"/api/slice/{submitted.JobId}/model");
+        _ = claimed.ModelFileUrl.Should().NotContain("example.com");
 
         // 3. Fetch status directly
         HttpResponseMessage statusResp = await _client.GetAsync($"/api/slice/{submitted.JobId}");
@@ -76,6 +77,5 @@ public class SliceJobHttpFlowTests(Xunit.Abstractions.ITestOutputHelper output) 
         _ = status.Should().NotBeNull();
         _ = status!.Id.Should().Be(submitted.JobId);
         _ = status.Status.Should().Be("Processing");
-        _ = status.WorkerId.Should().Be(claimed.WorkerId);
     }
 }

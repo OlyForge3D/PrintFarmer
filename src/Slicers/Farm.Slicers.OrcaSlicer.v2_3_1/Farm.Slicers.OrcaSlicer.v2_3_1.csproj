@@ -8,7 +8,7 @@
     <WarningsNotAsErrors>nullable</WarningsNotAsErrors>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Title>Farm.Slicers.OrcaSlicer.v2_3_1</Title>
-    <Description>OrcaSlicer v2.3.1 slicer library for PrintFarmer. Contains profiles, assets, and UI components.</Description>
+    <Description>OrcaSlicer v2.3.1 slicer library for PrintFarmer. Ships alongside v2_4_0 for dual-engine support (issue #578).</Description>
     <Version>2.3.1</Version>
     <Authors>PrintFarmer</Authors>
   </PropertyGroup>
@@ -17,11 +17,10 @@
     <ProjectReference Include="../../slicer/Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
   </ItemGroup>
 
-  <!-- Embed assets as resources -->
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.2.0" />
-    <EmbeddedResource Include="lib/Assets/**/*">
-      <LogicalName>OrcaSlicer_v2_3_1_Assets_%(Filename)</LogicalName>
+    <EmbeddedResource Include="lib/Assets/**/*" Exclude="lib/Assets/**/*.cs">
+      <LogicalName>$([System.String]::Copy('OrcaSlicer_v2_3_1_Assets_%(RecursiveDir)%(Filename)%(Extension)').Replace('\', '.').Replace('/', '.').ToLowerInvariant())</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
 

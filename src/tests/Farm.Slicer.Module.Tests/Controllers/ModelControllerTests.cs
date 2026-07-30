@@ -1,12 +1,17 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
+using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Api.Controllers;
+using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -22,10 +27,21 @@ public class ModelControllerTests
         Mock<ILogger<Model3DFilesController>> mockLogger = new Mock<ILogger<Model3DFilesController>>();
         mockConverter ??= new Mock<I3MfToStlConversionService>();
 
-        return new Model3DFilesController(
+        Model3DFilesController controller = new(
             mockLogger.Object,
             mockService.Object,
             mockConverter.Object);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    [new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())],
+                    "Test"))
+            }
+        };
+
+        return controller;
     }
 
     [Fact]
@@ -65,19 +81,191 @@ public class ModelControllerTests
     {
         Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
         Model3DUploadResultDto uploadResult = new Model3DUploadResultDto { Id = Guid.NewGuid(), FileName = "model.stl", FileType = "stl" };
-        _ = mockService.Setup(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
+        _ = mockService.Setup(s => s.UploadModelAsync(
+            It.IsAny<IFormFile>(),
+            It.IsAny<IFormFile?>(),
+            It.IsAny<Guid>(),
+            It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>())).ReturnsAsync(uploadResult);
 
         Model3DFilesController controller = CreateController(mockService);
 
         FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+        FormFile thumbnailFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("png")), 0, 3, "thumbnailFile", "thumbnail.png");
+        using CancellationTokenSource cancellation = new();
 
-        IActionResult result = await controller.UploadModelAsync(fakeFile);
+        Guid clientUploadId = Guid.NewGuid();
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile,
+            clientUploadId.ToString(),
+            cancellation.Token);
 
         CreatedResult created = Assert.IsType<CreatedResult>(result);
         Model3DUploadResultDto value = Assert.IsType<Model3DUploadResultDto>(created.Value);
         Assert.Equal(uploadResult.Id, value.Id);
 
-        mockService.Verify(s => s.UploadModelAsync(It.IsAny<IFormFile>(), It.IsAny<CancellationToken>()), Times.Once);
+        mockService.Verify(s => s.UploadModelAsync(
+            fakeFile,
+            thumbnailFile,
+            It.IsAny<Guid>(),
+            clientUploadId,
+            cancellation.Token), Times.Once);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithInvalidClientUploadId_ReturnsBadRequest()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Model3DFilesController controller = CreateController(mockService);
+        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile: null,
+            clientUploadId: "not-a-guid",
+            CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.Equal("clientUploadId must be a non-empty GUID.", badRequest.Value);
+    }
+
+    [Fact]
+    public async Task UploadModelAsync_WithClientUploadIdAndNoUserId_ReturnsUnauthorized()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Model3DFilesController controller = CreateController(mockService);
+        controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
+        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+
+        IActionResult result = await controller.UploadModelAsync(
+            fakeFile,
+            thumbnailFile: null,
+            clientUploadId: Guid.NewGuid().ToString(),
+            ct: CancellationToken.None);
+
+        _ = Assert.IsType<UnauthorizedResult>(result);
+    }
+
+    [Fact]
+    public async Task ReplaceThumbnailAsync_WithOwnerAndMatchingETag_ReturnsResultAndETag()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Guid modelId = Guid.NewGuid();
+        Guid userId = Guid.NewGuid();
+        Model3DThumbnailUpdateResultDto replacement = new()
+        {
+            Id = modelId,
+            ThumbnailUrl = $"/api/3d-models/thumbnail/{modelId}",
+            ETag = "\"0203\""
+        };
+        _ = mockService.Setup(service => service.ReplaceThumbnailAsync(
+                modelId,
+                It.IsAny<IFormFile>(),
+                userId,
+                false,
+                "\"0102\"",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(replacement);
+        Model3DFilesController controller = CreateController(mockService);
+        controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.NameIdentifier, userId.ToString())],
+            "Test"));
+        controller.Request.Headers.IfMatch = "\"0102\"";
+
+        IActionResult result = await controller.ReplaceThumbnailAsync(
+            modelId,
+            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            CancellationToken.None);
+
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        Assert.Same(replacement, ok.Value);
+        Assert.Equal(replacement.ETag, controller.Response.Headers.ETag);
+    }
+
+    [Fact]
+    public async Task ReplaceThumbnailAsync_WithAdminRole_ForwardsAdministratorAuthorization()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Guid modelId = Guid.NewGuid();
+        _ = mockService.Setup(service => service.ReplaceThumbnailAsync(
+                modelId,
+                It.IsAny<IFormFile>(),
+                null,
+                true,
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Model3DThumbnailUpdateResultDto { Id = modelId, ETag = "\"01\"" });
+        Model3DFilesController controller = CreateController(mockService);
+        controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.Role, "farm_admin")],
+            "Test"));
+
+        IActionResult result = await controller.ReplaceThumbnailAsync(
+            modelId,
+            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            CancellationToken.None);
+
+        _ = Assert.IsType<OkObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ReplaceThumbnailAsync_WhenServiceRejectsOwnership_ReturnsForbidden()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Guid modelId = Guid.NewGuid();
+        _ = mockService.Setup(service => service.ReplaceThumbnailAsync(
+                modelId,
+                It.IsAny<IFormFile>(),
+                It.IsAny<Guid?>(),
+                false,
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new UnauthorizedAccessException());
+        Model3DFilesController controller = CreateController(mockService);
+
+        IActionResult result = await controller.ReplaceThumbnailAsync(
+            modelId,
+            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            CancellationToken.None);
+
+        _ = Assert.IsType<ForbidResult>(result);
+    }
+
+    [Fact]
+    public async Task ReplaceThumbnailAsync_WhenConcurrencyConflictOccurs_ReturnsPreconditionFailed()
+    {
+        Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
+        Guid modelId = Guid.NewGuid();
+        _ = mockService.Setup(service => service.ReplaceThumbnailAsync(
+                modelId,
+                It.IsAny<IFormFile>(),
+                It.IsAny<Guid?>(),
+                false,
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateConcurrencyException());
+        Model3DFilesController controller = CreateController(mockService);
+
+        IActionResult result = await controller.ReplaceThumbnailAsync(
+            modelId,
+            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            CancellationToken.None);
+
+        ObjectResult conflict = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status412PreconditionFailed, conflict.StatusCode);
+    }
+
+    [Fact]
+    public void UploadModelAsync_ConfiguresMultipartLimitForModelAndThumbnail()
+    {
+        MethodInfo method = typeof(Model3DFilesController)
+            .GetMethod(nameof(Model3DFilesController.UploadModelAsync))
+            ?? throw new InvalidOperationException("Upload action was not found");
+        RequestFormLimitsAttribute attribute = Assert.Single(
+            method.GetCustomAttributes<RequestFormLimitsAttribute>());
+
+        Assert.Equal(512_000_000, attribute.MultipartBodyLengthLimit);
     }
 
     [Fact]

@@ -148,27 +148,48 @@ internal static class ProgramHelpers
             OnMessageReceived = context =>
             {
                 string auth = context.Request.Headers["Authorization"].ToString();
-                string snippet = string.Empty;
+                string? token = null;
                 if (!string.IsNullOrEmpty(auth) && auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    string tok = auth["Bearer ".Length..].Trim();
-                    snippet = tok.Length > 12 ? tok[..12] + "..." : tok;
-                    if (!string.IsNullOrEmpty(tok))
+                    token = auth["Bearer ".Length..].Trim();
+                }
+                else if (context.Request.Path.StartsWithSegments("/hubs") &&
+                         context.Request.Query.TryGetValue("access_token", out Microsoft.Extensions.Primitives.StringValues accessToken))
+                {
+                    token = accessToken.ToString();
+                }
+
+                if (!string.IsNullOrWhiteSpace(token))
+                {
+                    context.Token = token;
+                    context.HttpContext.Items["PrintFarmer.RawJwt"] = token;
+                }
+
+                // SignalR's WebSocket and Server-Sent-Events transports cannot set the
+                // Authorization header on the browser handshake, so the client sends the JWT as a
+                // ?access_token= query parameter instead. Honour it for hub paths when the header
+                // did not already supply a token; without this the WS upgrade to an [Authorize] hub
+                // (e.g. /hubs/slicers) is rejected 401 and SignalR silently downgrades to long-polling.
+                if (string.IsNullOrEmpty(context.Token))
+                {
+                    string accessToken = context.Request.Query["access_token"].ToString();
+                    if (!string.IsNullOrEmpty(accessToken)
+                        && context.HttpContext.Request.Path.StartsWithSegments("/hubs", StringComparison.OrdinalIgnoreCase))
                     {
-                        context.Token = tok;
+                        context.Token = accessToken;
                     }
                 }
 
                 try
                 {
-                    string presence = !string.IsNullOrEmpty(auth) ? "present" : "missing";
+                    string presence = !string.IsNullOrWhiteSpace(token) ? "present" : "missing";
                     if (startupUls != null)
                     {
-                        startupUls.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet={Snippet}", presence, snippet);
+                        startupUls.LogDebug("[JWT][OnMessageReceived] Bearer token: {Presence}", presence);
                     }
                     else
                     {
-                        startupLogger?.LogDebug("[JWT][OnMessageReceived] Authorization header: {Presence} tokenSnippet: {TokenSnippet}", presence, snippet);
+                        startupLogger?.LogDebug("[JWT][OnMessageReceived] Bearer token: {Presence}", presence);
                     }
                 }
                 catch
@@ -216,13 +237,17 @@ internal static class ProgramHelpers
                     // Check if token has been revoked. Prefer the raw token extracted from the Authorization header
                     // (context.Token) because that matches the original JWT string used to compute the stored token hash.
                     // Try to read raw token from Authorization header to ensure we compute the same hash
-                    string? token = null;
+                    string? token = context.HttpContext.Items["PrintFarmer.RawJwt"] as string;
                     try
                     {
-                        string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
-                        if (!string.IsNullOrEmpty(authHeader) && authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        if (string.IsNullOrWhiteSpace(token))
                         {
-                            token = authHeader["Bearer ".Length..].Trim();
+                            string authHeader = context.HttpContext.Request.Headers["Authorization"].ToString();
+                            if (!string.IsNullOrEmpty(authHeader) &&
+                                authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                            {
+                                token = authHeader["Bearer ".Length..].Trim();
+                            }
                         }
                     }
                     catch
@@ -341,6 +366,7 @@ internal static class ProgramHelpers
                 ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
                 settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
                 settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+                settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
                 app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
             }
             catch (Exception innerEx)

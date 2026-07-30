@@ -24,6 +24,12 @@ public class JobSchedule
     public PrintJob PrintJob { get; set; } = null!;
 
     /// <summary>
+    /// Stable identity of the job the operator originally scheduled. Recurring schedules keep
+    /// this value while <see cref="PrintJobId"/> advances to a fresh occurrence job.
+    /// </summary>
+    public Guid RootPrintJobId { get; set; }
+
+    /// <summary>
     /// Scheduled start time in UTC
     /// </summary>
     public DateTime ScheduledStartTime { get; set; }
@@ -38,6 +44,11 @@ public class JobSchedule
     /// Values: "Daily", "Weekly", "Monthly", null
     /// </summary>
     public string? RecurrencePattern { get; set; }
+
+    /// <summary>
+    /// Number of recurrence units between executions. One means every day/week/month.
+    /// </summary>
+    public int RecurrenceInterval { get; set; } = 1;
 
     /// <summary>
     /// When recurrence should end (null = indefinite for recurring jobs)
@@ -62,6 +73,19 @@ public class JobSchedule
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Authenticated actor that created or last rescheduled this execution.
+    /// The scheduler reuses this subject so resource ACLs are rechecked at execution time.
+    /// </summary>
+    [MaxLength(256)]
+    public string? InitiatingActorSubject { get; set; }
+
+    /// <summary>
+    /// True when the schedule has no provable originating user or that user's resource access
+    /// was revoked. Such schedules are disabled until an authorized operator reschedules them.
+    /// </summary>
+    public bool RequiresOperatorReauthorization { get; set; } = true;
 
     /// <summary>
     /// Navigation property to execution history (for recurring jobs)

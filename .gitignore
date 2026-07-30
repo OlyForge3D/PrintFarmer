@@ -96,6 +96,9 @@ deploy/nginx/certs/
 .playwright-mcp/
 .playwright-cli/
 
+# Local parity capture artifacts
+simplyprint-*
+
 # Dotnet installer duplicates
 dotnet-install.sh.*
 
@@ -109,9 +112,46 @@ tools/installer/dist/
 .squad/sessions/
 .squad-workstream
 
-# Beads / Dolt files (added by bd init)
-.dolt/
-.beads-credential-key
+*.png
+!src/Web/ReactApp/public/assets/orcaslicer/**/*.png
+!src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/**/*.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_moonrakerProfile.1.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_flashForgeProfile.1.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_sdcpProfile.1.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_loadingState_capabilitiesNil.1.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_disabledState_printerStarting.1.png
+!mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_lockoutBanner_printingState.1.png
 
-# C# Language Server cache
-*.csproj.lscache
+# C# devkit generated cache files
+*.lscache
+
+# Local camera snapshot storage (runtime output)
+src/api/snapshots/
+snapshots/
+
+# Beads issue tracking (removed — use GitHub issues instead)
+.beads/
+
+# Review scratch / PR artifact caches (do not commit)
+.copilot-review-*/
+.squad/reviews/
+.squad/decisions/inbox/pr-*.diff
+.squad/decisions/inbox/pr-*-view.json
+.squad/decisions/inbox/review-*.txt
+# Agent-local scratch dir for commit-message drafts etc. (not for shared state).
+.scratch/
+.squad/.cache/
+# Machine-local Squad scope overrides (per-dev-machine, never shared)
+.squad/machine-local.md
+
+# Temp/debug artifacts
+.tmp-*
+.qa/
+layout_diff.txt
+/*.yaml
+
+# Misplaced Squad outputs — Squad state belongs under .squad/, never the repo root
+/decisions/
+/decisions.md
+/agents/
+/orchestration-log/

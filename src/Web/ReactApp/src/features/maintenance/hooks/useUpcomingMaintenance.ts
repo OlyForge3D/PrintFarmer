@@ -7,12 +7,35 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { maintenanceService } from '@/services/maintenanceService';
+import { maintenanceQueryKeys } from '../queryKeys';
 
 export interface UpcomingMaintenanceTask {
   id: string;
-  scheduleId: string;
+  /**
+   * Global maintenance-task catalog id (a Guid on the wire). Named `taskId`
+   * to match the backend record `UpcomingMaintenanceTaskDto.TaskId`
+   * (`src/api/Controllers/Responses/UpcomingMaintenanceTaskDto.cs`) and the
+   * wire type `UpcomingMaintenanceTaskDto.taskId` in
+   * `src/Web/ReactApp/src/services/maintenanceService.ts`. This is NOT a
+   * `PrinterMaintenanceSchedule` id — the upcoming feed keys upcoming work
+   * to the global task catalog, not to a per-printer schedule deployment,
+   * so a `scheduleId` alias would misrepresent the contract and produced a
+   * silently-`undefined` field at runtime prior to this fix.
+   */
+  taskId: string;
   printerId: string;
   printerName: string;
+  /**
+   * Optional physical toolhead scope. `null`/omitted means the task is
+   * printer-wide. Populated by the #711 backend on toolhead-scoped
+   * schedules so the UI can join upcoming tasks to specific tools.
+   *
+   * The backend `UpcomingMaintenanceTaskDto` does NOT carry a `ToolheadName`
+   * — callers resolve the display name from `PrinterDetailsDto.toolheads[]`,
+   * which is the authoritative source. Synthesising a permanently-null
+   * `toolheadName` on the client would misrepresent the wire contract.
+   */
+  toolheadId?: string | null;
   taskName: string;
   component?: string | null;
   description?: string | null;
@@ -62,8 +85,6 @@ export interface UseUpcomingMaintenanceResult {
   refetch: () => void;
 }
 
-const QUERY_KEY = 'upcoming-maintenance';
-
 /**
  * Hook for calculating upcoming maintenance tasks
  */
@@ -83,7 +104,7 @@ export function useUpcomingMaintenance(
     error,
     refetch,
   } = useQuery<UpcomingMaintenanceTask[], Error>({
-    queryKey: [QUERY_KEY, { lookaheadDays, includeOverdue, printerId }],
+    queryKey: maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays, includeOverdue, printerId }),
     queryFn: async () => {
       const data = await maintenanceService.getUpcomingMaintenance({
         lookaheadDays,
@@ -93,9 +114,19 @@ export function useUpcomingMaintenance(
 
       return data.map((t) => ({
         id: t.id,
-        scheduleId: t.scheduleId,
+        // Wire boundary: backend `UpcomingMaintenanceTaskDto` uses `taskId`
+        // (a Guid keyed to the global `MaintenanceTask` catalog). The prior
+        // `t.scheduleId` mapping produced `undefined` at runtime because no
+        // such field exists on the DTO. Regression test at
+        // `__tests__/useUpcomingMaintenance.test.tsx`.
+        taskId: t.taskId,
         printerId: t.printerId,
         printerName: t.printerName,
+        // Toolhead scope is a plain GUID pass-through from the #711 wire
+        // contract; the wire DTO does not carry a `toolheadName` and we
+        // deliberately do not synthesise one here. Consumers resolve the
+        // display name from `PrinterDetailsDto.toolheads[]`.
+        toolheadId: t.toolheadId ?? null,
         taskName: t.taskName,
         component: t.component,
         description: t.description,

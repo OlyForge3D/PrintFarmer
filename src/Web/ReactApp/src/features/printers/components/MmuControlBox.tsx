@@ -219,11 +219,18 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
   const handleLoad = useCallback(() => {
     if (!canSendCommand || displayGate === null) return;
     if (isQidibox) {
-      void executeCommand('Load', () => apiClient.sendGcode(printerId, `T${displayGate}`));
+      void executeCommand('Load', () => apiClient.mmuGateAction(printerId, {
+        protocol: 'Qidibox',
+        action: 'Load',
+        gateIndex: displayGate,
+      }));
     } else if (isAfc) {
-      // AFC uses CHANGE_TOOL LANE=<name> GCode command
       const laneName = mmuStatus.gates[displayGate]?.name ?? `lane${displayGate + 1}`;
-      void executeCommand('Load', () => apiClient.sendGcode(printerId, `CHANGE_TOOL LANE=${laneName}`));
+      void executeCommand('Load', () => apiClient.mmuGateAction(printerId, {
+        protocol: 'Afc',
+        action: 'Load',
+        laneName,
+      }));
     } else {
       void executeCommand('Load', () => apiClient.mmuChangeTool(printerId, displayGate));
     }
@@ -233,14 +240,20 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
     if (!canSendCommand) return;
     const unloadGate = displayGate ?? activeGate;
     if (isQidibox) {
-      // Qidibox needs the slot number for unload
       if (unloadGate === null) return;
-      void executeCommand('Unload', () => apiClient.sendGcode(printerId, `UNLOAD_T${unloadGate}`));
+      void executeCommand('Unload', () => apiClient.mmuGateAction(printerId, {
+        protocol: 'Qidibox',
+        action: 'Unload',
+        gateIndex: unloadGate,
+      }));
     } else if (isAfc) {
-      // AFC uses TOOL_UNLOAD LANE=<name> GCode command
       if (unloadGate === null) return;
       const laneName = mmuStatus.gates[unloadGate]?.name ?? `lane${unloadGate + 1}`;
-      void executeCommand('Unload', () => apiClient.sendGcode(printerId, `TOOL_UNLOAD LANE=${laneName}`));
+      void executeCommand('Unload', () => apiClient.mmuGateAction(printerId, {
+        protocol: 'Afc',
+        action: 'Unload',
+        laneName,
+      }));
     } else {
       void executeCommand('Unload', () => apiClient.mmuEject(printerId));
     }
@@ -251,7 +264,11 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
     const ejectGate = displayGate ?? activeGate;
     if (isQidibox) {
       if (ejectGate === null) return;
-      void executeCommand('Eject', () => apiClient.sendGcode(printerId, `EJECT_T${ejectGate}`));
+      void executeCommand('Eject', () => apiClient.mmuGateAction(printerId, {
+        protocol: 'Qidibox',
+        action: 'Eject',
+        gateIndex: ejectGate,
+      }));
     } else {
       void executeCommand('Eject', () => apiClient.mmuEject(printerId));
     }

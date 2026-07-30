@@ -1,11 +1,15 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Discovery;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -17,27 +21,50 @@ namespace Farm.Web.Api.Tests.Hubs;
 public class PrinterHubTests
 {
     private readonly Mock<IDiscoveryProgressCache> _progressCacheMock;
+    private readonly Mock<IDiscoverySessionRegistry> _sessionRegistryMock;
     private readonly Mock<ILogger<PrinterHub>> _loggerMock;
+    private readonly Mock<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader> _statusCacheMock;
     private readonly Mock<IHubCallerClients> _clientsMock;
     private readonly Mock<ISingleClientProxy> _callerMock;
     private readonly Mock<IClientProxy> _groupMock;
     private readonly Mock<IGroupManager> _groupsMock;
     private readonly Mock<HubCallerContext> _contextMock;
+    private readonly Mock<IQueueResourceAuthorizationService> _resourceAuthorizationMock;
+    private readonly Guid _userId = Guid.NewGuid();
     private readonly PrinterHub _hub;
 
     public PrinterHubTests()
     {
         _progressCacheMock = new Mock<IDiscoveryProgressCache>();
+        _sessionRegistryMock = new Mock<IDiscoverySessionRegistry>();
         _loggerMock = new Mock<ILogger<PrinterHub>>();
+        _statusCacheMock = new Mock<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>();
+        _statusCacheMock
+            .Setup(c => c.GetAllStatuses())
+            .Returns(new Dictionary<Guid, PrinterStatusDto>());
         _clientsMock = new Mock<IHubCallerClients>();
         _callerMock = new Mock<ISingleClientProxy>();
         _groupMock = new Mock<IClientProxy>();
         _groupsMock = new Mock<IGroupManager>();
         _contextMock = new Mock<HubCallerContext>();
+        _resourceAuthorizationMock = new Mock<IQueueResourceAuthorizationService>();
+        _resourceAuthorizationMock
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
 
         // Setup hub context
         _contextMock.Setup(c => c.ConnectionId).Returns("test-connection-id");
         _contextMock.Setup(c => c.ConnectionAborted).Returns(CancellationToken.None);
+        _contextMock.Setup(c => c.User).Returns(new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, _userId.ToString()),
+        ], "Test")));
+        _sessionRegistryMock.Setup(r => r.SessionExists(It.IsAny<string>())).Returns(true);
+        _sessionRegistryMock.Setup(r => r.IsSessionOwner(It.IsAny<string>(), _userId)).Returns(true);
 
         // Setup caller mock to handle SendCoreAsync (required for SendAsync extension method)
         // Configure both the ISingleClientProxy and IClientProxy interfaces
@@ -57,14 +84,43 @@ public class PrinterHubTests
             .Returns(Task.CompletedTask);
 
         _clientsMock.Setup(c => c.Caller).Returns(_callerMock.Object);
+        // IHubCallerClients hides Caller from IHubCallerClients<IClientProxy> with `new`;
+        // depending on which slot the hub's compilation binds to, both must be set up.
+        _clientsMock.As<IHubCallerClients<IClientProxy>>().Setup(c => c.Caller).Returns(_callerMock.Object);
         _clientsMock.Setup(c => c.Group(It.IsAny<string>())).Returns(_groupMock.Object);
 
-        _hub = new PrinterHub(_progressCacheMock.Object, _loggerMock.Object)
+        _hub = new PrinterHub(
+            _progressCacheMock.Object,
+            _loggerMock.Object,
+            _statusCacheMock.Object,
+            _sessionRegistryMock.Object,
+            _resourceAuthorizationMock.Object)
         {
             Clients = _clientsMock.Object,
             Groups = _groupsMock.Object,
             Context = _contextMock.Object
         };
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_QueueReader_JoinsResourceDiscoveryGroup()
+    {
+        _contextMock.Setup(c => c.User).Returns(new ClaimsPrincipal(
+            new ClaimsIdentity(
+            [
+                new Claim(ClaimTypes.NameIdentifier, _userId.ToString()),
+                new Claim(
+                    PrintFarmerPermissions.ClaimType,
+                    PrintFarmerPermissions.Queue.Read),
+            ],
+            "Test")));
+
+        await _hub.OnConnectedAsync();
+
+        _groupsMock.Verify(group => group.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.QueueReaders,
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -81,6 +137,46 @@ public class PrinterHubTests
             "test-connection-id",
             "discovery-test-session-id",
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task JoinDiscoveryGroupAsync_ForDifferentOwner_ThrowsHubException()
+    {
+        Guid differentUserId = Guid.NewGuid();
+        _contextMock.Setup(c => c.User).Returns(new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, differentUserId.ToString()),
+        ], "Test")));
+
+        await Assert.ThrowsAsync<HubException>(
+            () => _hub.JoinDiscoveryGroupAsync("test-session-id"));
+
+        _groupsMock.Verify(
+            g => g.AddToGroupAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task JoinDiscoveryGroupAsync_ForFarmAdmin_AllowsAuditedBypass()
+    {
+        Guid adminUserId = Guid.NewGuid();
+        _contextMock.Setup(c => c.User).Returns(new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.NameIdentifier, adminUserId.ToString()),
+            new Claim(ClaimTypes.Role, PrintFarmerPermissions.FarmAdminRole),
+        ], "Test", ClaimTypes.Name, ClaimTypes.Role)));
+
+        await _hub.JoinDiscoveryGroupAsync("test-session-id");
+
+        _groupsMock.Verify(
+            g => g.AddToGroupAsync(
+                "test-connection-id",
+                "discovery-test-session-id",
+                It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -149,119 +245,6 @@ public class PrinterHubTests
     }
 
     [Fact]
-    public async Task BroadcastDiscoveryProgressAsync_CachesProgress()
-    {
-        // Arrange
-        var progress = new DiscoveryProgressDto(
-            SessionId: "test-session",
-            CurrentNetwork: "192.168.1.0/24",
-            CurrentIp: "192.168.1.200",
-            TotalIps: 100,
-            ScannedIps: 75,
-            PrintersFound: 3,
-            PrintersExcluded: 0,
-            ProgressPercentage: 75,
-            Status: DiscoveryStatus.Scanning
-        );
-
-        // Act
-        await _hub.BroadcastDiscoveryProgressAsync(progress);
-
-        // Assert
-        _progressCacheMock.Verify(c => c.Set("test-session", progress), Times.Once);
-    }
-
-    [Fact]
-    public async Task BroadcastDiscoveryProgressAsync_BroadcastsToGroup()
-    {
-        // Arrange
-        var progress = new DiscoveryProgressDto(
-            SessionId: "test-session",
-            CurrentNetwork: "192.168.1.0/24",
-            CurrentIp: "192.168.1.200",
-            TotalIps: 100,
-            ScannedIps: 75,
-            PrintersFound: 3,
-            PrintersExcluded: 0,
-            ProgressPercentage: 75,
-            Status: DiscoveryStatus.Scanning
-        );
-
-        // Act
-        await _hub.BroadcastDiscoveryProgressAsync(progress);
-
-        // Assert
-        _groupMock.Verify(g => g.SendCoreAsync(
-            "discoveryprogress",
-            It.Is<object[]>(args => args.Length == 1 && ReferenceEquals(args[0], progress)),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        _clientsMock.Verify(c => c.Group("discovery-test-session"), Times.Once);
-    }
-
-    [Fact]
-    public async Task BroadcastDiscoveryPrinterFoundAsync_BroadcastsToGroup()
-    {
-        // Arrange
-        var found = new DiscoveryPrinterFoundDto(
-            SessionId: "test-session",
-            Printer: new DiscoveredPrinterDto
-            {
-                Name = "Test Printer",
-                IpAddress = "192.168.1.100",
-                Backend = PrinterBackend.Moonraker
-            }
-        );
-
-        // Act
-        await _hub.BroadcastDiscoveryPrinterFoundAsync(found);
-
-        // Assert
-        _groupMock.Verify(g => g.SendCoreAsync(
-            "discoveryprinterfound",
-            It.Is<object[]>(args => args.Length == 1 && ReferenceEquals(args[0], found)),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        _clientsMock.Verify(c => c.Group("discovery-test-session"), Times.Once);
-    }
-
-    [Fact]
-    public async Task BroadcastDiscoveryCompletedAsync_BroadcastsToGroup()
-    {
-        // Arrange
-        var completed = new DiscoveryCompletedDto(
-            SessionId: "test-session",
-            TotalPrintersFound: 3,
-            TotalPrintersExcluded: 0,
-            Duration: TimeSpan.FromSeconds(30)
-        );
-
-        // Act
-        await _hub.BroadcastDiscoveryCompletedAsync(completed);
-
-        // Assert
-        _groupMock.Verify(g => g.SendCoreAsync(
-            "discoverycompleted",
-            It.Is<object[]>(args => args.Length == 1 && ReferenceEquals(args[0], completed)),
-            It.IsAny<CancellationToken>()), Times.Once);
-
-        _clientsMock.Verify(c => c.Group("discovery-test-session"), Times.Once);
-    }
-
-    [Fact]
-    public async Task BroadcastDiscoveryProgressAsync_WithNullProgress_DoesNotThrow()
-    {
-        // Arrange - Deliberately testing behavior with null (though hub signature doesn't allow nulls)
-        // This test verifies the hub doesn't crash on unexpected null references
-
-        // Act & Assert - should not throw
-        await Assert.ThrowsAsync<NullReferenceException>(async () =>
-        {
-            await _hub.BroadcastDiscoveryProgressAsync(null!);
-        });
-    }
-
-    [Fact]
     public async Task JoinDiscoveryGroupAsync_LogsConnectionInfo()
     {
         // Arrange
@@ -302,55 +285,135 @@ public class PrinterHubTests
     }
 
     [Fact]
-    public async Task BroadcastDiscoveryPrinterFoundAsync_LogsPrinterInfo()
+    public async Task OnConnectedAsync_DoesNotReplayUnsubscribedPrinterStatuses()
     {
         // Arrange
-        var found = new DiscoveryPrinterFoundDto(
-            SessionId: "test-session",
-            Printer: new DiscoveredPrinterDto
+        Guid printerA = Guid.NewGuid();
+        Guid printerB = Guid.NewGuid();
+        _statusCacheMock
+            .Setup(c => c.GetAllStatuses())
+            .Returns(new Dictionary<Guid, PrinterStatusDto>
             {
-                Name = "Test Printer",
-                IpAddress = "192.168.1.100",
-                Backend = PrinterBackend.Moonraker
-            }
-        );
+                [printerA] = new PrinterStatusDto(Id: printerA, IsOnline: true, State: "Printing"),
+                [printerB] = new PrinterStatusDto(Id: printerB, IsOnline: false, State: "Offline"),
+            });
 
         // Act
-        await _hub.BroadcastDiscoveryPrinterFoundAsync(found);
+        await _hub.OnConnectedAsync();
+
+        // Assert: resource data is never replayed before an explicit authorized subscription.
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                "printerupdated",
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task OnConnectedAsync_WithEmptyCache_SendsNothing()
+    {
+        // Act
+        await _hub.OnConnectedAsync();
 
         // Assert
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("printer found")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithCachedStatus_SendsToCaller()
+    {
+        // Arrange
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: printerId, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(c => c.GetStatus(printerId)).Returns(status);
+
+        // Act
+        await _hub.RequestPrinterStatusAsync(printerId.ToString());
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                "printerupdated",
+                It.Is<object?[]>(args => ReferenceEquals(args[0], status)),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
     [Fact]
-    public async Task BroadcastDiscoveryCompletedAsync_LogsCompletionInfo()
+    public async Task SubscribeToPrinterAsync_WithAccess_JoinsAndReplaysOnlyThatPrinter()
     {
-        // Arrange
-        var completed = new DiscoveryCompletedDto(
-            SessionId: "test-session",
-            TotalPrintersFound: 3,
-            TotalPrintersExcluded: 0,
-            Duration: TimeSpan.FromSeconds(30)
-        );
+        Guid printerId = Guid.NewGuid();
+        var status = new PrinterStatusDto(Id: printerId, IsOnline: true, State: "Idle");
+        _statusCacheMock.Setup(cache => cache.GetStatus(printerId)).Returns(status);
 
+        await _hub.SubscribeToPrinterAsync(printerId.ToString());
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            "test-connection-id",
+            AuthorizedHubGroups.Printer(printerId),
+            It.IsAny<CancellationToken>()), Times.Once);
+        _callerMock.Verify(client => client.SendCoreAsync(
+            "printerupdated",
+            It.Is<object?[]>(arguments => ReferenceEquals(arguments[0], status)),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task SubscribeToPrinterAsync_WithoutResourceAccess_ThrowsAndDoesNotJoin()
+    {
+        _resourceAuthorizationMock
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<HubException>(
+            () => _hub.SubscribeToPrinterAsync(Guid.NewGuid().ToString()));
+
+        _groupsMock.Verify(groups => groups.AddToGroupAsync(
+            It.IsAny<string>(),
+            It.Is<string>(group => group.StartsWith("Printer-", StringComparison.Ordinal)),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithInvalidId_SendsNothing()
+    {
         // Act
-        await _hub.BroadcastDiscoveryCompletedAsync(completed);
+        await _hub.RequestPrinterStatusAsync("not-a-guid");
 
         // Assert
-        _loggerMock.Verify(
-            x => x.Log(
-                LogLevel.Information,
-                It.IsAny<EventId>(),
-                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("completion")),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.Once);
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RequestPrinterStatus_WithUnknownPrinter_SendsNothing()
+    {
+        // Arrange
+        _statusCacheMock.Setup(c => c.GetStatus(It.IsAny<Guid>())).Returns((PrinterStatusDto?)null);
+
+        // Act
+        await _hub.RequestPrinterStatusAsync(Guid.NewGuid().ToString());
+
+        // Assert
+        _callerMock.Verify(
+            c => c.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 }

@@ -25,6 +25,12 @@ public class JobExecution
 
     public JobSchedule JobSchedule { get; set; } = null!;
 
+    /// <summary>Print job used for this exact scheduled occurrence.</summary>
+    public Guid? OccurrencePrintJobId { get; set; }
+
+    /// <summary>Dispatch attempt produced by this occurrence, when one was created.</summary>
+    public Guid? DispatchAttemptId { get; set; }
+
     /// <summary>
     /// When this execution was scheduled to run
     /// </summary>

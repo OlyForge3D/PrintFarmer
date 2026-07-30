@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Worker.Core;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -43,20 +44,35 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly IOrcaBinaryDetector _binaryDetector;
     private readonly ILogger<SlicerRegistrationClient> _logger;
+    private readonly WorkerCapabilityProvider _capabilityProvider;
     private readonly string _apiBaseUrl;
     private readonly string _serviceName;
     private readonly string _serviceVersion;
     private readonly string _serviceHost;
 
+    /// <summary>Path of the image attestation describing the installed OrcaSlicer binary.</summary>
+    private readonly string? _binaryAttestationPath;
+
+    /// <summary>SHA-256 the image build declared for the pinned OrcaSlicer AppImage, if any.</summary>
+    private readonly string? _declaredBinarySha256;
+
+    /// <summary>Digest of the container image this worker runs from, when supplied.</summary>
+    private readonly string? _slicerContainerDigest;
+
     public SlicerRegistrationClient(
         HttpClient httpClient,
         IConfiguration configuration,
-        ILogger<SlicerRegistrationClient> logger)
+        IOrcaBinaryDetector binaryDetector,
+        ILogger<SlicerRegistrationClient> logger,
+        WorkerCapabilityProvider capabilityProvider)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _binaryDetector = binaryDetector ?? throw new ArgumentNullException(nameof(binaryDetector));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
 
         // Load configuration — prefer unified SlicerApi:BaseUrl, then legacy keys
         _apiBaseUrl = configuration["SlicerApi:BaseUrl"]
@@ -64,8 +80,14 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                    ?? configuration["Worker:StorageEndpoint"]
                    ?? "http://api:5245";
         _serviceName = configuration["SlicerRegistry:ServiceName"] ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "orcaslicer-worker";
-        _serviceVersion = configuration["SlicerRegistry:Version"] ?? "1.0.0";
+        _serviceVersion = configuration["SlicerRegistry:Version"] ?? WorkerConstants.SlicerVersion;
         _serviceHost = configuration["SlicerRegistry:Host"] ?? "http://orcaslicer-worker:8080";
+
+        // Identity comes from what the image actually installed, attested by the build. The declared
+        // build argument alone never establishes it, because the stub fallback does not honour it.
+        _binaryAttestationPath = Normalize(configuration["Worker:OrcaSlicerAttestationPath"]);
+        _declaredBinarySha256 = Normalize(configuration["Worker:OrcaSlicerSha256"]);
+        _slicerContainerDigest = Normalize(configuration["Worker:ContainerDigest"]);
 
         // Ensure base URL doesn't have trailing slash
         _apiBaseUrl = _apiBaseUrl.TrimEnd('/');
@@ -75,6 +97,17 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     {
         try
         {
+            SlicerBinaryIdentity identity = await SlicerBinaryAttestation.ResolveFromFileAsync(
+                _binaryAttestationPath,
+                _declaredBinarySha256,
+                _binaryDetector.IsRealBinaryPresent(),
+                cancellationToken);
+            if (!identity.RealBinary && _declaredBinarySha256 is not null)
+            {
+                _logger.LogWarning(
+                    "This image declares a pinned OrcaSlicer digest but carries no verified binary; registering as unverified.");
+            }
+
             RegisterSlicerDto registrationDto = new RegisterSlicerDto
             {
                 Name = _serviceName,
@@ -84,9 +117,18 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 UiManifestUrl = null, // Optional: can be added later for embedded UI
                 CapabilitiesJson = JsonSerializer.Serialize(new
                 {
-                    supportedFormats = new[] { "stl", "obj", "3mf" },
+                    supportedFormats = new[] { "stl", "obj", "3mf", "step", "stp" },
                     supportedFeatures = new[] { "multi-material", "variable-layer-height", "auto-arrange" },
-                    capabilities = WorkerConstants.Capabilities
+                    capabilities = _capabilityProvider.GetCapabilities(),
+                    engineVersion = _capabilityProvider.EngineVersion,
+
+                    // Pinned build identity, so the API can decide whether this worker is the
+                    // reproducible upstream image it advertises rather than trusting a version string.
+                    slicerDistribution = "upstream",
+                    slicerVersion = _serviceVersion,
+                    slicerBinarySha256 = identity.BinarySha256,
+                    slicerContainerDigest = _slicerContainerDigest,
+                    realBinary = identity.RealBinary,
                 }),
                 MaxConcurrentJobs = _configuration.GetValue("Worker:MaxConcurrentJobs", 1),
                 Tags = "orcaslicer,production",
@@ -96,14 +138,18 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             string json = JsonSerializer.Serialize(registrationDto);
             StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            // Add API key header if configured
-            string? apiKey = _configuration["SlicerRegistry:ApiKey"];
-            if (!string.IsNullOrEmpty(apiKey))
+            using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/register")
             {
-                _httpClient.DefaultRequestHeaders.Add("X-Slicer-ApiKey", apiKey);
+                Content = content
+            };
+
+            string? apiKey = ResolveRegistrationApiKey(_configuration);
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                request.Headers.Add("X-Slicer-ApiKey", apiKey);
             }
 
-            HttpResponseMessage response = await _httpClient.PostAsync($"{_apiBaseUrl}/api/slicers/register", content, cancellationToken);
+            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
@@ -158,7 +204,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
             {
                 Content = content
             };
-            request.Headers.Add("X-Slicer-ApiKey", apiKey);
+            request.Headers.Add("X-Slicer-Service-Api-Key", apiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -183,7 +229,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         try
         {
             using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Post, $"{_apiBaseUrl}/api/slicers/{serviceId}/deregister");
-            request.Headers.Add("X-Slicer-ApiKey", apiKey);
+            request.Headers.Add("X-Slicer-Service-Api-Key", apiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -203,6 +249,12 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         }
     }
 
+    /// <summary>Trims a configured identity value and treats blank input as absent.</summary>
+    /// <param name="value">The configured value.</param>
+    /// <returns>The trimmed value, or <see langword="null"/> when nothing was configured.</returns>
+    private static string? Normalize(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
     private class RegistrationResponse
     {
         [System.Text.Json.Serialization.JsonPropertyName("id")]
@@ -210,5 +262,20 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
         [System.Text.Json.Serialization.JsonPropertyName("apiKey")]
         public string ApiKey { get; init; } = string.Empty;
+    }
+
+    internal static string? ResolveRegistrationApiKey(IConfiguration configuration)
+    {
+        return FirstNonBlank(
+            configuration["WorkerAuth:SharedKey"],
+            configuration["WorkerAuth:SharedApiKey"],
+            configuration["SlicerRegistry:ApiKey"],
+            Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
+            Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
+    }
+
+    private static string? FirstNonBlank(params string?[] candidates)
+    {
+        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
     }
 }

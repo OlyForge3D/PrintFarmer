@@ -9,17 +9,17 @@ final class DispatchViewModelTests: XCTestCase {
     private var mockDispatchService: MockDispatchService!
     private var viewModel: DispatchViewModel!
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockDispatchService = MockDispatchService()
         viewModel = DispatchViewModel()
         viewModel.configure(dispatchService: mockDispatchService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockDispatchService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
     
     // MARK: - Initial State
@@ -143,12 +143,34 @@ final class DispatchViewModelTests: XCTestCase {
     }
     
     func testLoadHistoryHandlesError() async {
+        let previousEntry = DispatchHistoryEntry(
+            id: UUID(),
+            printJobId: UUID(),
+            jobName: "previous.gcode",
+            printerId: UUID(),
+            printerName: "Previous Printer",
+            action: "manual_dispatch",
+            score: 75.0,
+            reason: "Previously loaded",
+            createdAtUtc: Date()
+        )
+        viewModel.history = [previousEntry]
+        viewModel.error = "prior-dispatch-error-sentinel"
         mockDispatchService.errorToThrow = TestError.generic
         
         await viewModel.loadHistory()
         
-        XCTAssertNil(viewModel.history)
-        XCTAssertNotNil(viewModel.error)
+        // loadHistory() is a secondary load: it logs the failure via `logger.warning`
+        // and preserves the last successful history AND the prior `viewModel.error`
+        // (the primary `loadQueueStatus()` owns the error banner). Seeding a
+        // nonnil sentinel here fails deterministically if a future refactor
+        // silently clears or overwrites the error channel.
+        XCTAssertEqual(viewModel.history.count, 1)
+        XCTAssertEqual(viewModel.history.first?.id, previousEntry.id)
+        XCTAssertEqual(viewModel.history.first?.jobName, "previous.gcode")
+        XCTAssertEqual(mockDispatchService.getHistoryCalledWith?.page, 1)
+        XCTAssertEqual(mockDispatchService.getHistoryCalledWith?.pageSize, 50)
+        XCTAssertEqual(viewModel.error, "prior-dispatch-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -242,7 +264,9 @@ final class DispatchViewModelTests: XCTestCase {
         
         await viewModel.loadHistory()
         
-        XCTAssertNil(viewModel.history)
+        // `history` is a non-optional array; when the view model is unconfigured
+        // the guard returns before mutating it, so it remains empty.
+        XCTAssertTrue(viewModel.history.isEmpty)
         XCTAssertNil(mockDispatchService.getHistoryCalledWith)
     }
 }

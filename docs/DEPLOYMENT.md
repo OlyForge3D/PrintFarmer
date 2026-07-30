@@ -128,6 +128,14 @@ docker compose --env-file .env.microservices up -d --build
 - Independent health monitoring
 - Better resource isolation
 
+The deployment script generates and preserves `DISCOVERY_SHARED_API_KEY` for
+the printer-discovery service boundary. Compose injects it as
+`DiscoveryAuth__SharedKey` into the API and `Discovery__SharedKey` into the
+discovery service. Treat it as a secret, keep it distinct from worker and user
+credentials, and rotate both services together. It is accepted only as
+`X-Discovery-Service-Key` on internal discovery-event ingestion routes and is
+never a user-facing API credential.
+
 ## Deployment Architectures
 
 ### Architecture Comparison
@@ -168,6 +176,101 @@ Set `DB_PROVIDER` environment variable during deployment:
 export DB_PROVIDER=postgresql  # or sqlserver, mysql, sqlite
 ```
 
+### Migration-safe upgrades
+
+Automatic provider-aware startup migrations are supported for SQLite,
+PostgreSQL, and SQL Server. Core `AppDbContext` and slicer `SlicerDbContext`
+use independent provider-specific migration assemblies. Startup and readiness
+fail if either context cannot apply or validate its migration set; the service
+does not fall back to `EnsureCreated` or continue with a partial schema.
+
+Before upgrading, stop writers and take a provider-native backup:
+
+Queue-dispatch schema upgrades require a full quiescence window. Stop every API
+replica, scheduler, outbox publisher, slicer bridge, and background worker that
+can create or mutate queue jobs before applying migrations. Do not run old and
+new application versions against the database at the same time: the canonical
+calibration fields, queue-generation fences, command phases, and provider-native
+outbox ordering are one deployment contract.
+
+Apply the migrations once, deploy all services from the same release artifact,
+verify both context migration sets and readiness, and only then resume queue
+writers. The migration path is forward-only. If startup fails after schema
+upgrade, keep writers stopped and fix forward. A binary rollback requires
+restoring the matching provider-native database backup and blob snapshot before
+starting the old release; never run old binaries on the upgraded schema and
+never use an EF down-migration as an operational rollback.
+
+Before the quiescence window, drain pending queue work and inspect
+`QueueDispatchOutbox` for `Pending` or `Processing` backend start/control
+commands. Do not clear leases or replay uncertain commands during deployment.
+After all replicas are upgraded, verify the start consumer, control consumer,
+reconciler, and SignalR publisher are running before allowing new queue writes.
+An unresolved control command stays fenced and becomes a
+`manual_control_reconciliation_required` dead letter after 24 hours.
+
+The owner-scoped artifact promotion key and calibration-scoped slicer
+idempotency migrations intentionally have no down path. Valid head data can
+contain repeated legacy promotion identifiers and repeated standard-job
+checksums, so recreating the old global unique indexes is unsafe. Roll back only
+by restoring the matching database and blob backups taken while all writers
+were stopped.
+
+```bash
+# SQLite: stop PrintFarmer before copying the database and sidecar files.
+cp farm.db "farm.db.$(date +%Y%m%d%H%M%S).bak"
+
+# PostgreSQL
+pg_dump --format=custom --file=printfarmer.backup printfarmer
+
+# SQL Server
+sqlcmd -S "$SQLSERVER_HOST" -Q \
+  "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
+```
+
+Previously supported SQLite databases created with `EnsureCreated` and without
+migration history are adopted only when the complete relational fingerprint
+matches the current model. Validation covers table and column names, store
+types, declared nullability (including non-integer primary keys), defaults,
+primary keys and `AUTOINCREMENT` semantics, explicit and constraint index
+identity, uniqueness, filters, and per-key sort order and collation (including
+SQLite primary-key autoindexes), foreign keys, foreign-key update and delete
+actions, and check constraints. The migration-history baseline is then recorded
+transactionally without rewriting application data.
+
+No-history PostgreSQL and SQL Server databases are not adopted because a local
+fingerprint cannot safely establish their migration provenance. Restore a
+migration-managed backup instead. A mismatched SQLite fingerprint, unsupported
+server adoption, missing migration assembly, unsupported provider, or
+post-migration validation failure stops startup with one of these stable
+diagnostic codes:
+
+- `legacy_schema_incomplete`
+- `legacy_schema_adoption_unsupported`
+- `schema_validation_failed`
+- `migration_assembly_missing`
+- `provider_unsupported`
+- `migration_failed`
+
+Do not manually insert migration-history rows or use `EnsureCreated` to recover.
+Preserve the failed database for diagnosis. Correct permissions or deployment
+configuration and restart only when the schema is known to match the release;
+otherwise restore the provider-native backup and the previous application
+version. Rollback is backup restoration, not an automatic down-migration.
+
+Calibration photo bytes are stored outside the database under the private
+`Calibration:BlobStorage:RootPath` configuration value. In environment
+variables, use `PFARM__Calibration__BlobStorage__RootPath`. Mount this directory
+as persistent storage, do not expose it through a static-file server, and back
+it up at the same consistency point as the database. Restore the database and
+blob root together; the hosted reconciliation service retries pending
+two-phase deletes and removes orphaned blobs recorded during failed metadata
+writes.
+
+The migration-safe contract in this release does not include MySQL. Do not
+upgrade an existing MySQL deployment to this release until a provider-correct
+MySQL migration assembly is available.
+
 ## Network Configuration
 
 ### Option 1: Bridge Network with Host Gateway (Recommended)
@@ -184,6 +287,64 @@ api:
 - Maintains container isolation
 - Allows selective network access
 - Works cross-platform (Linux, macOS, Windows)
+
+### Reverse Proxy / Forwarded Headers
+
+PrintFarmer treats `HttpContext.Connection.RemoteIpAddress` as the source of truth for
+per-client policies (auth rate limits, audit logs). By default the API **ignores** the
+`X-Forwarded-For` / `X-Forwarded-Proto` / `X-Forwarded-Host` headers, because trusting them
+unconditionally would let any caller spoof the client IP and bypass per-IP rate limits
+(see security issue #862).
+
+When you deploy behind a reverse proxy (nginx, Traefik, IIS, Cloudflare Tunnel, an Azure
+Application Gateway, etc.) enable the framework's forwarded-headers middleware and
+**explicitly declare the proxy** as trusted so the connection address is rewritten from the
+header before rate limiting and authentication run.
+
+`appsettings.json` / environment variable surface:
+
+```json
+{
+  "ForwardedHeaders": {
+    "Enabled": true,
+    "KnownProxies": ["10.0.0.5"],
+    "KnownNetworks": ["10.0.0.0/24"],
+    "ForwardLimit": 1
+  }
+}
+```
+
+Environment variables (Docker / systemd) use double-underscore separators and `__N` for
+list indices:
+
+```bash
+ForwardedHeaders__Enabled=true
+ForwardedHeaders__KnownProxies__0=10.0.0.5
+ForwardedHeaders__KnownNetworks__0=10.0.0.0/24
+ForwardedHeaders__ForwardLimit=1
+```
+
+Rules:
+
+- Leaving `Enabled=false` (the default) is safe when nothing sits between clients and the
+  API — the TCP peer address is used directly.
+- Setting `Enabled=true` **clears** the framework's implicit loopback trust — you must
+  declare every trusted proxy or CIDR explicitly. Enabled without any trusted proxy will
+  log a warning at startup and continue to ignore `X-Forwarded-For` for all connections.
+- `KnownProxies` accepts individual IPv4 or IPv6 addresses; `KnownNetworks` accepts CIDR
+  ranges parsed via `System.Net.IPNetwork`.
+- `ForwardLimit` (default `1`) caps how many chained proxies are honored. Increase only
+  when a documented multi-hop proxy chain is in place.
+
+Verifying trust wiring:
+
+```bash
+# From an untrusted host - X-Forwarded-For must NOT change the rate-limit key
+curl -H "X-Forwarded-For: 1.2.3.4" -X POST https://your-host/api/auth/login
+
+# The API's authentication audit log should record the caller's real TCP address,
+# not 1.2.3.4. Rate limit counters increment on the real address.
+```
 
 ## Offline Deployment
 

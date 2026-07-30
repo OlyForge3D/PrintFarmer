@@ -5,6 +5,8 @@
 /// </summary>
 public sealed class OctoPrintStatusData
 {
+    internal long? OriginWatermark { get; set; }
+
     public bool IsOnline { get; set; }
 
     public bool Operational { get; set; }
@@ -34,4 +36,6 @@ public sealed class OctoPrintStatusData
     public string? CameraStreamUrl { get; set; }
 
     public string? CameraSnapshotUrl { get; set; }
+
+    public double? PrintTimeLeftSeconds { get; set; }
 }

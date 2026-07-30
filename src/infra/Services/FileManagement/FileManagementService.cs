@@ -10,7 +10,7 @@ namespace Farm.Infrastructure.Services.FileManagement;
 public sealed class FileManagementService : IFileManagementService
 {
     // Allowed model file extensions (centralized source of truth)
-    private static readonly IReadOnlyCollection<string> AllowedModelExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step" }.AsReadOnly();
+    private static readonly IReadOnlyCollection<string> AllowedModelExtensions = new[] { ".stl", ".3mf", ".obj", ".ply", ".step", ".stp" }.AsReadOnly();
 
     public (string StorageRoot, string ResolvedFullPath, string VirtualNormalized) ResolveVirtualPath(
         string? virtualPath,
@@ -161,6 +161,7 @@ public sealed class FileManagementService : IFileManagementService
             ".obj" => ModelFileFormat.OBJ,
             ".ply" => ModelFileFormat.PLY,
             ".step" => ModelFileFormat.STEP,
+            ".stp" => ModelFileFormat.STEP,
             _ => ModelFileFormat.STL
         };
     }

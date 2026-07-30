@@ -2,6 +2,7 @@
 
 using System.Reflection;
 using Farm.Backend.Plugin.Core;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -33,9 +34,20 @@ public static class BackendPluginExtensions
         services.AddSingleton<IBackendPluginRegistry>(registry);
         services.AddSingleton<IBackendPluginLoader, BackendPluginLoader>();
 
+        // Ensure IConfiguration is registered as an instance so plugins can
+        // read it during RegisterAdditionalServices (before the host is built).
+        if (configuration != null &&
+            !services.Any(sd => sd.ServiceType == typeof(IConfiguration) && sd.ImplementationInstance != null))
+        {
+            services.AddSingleton(configuration);
+        }
+
         // Discover and load plugins dynamically
         string? pluginsPath = configuration?["BackendPlugins:PluginsPath"];
         DiscoverAndLoadPlugins(registry, services, pluginsPath, pluginAssemblies);
+        services.AddSingleton<
+            IPrinterTelemetryFreshnessPolicy,
+            PrinterTelemetryFreshnessPolicy>();
 
         return services;
     }

@@ -18,16 +18,21 @@ public class JobCostCalculationService : IJobCostCalculationService
     private readonly ISettingsService _settingsService;
     private readonly ILogger<JobCostCalculationService> _logger;
 
+    // Optional: when registered, provides cached Spoolman price lookups.
+    private readonly IFilamentCostProvider? _filamentCostProvider;
+
     public JobCostCalculationService(
         AppDbContext db,
         ISpoolmanService spoolmanService,
         ISettingsService settingsService,
-        ILogger<JobCostCalculationService> logger)
+        ILogger<JobCostCalculationService> logger,
+        IFilamentCostProvider? filamentCostProvider = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
         _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _filamentCostProvider = filamentCostProvider;
     }
 
     /// <inheritdoc />
@@ -56,8 +61,8 @@ public class JobCostCalculationService : IJobCostCalculationService
         // Calculate material cost (per-toolhead if usage records exist, single-spool otherwise)
         decimal? materialCost = await CalculateMaterialCostAsync(job, ct);
 
-        // Calculate energy cost
-        decimal? energyCost = CalculateEnergyCost(job, settings);
+        // Calculate energy cost — uses measured KwhUsed when available, otherwise wattage estimate
+        decimal? energyCost = await CalculateEnergyCostAsync(job, settings, ct);
 
         // Calculate machine time cost
         decimal? machineTimeCost = CalculateMachineTimeCost(job, settings);
@@ -69,14 +74,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? laborCost = CalculateLaborCost(subtotal, settings);
 
         // Calculate total cost
-        decimal? totalCost = subtotal + (laborCost ?? 0m);
+        decimal totalCost = subtotal + (laborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = materialCost;
         job.EnergyCostUsd = energyCost;
         job.MachineTimeCostUsd = machineTimeCost;
         job.LaborCostUsd = laborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -88,7 +93,7 @@ public class JobCostCalculationService : IJobCostCalculationService
             energyCost ?? 0m,
             machineTimeCost ?? 0m,
             laborCost ?? 0m,
-            totalCost ?? 0m);
+            totalCost);
 
         return true;
     }
@@ -118,7 +123,7 @@ public class JobCostCalculationService : IJobCostCalculationService
 
         // Use overrides if provided, otherwise recalculate
         decimal? finalMaterialCost = materialCost ?? await CalculateMaterialCostAsync(job, ct);
-        decimal? finalEnergyCost = energyCost ?? CalculateEnergyCost(job, settings);
+        decimal? finalEnergyCost = energyCost ?? await CalculateEnergyCostAsync(job, settings, ct);
         decimal? finalMachineTimeCost = machineTimeCost ?? CalculateMachineTimeCost(job, settings);
 
         // Calculate subtotal
@@ -128,14 +133,14 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal? finalLaborCost = laborCost ?? CalculateLaborCost(subtotal, settings);
 
         // Calculate total
-        decimal? totalCost = subtotal + (finalLaborCost ?? 0m);
+        decimal totalCost = subtotal + (finalLaborCost ?? 0m);
 
         // Store results
         job.MaterialCostUsd = finalMaterialCost;
         job.EnergyCostUsd = finalEnergyCost;
         job.MachineTimeCostUsd = finalMachineTimeCost;
         job.LaborCostUsd = finalLaborCost;
-        job.TotalCostUsd = totalCost > 0 ? totalCost : null;
+        job.TotalCostUsd = totalCost;
         job.CostCalculatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync(ct);
@@ -193,6 +198,26 @@ public class JobCostCalculationService : IJobCostCalculationService
         }
 
         CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
+
+        if (_filamentCostProvider is not null)
+        {
+            decimal? costPerGram = null;
+
+            if (job.SpoolmanSpoolId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetSpoolCostPerGramAsync(job.SpoolmanSpoolId.Value, ct);
+            }
+
+            if (!costPerGram.HasValue && job.SpoolmanFilamentId.HasValue)
+            {
+                costPerGram = await _filamentCostProvider.GetFilamentCostPerGramAsync(job.SpoolmanFilamentId.Value, ct);
+            }
+
+            if (costPerGram.HasValue)
+            {
+                return Math.Round(costPerGram.Value * (decimal)filamentUsageGrams.Value, 2);
+            }
+        }
 
         double? effectivePrice = null;
         double spoolWeightGrams = 1000.0;
@@ -303,58 +328,49 @@ public class JobCostCalculationService : IJobCostCalculationService
 
     /// <summary>
     /// Calculates material cost for a single spool given its Spoolman ID and filament usage.
-    /// Uses the standard price cascade: spool price → filament price → material default → global default.
+    /// Price cascade:
+    ///   1. <see cref="IFilamentCostProvider"/> (cached Spoolman spool price / initial weight)
+    ///   2. Direct Spoolman filament lookup for material type (settings fallback only)
+    ///   3. Per-material-type default from settings
+    ///   4. Global default filament price from settings
     /// Used by the multi-toolhead path to calculate per-toolhead costs independently.
     /// </summary>
     private async Task<decimal?> CalculateSingleSpoolCostAsync(
         int? spoolmanSpoolId, double usageGrams, PrintJob job, CancellationToken ct)
     {
         CostTrackingSettings? settings = _settingsService.Get<CostTrackingSettings>();
-        double? effectivePrice = null;
-        double spoolWeightGrams = 1000.0;
         string? materialType = null;
 
         if (spoolmanSpoolId.HasValue)
         {
+            // Fast path: cached cost provider returns cost per gram when Spoolman has price data.
+            if (_filamentCostProvider is not null)
+            {
+                decimal? costPerGram = await _filamentCostProvider.GetSpoolCostPerGramAsync(spoolmanSpoolId.Value, ct);
+                if (costPerGram.HasValue)
+                {
+                    return Math.Round(costPerGram.Value * (decimal)usageGrams, 2);
+                }
+            }
+
+            // No Spoolman pricing available — fetch material type for settings-based fallback.
             try
             {
                 SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolmanSpoolId.Value, ct);
-                if (spool is not null)
+                if (spool?.FilamentId is int filamentId)
                 {
-                    if (spool.Price is > 0)
-                    {
-                        effectivePrice = spool.Price;
-                    }
-
-                    if (spool.InitialWeightG is > 0)
-                    {
-                        spoolWeightGrams = spool.InitialWeightG.Value;
-                    }
-
-                    // Try filament product for price/weight fallback
-                    if (spool.FilamentId.HasValue)
-                    {
-                        SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(spool.FilamentId.Value, ct);
-                        if (filament is not null)
-                        {
-                            materialType = filament.Material;
-                            effectivePrice ??= filament.Price;
-                            if (spoolWeightGrams <= 0)
-                            {
-                                spoolWeightGrams = filament.Weight ?? 1000.0;
-                            }
-                        }
-                    }
+                    SpoolmanFilamentDto? filament = await _spoolmanService.GetFilamentByIdAsync(filamentId, ct);
+                    materialType = filament?.Material;
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to look up spool {SpoolId} for per-toolhead cost.", spoolmanSpoolId.Value);
+                _logger.LogDebug(ex, "Failed to look up spool {SpoolId} for per-toolhead material type.", spoolmanSpoolId.Value);
             }
         }
 
-        // Price cascade: material type default → global default
-        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings is not null)
+        // Settings price cascade: material type default → global default (pricePerKg × usageKg).
+        if (settings is not null)
         {
             string? resolvedMaterial = materialType ?? job.RequiredMaterialType ?? job.FilamentName;
             if (!string.IsNullOrEmpty(resolvedMaterial))
@@ -362,27 +378,17 @@ public class JobCostCalculationService : IJobCostCalculationService
                 decimal matchedPrice = LookupMaterialPrice(resolvedMaterial, settings.MaterialPriceDefaults);
                 if (matchedPrice > 0)
                 {
-                    effectivePrice = (double)matchedPrice;
+                    return Math.Round((decimal)(usageGrams / 1000.0) * matchedPrice, 2);
                 }
             }
         }
 
-        if ((!effectivePrice.HasValue || effectivePrice.Value <= 0) && settings?.DefaultFilamentPricePerKg > 0)
+        if (settings?.DefaultFilamentPricePerKg > 0)
         {
-            effectivePrice = (double)settings.DefaultFilamentPricePerKg;
+            return Math.Round((decimal)(usageGrams / 1000.0) * settings.DefaultFilamentPricePerKg, 2);
         }
 
-        if (!effectivePrice.HasValue || effectivePrice.Value <= 0)
-        {
-            return null;
-        }
-
-        if (spoolWeightGrams <= 0)
-        {
-            spoolWeightGrams = 1000.0;
-        }
-
-        return Math.Round((decimal)(usageGrams / spoolWeightGrams) * (decimal)effectivePrice.Value, 2);
+        return null;
     }
 
     /// <summary>
@@ -410,15 +416,48 @@ public class JobCostCalculationService : IJobCostCalculationService
     }
 
     /// <summary>
-    /// Calculates energy cost from print duration and electricity rate.
-    /// Wattage cascade: printer.Wattage → printer.Model.DefaultWattage → settings.AveragePrinterWattage.
-    /// Formula: (printDurationHours × printerWattage / 1000) × electricityRatePerKwh
+    /// Calculates energy cost from power consumption data.
+    /// When <see cref="PrintJob.KwhUsed"/> is set, uses that measured value directly.
+    /// The electricity rate is taken from the printer's <see cref="PowerMonitor"/> if one is
+    /// configured and non-zero; otherwise it falls back to the farm-wide rate.
+    /// When <see cref="PrintJob.KwhUsed"/> is null, falls back to a wattage-based estimate:
+    /// (printDurationHours × printerWattage / 1000) × electricityRatePerKwh.
     /// </summary>
-    /// <param name="job">The print job with AssignedPrinter and Model loaded.</param>
-    /// <param name="settings">Global cost tracking settings for fallback values.</param>
-    private decimal? CalculateEnergyCost(PrintJob job, CostTrackingSettings? settings)
+    private async Task<decimal?> CalculateEnergyCostAsync(
+        PrintJob job,
+        CostTrackingSettings? settings,
+        CancellationToken ct)
     {
-        if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0 || settings == null)
+        if (settings == null)
+        {
+            return null;
+        }
+
+        decimal electricityRate = settings.ElectricityRatePerKwh;
+
+        if (job.AssignedPrinterId.HasValue)
+        {
+            PowerMonitor? monitor = await _db.Set<PowerMonitor>()
+                .Where(m => m.PrinterId == job.AssignedPrinterId.Value && m.IsEnabled)
+                .FirstOrDefaultAsync(ct);
+
+            if (monitor is { ElectricityRateUsdPerKwh: > 0 })
+            {
+                electricityRate = monitor.ElectricityRateUsdPerKwh;
+            }
+        }
+
+        if (electricityRate <= 0)
+        {
+            return null;
+        }
+
+        if (job.KwhUsed is > 0m)
+        {
+            return Math.Round(job.KwhUsed.Value * electricityRate, 2);
+        }
+
+        if (!job.ActualPrintTime.HasValue || job.ActualPrintTime.Value.TotalHours <= 0)
         {
             return null;
         }
@@ -427,9 +466,7 @@ public class JobCostCalculationService : IJobCostCalculationService
         decimal printerWattage = job.AssignedPrinter?.Wattage
             ?? job.AssignedPrinter?.Model?.DefaultWattage
             ?? settings.AveragePrinterWattage;
-        decimal electricityRate = settings.ElectricityRatePerKwh;
 
-        // Convert watts to kilowatts and multiply by hours and rate
         decimal energyCost = (printDurationHours * printerWattage / 1000m) * electricityRate;
 
         return Math.Round(energyCost, 2);

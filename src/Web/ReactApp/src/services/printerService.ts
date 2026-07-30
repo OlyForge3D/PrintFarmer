@@ -10,11 +10,13 @@ import type {
   MoveRequest,
   Printer,
   PrinterBackendCapabilitiesDto,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
   PrinterFileDto,
   PrinterVersionInfo,
+  PrintJobObjectListDto,
   PrintJobStatusDto,
   SpoolmanSpool,
   StartDiscoveryRequest,
@@ -63,8 +65,12 @@ export const printerService = {
     return apiClient.bulkCreatePrinters(printers, options);
   },
 
-  async updatePrinter(id: string, printer: UpdatePrinterDto): Promise<Printer> {
-    return apiClient.updatePrinter(id, printer);
+  async updatePrinter(
+    id: string,
+    printer: UpdatePrinterDto,
+    reviewedRowVersion: string
+  ): Promise<Printer> {
+    return apiClient.updatePrinter(id, printer, reviewedRowVersion);
   },
 
   async deletePrinter(id: string): Promise<void> {
@@ -120,6 +126,14 @@ export const printerService = {
 
   async getPrinterCameraUrls(): Promise<PrinterCameraUrls[]> {
     return apiClient.getPrinterCameraUrls();
+  },
+
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    return apiClient.getPrinterCameraUrl(id);
+  },
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    return apiClient.getPrinterSnapshot(id);
   },
 
   async refreshCameraUrls(id: string): Promise<Printer> {
@@ -188,6 +202,14 @@ export const printerService = {
     return apiClient.disableMotors(printerId);
   },
 
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    return apiClient.getPrintJobObjects(printerId);
+  },
+
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    return apiClient.excludePrintJobObject(printerId, name);
+  },
+
   // ── Filament ──────────────────────────────────────────────────────────
 
   async loadFilament(printerId: string): Promise<CommandResult> {
@@ -230,16 +252,19 @@ export const printerService = {
 
   // ── G-code & Spoolman ─────────────────────────────────────────────────
 
-  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
-    return apiClient.sendGcode(printerId, command);
+  async setActiveSpool(
+    printerId: string,
+    spoolId: number,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    return apiClient.setActiveSpool(printerId, spoolId, reviewedRowVersion);
   },
 
-  async setActiveSpool(printerId: string, spoolId: number): Promise<boolean> {
-    return apiClient.setActiveSpool(printerId, spoolId);
-  },
-
-  async clearActiveSpool(printerId: string): Promise<boolean> {
-    return apiClient.clearActiveSpool(printerId);
+  async clearActiveSpool(
+    printerId: string,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    return apiClient.clearActiveSpool(printerId, reviewedRowVersion);
   },
 
   async getPrinterSpools(printerId: string): Promise<SpoolmanSpool[]> {
@@ -301,15 +326,25 @@ export const printerService = {
 
   async updatePrinterMaintenance(
     printerId: string,
-    maintenance: Record<string, unknown>
+    maintenance: Record<string, unknown>,
+    reviewedRowVersion: string
   ): Promise<Record<string, unknown>> {
-    return apiClient.updatePrinterMaintenance(printerId, maintenance);
+    return apiClient.updatePrinterMaintenance(
+      printerId,
+      maintenance,
+      reviewedRowVersion
+    );
   },
 
   async setPrinterMaintenance(
     printerId: string,
-    inMaintenance: boolean
+    inMaintenance: boolean,
+    reviewedRowVersion: string
   ): Promise<Record<string, unknown>> {
-    return apiClient.setPrinterMaintenance(printerId, inMaintenance);
+    return apiClient.setPrinterMaintenance(
+      printerId,
+      inMaintenance,
+      reviewedRowVersion
+    );
   },
 };

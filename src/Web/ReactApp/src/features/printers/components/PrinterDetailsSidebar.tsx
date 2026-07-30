@@ -1,12 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
+import {
+  mutationErrorMessage,
+  mutationErrorStatus,
+} from '@/common/utils/mutationError';
 import { maintenanceService } from '@/services/maintenanceService';
 import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
-import { PrinterBackend, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type TempTargets } from '@/types/api';
+import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import {
@@ -14,6 +18,7 @@ import {
   canCooldown,
   canDisableMotors,
   canEmergencyStop,
+  canExcludeObject,
   canFilamentChange,
   canFilamentControl,
   canMove,
@@ -66,9 +71,16 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
+import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
+import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
 import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
+import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
+import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
+import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
+import { Modal } from '@/common/components/modals/Modal';
+import { toast } from 'sonner';
 
 // Animation styles
 // Use unique keyframe/class names to avoid collisions with other injected styles.
@@ -103,6 +115,33 @@ const sidebarAnimationStyles = `
     animation: pfPrinterSidebarSlideOutToRight 0.3s ease-in;
   }
 `;
+
+const neverSyncedCutoff = new Date('1970-01-01T00:00:00.000Z').getTime();
+
+function shouldRetryStatisticsQuery(failureCount: number, error: unknown) {
+  const statusCode = typeof error === 'object' && error
+    ? (error as ApiError).statusCode ?? (error as { response?: { status?: number } }).response?.status
+    : undefined;
+
+  if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+    return false;
+  }
+
+  return failureCount < 2;
+}
+
+function formatLastSyncTime(lastSyncTime?: string | null) {
+  if (!lastSyncTime) {
+    return '—';
+  }
+
+  const timestamp = Date.parse(lastSyncTime);
+  if (!Number.isFinite(timestamp) || timestamp <= neverSyncedCutoff) {
+    return '—';
+  }
+
+  return new Date(timestamp).toLocaleString();
+}
 
 // Inject animation styles (once)
 if (typeof document !== 'undefined') {
@@ -185,6 +224,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     staleTime: 60_000,
     gcTime: 10 * 60_000,
     refetchOnWindowFocus: false,
+    retry: shouldRetryStatisticsQuery,
   });
 
   const printerVersionQuery = useQuery({
@@ -210,6 +250,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const [step, setStep] = useState(10);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
+  const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
 
   // Track last known values for display fallback - use state not refs for render access
   const [lastKnownValues, setLastKnownValues] = useState({
@@ -274,6 +315,46 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     setBedTemp(printerBedTarget > 0 ? printerBedTarget : '');
   }, [printerHotendTarget, printerBedTarget]);
 
+  const support = getPrinterSupport(backendCapabilities);
+  const preRenderRawState = printer?.state ?? '';
+  const isActivePrintForObjectQuery = preRenderRawState.toLowerCase().includes('printing') ||
+    preRenderRawState.toLowerCase().includes('paused');
+  const printJobObjectsQuery = usePrintJobObjects(printerId, {
+    enabled: !!printerId && support.supportsObjectExclusion && isActivePrintForObjectQuery,
+  });
+  const excludeObjectMutation = useMutation({
+    mutationFn: (name: string) => apiClient.excludePrintJobObject(printerId!, name),
+    onSuccess: async (result, name) => {
+      if (result.success) {
+        toast.success(`Skipped object "${name}"`);
+        if (printerId) {
+          queryClient.setQueryData<PrintJobObjectListDto>(queryKeys.printJobObjects(printerId), (old) =>
+            old
+              ? {
+                  ...old,
+                  objects: old.objects.map((object) =>
+                    object.name === name
+                      ? { ...object, isExcluded: true, isCurrent: false }
+                      : object
+                  ),
+                }
+              : old
+          );
+        }
+        setObjectToSkip(null);
+      } else {
+        toast.error(`Failed to skip object: ${result.message ?? result.error ?? 'Unknown error'}`);
+      }
+
+      if (printerId) {
+        await queryClient.invalidateQueries({ queryKey: queryKeys.printJobObjects(printerId) });
+      }
+    },
+    onError: (error: Error) => {
+      toast.error(`Failed to skip object: ${error.message}`);
+    },
+  });
+
   // Guard early after all hooks are called
   if (!printerId) {
     return null;
@@ -282,7 +363,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
   const sidebarShellClassName = layout === 'content'
-    ? `w-full max-w-sm overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
     : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
@@ -298,6 +379,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const isOnline = displayPrinter?.isOnline ?? false;
   const isEnabled = displayPrinter?.isEnabled ?? true;
   const rawState = displayPrinter?.state ?? 'unknown';
+  const isSnapmakerU1Mmu = displayPrinter?.mmuStatus?.mmuType === MmuProtocol.SnapmakerU1;
   const statusLabel = getPrinterDisplayState({
     printerState: rawState,
     autoDispatchState: autoDispatchStatus?.state,
@@ -310,8 +392,6 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const headerClassName = getStatusHeaderClassName({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
   const statusIndicatorClassName = getStatusIndicatorColor({ state: rawState, isOnline, isPrinting, isPaused, isShutdown });
 
-  const support = getPrinterSupport(backendCapabilities);
-
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canCancelNow = canCancel({ isOnline, isEnabled, isPrinting, isPaused, support });
   const canEmergencyStopNow = canEmergencyStop({ isOnline, isEnabled, support });
@@ -323,6 +403,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const canCooldownNow = canCooldown({ isOnline, isEnabled, isPrinting, support });
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });
   const canOpenHistoryNow = canOpenHistory({ isOnline, isEnabled, support });
+  const canExcludeObjectNow = canExcludeObject({ isOnline, isEnabled, isPrinting, isPaused, support });
+  const printJobObjects = printJobObjectsQuery.data?.objects ?? [];
 
   const extrudeMinTemp = getExtrudeMinTemp(printer.spoolInfo?.material);
   const canExtrudeNow = canMoveNow && (printer.hotendTemp ?? 0) >= extrudeMinTemp;
@@ -492,8 +574,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     try {
       const distance = direction === 'extrude' ? extrudeStep : -extrudeStep;
       const feedrate = extrudeSpeed * 60; // mm/s to mm/min
-      const gcode = `M83\nG1 E${distance} F${feedrate}\nM82`;
-      const result = await apiClient.sendGcode(printer.id, gcode);
+      const result = await apiClient.extrudeFilament(
+        printer.id,
+        distance,
+        feedrate
+      );
       if (!result.success) {
         console.error(`Failed to ${direction}:`, result.error);
       }
@@ -638,7 +723,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       </div>
 
       {/* Scrollable Content */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
         {/* Statistics */}
         <CollapsibleSection
           title="Statistics"
@@ -681,7 +766,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <div className="col-span-2">
                 <dt className="text-xs text-pf-text-secondary">Last sync</dt>
                 <dd className="text-pf-text-primary">
-                  {printerStatisticsQuery.data.lastSyncTime ? new Date(printerStatisticsQuery.data.lastSyncTime).toLocaleString() : '—'}
+                  {formatLastSyncTime(printerStatisticsQuery.data.lastSyncTime)}
                 </dd>
               </div>
             </dl>
@@ -805,6 +890,69 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             </div>
           </div>
         </CollapsibleSection>
+
+        {support.supportsObjectExclusion && (
+          <CollapsibleSection
+            title="Objects"
+            expanded={true}
+            headerActions={
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void printJobObjectsQuery.refetch()}
+                disabled={!isPrinting || printJobObjectsQuery.isFetching}
+                className="p-1! h-auto!"
+                title="Refresh print objects"
+                aria-label="Refresh print objects"
+                iconCenter={<RefreshIcon className="h-4 w-4" />}
+              ></Button>
+            }
+          >
+            {printJobObjectsQuery.isLoading ? (
+              <div className="text-sm text-pf-text-secondary">Loading print objects…</div>
+            ) : !isPrinting && !isPaused ? (
+              <div className="text-sm text-pf-text-secondary">Object skipping is available during an active print.</div>
+            ) : printJobObjects.length === 0 ? (
+              <div className="text-sm text-pf-text-secondary">No object metadata is available for this job.</div>
+            ) : (
+              <ul className="space-y-2" aria-label="Current print objects">
+                {printJobObjects.map((object) => (
+                  <li
+                    key={object.name}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/15 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-pf-text-primary">{object.name}</div>
+                      <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide">
+                        {object.isCurrent && (
+                          <span className="rounded-full border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
+                            Printing
+                          </span>
+                        )}
+                        {object.isExcluded && (
+                          <span className="rounded-full border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
+                            Skipped
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="danger"
+                      size="sm"
+                      disabled={!canExcludeObjectNow || object.isExcluded || excludeObjectMutation.isPending}
+                      onClick={() => setObjectToSkip(object)}
+                      aria-label={`Skip object ${object.name}`}
+                    >
+                      Skip
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CollapsibleSection>
+        )}
 
         {/* Move Section */}
         <CollapsibleSection
@@ -1023,7 +1171,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveX(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveX !== '' && handleMove('X', Number(moveX))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <MovementInput
                 axis="Y"
@@ -1033,7 +1181,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveY(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveY !== '' && handleMove('Y', Number(moveY))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <MovementInput
                 axis="Z"
@@ -1043,7 +1191,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 max={500}
                 onChange={(e) => setMoveZ(e.target.value === '' ? '' : Number(e.target.value))}
                 onKeyDown={(e) => e.key === 'Enter' && moveZ !== '' && handleMove('Z', Number(moveZ))}
-                className="w-16! min-w-0"
+                className="w-24! min-w-0"
               />
               <ControlPadButton
                 disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
@@ -1147,7 +1295,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         </CollapsibleSection>
 
         {/* MMU Control Box - Show when MMU/ERCF is detected via real-time status */}
-        {displayPrinter?.mmuStatus && (
+        {displayPrinter?.mmuStatus && !isSnapmakerU1Mmu && (
           <MmuControlBox
             printerId={printer.id}
             mmuStatus={displayPrinter.mmuStatus}
@@ -1155,25 +1303,39 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         )}
 
-        {/* Spool Section - Show when Spoolman is configured (all backends) */}
+        {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
+        {(() => {
+          const hasLiveMmuGates = !isSnapmakerU1Mmu && !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
+          const toolheads = hasLiveMmuGates
+            ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
+            : printerDetails?.toolheads && printerDetails.toolheads.length > 1
+              ? printerDetails.toolheads
+              : undefined;
+          if (!toolheads) return null;
+          return (
+            <CollapsibleSection title="Material Slots" expanded={true}>
+              <AmsSlotVisualization
+                toolheads={toolheads}
+                printerId={printerId ?? undefined}
+                reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+              />
+            </CollapsibleSection>
+          );
+        })()}
+
+        {/* Spool Section - hide for live MMU printers and AMS-served toolheads to avoid duplicate assignment UIs */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
+          if (shouldHideToolheadSpoolPicker(displayPrinter?.mmuStatus?.gates, printerDetails?.toolheads, displayPrinter?.mmuStatus?.mmuType)) return null;
+
           // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
           const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-          // MMU multi-material (e.g., QidiBox, HappyHare, AFC): gates from live SignalR status
-          const hasMmuGates = !hasMultipleToolheads
-            && displayPrinter?.mmuStatus?.gates
-            && displayPrinter.mmuStatus.gates.length > 0;
-          const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
+          const hasMultipleSpoolSources = hasMultipleToolheads;
           const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
 
-          // For multi-spool mode, determine the toolheads to display.
-          // Prefer printerDetails.toolheads (includes virtual MmuGate entries after backend sync).
-          // Fall back to converting live mmuStatus.gates for MMU printers without synced toolheads.
+          // For multi-spool mode on physical multi-tool printers, use config DB toolheads.
           const effectiveToolheads = hasMultipleToolheads
             ? printerDetails!.toolheads!
-            : hasMmuGates
-              ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
-              : undefined;
+            : undefined;
           
           return (
             <CollapsibleSection
@@ -1193,17 +1355,38 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                         onClick={async () => {
                           setSpoolActionPending(true);
                           try {
-                            await apiClient.clearActiveSpool(printer.id);
+                            const reviewedRowVersion =
+                              displayPrinter?.rowVersion ?? printer.rowVersion;
+                            if (!reviewedRowVersion) {
+                              toast.error('Printer revision unavailable. Refresh and review again.');
+                              return;
+                            }
+                            const nextRowVersion = await apiClient.clearActiveSpool(
+                              printer.id,
+                              reviewedRowVersion
+                            );
                             // Optimistically update cached printers to clear spool info
                             // SignalR will deliver the authoritative update on next status cycle
                             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                               old?.map(p => p.id === printer.id
-                                ? { ...p, spoolInfo: { hasActiveSpool: false } }
+                                ? {
+                                    ...p,
+                                    rowVersion: nextRowVersion,
+                                    spoolInfo: { hasActiveSpool: false },
+                                  }
                                 : p
                               )
                             );
                           } catch (err) {
                             console.error('Failed to eject spool:', err);
+                            if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                              await queryClient.invalidateQueries({
+                                queryKey: ['printers'],
+                              });
+                            }
+                            toast.error(
+                              mutationErrorMessage(err, 'Failed to eject spool')
+                            );
                           } finally {
                             setSpoolActionPending(false);
                           }
@@ -1231,16 +1414,29 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             >
               {hasMultipleSpoolSources && effectiveToolheads ? (
                 // Multi-toolhead or MMU spool picker
-                <ToolheadSpoolPicker
-                  printerId={printer.id}
-                  toolheads={effectiveToolheads}
-                  onSpoolChange={() => {
-                    queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                  }}
-                />
+                <>
+                  <FilamentCoverageBreakdown printerId={printer.id} />
+                  <ToolheadSpoolPicker
+                    printerId={printer.id}
+                    toolheads={effectiveToolheads}
+                    reviewedRowVersion={
+                      displayPrinter?.rowVersion ?? printer.rowVersion
+                    }
+                    onSpoolChange={() => {
+                      queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+                    }}
+                  />
+                  <FallbackGroupsPanel
+                    printerId={printer.id}
+                    toolheads={effectiveToolheads}
+                  />
+                </>
               ) : (
                 // Single spool display
-                <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
+                <>
+                  <FilamentCoverageBreakdown printerId={printer.id} />
+                  <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
+                </>
               )}
             </CollapsibleSection>
           );
@@ -1266,6 +1462,49 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         printer={printer}
       />
 
+      <Modal
+        isOpen={objectToSkip !== null}
+        onClose={() => {
+          if (!excludeObjectMutation.isPending) {
+            setObjectToSkip(null);
+          }
+        }}
+        title="Skip print object?"
+        size="sm"
+        isDisabled={excludeObjectMutation.isPending}
+        footer={(
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setObjectToSkip(null)}
+              disabled={excludeObjectMutation.isPending}
+            >
+              Keep printing
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              loading={excludeObjectMutation.isPending}
+              onClick={() => {
+                if (objectToSkip) {
+                  excludeObjectMutation.mutate(objectToSkip.name);
+                }
+              }}
+            >
+              Skip object
+            </Button>
+          </div>
+        )}
+      >
+        <p className="text-sm text-pf-text-primary">
+          Skip <span className="font-semibold">{objectToSkip?.name}</span> for the active print on {printer.name}?
+        </p>
+        <p className="mt-2 text-xs text-pf-text-secondary">
+          The printer will continue printing the remaining objects. This action cannot be undone from PrintFarmer.
+        </p>
+      </Modal>
+
       {/* Spool Picker Modal */}
       <SpoolPickerModal
         isOpen={showSpoolPicker}
@@ -1275,13 +1514,24 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            await apiClient.setActiveSpool(printer.id, spoolId);
+            const reviewedRowVersion =
+              displayPrinter?.rowVersion ?? printer.rowVersion;
+            if (!reviewedRowVersion) {
+              toast.error('Printer revision unavailable. Refresh and review again.');
+              return;
+            }
+            const nextRowVersion = await apiClient.setActiveSpool(
+              printer.id,
+              spoolId,
+              reviewedRowVersion
+            );
             setShowSpoolPicker(false);
             // Optimistically update cached printers with new spool info
             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
               old?.map(p => p.id === printer.id
                 ? {
                     ...p,
+                    rowVersion: nextRowVersion,
                     currentSpoolId: spool.id,
                     spoolInfo: {
                       hasActiveSpool: true,
@@ -1301,6 +1551,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             // SignalR will deliver the authoritative update on next status cycle
           } catch (err) {
             console.error('Failed to set active spool:', err);
+            if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+              await queryClient.invalidateQueries({ queryKey: ['printers'] });
+            }
+            toast.error(
+              mutationErrorMessage(err, 'Failed to set active spool')
+            );
           } finally {
             setSpoolActionPending(false);
           }

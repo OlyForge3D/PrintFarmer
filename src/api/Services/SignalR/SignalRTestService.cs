@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Services.SignalR;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 
 namespace Farm.Web.Api.Services.SignalR;
@@ -19,17 +21,18 @@ public class SignalRTestService(IHubContext<PrinterHub> hubContext) : ISignalRTe
 
         if (!string.IsNullOrEmpty(connectionId))
         {
-            await _hubContext.Clients.Client(connectionId).SendAsync("TestMessage", testMessage, ct);
+            await _hubContext.Clients.Client(connectionId).SendAsync("testmessage", testMessage, ct);
             return;
         }
 
         if (!string.IsNullOrEmpty(groupName))
         {
-            await _hubContext.Clients.Group(groupName).SendAsync("TestMessage", testMessage, ct);
+            await _hubContext.Clients.Group(groupName).SendAsync("testmessage", testMessage, ct);
             return;
         }
 
-        await _hubContext.Clients.All.SendAsync("TestMessage", testMessage, ct);
+        await _hubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm)
+            .SendAsync("testmessage", testMessage, ct);
     }
 
     public async Task TestDiscoveryGroupAsync(string? sessionId, bool delayBetweenMessages, CancellationToken ct = default)
@@ -37,28 +40,41 @@ public class SignalRTestService(IHubContext<PrinterHub> hubContext) : ISignalRTe
         string session = sessionId ?? Guid.NewGuid().ToString();
         string groupName = $"discovery-{session}";
 
-        var testMessages = new[]
+        DiscoveryProgressDto[] testMessages =
         {
-            new { SessionId = session, CurrentIP = "10.0.0.1", ScannedCount = 1, TotalCount = 254, Progress = 0.4 },
-            new { SessionId = session, CurrentIP = "10.0.0.10", ScannedCount = 10, TotalCount = 254, Progress = 3.9 },
-            new { SessionId = session, CurrentIP = "10.0.0.50", ScannedCount = 50, TotalCount = 254, Progress = 19.7 },
-            new { SessionId = session, CurrentIP = "10.0.0.100", ScannedCount = 100, TotalCount = 254, Progress = 39.4 }
+            CreateProgress(session, scannedIps: 1, progressPercentage: 0.4),
+            CreateProgress(session, scannedIps: 10, progressPercentage: 3.9),
+            CreateProgress(session, scannedIps: 50, progressPercentage: 19.7),
+            CreateProgress(session, scannedIps: 100, progressPercentage: 39.4),
         };
 
-        foreach (var m in testMessages)
+        foreach (DiscoveryProgressDto progress in testMessages)
         {
-            await _hubContext.Clients.Group(groupName).SendAsync("DiscoveryProgress", m, ct);
+            await _hubContext.Clients.Group(groupName).SendAsync("discoveryprogress", progress, ct);
             if (delayBetweenMessages)
             {
                 await Task.Delay(100, ct);
             }
         }
 
-        var testPrinter = new { SessionId = session, IpAddress = "10.0.0.123", Name = "Test Printer", Backend = "Moonraker", ServerUrl = "http://10.0.0.123" };
-        await _hubContext.Clients.Group(groupName).SendAsync("DiscoveryPrinterFound", testPrinter, ct);
+        DiscoveryPrinterFoundDto testPrinter = new(
+            session,
+            new DiscoveredPrinterSummaryDto(
+                Guid.NewGuid(),
+                "Test Printer",
+                PrinterBackend.Moonraker,
+                Manufacturer: null,
+                Model: null,
+                DiscoveredAt: DateTime.UtcNow,
+                IsReachable: true));
+        await _hubContext.Clients.Group(groupName).SendAsync("discoveryprinterfound", testPrinter, ct);
 
-        var completion = new { SessionId = session, TotalScanned = 254, PrintersFound = 1, Duration = TimeSpan.FromSeconds(10.5) };
-        await _hubContext.Clients.Group(groupName).SendAsync("DiscoveryCompleted", completion, ct);
+        DiscoveryCompletedDto completion = new(
+            session,
+            TotalPrintersFound: 1,
+            TotalPrintersExcluded: 0,
+            Duration: TimeSpan.FromSeconds(10.5));
+        await _hubContext.Clients.Group(groupName).SendAsync("discoverycompleted", completion, ct);
     }
 
     public object GetConnectionStats()
@@ -67,8 +83,23 @@ public class SignalRTestService(IHubContext<PrinterHub> hubContext) : ISignalRTe
         {
             Timestamp = DateTime.UtcNow,
             HubName = nameof(PrinterHub),
-            AvailableMethods = new[] { "PrinterStatusUpdated", "HarvestProgress", "JobQueueUpdated", "DiscoveryProgress", "DiscoveryPrinterFound", "DiscoveryCompleted", "TestMessage" },
+            AvailableMethods = new[] { "printerupdated", "harvestprogress", "jobqueueupdated", "discoveryprogress", "discoveryprinterfound", "discoverycompleted", "testmessage" },
             HealthStatus = "Hub context available and functional"
         };
     }
+
+    private static DiscoveryProgressDto CreateProgress(
+        string sessionId,
+        int scannedIps,
+        double progressPercentage) =>
+        new(
+            sessionId,
+            CurrentNetwork: string.Empty,
+            CurrentIp: string.Empty,
+            TotalIps: 254,
+            ScannedIps: scannedIps,
+            PrintersFound: 0,
+            PrintersExcluded: 0,
+            ProgressPercentage: progressPercentage,
+            Status: DiscoveryStatus.Scanning);
 }

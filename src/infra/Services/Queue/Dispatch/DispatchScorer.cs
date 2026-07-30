@@ -1,5 +1,10 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoTagging;
+using Farm.Infrastructure.Services.Mutations;
+using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -9,7 +14,27 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// Scores and ranks candidate printers for a print job using weighted multi-factor analysis.
 /// Hard requirements eliminate printers; soft factors produce a weighted average score.
 /// </summary>
-public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : IDispatchScorer
+/// <remarks>
+/// The per-tool loadout factor (issue #711, F6) is only applied when the
+/// <see cref="OperatorFeature.MultiSlotFallback"/> operator feature is enabled. The gate is
+/// optional so unit tests can construct the scorer directly without a gate (treated as
+/// enabled); production DI always supplies it (issue #711, FIX E).
+/// <para>
+/// When a coverage service is supplied and a job's per-tool requirements carry gram estimates
+/// (issue #711, F6, Finding 4), the per-tool factor additionally cross-references #709
+/// loaded-spool remaining grams: a slot short of the estimated grams is discounted proportionally
+/// (or credited at a reduced weight when a configured fallback member covers the shortfall), and
+/// the shortfall is surfaced in the factor's explanation. Both dependencies are optional so unit
+/// tests and callers without coverage keep the material-only behaviour.
+/// </para>
+/// </remarks>
+public class DispatchScorer(
+    AppDbContext db,
+    ILogger<DispatchScorer> logger,
+    IOperatorFeatureGate? featureGate = null,
+    IFilamentCoverageService? coverageService = null,
+    IFilamentFallbackGroupService? fallbackService = null,
+    IMutationWatermarkReader? watermarkReader = null) : IDispatchScorerWithOrigin
 {
     // Factor weight constants
     private const double WeightMaterialMatch = 100;
@@ -20,11 +45,30 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
     private const double WeightModelMatch = 60;
     private const double WeightQueueDepth = 30;
     private const double WeightPreferred = 40;
+    private const double WeightColorMatch = 20;
 
     private const double NozzleDiameterTolerance = 0.01;
+    private const double WeightPerToolLoadout = 60;
+
+    // A configured fallback member with enough grams keeps the tool viable via auto-switch, but
+    // the switch is a dependency (not the primary slot), so it is credited below a full match.
+    private const double FallbackGramsDiscount = 0.6;
 
     public async Task<List<DispatchScore>> ScorePrintersForJobAsync(Guid jobId, CancellationToken ct = default)
     {
+        DispatchScoreResult result = await ScorePrintersForJobWithOriginAsync(jobId, ct).ConfigureAwait(false);
+        return [.. result.Scores];
+    }
+
+    public async Task<DispatchScoreResult> ScorePrintersForJobWithOriginAsync(
+        Guid jobId,
+        CancellationToken ct = default)
+    {
+        long? originWatermark = await OriginWatermark
+            .CaptureAsync(watermarkReader, logger, "dispatch scoring", ct)
+            .ConfigureAwait(false);
+        List<long?> requiredOrigins = [originWatermark];
+
         PrintJob? job = await db.PrintJobs
             .Include(j => j.GcodeFile)
                 .ThenInclude(g => g!.PrinterModel)
@@ -34,7 +78,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         if (job is null)
         {
             logger.LogWarning("Dispatch scorer: job {JobId} not found", jobId);
-            return [];
+            return new DispatchScoreResult([], originWatermark);
         }
 
         // Pre-filter: get all enabled, non-maintenance printers with toolheads
@@ -67,14 +111,46 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         {
             requiredFilament = await db.FilamentTypes
                 .AsNoTracking()
-                .FirstOrDefaultAsync(f => EF.Functions.Like(f.Name, requiredMaterial) && f.IsActive, ct);
+                .FirstOrDefaultAsync(f => f.Name == requiredMaterial && f.IsActive, ct);
+        }
+
+        // Pre-load cluster mate names for the required material (used for fallback matching)
+        HashSet<string> clusterMateNames = [];
+        if (!string.IsNullOrWhiteSpace(requiredMaterial))
+        {
+            clusterMateNames = await GetClusterMateNamesAsync(requiredMaterial, ct);
         }
 
         List<DispatchScore> results = [];
+        bool multiSlotEnabled = featureGate is null
+            || await featureGate.IsEnabledAsync(OperatorFeature.MultiSlotFallback, ct).ConfigureAwait(false);
+
+        // Batch-load per-tool usable coverage and fallback chains only when the feature is on and
+        // the job carries gram estimates. Missing/failed coverage remains material-only with an
+        // explicit "coverage unknown" explanation.
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
+        bool gramsAware = multiSlotEnabled
+            && perToolReqs is { Count: > 0 }
+            && perToolReqs.Any(r => r.EstimatedGrams is > 0);
+        Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts = null;
+        if (gramsAware && coverageService is not null)
+        {
+            gramsContexts =
+                await BuildPerToolGramsContextAsync(printers, perToolReqs!, requiredOrigins, ct)
+                    .ConfigureAwait(false);
+        }
 
         foreach (Printer printer in printers)
         {
-            DispatchScore score = ScorePrinter(job, printer, requiredFilament, queueDepths);
+            DispatchScore score = ScorePrinter(
+                job,
+                printer,
+                requiredFilament,
+                queueDepths,
+                clusterMateNames,
+                multiSlotEnabled,
+                gramsAware,
+                gramsContexts);
             results.Add(score);
         }
 
@@ -93,14 +169,20 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             "Dispatch scorer: job {JobId} scored {Count} printers, {Eliminated} eliminated",
             jobId, results.Count, results.Count(r => r.Eliminated));
 
-        return results;
+        return new DispatchScoreResult(
+            results,
+            OriginWatermark.Combine([.. requiredOrigins]));
     }
 
     private DispatchScore ScorePrinter(
         PrintJob job,
         Printer printer,
         FilamentType? requiredFilament,
-        Dictionary<Guid, int> queueDepths)
+        Dictionary<Guid, int> queueDepths,
+        HashSet<string> clusterMateNames,
+        bool multiSlotEnabled,
+        bool gramsAware,
+        IReadOnlyDictionary<(Guid PrinterId, int Tool), PerToolGramsContext>? gramsContexts)
     {
         Dictionary<string, FactorScore> breakdown = [];
         List<string> eliminationReasons = [];
@@ -120,7 +202,7 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
 
         // Factor 1: Material Match
         string? requiredMaterial = job.RequiredMaterialType ?? job.GcodeFile?.RequiredMaterial;
-        FactorScore materialScore = ScoreMaterialMatch(printer, requiredMaterial);
+        FactorScore materialScore = ScoreMaterialMatch(printer, requiredMaterial, clusterMateNames);
         breakdown["MaterialMatch"] = materialScore;
         if (materialScore is { IsHardRequirement: true, Score: 0 })
         {
@@ -128,6 +210,34 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             if (materialScore.EliminationReason is not null)
             {
                 eliminationReasons.Add(materialScore.EliminationReason);
+            }
+        }
+
+        // Factor 1b: Per-Tool Loadout (issue #711, F6). One explainable factor per required
+        // tool from #710 toolRequirements, cross-referenced with per-toolhead loaded-spool
+        // state from #709 (Toolhead.CurrentMaterial / CurrentSpoolId). This is a soft factor
+        // — it never eliminates a candidate on its own because the operator can still swap
+        // filament — but it explains why the raw material match may over- or under-score
+        // multi-material jobs.
+        IReadOnlyList<PrintJobToolMaterialRequirement>? perToolReqs = job.RequiredMaterialsPerTool;
+        if (multiSlotEnabled && perToolReqs is { Count: > 0 })
+        {
+            // Printer-wide grams ledger (Finding H4): each source/fallback toolhead's usable
+            // coverage is a finite shared pool. Allocating it per requirement in a deterministic
+            // order (by G-code tool index) prevents two requirements from each claiming the full
+            // grams of the same spool.
+            Dictionary<Guid, double> gramsLedger = [];
+            foreach (PrintJobToolMaterialRequirement req in perToolReqs.OrderBy(r => r.Tool))
+            {
+                PerToolGramsContext? gramsContext = null;
+                gramsContexts?.TryGetValue((printer.Id, req.Tool), out gramsContext);
+                FactorScore toolFactor = ScorePerToolLoadout(
+                    printer,
+                    req,
+                    gramsAware,
+                    gramsContext,
+                    gramsLedger);
+                breakdown[$"PerToolLoadout.T{req.Tool}"] = toolFactor;
             }
         }
 
@@ -207,6 +317,10 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             }
         }
 
+        // Factor 11: Color Match (soft preference)
+        FactorScore colorScore = ScoreColorMatch(printer, job);
+        breakdown["ColorMatch"] = colorScore;
+
         // Calculate weighted average: Σ(score × weight) / Σ(weights)
         double totalScore = 0;
         if (!eliminated)
@@ -258,18 +372,384 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         return new FactorScore("Availability", 100, 0, 0, true);
     }
 
-    private static FactorScore ScoreMaterialMatch(Printer printer, string? requiredMaterial)
+    private async Task<Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext>>
+        BuildPerToolGramsContextAsync(
+            List<Printer> printers,
+            IReadOnlyList<PrintJobToolMaterialRequirement> perToolReqs,
+            List<long?> requiredOrigins,
+            CancellationToken ct)
+    {
+        Dictionary<(Guid PrinterId, int Tool), PerToolGramsContext> contexts = [];
+
+        FleetFilamentCoverageDto fleet;
+        try
+        {
+            FilamentCoverageResult<FleetFilamentCoverageDto> coverageResult =
+                await coverageService!.GetForFleetWithOriginAsync(ct).ConfigureAwait(false);
+            fleet = coverageResult.Value;
+            requiredOrigins.Add(coverageResult.OriginWatermark);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Dispatch scorer: fleet coverage load failed; per-tool grams checks skipped");
+            requiredOrigins.Add(null);
+            return contexts;
+        }
+
+        Dictionary<Guid, PrinterFilamentCoverageDto> coverageByPrinter =
+            fleet.Printers.ToDictionary(p => p.PrinterId);
+        IReadOnlyDictionary<FilamentFallbackLookupKey, FilamentFallbackResolution> fallbacks =
+            new Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>();
+        if (fallbackService is not null)
+        {
+            try
+            {
+                fallbacks = await fallbackService
+                    .GetAvailableFallbacksAsync(printers.Select(p => p.Id), ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Dispatch scorer: fallback-chain batch load failed; source usable coverage retained");
+                requiredOrigins.Add(null);
+            }
+        }
+
+        foreach (Printer printer in printers)
+        {
+            if (!coverageByPrinter.TryGetValue(printer.Id, out PrinterFilamentCoverageDto? coverage))
+            {
+                continue; // coverage unknown for this printer → material-only path
+            }
+
+            Dictionary<int, ToolheadCoverageDto> coverageByIndex = coverage.Toolheads
+                .GroupBy(t => t.ToolheadIndex)
+                .ToDictionary(g => g.Key, g => g.First());
+            Dictionary<Guid, ToolheadCoverageDto> coverageByToolheadId = coverage.Toolheads
+                .Where(t => t.ToolheadId.HasValue)
+                .ToDictionary(t => t.ToolheadId!.Value);
+
+            foreach (PrintJobToolMaterialRequirement req in perToolReqs)
+            {
+                if (req.EstimatedGrams is not double estimated
+                    || estimated <= 0
+                    || string.IsNullOrWhiteSpace(req.MaterialType))
+                {
+                    continue;
+                }
+
+                Toolhead? indexed = MatchIndexedToolhead(printer, req.Tool);
+                bool exactMatch = indexed is not null
+                    && !string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
+                    && string.Equals(
+                        indexed.CurrentMaterial,
+                        req.MaterialType,
+                        StringComparison.OrdinalIgnoreCase);
+                Toolhead? matched = exactMatch
+                    ? indexed
+                    : FindLoadedMaterialToolhead(printer, req.MaterialType);
+                if (matched is null)
+                {
+                    continue;
+                }
+
+                double? sourceUsable = TryGetUsableGrams(
+                    coverageByToolheadId,
+                    coverageByIndex,
+                    matched,
+                    req.MaterialType);
+                List<FallbackGramsMember> fallbackMembers = [];
+
+                // Only an exact-index source consumes its configured ordered fallback chain.
+                if (exactMatch
+                    && indexed is not null
+                    && fallbacks.TryGetValue(
+                        FilamentFallbackLookupKey.Create(printer.Id, indexed.Id, req.MaterialType),
+                        out FilamentFallbackResolution? resolution))
+                {
+                    foreach (FilamentFallbackChainMember member in resolution.Members)
+                    {
+                        Toolhead? memberToolhead =
+                            printer.Toolheads.FirstOrDefault(t => t.Id == member.ToolheadId);
+                        if (memberToolhead is null
+                            || !ToolheadIndexMapper.IsFilamentSource(
+                                memberToolhead,
+                                printer.Toolheads))
+                        {
+                            continue;
+                        }
+
+                        fallbackMembers.Add(new FallbackGramsMember(
+                            memberToolhead.Id,
+                            memberToolhead.Name,
+                            TryGetUsableGrams(
+                                coverageByToolheadId,
+                                coverageByIndex,
+                                memberToolhead,
+                                req.MaterialType)));
+                    }
+                }
+
+                contexts[(printer.Id, req.Tool)] =
+                    new PerToolGramsContext(matched.Id, sourceUsable, fallbackMembers);
+            }
+        }
+
+        return contexts;
+    }
+
+    private static double? TryGetUsableGrams(
+        IReadOnlyDictionary<Guid, ToolheadCoverageDto> coverageByToolheadId,
+        IReadOnlyDictionary<int, ToolheadCoverageDto> coverageByIndex,
+        Toolhead toolhead,
+        string requiredMaterial)
+    {
+        ToolheadCoverageDto? coverage = coverageByToolheadId.GetValueOrDefault(toolhead.Id)
+            ?? coverageByIndex.GetValueOrDefault(toolhead.Index);
+        if (coverage is null || string.IsNullOrWhiteSpace(coverage.Material))
+        {
+            return null;
+        }
+
+        if (!string.Equals(coverage.Material, requiredMaterial, StringComparison.OrdinalIgnoreCase))
+        {
+            return 0;
+        }
+
+        return coverage.AvailableForNewDemandGrams;
+    }
+
+    private static Toolhead? MatchIndexedToolhead(Printer printer, int tool) =>
+        printer.Toolheads
+            .Where(t =>
+                ToolheadIndexMapper.ToFilamentSourceGcodeToolIndex(
+                    t,
+                    printer.Toolheads) == tool)
+            .OrderBy(t => t.Index)
+            .FirstOrDefault();
+
+    private static Toolhead? FindLoadedMaterialToolhead(Printer printer, string material) =>
+        printer.Toolheads.FirstOrDefault(t =>
+            ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads)
+            && !string.IsNullOrWhiteSpace(t.CurrentMaterial)
+            && string.Equals(t.CurrentMaterial, material, StringComparison.OrdinalIgnoreCase));
+
+    private static FactorScore ScorePerToolLoadout(
+        Printer printer,
+        PrintJobToolMaterialRequirement req,
+        bool gramsAware,
+        PerToolGramsContext? gramsContext,
+        Dictionary<Guid, double> gramsLedger)
+    {
+        string factorName = $"PerToolLoadout.T{req.Tool}";
+
+        // When the slicer proved the tool is used but the material is unresolved, don't score
+        // this tool — it stays neutral and non-hard.
+        if (string.IsNullOrWhiteSpace(req.MaterialType))
+        {
+            return new FactorScore(factorName, 60, WeightPerToolLoadout, 60 * WeightPerToolLoadout, false);
+        }
+
+        // Stored MMU gate indices are one-based while G-code tools are zero-based. Prefer an
+        // MMU source when a shared physical hotend maps to the same G-code tool.
+        Toolhead? indexed = MatchIndexedToolhead(printer, req.Tool);
+        if (indexed is not null
+            && !string.IsNullOrWhiteSpace(indexed.CurrentMaterial)
+            && string.Equals(indexed.CurrentMaterial, req.MaterialType, StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyGramsOverlay(
+                factorName, 100, req, gramsAware, gramsContext, gramsLedger);
+        }
+
+        // Fall back: any physical toolhead or MMU gate currently loaded with the material.
+        Toolhead? loadedElsewhere = FindLoadedMaterialToolhead(printer, req.MaterialType);
+        if (loadedElsewhere is not null)
+        {
+            // A different-toolhead match is already partial credit, so it never consumes the
+            // fallback-group path — only the proportional grams penalty applies here.
+            return ApplyGramsOverlay(
+                factorName, 75, req, gramsAware, gramsContext, gramsLedger);
+        }
+
+        // No toolhead has this material loaded — soft penalty, still non-hard so the operator
+        // can decide to run a filament swap.
+        string reason = indexed is null
+            ? $"Tool T{req.Tool} not present on printer"
+            : $"Tool T{req.Tool} loaded with '{indexed.CurrentMaterial ?? "(empty)"}', requires '{req.MaterialType}'";
+        return new FactorScore(factorName, 20, WeightPerToolLoadout, 20 * WeightPerToolLoadout, false, reason);
+    }
+
+    /// <summary>
+    /// Overlays #709 loaded-spool grams coverage onto a base per-tool material score (issue #711,
+    /// F6, Finding 4). A slot short of the estimated grams is discounted proportionally, credited
+    /// at a reduced weight when a configured fallback member covers the shortfall, or left at the
+    /// material-only score with a "coverage unknown" note when grams cannot be verified.
+    /// A printer-wide <paramref name="gramsLedger"/> tracks grams already committed to earlier
+    /// requirements so a spool shared as a source or fallback member is never double-counted
+    /// across the printer's requirement set (Finding H4).
+    /// </summary>
+    private static FactorScore ApplyGramsOverlay(
+        string factorName,
+        double baseScore,
+        PrintJobToolMaterialRequirement req,
+        bool gramsAware,
+        PerToolGramsContext? gramsContext,
+        Dictionary<Guid, double> gramsLedger)
+    {
+        double baseWeighted = baseScore * WeightPerToolLoadout;
+
+        // No gram estimate or grams awareness disabled → preserve the legacy material-only score.
+        if (!gramsAware || req.EstimatedGrams is not double estimated || estimated <= 0)
+        {
+            return new FactorScore(factorName, baseScore, WeightPerToolLoadout, baseWeighted, false);
+        }
+
+        // Coverage unknown for this printer, or this slot's remaining grams unavailable → keep the
+        // material-only score but surface that grams could not be verified (Finding 4d).
+        if (gramsContext?.SourceUsableGrams is not double sourceUsable)
+        {
+            return new FactorScore(
+                factorName,
+                baseScore,
+                WeightPerToolLoadout,
+                baseWeighted,
+                false,
+                $"T{req.Tool} coverage unknown (need {FormatGrams(estimated)}g)");
+        }
+
+        // Subtract grams already committed to earlier requirements from the shared source pool.
+        double sourceUsableRemaining = sourceUsable;
+        if (gramsContext.SourceToolheadId is Guid sourceId)
+        {
+            sourceUsableRemaining = Math.Max(0, sourceUsable - gramsLedger.GetValueOrDefault(sourceId));
+        }
+
+        double sourceConsumed = Math.Min(Math.Max(0, sourceUsableRemaining), estimated);
+        if (gramsContext.SourceToolheadId is Guid chargedSourceId)
+        {
+            gramsLedger[chargedSourceId] =
+                gramsLedger.GetValueOrDefault(chargedSourceId) + sourceConsumed;
+        }
+
+        double shortfallRemaining = estimated - sourceConsumed;
+        if (shortfallRemaining <= 1e-6)
+        {
+            string sufficientCoverage =
+                $"T{req.Tool} source usable {FormatGrams(sourceUsableRemaining)}g covers " +
+                $"{FormatGrams(estimated)}g; shortfall remaining 0g; fallback closed gap: not needed";
+            return new FactorScore(
+                factorName,
+                baseScore,
+                WeightPerToolLoadout,
+                baseWeighted,
+                false,
+                sufficientCoverage);
+        }
+
+        double fallbackConsumed = 0;
+        List<string> memberDetails = [];
+        foreach (FallbackGramsMember member in gramsContext.FallbackMembers)
+        {
+            if (member.UsableGrams is not double memberUsable)
+            {
+                memberDetails.Add($"{member.Name} usable unknown, consumed 0g");
+                continue;
+            }
+
+            // Members are also shared pools — only their unallocated remainder is available.
+            double memberUsableRemaining =
+                Math.Max(0, memberUsable - gramsLedger.GetValueOrDefault(member.ToolheadId));
+            double consumed = Math.Min(memberUsableRemaining, shortfallRemaining);
+            fallbackConsumed += consumed;
+            shortfallRemaining -= consumed;
+            gramsLedger[member.ToolheadId] =
+                gramsLedger.GetValueOrDefault(member.ToolheadId) + consumed;
+            memberDetails.Add(
+                $"{member.Name} usable {FormatGrams(memberUsableRemaining)}g, consumed {FormatGrams(consumed)}g");
+            if (shortfallRemaining <= 1e-6)
+            {
+                shortfallRemaining = 0;
+                break;
+            }
+        }
+
+        double creditedRatio = Math.Clamp(
+            (sourceConsumed + (fallbackConsumed * FallbackGramsDiscount)) / estimated,
+            0,
+            1);
+        double reduced = Math.Round(baseScore * creditedRatio, 2);
+        bool fallbackClosedGap = fallbackConsumed > 0 && shortfallRemaining <= 1e-6;
+        string fallbackDetails = memberDetails.Count == 0
+            ? "no usable configured fallback members"
+            : string.Join("; ", memberDetails);
+        string explanation =
+            $"T{req.Tool} source usable {FormatGrams(sourceUsableRemaining)}g, consumed " +
+            $"{FormatGrams(sourceConsumed)}g; {fallbackDetails}; shortfall remaining " +
+            $"{FormatGrams(shortfallRemaining)}g; fallback closed gap: " +
+            $"{(fallbackClosedGap ? "yes" : "no")}";
+        if (shortfallRemaining > 1e-6)
+        {
+            explanation += "; insufficient usable coverage";
+        }
+
+        return new FactorScore(
+            factorName,
+            reduced,
+            WeightPerToolLoadout,
+            reduced * WeightPerToolLoadout,
+            false,
+            explanation);
+    }
+
+    private sealed record PerToolGramsContext(
+        Guid? SourceToolheadId,
+        double? SourceUsableGrams,
+        IReadOnlyList<FallbackGramsMember> FallbackMembers);
+
+    private sealed record FallbackGramsMember(Guid ToolheadId, string Name, double? UsableGrams);
+
+    private static string FormatGrams(double grams) =>
+        grams.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static FactorScore ScoreMaterialMatch(Printer printer, string? requiredMaterial, HashSet<string> clusterMateNames)
     {
         if (string.IsNullOrWhiteSpace(requiredMaterial))
         {
             return new FactorScore("MaterialMatch", 70, WeightMaterialMatch, 70 * WeightMaterialMatch, false);
         }
 
-        // Check if printer's currently loaded material matches
+        // Check if printer's currently loaded material matches exactly
         if (!string.IsNullOrWhiteSpace(printer.CurrentMaterial)
             && string.Equals(printer.CurrentMaterial, requiredMaterial, StringComparison.OrdinalIgnoreCase))
         {
             return new FactorScore("MaterialMatch", 100, WeightMaterialMatch, 100 * WeightMaterialMatch, true);
+        }
+
+        // Check if printer's loaded material is a cluster mate (equivalent material)
+        if (!string.IsNullOrWhiteSpace(printer.CurrentMaterial)
+            && clusterMateNames.Count > 0
+            && clusterMateNames.Contains(printer.CurrentMaterial))
+        {
+            return new FactorScore("MaterialMatch", 85, WeightMaterialMatch, 85 * WeightMaterialMatch, true);
+        }
+
+        if (printer.Toolheads.Any(t =>
+            ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads) &&
+            !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
+            string.Equals(t.CurrentMaterial, requiredMaterial, StringComparison.OrdinalIgnoreCase)))
+        {
+            return new FactorScore("MaterialMatch", 100, WeightMaterialMatch, 100 * WeightMaterialMatch, true);
+        }
+
+        if (clusterMateNames.Count > 0 &&
+            printer.Toolheads.Any(t =>
+                ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads) &&
+                !string.IsNullOrWhiteSpace(t.CurrentMaterial) &&
+                clusterMateNames.Contains(t.CurrentMaterial)))
+        {
+            return new FactorScore("MaterialMatch", 85, WeightMaterialMatch, 85 * WeightMaterialMatch, true);
         }
 
         // Check toolhead supported materials
@@ -283,6 +763,18 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
             return new FactorScore("MaterialMatch", 50, WeightMaterialMatch, 50 * WeightMaterialMatch, true);
         }
 
+        // Check toolhead supported materials via cluster equivalence
+        if (clusterMateNames.Count > 0)
+        {
+            bool anyToolheadSupportsCluster = printer.Toolheads.Any(t =>
+                t.SupportedMaterials?.Any(m => clusterMateNames.Contains(m)) == true);
+
+            if (anyToolheadSupportsCluster)
+            {
+                return new FactorScore("MaterialMatch", 45, WeightMaterialMatch, 45 * WeightMaterialMatch, true);
+            }
+        }
+
         // Check printer model's supported filament types
         bool modelSupports = printer.Model?.SupportedFilamentTypes.Any(f =>
             string.Equals(f.Name, requiredMaterial, StringComparison.OrdinalIgnoreCase)) == true;
@@ -290,6 +782,18 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         if (modelSupports)
         {
             return new FactorScore("MaterialMatch", 40, WeightMaterialMatch, 40 * WeightMaterialMatch, true);
+        }
+
+        // Check printer model's supported filament types via cluster equivalence
+        if (clusterMateNames.Count > 0)
+        {
+            bool modelSupportsCluster = printer.Model?.SupportedFilamentTypes.Any(f =>
+                clusterMateNames.Contains(f.Name)) == true;
+
+            if (modelSupportsCluster)
+            {
+                return new FactorScore("MaterialMatch", 35, WeightMaterialMatch, 35 * WeightMaterialMatch, true);
+            }
         }
 
         // No data about supported materials — don't eliminate, score low
@@ -503,5 +1007,92 @@ public class DispatchScorer(AppDbContext db, ILogger<DispatchScorer> logger) : I
         // Printer is not in the required group — hard eliminate
         return new FactorScore("PrinterGroup", 0, 0, 0, true,
             $"G-code requires printer group '{gcode.PrinterGroupId}' but printer is in group '{printer.PrinterGroupId?.ToString() ?? "none"}'");
+    }
+
+    private FactorScore ScoreColorMatch(Printer printer, PrintJob job)
+    {
+        if (string.IsNullOrWhiteSpace(job.FilamentColor))
+        {
+            // Job doesn't specify a color — not a factor
+            return new FactorScore("ColorMatch", 50, WeightColorMatch, 50 * WeightColorMatch, false);
+        }
+
+        string[] printerColors = printer.Toolheads
+            .Where(t => ToolheadIndexMapper.IsFilamentSource(t, printer.Toolheads))
+            .Select(t => t.CurrentFilamentColor)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Select(c => c!)
+            .ToArray();
+
+        if (printerColors.Length == 0)
+        {
+            // Printer has no color data — neutral
+            logger.LogDebug("Dispatch color: printer {PrinterName} has no loaded color data", printer.Name);
+            return new FactorScore("ColorMatch", 50, WeightColorMatch, 50 * WeightColorMatch, false);
+        }
+
+        // Exact hex match (case-insensitive, normalize # prefix)
+        string jobHex = job.FilamentColor.Trim().TrimStart('#').ToUpperInvariant();
+        if (printerColors.Any(c => string.Equals(jobHex, c.Trim().TrimStart('#').ToUpperInvariant(), StringComparison.Ordinal)))
+        {
+            logger.LogDebug(
+                "Dispatch color: exact hex match for printer {PrinterName} (#{Hex})",
+                printer.Name, jobHex);
+            return new FactorScore("ColorMatch", 100, WeightColorMatch, 100 * WeightColorMatch, false);
+        }
+
+        // Compare color families
+        (string Name, string Hex)? jobFamily = AutoTagService.HexToColorFamily(job.FilamentColor);
+        if (jobFamily is null)
+        {
+            // Can't parse color — neutral
+            return new FactorScore("ColorMatch", 50, WeightColorMatch, 50 * WeightColorMatch, false);
+        }
+
+        (string Name, string Hex)? matchingFamily = printerColors
+            .Select(AutoTagService.HexToColorFamily)
+            .FirstOrDefault(f => f is not null &&
+                string.Equals(f.Value.Name, jobFamily.Value.Name, StringComparison.OrdinalIgnoreCase));
+        if (matchingFamily is not null)
+        {
+            logger.LogDebug(
+                "Dispatch color: same family '{Family}' for printer {PrinterName} (job #{JobHex})",
+                jobFamily.Value.Name, printer.Name, jobHex);
+            return new FactorScore("ColorMatch", 80, WeightColorMatch, 80 * WeightColorMatch, false);
+        }
+
+        // Different color family — slight penalty, don't eliminate
+        logger.LogDebug(
+            "Dispatch color: family mismatch for printer {PrinterName} (job {JobFamily})",
+            printer.Name, jobFamily.Value.Name);
+        return new FactorScore("ColorMatch", 20, WeightColorMatch, 20 * WeightColorMatch, false);
+    }
+
+    /// <summary>
+    /// Returns the names of all filament types that share a material cluster with the given name.
+    /// Used to score cluster-equivalent materials as a fallback when no exact match exists.
+    /// </summary>
+    private async Task<HashSet<string>> GetClusterMateNamesAsync(string filamentTypeName, CancellationToken ct)
+    {
+        List<Guid> clusterIds = await db.MaterialClusterMembers
+            .Include(m => m.FilamentType)
+            .Where(m => m.FilamentType.Name == filamentTypeName)
+            .Select(m => m.ClusterId)
+            .Distinct()
+            .ToListAsync(ct);
+
+        if (clusterIds.Count == 0)
+        {
+            return [];
+        }
+
+        List<string> names = await db.MaterialClusterMembers
+            .Include(m => m.FilamentType)
+            .Where(m => clusterIds.Contains(m.ClusterId))
+            .Select(m => m.FilamentType.Name)
+            .Distinct()
+            .ToListAsync(ct);
+
+        return new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
     }
 }

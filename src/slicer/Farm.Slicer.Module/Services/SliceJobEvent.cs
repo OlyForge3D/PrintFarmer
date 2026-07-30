@@ -35,8 +35,8 @@ public class SliceJobEvent
     /// <summary>Gets or sets when the job completed.</summary>
     public DateTime? CompletedAt { get; set; }
 
-    /// <summary>Gets or sets the URL to result file for JobCompleted events.</summary>
-    public string? ResultFileUrl { get; set; }
+    /// <summary>Gets or sets the canonical authenticated artifact route for JobCompleted events.</summary>
+    public string? ArtifactsRoute { get; set; }
 
     /// <summary>Gets or sets the error message for JobFailed events.</summary>
     public string? ErrorMessage { get; set; }
@@ -55,4 +55,11 @@ public class SliceJobEvent
 
     /// <summary>Gets or sets when this event was generated.</summary>
     public DateTime Timestamp { get; set; }
+
+    /// <summary>
+    /// Resolved slicer engine version for this job (issue #578). Null for legacy /
+    /// unpinned jobs. Clients use this to render version-correct icons, profile
+    /// metadata, and lifecycle warnings.
+    /// </summary>
+    public string? SlicerEngineVersion { get; set; }
 }

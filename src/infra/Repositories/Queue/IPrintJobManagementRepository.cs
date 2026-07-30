@@ -36,6 +36,12 @@ public interface IPrintJobManagementRepository
     /// </summary>
     void Add(PrintJob job);
 
+    /// <summary>Adds a print job asynchronously without saving.</summary>
+    Task AddWithoutSaveAsync(PrintJob job, CancellationToken ct = default);
+
+    /// <summary>Adds a dispatch audit row without saving.</summary>
+    void AddDispatchLog(DispatchLog log);
+
     /// <summary>
     /// Remove a print job from the change tracker without saving.
     /// Call SaveChangesAsync() separately to persist.
@@ -57,6 +63,11 @@ public interface IPrintJobManagementRepository
     /// </summary>
     Task SaveChangesAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Clears currently tracked entities from the underlying change tracker.
+    /// </summary>
+    void ClearTrackedChanges();
+
     // ============= FILTERED QUERIES =============
 
     /// <summary>
@@ -65,15 +76,25 @@ public interface IPrintJobManagementRepository
     /// <param name="filterStatus">Optional status filter.</param>
     /// <param name="filterModel">Optional printer model name filter.</param>
     /// <param name="filterMaterial">Optional material type filter.</param>
+    /// <param name="deadlineStartUtc">Optional inclusive minimum deadline timestamp (UTC).</param>
+    /// <param name="deadlineEndUtc">Optional inclusive maximum deadline timestamp (UTC).</param>
+    /// <param name="sortBy">Sort mode for queued jobs (for example: priority, deadline, deadline_desc).</param>
     /// <param name="limit">Maximum results to return.</param>
     /// <param name="offset">Number of results to skip.</param>
+    /// <param name="queuedFrom">Optional inclusive minimum queued timestamp (UTC).</param>
+    /// <param name="queuedTo">Optional inclusive maximum queued timestamp (UTC).</param>
     /// <param name="ct">Cancellation token.</param>
     Task<List<PrintJob>> GetFilteredJobsAsync(
         PrintJobStatus? filterStatus = null,
         string? filterModel = null,
         string? filterMaterial = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
+        string sortBy = "priority",
         int limit = 100,
         int offset = 0,
+        DateTime? queuedFrom = null,
+        DateTime? queuedTo = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -118,6 +139,8 @@ public interface IPrintJobManagementRepository
     /// <param name="statuses">Optional list of statuses to filter by (completed, failed, cancelled).</param>
     /// <param name="dateStart">Optional start date filter (inclusive).</param>
     /// <param name="dateEnd">Optional end date filter (inclusive).</param>
+    /// <param name="deadlineStartUtc">Optional inclusive minimum deadline timestamp (UTC).</param>
+    /// <param name="deadlineEndUtc">Optional inclusive maximum deadline timestamp (UTC).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Tuple of paginated jobs, total count, and statistics for the full filtered set.</returns>
     Task<(List<PrintJob> jobs, int totalCount, int completedCount, int failedCount, int cancelledCount, long totalPrintTimeSeconds)> GetHistoryAsync(
@@ -127,6 +150,8 @@ public interface IPrintJobManagementRepository
         List<string>? statuses = null,
         DateTime? dateStart = null,
         DateTime? dateEnd = null,
+        DateTime? deadlineStartUtc = null,
+        DateTime? deadlineEndUtc = null,
         CancellationToken ct = default);
 
     // ============= TIMELINE & HISTORY =============
@@ -203,6 +228,18 @@ public interface IPrintJobManagementRepository
     Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default);
 
     /// <summary>
+    /// Get known actual start times for a specific printer (for duplicate detection during history seeding).
+    /// </summary>
+    Task<HashSet<DateTime>> GetActualStartTimesForPrinterAsync(Guid printerId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Get lightweight candidate rows for detecting existing duplicate history jobs.
+    /// Returns every job that has a valid (post-epoch) <see cref="PrintJob.ActualStartTime"/>,
+    /// projecting only the fields needed to group duplicates by printer and whole-second start.
+    /// </summary>
+    Task<List<HistoryDuplicateCandidate>> GetHistoryDuplicateCandidatesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Get a job by external job ID and source printer ID (for history seeding updates).
     /// </summary>
     Task<PrintJob?> GetByExternalIdAsync(Guid printerId, string externalJobId, CancellationToken ct = default);
@@ -253,3 +290,18 @@ public record PrinterModelQueueStats(
     int TotalQueued,
     int CurrentlyPrinting,
     DateTime? OldestQueuedAtUtc);
+
+/// <summary>
+/// Lightweight projection of a print job used to detect existing duplicate history rows.
+/// The effective printer for grouping is <see cref="SourcePrinterId"/> when set, otherwise
+/// <see cref="AssignedPrinterId"/>.
+/// </summary>
+public record HistoryDuplicateCandidate(
+    Guid Id,
+    Guid? SourcePrinterId,
+    Guid? AssignedPrinterId,
+    DateTime ActualStartTime,
+    bool WasSeededFromHistory,
+    bool IsExternalPrint,
+    string? ExternalJobId,
+    DateTime CreatedAt);

@@ -41,7 +41,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        _client = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -96,7 +96,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
             ["Obico:Enabled"] = "false"
         });
         await disabledFactory.ResetDatabaseAsync();
-        using HttpClient disabledClient = disabledFactory.CreateClient();
+        using HttpClient disabledClient = await disabledFactory.CreateAdminClientAsync();
 
         HttpResponseMessage disabledResponse = await disabledClient.GetAsync("/api/failure-detection/status");
         disabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -111,7 +111,7 @@ public class FailureDetectionControllerTests : IAsyncLifetime
             ["Obico:Enabled"] = "true"
         });
         await enabledFactory.ResetDatabaseAsync();
-        using HttpClient enabledClient = enabledFactory.CreateClient();
+        using HttpClient enabledClient = await enabledFactory.CreateAdminClientAsync();
 
         HttpResponseMessage enabledResponse = await enabledClient.GetAsync("/api/failure-detection/status");
         enabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -129,7 +129,8 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         var printerId = Guid.NewGuid();
 
         // Act - POST without auth should return 401 since controller requires [Authorize]
-        var response = await _client!.PostAsync($"/api/failure-detection/analyze/{printerId}", null);
+        using HttpClient anonymousClient = _factory.CreateClient();
+        var response = await anonymousClient.PostAsync($"/api/failure-detection/analyze/{printerId}", null);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
@@ -143,7 +144,8 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         var invalidUrl = "not-a-valid-url";
 
         // Act
-        var response = await _client!.PostAsync(
+        using HttpClient anonymousClient = _factory.CreateClient();
+        var response = await anonymousClient.PostAsync(
             $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(invalidUrl)}",
             null);
 
@@ -159,7 +161,8 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         var snapshotUrl = "http://example.com/snapshot.jpg";
 
         // Act
-        var response = await _client!.PostAsync(
+        using HttpClient anonymousClient = _factory.CreateClient();
+        var response = await anonymousClient.PostAsync(
             $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}",
             null);
 
@@ -246,13 +249,10 @@ public class FailureDetectionControllerTests : IAsyncLifetime
     [Fact(DisplayName = "Endpoints are protected by authorization")]
     public async Task Endpoints_ProtectedByAuthorization()
     {
-        // Act & Assert - Test factory automatically provides auth, so status endpoint succeeds
-        // In production without auth, this would return 401
-        var statusResponse = await _client!.GetAsync("/api/failure-detection/status");
+        using HttpClient anonymousClient = _factory.CreateClient();
+        var statusResponse = await anonymousClient.GetAsync("/api/failure-detection/status");
 
-        // The test factory provides authentication, so we get 200
-        // This verifies the endpoint is accessible when properly authenticated
-        statusResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        statusResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
     [Fact(DisplayName = "GetStatus handles system initialization state")]
@@ -285,7 +285,8 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         var snapshotUrl = "http://example.com/snapshot.jpg";
 
         // Act
-        var response = await _client!.PostAsync(
+        using HttpClient anonymousClient = _factory.CreateClient();
+        var response = await anonymousClient.PostAsync(
             $"/api/failure-detection/analyze/{printerId}?snapshotUrl={Uri.EscapeDataString(snapshotUrl)}",
             null);
 

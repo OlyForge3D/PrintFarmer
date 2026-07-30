@@ -5,8 +5,10 @@ import {
   ApiError,
   PrintJobStatusDto,
   AuthenticationResult,
+  BedType,
   CatalogContext,
   CommandResult,
+  CreateBedTypeRequest,
   CreateExtruderModelDto,
   CreateFilamentTypeRequest,
   CreateHotendModelDto,
@@ -35,23 +37,38 @@ import {
   MoveRequest,
   NozzleModelDefinition,
   Printer,
+  PrinterCameraUrlResult,
   PrinterCameraUrls,
   PrinterCapabilitiesDto,
   PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrintJobObjectListDto,
   PrinterFileDto,
   PrinterGroup,
+  PrinterGroupAccessRule,
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
   QueuedPrintJobWithFileMetaDto,
+  QueuedPrintJobDto,
+  DispatchClientResult,
+  BedClearAcknowledgementResult,
+  QueueChangeFeed,
+  QueueSubscriptionResources,
   QueueHistoryPageDto,
   QueueOverviewDto,
+  QueueStatsDto,
   RegisterRequest,
+  SystemInfo,
   ResolveHostnameRequest,
+  RoleDto,
+  SetAccessRulesRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
+  ProfileSchemasResponse,
+  ProfileTypeSchema,
+  RegisterDiscoveredPrinterRequest,
   SlicerModelAliasDto,
   SpoolmanDiscoveryResult,
   SpoolmanFilamentImportResult,
@@ -70,9 +87,13 @@ import {
   UpdateToolheadModelDefDto,
   UserDto,
   DiscoveredGcodeFileDto,
+  SetModelDispatchDefaultsRequest,
+  ApplyModelDefaultsResult,
   GcodeHarvestResultDto,
   BulkImportResponse,
   SpoolmanSpool,
+  SpoolFilterOptions,
+  FilamentFilterOptions,
   SpoolmanFilament,
   SpoolmanVendor,
   SpoolmanMaterial,
@@ -94,15 +115,21 @@ import {
   ConnectionDiagnosticsResponse,
   PagedResponse,
   SystemCapabilities,
-    DispatchHistoryPageDto,
-    FailureDetectionEvent,
-    NotificationDto,
+  DispatchHistoryPageDto,
+  FailureDetectionEvent,
+  NotificationDto,
+  NotificationCapabilitiesResponse,
   NotificationPreferencesDto,
+  TelegramSettingsDto,
+  TelegramTestResult,
+  UpdateBedTypeRequest,
+  UpdateTelegramSettingsRequest,
   UpdateNotificationPreferencesRequest,
   UnreadCountResponse,
   ScheduledJob,
   JobExecution,
   ScheduleJobRequest,
+  RescheduleJobRequest,
   AutoDispatchGlobalStatus,
   AutoDispatchDetailedStatus,
   AutoDispatchReadyResult,
@@ -113,11 +140,113 @@ import {
   ObicoServerHealthResponse,
   TimelineEventDto,
   TimezoneInfo,
+  MaterialClusterDto,
+  CreateMaterialClusterRequest,
+  UpdateMaterialClusterRequest,
+  QuotaDto,
+  CreateQuotaRequest,
+  UpdateQuotaRequest,
+  CheckQuotaRequest,
+  QuotaCheckResult,
+  UserBalanceDto,
+  BalanceTransactionDto,
+  BalanceAdjustRequest,
+  ZOffsetSaveRequest,
+  CustomFieldDefinition,
+  CustomFieldEntityType,
+  CustomFieldValue,
+  CreateCustomFieldDefinitionRequest,
+  UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
+import type {
+  PrintablesDownloadHistoryItem,
+  GeometryUploadResultDto,
+  PrintablesCollectionSummary,
+  PrintablesModelSummary,
+  PrintablesOAuthStatus,
+  PrintablesPagedResponse,
+  ThreeMfMetadata
+} from "@/types/models";
 import type { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse } from "axios";
 import axios from "axios";
+import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSignalRSession";
+import { notifyAuthenticationExpired } from "@/common/auth/authenticationExpiration";
+import type {
+  ModelCollection,
+  ModelCollectionMembership,
+  CreateModelCollectionRequest,
+  UpdateModelCollectionRequest,
+} from "@/types/models";
+import type { TagOption, UpdateTagRequest } from "@/types/admin";
+
+/**
+ * Extended Axios request config with PrintFarmer-specific interceptor bypass flags.
+ * Pass a `PfRequestConfig` to `apiClient.request()` when you need to suppress the
+ * default 401 redirect behaviour for endpoints that signal soft failures via 401
+ * (e.g. passkey assertion completion).
+ */
+export interface PfRequestConfig extends AxiosRequestConfig {
+  /**
+   * When `true`, a 401 response will not trigger the global token-clear and
+   * redirect-to-/login behaviour in the response interceptor.  Use this for
+   * endpoints that legitimately return 401 to indicate a failed operation
+   * rather than an expired session.
+   */
+  skipAuthRedirect?: boolean;
+}
+
+interface PfInternalRequestConfig extends PfRequestConfig {
+  authTokenAtRequest?: string | null;
+}
 
 const AUTO_DISPATCH_API_BASE = "/auto-dispatch";
+
+interface PrintablesModelSummaryApiDto {
+  id: string;
+  name?: string;
+  title?: string;
+  slug?: string | null;
+  authorHandle?: string | null;
+  authorName?: string | null;
+  author?: string | null;
+  thumbnailUrl?: string | null;
+  likesCount?: number;
+  likeCount?: number;
+  downloadCount?: number;
+  downloadsCount?: number;
+  fileCount?: number;
+  sourceUrl?: string;
+}
+
+interface PrintablesCursorApiResponse<T> {
+  items?: T[];
+  nextCursor?: string | null;
+  hasMore?: boolean;
+}
+
+interface PrintablesSearchApiResponse<T> {
+  items?: T[];
+  hasMore?: boolean;
+  offset?: number;
+  limit?: number;
+}
+
+type SerializedArray<T> = T[] | string | null | undefined;
+
+interface GcodeFileApiResponse extends Omit<GcodeFile,
+  "filamentPerExtruderWeightG" |
+  "filamentPerExtruderLengthMm" |
+  "filamentPerExtruderColorHex" |
+  "filamentPerExtruderType"> {
+  filamentPerExtruderWeightG?: SerializedArray<number>;
+  filamentPerExtruderLengthMm?: SerializedArray<number>;
+  filamentPerExtruderColorHex?: SerializedArray<string>;
+  filamentPerExtruderType?: SerializedArray<string>;
+}
+
+interface GetGcodeFilesApiResponse extends Omit<GetGcodeFilesResponse, "files"> {
+  files: GcodeFileApiResponse[];
+}
 
 export class ApiClient {
   // Utility to generate a correlation ID (UUID v4)
@@ -135,6 +264,132 @@ export class ApiClient {
         return v.toString(16);
       }
     );
+  }
+
+  private static normalizePrintablesUsername(username: string): string {
+    return username.trim().replace(/^@+/, "");
+  }
+
+  private static mapPrintablesModelSummary(model: PrintablesModelSummaryApiDto): PrintablesModelSummary {
+    return {
+      id: model.id,
+      title: model.title ?? model.name ?? "",
+      slug: model.slug ?? null,
+      author: model.author ?? model.authorHandle ?? model.authorName ?? "Unknown",
+      thumbnailUrl: model.thumbnailUrl ?? null,
+      likesCount: model.likesCount ?? model.likeCount,
+      downloadsCount: model.downloadsCount ?? model.downloadCount,
+      fileCount: model.fileCount,
+      sourceUrl: model.sourceUrl,
+    };
+  }
+
+  private static parseSerializedNumberArray(value: SerializedArray<number>): number[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "number") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static parseSerializedStringArray(value: SerializedArray<string>): string[] | undefined {
+    if (Array.isArray(value)) {
+      return value;
+    }
+
+    if (typeof value !== "string" || value.trim().length === 0) {
+      return undefined;
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      return Array.isArray(parsed) && parsed.every((item) => typeof item === "string") ? parsed : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private static mapGcodeFile(file: GcodeFileApiResponse): GcodeFile {
+    return {
+      ...file,
+      filamentPerExtruderWeightG: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderWeightG),
+      filamentPerExtruderLengthMm: ApiClient.parseSerializedNumberArray(file.filamentPerExtruderLengthMm),
+      filamentPerExtruderColorHex: ApiClient.parseSerializedStringArray(file.filamentPerExtruderColorHex),
+      filamentPerExtruderType: ApiClient.parseSerializedStringArray(file.filamentPerExtruderType),
+    };
+  }
+
+  private static mapGcodeFilesResponse(response: GetGcodeFilesApiResponse): GetGcodeFilesResponse {
+    return {
+      ...response,
+      files: response.files.map(ApiClient.mapGcodeFile),
+    };
+  }
+
+  private static normalizePrintablesCursorPage(
+    page: PrintablesCursorApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesHistoryPage(
+    page:
+      | PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>
+      | PrintablesPagedResponse<PrintablesDownloadHistoryItem>
+      | null
+      | undefined,
+  ): PrintablesPagedResponse<PrintablesDownloadHistoryItem> {
+    if (!page) {
+      return { items: [], nextCursor: null, hasMore: false };
+    }
+
+    const items = (page.items ?? []).map((item) => {
+      const mappedModel = ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto);
+      return {
+        ...mappedModel,
+        downloadedAt: (item as { downloadedAt?: string | null }).downloadedAt ?? null,
+      };
+    });
+
+    return {
+      items,
+      nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+      hasMore: Boolean(page.hasMore),
+    };
+  }
+
+  private static normalizePrintablesSearchPage(
+    page: PrintablesSearchApiResponse<PrintablesModelSummaryApiDto> | PrintablesPagedResponse<PrintablesModelSummary> | null | undefined,
+  ): PrintablesPagedResponse<PrintablesModelSummary> {
+    if (!page) {
+      return { items: [], hasMore: false, offset: 0, limit: 0 };
+    }
+
+    const items = (page.items ?? []).map((item) => ApiClient.mapPrintablesModelSummary(item as PrintablesModelSummaryApiDto));
+    return {
+      items,
+      hasMore: Boolean(page.hasMore),
+      offset: typeof page.offset === "number" ? page.offset : 0,
+      limit: typeof page.limit === "number" ? page.limit : items.length,
+    };
   }
   // ============ Generic Settings API methods ============
   /**
@@ -179,13 +434,6 @@ export class ApiClient {
   async getAllSettings(): Promise<Record<string, unknown>> {
     const res = await this.client.get("/settings");
     return res.data;
-  }
-
-  /**
-   * Save all unified settings
-   */
-  async saveAllSettings(settings: Record<string, unknown>): Promise<void> {
-    await this.client.post("/settings", settings);
   }
 
   // ============ Cost Tracking Settings ============
@@ -245,6 +493,7 @@ export class ApiClient {
     // Request interceptor for authentication and correlationId
     this.client.interceptors.request.use((config) => {
       const token = localStorage.getItem("auth-token");
+      (config as PfInternalRequestConfig).authTokenAtRequest = token;
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -263,12 +512,34 @@ export class ApiClient {
     // Response interceptor for error handling
     this.client.interceptors.response.use(
       (response) => response,
-      (error: AxiosError) => {
-        // Handle 401 Unauthorized - clear token and redirect to login
-        if (error.response?.status === 401) {
-          localStorage.removeItem("auth-token");
+      async (error: AxiosError) => {
+        const requestConfig = error.config as PfInternalRequestConfig | undefined;
+        // Handle 401 Unauthorized — clear token and redirect to login unless
+        // the caller set skipAuthRedirect:true on the request config to handle
+        // the 401 inline (e.g. passkey assertion, which the backend signals
+        // with 401 for failed credentials rather than as a session expiry).
+        if (
+          error.response?.status === 401 &&
+          !requestConfig?.skipAuthRedirect &&
+          requestConfig?.authTokenAtRequest === localStorage.getItem("auth-token")
+        ) {
+          let invalidatedCurrentSession = false;
+          try {
+            await resetAuthenticatedSignalRSession();
+          } catch (resetError) {
+            console.error(
+              "Failed to reset authenticated SignalR session after a 401 response.",
+              resetError,
+            );
+          }
+          if (requestConfig.authTokenAtRequest === localStorage.getItem("auth-token")) {
+            localStorage.removeItem("auth-token");
+            notifyAuthenticationExpired();
+            invalidatedCurrentSession = true;
+          }
           // Only redirect if not already on auth pages
           if (
+            invalidatedCurrentSession &&
             window.location.pathname !== "/login" &&
             window.location.pathname !== "/register"
           ) {
@@ -277,14 +548,38 @@ export class ApiClient {
         }
 
         const responseData = error.response?.data;
+
+        // Legacy string-shape `details`: keep this behavior for existing
+        // callers. Only surface a string when the body itself is a string or
+        // carries `{ error: string }`. Never stringify objects into `details`.
         const detailMessage = typeof responseData === 'string'
           ? responseData
           : (responseData as { error?: string })?.error ?? undefined;
 
+        // Prefer a ProblemDetails-style top-level message from the body:
+        // backend emits `{ message: "..." }` for some endpoints and
+        // `{ detail: "..." }` for `application/problem+json`. Fall back to the
+        // axios error message only when neither exists. Preserve the raw body
+        // and the axios-error flag so feature callers (e.g. partsHarvest,
+        // partsInventory) can recover canonical `code`/`mismatches`/`details`
+        // extensions instead of collapsing every failure into an opaque error.
+        const bodyRecord =
+          responseData && typeof responseData === 'object'
+            ? (responseData as { message?: unknown; detail?: unknown })
+            : undefined;
+        const bodyMessage =
+          typeof bodyRecord?.message === 'string' && bodyRecord.message.length > 0
+            ? bodyRecord.message
+            : typeof bodyRecord?.detail === 'string' && bodyRecord.detail.length > 0
+              ? bodyRecord.detail
+              : undefined;
+
         const apiError: ApiError = {
-          message: error.message,
+          message: bodyMessage ?? (detailMessage || error.message),
           statusCode: error.response?.status || 500,
           details: detailMessage,
+          data: responseData,
+          isAxiosError: axios.isAxiosError(error),
         };
         return Promise.reject(apiError);
       }
@@ -413,6 +708,24 @@ export class ApiClient {
     return response.data;
   }
 
+  async getPrinterCameraUrl(id: string): Promise<PrinterCameraUrlResult> {
+    const response = await this.client.get<PrinterCameraUrlResult>(
+      `/printers/${id}/camera/url`
+    );
+    return response.data;
+  }
+
+  async getPrinterSnapshot(id: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/printers/${id}/snapshot`,
+      {
+        params: { _: Date.now() },
+        responseType: "blob",
+      }
+    );
+    return response.data;
+  }
+
   async getPrinterBackendCapabilities(): Promise<PrinterBackendCapabilitiesDto[]> {
     const response = await this.client.get<PrinterBackendCapabilitiesDto[]>(
       "/printers/backend-capabilities"
@@ -434,6 +747,13 @@ export class ApiClient {
 
   async getPrinterVersionInfo(printerId: string): Promise<PrinterVersionInfo> {
     const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`);
+    return response.data;
+  }
+
+  async getPrintJobObjects(printerId: string): Promise<PrintJobObjectListDto> {
+    const response = await this.client.get<PrintJobObjectListDto>(
+      `/printers/${printerId}/printjob/objects`
+    );
     return response.data;
   }
 
@@ -608,8 +928,16 @@ export class ApiClient {
     return resp.data;
   }
 
-  async updatePrinter(id: string, printer: UpdatePrinterDto): Promise<Printer> {
-    const response = await this.client.put<Printer>(`/printers/${id}`, printer);
+  async updatePrinter(
+    id: string,
+    printer: UpdatePrinterDto,
+    reviewedRowVersion: string
+  ): Promise<Printer> {
+    const response = await this.client.put<Printer>(
+      `/printers/${id}`,
+      printer,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
     return response.data;
   }
 
@@ -652,6 +980,17 @@ export class ApiClient {
     const response = await this.client.post<{ message: string }>(
       `/printers/discover/${sessionId}/cancel`,
       {}
+    );
+    return response.data;
+  }
+
+  async registerDiscoveredPrinter(
+    sessionId: string,
+    request: RegisterDiscoveredPrinterRequest
+  ): Promise<Printer> {
+    const response = await this.client.post<Printer>(
+      `/printers/discover/${encodeURIComponent(sessionId)}/register`,
+      request
     );
     return response.data;
   }
@@ -775,6 +1114,18 @@ export class ApiClient {
     return response.data;
   }
 
+  async extrudeFilament(
+    printerId: string,
+    distanceMm: number,
+    feedrateMmPerMinute: number
+  ): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/extrude`,
+      { distanceMm, feedrateMmPerMinute }
+    );
+    return response.data;
+  }
+
   // ── MMU (Multi-Material Unit) commands ──
 
   /** Change to a specific MMU tool/gate (loads filament). */
@@ -825,15 +1176,44 @@ export class ApiClient {
     return response.data;
   }
 
-  /**
-   * Sends an arbitrary G-code command to the printer.
-   * @param printerId The printer's GUID
-   * @param command The G-code command string
-   */
-  async sendGcode(printerId: string, command: string): Promise<CommandResult> {
+  async mmuGateAction(
+    printerId: string,
+    request: {
+      protocol: 'Qidibox' | 'Afc';
+      action: 'Load' | 'Unload' | 'Eject';
+      gateIndex?: number;
+      laneName?: string;
+    }
+  ): Promise<CommandResult> {
     const response = await this.client.post<CommandResult>(
-      `/printers/${printerId}/gcode`,
-      { command }
+      `/printers/${printerId}/mmu/gate-action`,
+      request
+    );
+    return response.data;
+  }
+
+  async excludePrintJobObject(printerId: string, name: string): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/printjob/objects/exclude`,
+      { name }
+    );
+    return response.data;
+  }
+
+  /**
+   * Save calibrated Z-offset to the printer and optionally to firmware.
+   * @param printerId The printer's GUID
+   * @param request The Z-offset save payload
+   */
+  async saveZOffset(
+    printerId: string,
+    request: ZOffsetSaveRequest,
+    reviewedRowVersion: string
+  ): Promise<CommandResult> {
+    const response = await this.client.post<CommandResult>(
+      `/printers/${printerId}/z-offset`,
+      request,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
     );
     return response.data;
   }
@@ -843,24 +1223,39 @@ export class ApiClient {
    * @param printerId The printer's GUID
    * @param spoolId The Spoolman spool ID to activate
    */
-  async setActiveSpool(printerId: string, spoolId: number): Promise<boolean> {
-    const response = await this.client.post<boolean>(
+  async setActiveSpool(
+    printerId: string,
+    spoolId: number,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/active-spool`,
-      { spoolId }
+      { spoolId },
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
     );
-    return response.data;
+    if (!response.data.success) {
+      throw new Error(response.data.message ?? 'Failed to set active spool');
+    }
+    return this.responseEtag(response.headers, "The active spool mutation");
   }
 
   /**
    * Clear the active spool on a printer via Spoolman.
    * @param printerId The printer's GUID
    */
-  async clearActiveSpool(printerId: string): Promise<boolean> {
-    const response = await this.client.post<boolean>(
+  async clearActiveSpool(
+    printerId: string,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    const response = await this.client.post<CommandResult>(
       `/printers/${printerId}/active-spool`,
-      { spoolId: null }
+      { spoolId: null },
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
     );
-    return response.data;
+    if (!response.data.success) {
+      throw new Error(response.data.message ?? 'Failed to clear active spool');
+    }
+    return this.responseEtag(response.headers, "The active spool mutation");
   }
 
   /**
@@ -985,6 +1380,80 @@ export class ApiClient {
     await this.client.delete(`/printer-groups/${groupId}/printers/${printerId}`);
   }
 
+  async getPrinterGroupAccessRules(groupId: string): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.get<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`
+    );
+    return response.data;
+  }
+
+  async setPrinterGroupAccessRules(
+    groupId: string,
+    dto: SetAccessRulesRequest
+  ): Promise<PrinterGroupAccessRule[]> {
+    const response = await this.client.put<PrinterGroupAccessRule[]>(
+      `/printer-groups/${groupId}/access`,
+      dto
+    );
+    return response.data;
+  }
+
+  async getRoles(): Promise<RoleDto[]> {
+    const response = await this.client.get<RoleDto[]>("/users/roles");
+    return response.data;
+  }
+
+  // ============ Bed Type API methods ============
+
+  async getBedTypes(): Promise<BedType[]> {
+    const response = await this.client.get<BedType[]>("/bed-types");
+    return response.data;
+  }
+
+  async createBedType(dto: CreateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.post<BedType>("/bed-types", dto);
+    return response.data;
+  }
+
+  async updateBedType(id: string, dto: UpdateBedTypeRequest): Promise<BedType> {
+    const response = await this.client.put<BedType>(`/bed-types/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteBedType(id: string): Promise<void> {
+    await this.client.delete(`/bed-types/${id}`);
+  }
+
+  // ============ Custom Fields API methods ============
+
+  async getCustomFieldDefinitions(entityType: CustomFieldEntityType): Promise<CustomFieldDefinition[]> {
+    const response = await this.client.get<CustomFieldDefinition[]>('/custom-fields/definitions', { params: { entityType } });
+    return response.data;
+  }
+
+  async createCustomFieldDefinition(dto: CreateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.post<CustomFieldDefinition>('/custom-fields/definitions', dto);
+    return response.data;
+  }
+
+  async updateCustomFieldDefinition(id: string, dto: UpdateCustomFieldDefinitionRequest): Promise<CustomFieldDefinition> {
+    const response = await this.client.put<CustomFieldDefinition>(`/custom-fields/definitions/${id}`, dto);
+    return response.data;
+  }
+
+  async deleteCustomFieldDefinition(id: string): Promise<void> {
+    await this.client.delete(`/custom-fields/definitions/${id}`);
+  }
+
+  async getCustomFieldValues(entityType: CustomFieldEntityType, entityId: string): Promise<CustomFieldValue[]> {
+    const response = await this.client.get<CustomFieldValue[]>(`/custom-fields/values/${entityType}/${entityId}`);
+    return response.data;
+  }
+
+  async setCustomFieldValues(entityType: CustomFieldEntityType, entityId: string, values: Record<string, string | null>): Promise<void> {
+    await this.client.put(`/custom-fields/values/${entityType}/${entityId}`, { values });
+  }
+
   // ============ Catalog API methods ============
 
   async getManufacturers(): Promise<ManufacturerDto[]> {
@@ -1070,6 +1539,24 @@ export class ApiClient {
     const response = await this.client.put<SlicerModelAliasDto[]>(
       `/catalog/printer-models/${modelId}/aliases`,
       request
+    );
+    return response.data;
+  }
+
+  async setModelDispatchDefaults(
+    modelId: string,
+    request: SetModelDispatchDefaultsRequest
+  ): Promise<PrinterModelDto> {
+    const response = await this.client.put<PrinterModelDto>(
+      `/catalog/printer-models/${modelId}/dispatch-defaults`,
+      request
+    );
+    return response.data;
+  }
+
+  async applyModelDefaults(modelId: string): Promise<ApplyModelDefaultsResult> {
+    const response = await this.client.post<ApplyModelDefaultsResult>(
+      `/catalog/printer-models/${modelId}/apply-defaults`
     );
     return response.data;
   }
@@ -1419,6 +1906,66 @@ export class ApiClient {
     return response.data;
   }
 
+  // ============ Material Clusters ============
+
+  async getMaterialClusters(): Promise<MaterialClusterDto[]> {
+    const response = await this.client.get<MaterialClusterDto[]>(
+      "/material-clusters"
+    );
+    return response.data;
+  }
+
+  async getMaterialCluster(id: string): Promise<MaterialClusterDto> {
+    const response = await this.client.get<MaterialClusterDto>(
+      `/material-clusters/${id}`
+    );
+    return response.data;
+  }
+
+  async createMaterialCluster(
+    request: CreateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      "/material-clusters",
+      request
+    );
+    return response.data;
+  }
+
+  async updateMaterialCluster(
+    id: string,
+    request: UpdateMaterialClusterRequest
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.put<MaterialClusterDto>(
+      `/material-clusters/${id}`,
+      request
+    );
+    return response.data;
+  }
+
+  async deleteMaterialCluster(id: string): Promise<void> {
+    await this.client.delete(`/material-clusters/${id}`);
+  }
+
+  async addMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<MaterialClusterDto> {
+    const response = await this.client.post<MaterialClusterDto>(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+    return response.data;
+  }
+
+  async removeMaterialClusterMember(
+    clusterId: string,
+    filamentTypeId: string
+  ): Promise<void> {
+    await this.client.delete(
+      `/material-clusters/${clusterId}/members/${filamentTypeId}`
+    );
+  }
+
   // ============ Network utilities ============
 
   async resolveHostname(
@@ -1434,15 +1981,15 @@ export class ApiClient {
   // ============ G-code library methods ============
 
   async getGcodeFiles(page = 1, pageSize = 50): Promise<GcodeFile[]> {
-    const response = await this.client.get<GcodeFile[]>("/gcode-files", {
+    const response = await this.client.get<GcodeFileApiResponse[]>("/gcode-files", {
       params: { page, pageSize },
     });
-    return response.data;
+    return response.data.map(ApiClient.mapGcodeFile);
   }
 
   async getGcodeFile(id: string): Promise<GcodeFile> {
-    const response = await this.client.get<GcodeFile>(`/gcode-files/${id}`);
-    return response.data;
+    const response = await this.client.get<GcodeFileApiResponse>(`/gcode-files/${id}`);
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async uploadGcodeFile(
@@ -1455,7 +2002,7 @@ export class ApiClient {
     if (description) formData.append("description", description);
     if (tags) formData.append("tags", JSON.stringify(tags));
 
-    const response = await this.client.post<GcodeFile>(
+    const response = await this.client.post<GcodeFileApiResponse>(
       "/gcode-files/upload",
       formData,
       {
@@ -1464,7 +2011,7 @@ export class ApiClient {
         },
       }
     );
-    return response.data;
+    return ApiClient.mapGcodeFile(response.data);
   }
 
   async deleteGcodeFile(id: string): Promise<void> {
@@ -1700,11 +2247,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesWithFilter params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesQuery(
@@ -1723,11 +2270,11 @@ export class ApiClient {
       console.log('[API Client] getGcodeFilesQuery params after filtering:', params);
     }
     
-    const response = await this.client.get<GetGcodeFilesResponse>(
+    const response = await this.client.get<GetGcodeFilesApiResponse>(
       "/gcode-files/query",
       { params }
     );
-    return response.data;
+    return ApiClient.mapGcodeFilesResponse(response.data);
   }
 
   async getGcodeFilesFolders(): Promise<Array<{ path: string; fileName: string; isDirectory: boolean }>> {
@@ -1750,6 +2297,150 @@ export class ApiClient {
       apiRequest
     );
     return response.data;
+  }
+
+  async getPrintablesUserCollections(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesCollectionSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesPagedResponse<PrintablesCollectionSummary> & { collections?: PrintablesCollectionSummary[] }>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/collections`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    const items = Array.isArray(response.data.items)
+      ? response.data.items
+      : Array.isArray(response.data.collections)
+        ? response.data.collections
+        : [];
+
+    return {
+      items,
+      nextCursor: typeof response.data.nextCursor === "string" ? response.data.nextCursor : null,
+    };
+  }
+
+  async getPrintablesCollectionModels(
+    collectionId: string,
+    options?: { cursor?: string; limit?: number; query?: string; ordering?: string }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/collections/${encodeURIComponent(collectionId)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+          query: options?.query,
+          ordering: options?.ordering,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async getPrintablesUserModels(
+    username: string,
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const normalizedUsername = ApiClient.normalizePrintablesUsername(username);
+    if (!normalizedUsername) {
+      throw new Error("Printables username is required.");
+    }
+
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/users/${encodeURIComponent(normalizedUsername)}/models`,
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async searchPrintablesModels(
+    query: string,
+    options?: { offset?: number; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesSearchApiResponse<PrintablesModelSummaryApiDto>>(
+      `/3d-models/printables/search`,
+      {
+        params: {
+          query,
+          offset: options?.offset ?? 0,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesSearchPage(response.data);
+  }
+
+  async getPrintablesOAuthStatus(): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/status"
+    );
+    return response.data;
+  }
+
+  async getPrintablesOAuthAuthorizeUrl(): Promise<{ authorizationUrl: string }> {
+    const response = await this.client.post<{ authorizationUrl: string }>(
+      "/3d-models/printables/oauth/connect"
+    );
+    return response.data;
+  }
+
+  async completePrintablesOAuthCallback(code: string, state: string): Promise<PrintablesOAuthStatus> {
+    const response = await this.client.get<PrintablesOAuthStatus>(
+      "/3d-models/printables/oauth/callback",
+      {
+        params: { code, state },
+      }
+    );
+    return response.data;
+  }
+
+  async disconnectPrintablesOAuth(): Promise<void> {
+    await this.client.post("/3d-models/printables/oauth/disconnect");
+  }
+
+  async getPrintablesLikedModels(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesModelSummary>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto>>(
+      "/3d-models/printables/liked",
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesCursorPage(response.data);
+  }
+
+  async getPrintablesDownloadHistory(
+    options?: { cursor?: string; limit?: number }
+  ): Promise<PrintablesPagedResponse<PrintablesDownloadHistoryItem>> {
+    const response = await this.client.get<PrintablesCursorApiResponse<PrintablesModelSummaryApiDto & { downloadedAt?: string | null }>>(
+      "/3d-models/printables/history",
+      {
+        params: {
+          cursor: options?.cursor,
+          limit: options?.limit,
+        },
+      }
+    );
+    return ApiClient.normalizePrintablesHistoryPage(response.data);
   }
 
   async deleteGcodeFiles(fileIds: string[]): Promise<void> {
@@ -1830,7 +2521,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/gcode-files/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/gcode-files/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");
@@ -1894,7 +2585,7 @@ export class ApiClient {
 
       // Build URL with params
       const params = new URLSearchParams({ path: virtualPath });
-      xhr.open("POST", `/api/3d-models/upload?${params.toString()}`);
+      xhr.open("POST", `${getApiBaseUrl()}/3d-models/upload?${params.toString()}`);
 
       // Set auth header if available
       const token = localStorage.getItem("auth-token");
@@ -1965,6 +2656,35 @@ export class ApiClient {
   // NOTE: This is the simpler job queue API for basic queue management.
   // For the advanced Print Queue Dashboard with detailed analytics, see Print Queue methods below.
 
+  private queueJobIfMatch(rowVersion: string): string {
+    const value = rowVersion.trim();
+    if (!value) {
+      throw new Error("The reviewed queue job does not have an ETag");
+    }
+    return `"${this.normalizeQueueJobEtagForBody(value)}"`;
+  }
+
+  private normalizeQueueJobEtagForBody(etag: string): string {
+    return etag.trim().replace(/^W\//, "").replace(/^"|"$/g, "");
+  }
+
+  async getQueueChanges(
+    afterSequence = 0,
+    limit = 100
+  ): Promise<QueueChangeFeed> {
+    const response = await this.client.get<QueueChangeFeed>("/job-queue/changes", {
+        params: { afterSequence, limit },
+    });
+    return response.data;
+  }
+
+  async getQueueSubscriptionResources(): Promise<QueueSubscriptionResources> {
+    const response = await this.client.get<QueueSubscriptionResources>(
+      "/job-queue/subscription-resources"
+    );
+    return response.data;
+  }
+
   /**
    * Get queue overview for available printers with compatibility filtering.
    * All filtering is done server-side for consistency with auto-assign.
@@ -2023,8 +2743,11 @@ export class ApiClient {
    * Delete a print queue job from the queue.
    * Cannot delete jobs that are currently printing.
    */
-  async deletePrintQueueJob(jobId: string): Promise<void> {
-    await this.client.delete(`/job-queue/${jobId}`);
+  async deletePrintQueueJob(jobId: string, reviewedRowVersion: string): Promise<void> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
+    await this.client.delete(`/job-queue/${jobId}`, {
+      headers: { "If-Match": etag },
+    });
   }
 
   /**
@@ -2033,21 +2756,150 @@ export class ApiClient {
    * @param jobId - The ID of the job to dispatch
    * @returns The updated job with Starting/Printing status
    */
-  async dispatchPrintQueueJob(jobId: string): Promise<QueuedPrintJobWithFileMetaDto> {
+  async dispatchPrintQueueJob(
+    jobId: string,
+    reviewedRowVersion: string
+  ): Promise<DispatchClientResult> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     // Dispatch can take longer than the global Axios timeout due to G-code upload time.
-    const response = await this.client.post<QueuedPrintJobWithFileMetaDto>(
+    const response = await this.client.post<
+      QueuedPrintJobDto | {
+        error?: string;
+        detail?: string;
+        job?: QueuedPrintJobDto;
+      }
+    >(
       `/job-queue/${jobId}/dispatch`,
       undefined,
-      { timeout: 0 }
+      {
+        timeout: 0,
+        headers: { "If-Match": etag },
+        validateStatus: (status) => [200, 202, 409, 412, 503].includes(status),
+      }
     );
-    return response.data;
+    if (response.status === 200 || response.status === 202) {
+      const job = response.data as QueuedPrintJobDto;
+      if (!job.dispatchResult) {
+        return {
+          kind: 'unavailable',
+          httpStatus: 503,
+          errorCode: 'dispatch_outcome_unavailable',
+        };
+      }
+      return {
+        kind: response.status === 200 ? 'accepted' : 'reconciliation',
+        httpStatus: response.status,
+        job,
+        dispatch: job.dispatchResult,
+      };
+    }
+
+    const body = response.data as {
+      error?: string;
+      detail?: string;
+      job?: QueuedPrintJobDto;
+      dispatchResult?: QueuedPrintJobDto['dispatchResult'];
+    };
+    const rejectedJob =
+      body.job ??
+      ('id' in body ? (body as unknown as QueuedPrintJobDto) : undefined);
+    return {
+      kind:
+        response.status === 409
+          ? 'conflict'
+          : response.status === 412
+            ? 'stale'
+            : 'unavailable',
+      httpStatus: response.status as 409 | 412 | 503,
+      errorCode:
+        body.error ??
+        rejectedJob?.dispatchResult?.errorCode ??
+        'dispatch_request_failed',
+      detail: body.detail ?? rejectedJob?.dispatchResult?.errorDetail ?? undefined,
+      job: rejectedJob,
+    };
+  }
+
+  /**
+   * Dispatch a job to a specific printer, bypassing the scorer's material compatibility check.
+   * Used when the operator explicitly overrides a material mismatch.
+   */
+  async dispatchJobToPrinter(
+    jobId: string,
+    printerId: string,
+    reviewedRowVersion: string
+  ): Promise<DispatchClientResult> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
+    const response = await this.client.post<
+      QueuedPrintJobDto | {
+        error?: string;
+        detail?: string;
+        job?: QueuedPrintJobDto;
+      }
+    >(
+      `/job-queue/${jobId}/dispatch-to`,
+      { printerId },
+      {
+        timeout: 0,
+        headers: { "If-Match": etag },
+        validateStatus: (status) => [200, 202, 409, 412, 503].includes(status),
+      }
+    );
+    if (response.status === 200 || response.status === 202) {
+      const job = response.data as QueuedPrintJobDto;
+      if (!job.dispatchResult) {
+        return {
+          kind: 'unavailable',
+          httpStatus: 503,
+          errorCode: 'dispatch_outcome_unavailable',
+        };
+      }
+      return {
+        kind: response.status === 200 ? 'accepted' : 'reconciliation',
+        httpStatus: response.status,
+        job,
+        dispatch: job.dispatchResult,
+      };
+    }
+
+    const body = response.data as {
+      error?: string;
+      detail?: string;
+      job?: QueuedPrintJobDto;
+    };
+    const rejectedJob =
+      body.job ??
+      ('id' in body ? (body as unknown as QueuedPrintJobDto) : undefined);
+    return {
+      kind:
+        response.status === 409
+          ? 'conflict'
+          : response.status === 412
+            ? 'stale'
+            : 'unavailable',
+      httpStatus: response.status as 409 | 412 | 503,
+      errorCode:
+        body.error ??
+        rejectedJob?.dispatchResult?.errorCode ??
+        'dispatch_request_failed',
+      detail:
+        body.detail ??
+        rejectedJob?.dispatchResult?.errorDetail ??
+        undefined,
+      job: rejectedJob,
+    };
   }
 
   // ============ Dispatch history ============
 
-  async getDispatchHistory(page: number = 1, pageSize: number = 20): Promise<DispatchHistoryPageDto> {
+  async getDispatchHistory(page: number = 1, pageSize: number = 20, dateFrom?: Date, dateTo?: Date): Promise<DispatchHistoryPageDto> {
     const response = await this.client.get<DispatchHistoryPageDto>('/dispatch/history', {
-      params: { page, pageSize },
+      params: {
+        page,
+        pageSize,
+        ...(dateFrom && { dateFrom: dateFrom.toISOString() }),
+        ...(dateTo && { dateTo: dateTo.toISOString() }),
+      },
     });
     return response.data;
   }
@@ -2117,6 +2969,16 @@ export class ApiClient {
     return response.data;
   }
 
+  async getSystemInfo(): Promise<SystemInfo> {
+    const response = await this.client.get<SystemInfo>('/system/info');
+    return response.data;
+  }
+
+  async getFeatureFlags(): Promise<Record<string, boolean>> {
+    const response = await this.client.get<Record<string, boolean>>('/system/feature-flags');
+    return response.data;
+  }
+
   // ============ Authentication API methods ============
 
   async login(credentials: LoginRequest): Promise<AuthenticationResult> {
@@ -2135,7 +2997,8 @@ export class ApiClient {
 
     const response = await this.client.post<AuthenticationResult>(
       "/auth/login",
-      payload
+      payload,
+      { skipAuthRedirect: true },
     );
     return response.data;
   }
@@ -2203,7 +3066,7 @@ export class ApiClient {
 
   // ============ Generic request method ============
 
-  async request<T>(config: AxiosRequestConfig): Promise<T> {
+  async request<T>(config: PfRequestConfig): Promise<T> {
     const response = await this.client.request<T>(config);
     return response.data;
   }
@@ -2347,7 +3210,7 @@ export class ApiClient {
   }
 
   async removePrinterFromLocation(printerId: string): Promise<Record<string, unknown>> {
-    const response = await this.client.post(`/printers/${printerId}/location/remove`, {});
+    const response = await this.client.delete(`/printers/${printerId}/location`);
     return response.data;
   }
 
@@ -2392,6 +3255,28 @@ export class ApiClient {
   async getTagById(tagId: string): Promise<Record<string, unknown> | null> {
     const response = await this.client.get(`/tags/${tagId}`);
     return response.data || null;
+  }
+
+  /**
+   * Get a single tag by id with its revision/concurrencyToken, typed for the
+   * optimistic-concurrency edit flow (#844/#846). Delegates to `getTagById` so there's
+   * a single place wiring the `/tags/{id}` request; this method only adds the stronger
+   * `TagOption` return type needed by the revision-conflict flow.
+   */
+  async getTag(tagId: string): Promise<TagOption | null> {
+    const data = await this.getTagById(tagId);
+    return (data as TagOption | null) || null;
+  }
+
+  /**
+   * Updates a tag's metadata using optimistic concurrency (#844). `dto.expectedRevision`
+   * must equal the tag's current revision or the server rejects the write with a
+   * structured HTTP 409 conflict (`{ error, expectedRevision, actualRevision }`), which the
+   * response interceptor surfaces via `ApiError.data`.
+   */
+  async updateTag(tagId: string, dto: UpdateTagRequest): Promise<TagOption> {
+    const response = await this.client.put(`/tags/${tagId}`, dto);
+    return response.data as TagOption;
   }
 
   async assignTagToObject(objectId: string, tagId: string, objectType: 'Model3D' | 'GcodeFile' | 'Printer'): Promise<void> {
@@ -2560,20 +3445,27 @@ export class ApiClient {
     return response.data || [];
   }
 
+  /**
+   * Upload raw STL geometry (e.g. cut model pieces) to the server.
+   * Returns a server-side URL that slicer workers can HTTP-fetch.
+   */
+  async uploadGeometry(stlBlob: Blob, fileName: string): Promise<GeometryUploadResultDto> {
+    const formData = new FormData();
+    formData.append('geometryFile', new File([stlBlob], fileName, { type: 'application/octet-stream' }));
+    const response = await this.client.post<GeometryUploadResultDto>(
+      '/3d-models/upload-geometry',
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
+  }
+
   // ============ User Management API methods ============
   /**
    * Get all users
    */
   async getUsers(): Promise<Record<string, unknown>[]> {
     const response = await this.client.get('/users');
-    return response.data || [];
-  }
-
-  /**
-   * Get all roles
-   */
-  async getRoles(): Promise<Record<string, unknown>[]> {
-    const response = await this.client.get('/users/roles');
     return response.data || [];
   }
 
@@ -2620,6 +3512,21 @@ export class ApiClient {
    */
   async deleteUser(userId: string): Promise<void> {
     await this.client.delete(`/users/${userId}`);
+  }
+
+  /**
+   * Admin: change another user's password.
+   */
+  async adminChangeUserPassword(
+    userId: string,
+    newPassword: string,
+    confirmNewPassword: string
+  ): Promise<{ message: string }> {
+    const response = await this.client.post<{ message: string }>(`/users/${userId}/change-password`, {
+      newPassword,
+      confirmNewPassword,
+    });
+    return response.data;
   }
 
   // ============ Setup & Initialization API methods ============
@@ -2686,6 +3593,7 @@ export class ApiClient {
     vendor?: string;
     location?: string;
     allowArchived?: boolean;
+    signal?: AbortSignal;
   }): Promise<{ items: SpoolmanSpool[]; totalCount: number }> {
     const queryParams: Record<string, string | number | boolean> = {};
     if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
@@ -2699,6 +3607,7 @@ export class ApiClient {
 
     const response = await this.client.get('/spoolman/spools', {
       params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
     });
     const data = response.data;
 
@@ -2713,7 +3622,17 @@ export class ApiClient {
 
     // Fallback for plain array response (backward compatibility)
     const items = Array.isArray(data) ? (data as SpoolmanSpool[]) : [];
-    return { items, totalCount: items.length };
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
+  }
+
+  /**
+   * Get distinct material, vendor, and location values across all spools.
+   * Used to populate filter dropdowns without relying on paginated data.
+   */
+  async getSpoolFilterOptions(): Promise<SpoolFilterOptions> {
+    const response = await this.client.get<SpoolFilterOptions>('/spoolman/filter-options');
+    return response.data;
   }
 
   /**
@@ -2723,6 +3642,56 @@ export class ApiClient {
     const response = await this.client.get('/spoolman/filaments');
     const data = response.data;
     return Array.isArray(data) ? data : (data as Record<string, unknown>).items as SpoolmanFilament[] || [];
+  }
+
+  /**
+   * Get paginated filament types/products from Spoolman with server-side filtering and sorting.
+   */
+  async getFilamentsPaged(params?: {
+    limit?: number;
+    offset?: number;
+    sort?: string;
+    search?: string;
+    material?: string;
+    vendor?: string;
+    signal?: AbortSignal;
+  }): Promise<{ items: SpoolmanFilament[]; totalCount: number }> {
+    const queryParams: Record<string, string | number> = {};
+    if (params?.limit && params.limit > 0) queryParams.limit = params.limit;
+    if (params?.offset && params.offset > 0) queryParams.offset = params.offset;
+    if (params?.sort) queryParams.sort = params.sort;
+    if (params?.search) queryParams.search = params.search;
+    if (params?.material) queryParams.material = params.material;
+    if (params?.vendor) queryParams.vendor = params.vendor;
+
+    const response = await this.client.get('/spoolman/filaments', {
+      params: Object.keys(queryParams).length > 0 ? queryParams : undefined,
+      signal: params?.signal,
+    });
+    const data = response.data;
+
+    // Handle paginated response format { items, totalCount }
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'items' in data) {
+      const result = data as { items: SpoolmanFilament[]; totalCount: number };
+      return {
+        items: Array.isArray(result.items) ? result.items : [],
+        totalCount: typeof result.totalCount === 'number' ? result.totalCount : 0,
+      };
+    }
+
+    // Fallback for plain array response (backward compatibility)
+    const items = Array.isArray(data) ? (data as SpoolmanFilament[]) : [];
+    const offset = params?.offset ?? 0;
+    return { items, totalCount: Math.max(items.length, offset + items.length) };
+  }
+
+  /**
+   * Get distinct material and vendor values across all filament types.
+   * Used to populate filter dropdowns on the Filaments tab.
+   */
+  async getFilamentFilterOptions(): Promise<FilamentFilterOptions> {
+    const response = await this.client.get<FilamentFilterOptions>('/spoolman/filaments/filter-options');
+    return response.data;
   }
 
   /**
@@ -2928,8 +3897,16 @@ export class ApiClient {
   /**
    * Update printer maintenance
    */
-  async updatePrinterMaintenance(printerId: string, maintenance: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.client.put(`/printers/${printerId}/maintenance`, maintenance);
+  async updatePrinterMaintenance(
+    printerId: string,
+    maintenance: Record<string, unknown>,
+    reviewedRowVersion: string
+  ): Promise<Record<string, unknown>> {
+    const response = await this.client.put(
+      `/printers/${printerId}/maintenance`,
+      maintenance,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
     return response.data;
   }
 
@@ -3024,8 +4001,16 @@ export class ApiClient {
    * @param printerId - The printer ID
    * @param inMaintenance - Boolean indicating if printer should be in maintenance mode
    */
-  async setPrinterMaintenance(printerId: string, inMaintenance: boolean): Promise<Record<string, unknown>> {
-    const response = await this.client.put(`/printers/${printerId}/maintenance`, inMaintenance);
+  async setPrinterMaintenance(
+    printerId: string,
+    inMaintenance: boolean,
+    reviewedRowVersion: string
+  ): Promise<Record<string, unknown>> {
+    const response = await this.client.put(
+      `/printers/${printerId}/maintenance`,
+      inMaintenance,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
     return response.data;
   }
 
@@ -3061,6 +4046,28 @@ export class ApiClient {
    */
   async getSlicerJobStatus(jobId: string): Promise<Record<string, unknown>> {
     const response = await this.client.get(`/slicer/jobs/${encodeURIComponent(jobId)}/status`);
+    return response.data;
+  }
+
+  /**
+   * Get all profile schemas (process, machine, filament).
+   *
+   * When `engineVersion` is provided (e.g. `"2.3.1"`, `"2.4.1"`), the backend
+   * filters fields to those applicable to that OrcaSlicer engine and renames
+   * fields to that engine's key convention where needed (issue #578).
+   */
+  async getProfileSchemas(engineVersion?: string): Promise<ProfileSchemasResponse> {
+    const params = engineVersion ? { engineVersion } : undefined;
+    const response = await this.client.get<ProfileSchemasResponse>('/slicer/profiles/schemas', { params });
+    return response.data;
+  }
+
+  /**
+   * Get process profile schema, optionally scoped to an OrcaSlicer engine version.
+   */
+  async getProcessProfileSchema(engineVersion?: string): Promise<ProfileTypeSchema> {
+    const params = engineVersion ? { engineVersion } : undefined;
+    const response = await this.client.get<ProfileTypeSchema>('/slicer/profiles/schema/process', { params });
     return response.data;
   }
 
@@ -3116,6 +4123,14 @@ export class ApiClient {
   }
 
   /**
+   * Get extracted 3MF metadata for a model
+   */
+  async getModel3DMetadata(modelId: string): Promise<ThreeMfMetadata | null> {
+    const response = await this.client.get(`/3d-models/${modelId}/metadata`);
+    return response.data as ThreeMfMetadata | null;
+  }
+
+  /**
    * Update 3D model
    */
   async updateModel3D(modelId?: string, updates?: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -3152,15 +4167,21 @@ export class ApiClient {
     filterStatus?: string,
     filterModel?: string,
     filterMaterial?: string,
+    sortBy: "priority" | "deadline" | "deadline_desc" = "priority",
     limit: number = 50,
-    offset: number = 0
+    offset: number = 0,
+    queuedFrom?: Date,
+    queuedTo?: Date
   ): Promise<unknown[]> {
     const params = new URLSearchParams();
     if (filterStatus) params.append("filterStatus", filterStatus);
     if (filterModel) params.append("filterModel", filterModel);
     if (filterMaterial) params.append("filterMaterial", filterMaterial);
+    params.append("sortBy", sortBy);
     params.append("limit", limit.toString());
     params.append("offset", offset.toString());
+    if (queuedFrom) params.append("queuedFrom", queuedFrom.toISOString());
+    if (queuedTo) params.append("queuedTo", queuedTo.toISOString());
 
     const response = await this.client.get(`/job-queue-analytics?${params.toString()}`);
     return response.data;
@@ -3182,11 +4203,10 @@ export class ApiClient {
   /**
    * Get queue statistics (analytics)
    */
-  async getAnalyticsQueueStats(): Promise<unknown> {
+  async getAnalyticsQueueStats(): Promise<QueueStatsDto> {
     const response = await this.client.get(`/job-queue-analytics/stats`);
-    return response.data;
+    return response.data as QueueStatsDto;
   }
-
   /**
    * Get queue statistics by model (analytics)
    */
@@ -3242,10 +4262,16 @@ export class ApiClient {
   /**
    * Update a print job
    */
-  async updateJob(jobId: string, request: unknown): Promise<unknown> {
+  async updateJob(
+    jobId: string,
+    request: unknown,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.put(
       `/job-queue/${jobId}`,
-      request
+      request,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3253,10 +4279,16 @@ export class ApiClient {
   /**
    * Update job priority
    */
-  async updateJobPriority(jobId: string, newPriority: number): Promise<unknown> {
+  async updateJobPriority(
+    jobId: string,
+    newPriority: number,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.put(
-      `/job-queue/${jobId}/priority`,
-      { newPriority }
+      `/job-queue-analytics/jobs/${jobId}/priority`,
+      { newPriority },
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3264,9 +4296,12 @@ export class ApiClient {
   /**
    * Pause a print job
    */
-  async pauseJob(jobId: string): Promise<unknown> {
+  async pauseJob(jobId: string, reviewedRowVersion: string): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.post(
-      `/job-queue/${jobId}/pause`
+      `/job-queue-analytics/jobs/${jobId}/pause`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3274,9 +4309,12 @@ export class ApiClient {
   /**
    * Resume a print job
    */
-  async resumeJob(jobId: string): Promise<unknown> {
+  async resumeJob(jobId: string, reviewedRowVersion: string): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.post(
-      `/job-queue/${jobId}/resume`
+      `/job-queue-analytics/jobs/${jobId}/resume`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3285,24 +4323,43 @@ export class ApiClient {
    * Cancel a print job - stops the print if currently printing.
    * Sends a cancel command to the printer if the job is actively printing.
    */
-  async cancelPrintQueueJob(jobId: string): Promise<void> {
-    await this.client.post(`/job-queue/${jobId}/cancel`);
+  async cancelPrintQueueJob(
+    jobId: string,
+    reviewedRowVersion: string
+  ): Promise<void> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
+    await this.client.post(
+      `/job-queue/${jobId}/cancel`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
    * Abort the current print attempt but keep the job in the queue.
    * Only works when the job is actively printing (Printing, Starting, or Paused).
    */
-  async abortPrint(jobId: string): Promise<void> {
-    await this.client.post(`/job-queue/${jobId}/abort-print`);
+  async abortPrint(jobId: string, reviewedRowVersion: string): Promise<void> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
+    await this.client.post(
+      `/job-queue/${jobId}/abort-print`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
    * Rerun a completed print queue job (add it back to queue)
    */
-  async rerunPrintQueueJob(jobId: string): Promise<unknown> {
+  async rerunPrintQueueJob(
+    jobId: string,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.post(
-      `/job-queue/${jobId}/rerun`
+      `/job-queue/${jobId}/rerun`,
+      undefined,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3310,16 +4367,36 @@ export class ApiClient {
   /**
    * Bulk cancel multiple print jobs
    */
-  async bulkCancelJobs(request: unknown): Promise<unknown> {
-    const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, request);
+  async bulkCancelJobs(request: {
+    jobs: Array<{ jobId: string; rowVersion: string }>;
+  }): Promise<unknown> {
+    const jobIds = request.jobs.map((job) => job.jobId);
+    const etags = request.jobs.map((job) => [
+      job.jobId,
+      this.normalizeQueueJobEtagForBody(job.rowVersion),
+    ] as const);
+    const response = await this.client.post(`/job-queue-analytics/bulk/cancel`, {
+      jobIds,
+      jobETags: Object.fromEntries(etags),
+    });
     return response.data;
   }
 
   /**
    * Bulk reorder print jobs in queue
    */
-  async reorderQueueJobs(moves: { jobId: string; newPosition: number }[]): Promise<unknown> {
-    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, { moves });
+  async reorderQueueJobs(moves: {
+    jobId: string;
+    newPosition: number;
+    rowVersion: string;
+  }[]): Promise<unknown> {
+    const fencedMoves = moves.map(({ rowVersion, ...move }) => ({
+      ...move,
+      ifMatch: this.normalizeQueueJobEtagForBody(rowVersion),
+    }));
+    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, {
+      moves: fencedMoves,
+    });
     return response.data;
   }
 
@@ -3345,10 +4422,16 @@ export class ApiClient {
   /**
    * Update job details (name, priority, notes, tags, material, nozzle)
    */
-  async updateJobDetails(jobId: string, updates: unknown): Promise<unknown> {
+  async updateJobDetails(
+    jobId: string,
+    updates: unknown,
+    reviewedRowVersion: string
+  ): Promise<unknown> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
     const response = await this.client.put(
       `/job-queue/${jobId}`,
-      updates
+      updates,
+      { headers: { "If-Match": etag } }
     );
     return response.data;
   }
@@ -3356,10 +4439,17 @@ export class ApiClient {
   /**
    * Update job notes only
    */
-  async updateJobNotes(jobId: string, notes: string): Promise<void> {
-    await this.client.put(`/job-queue-analytics/jobs/${jobId}/notes`, {
-      notes: notes || null,
-    });
+  async updateJobNotes(
+    jobId: string,
+    notes: string,
+    reviewedRowVersion: string
+  ): Promise<void> {
+    const etag = this.queueJobIfMatch(reviewedRowVersion);
+    await this.client.put(
+      `/job-queue-analytics/jobs/${jobId}/notes`,
+      { notes: notes || null },
+      { headers: { "If-Match": etag } }
+    );
   }
 
   /**
@@ -3521,6 +4611,17 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Detect camera endpoints for a printer backend.
+   */
+  async detectCameraEndpoints(
+    request: import('@/types/api').DetectCameraEndpointsRequest
+  ): Promise<import('@/types/api').DetectCameraEndpointsResponse> {
+    // TODO: Confirm Lambert's backend contract remains POST /api/cameras/detect-endpoints with { printerId }.
+    const response = await this.client.post('/cameras/detect-endpoints', request);
+    return response.data;
+  }
+
   // ====== NFC Devices ======
 
   async getNfcDevices(): Promise<import('@/types/api').NfcDeviceDto[]> {
@@ -3545,6 +4646,19 @@ export class ApiClient {
 
   async deleteNfcDevice(id: string): Promise<void> {
     await this.client.delete(`/nfc-devices/${id}`);
+  }
+
+  async linkNfcTag(request: import('@/features/nfc/types').NfcLinkRequest): Promise<void> {
+    await this.client.post('/nfc/link', request);
+  }
+
+  async getNfcBindings(): Promise<import('@/features/nfc/types').NfcBindingDto[]> {
+    const response = await this.client.get('/nfc/bindings');
+    return response.data;
+  }
+
+  async deleteNfcBinding(id: string): Promise<void> {
+    await this.client.delete(`/nfc/bindings/${id}`);
   }
 
   async getNfcDeviceScanHistory(id: string, limit = 50): Promise<import('@/types/api').NfcScanHistoryDto[]> {
@@ -3720,7 +4834,75 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Capability probe for the notification preferences enum. Introduced by #708.
+   * Legacy servers respond 404; the client treats that as "supportedEventTypes
+   * = the classic four job tokens only" via the preferences adapter, so
+   * anticipatory operator tokens are never sent on the outbound PUT.
+   */
+  async getNotificationCapabilities(): Promise<NotificationCapabilitiesResponse | null> {
+    try {
+      const response = await this.client.get('/notifications/preferences/capabilities');
+      return response.data as NotificationCapabilitiesResponse;
+    } catch (err: unknown) {
+      // The axios response interceptor above unwraps errors into ApiError
+      // shapes carrying `statusCode`, not raw AxiosError. Treat 404 as the
+      // legacy-server signal per the #708 contract; rethrow everything else
+      // (network, 5xx) so callers/react-query can surface a proper failure
+      // instead of misclassifying an outage as "legacy" and silently
+      // stripping operator tokens on save.
+      const status =
+        typeof err === 'object' && err !== null && 'statusCode' in err
+          ? (err as { statusCode: unknown }).statusCode
+          : undefined;
+      if (status === 404) return null;
+      throw err;
+    }
+  }
+
+  async getTelegramSettings(): Promise<TelegramSettingsDto> {
+    const response = await this.client.get('/admin/integrations/telegram/settings');
+    return response.data;
+  }
+
+  async updateTelegramSettings(settings: UpdateTelegramSettingsRequest): Promise<TelegramSettingsDto> {
+    const response = await this.client.put('/admin/integrations/telegram/settings', settings);
+    return response.data;
+  }
+
+  async sendTelegramTestMessage(): Promise<TelegramTestResult> {
+    const response = await this.client.post('/admin/integrations/telegram/test');
+    return response.data;
+  }
+
   // ============ Auto-Dispatch API methods ============
+  private reviewedEtag(value: string, label: string): string {
+    const reviewed = value.trim();
+    if (!reviewed) {
+      throw new Error(`${label} does not have a reviewed ETag`);
+    }
+    return reviewed.startsWith('"') ? reviewed : `"${reviewed}"`;
+  }
+
+  private responseEtag(
+    headers: unknown,
+    label: string
+  ): string {
+    const etag = (headers as { etag?: unknown } | undefined)?.etag;
+    if (typeof etag !== 'string' || !etag.trim()) {
+      throw new Error(`${label} did not return a successor ETag`);
+    }
+    return etag.trim().replace(/^W\//, '').replace(/^"|"$/g, '');
+  }
+
+  private autoDispatchIfMatch(dispatchStateETag: string): string {
+    const value = dispatchStateETag.trim();
+    if (!value) {
+      throw new Error("The reviewed auto-dispatch status does not have an ETag");
+    }
+    return value.startsWith('"') ? value : `"${value}"`;
+  }
+
   async getAutoDispatchStatus(): Promise<AutoDispatchGlobalStatus> {
     const response = await this.client.get(`${AUTO_DISPATCH_API_BASE}/status`);
     return response.data;
@@ -3731,35 +4913,180 @@ export class ApiClient {
     return response.data;
   }
 
-  async confirmAutoDispatchReady(printerId: string): Promise<AutoDispatchReadyResult> {
-    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/ready`);
+  async confirmAutoDispatchReady(
+    printerId: string,
+    dispatchStateETag: string
+  ): Promise<AutoDispatchReadyResult> {
+    const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const response = await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
     return response.data;
   }
 
-  async skipAutoDispatchJob(printerId: string): Promise<void> {
-    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/skip`);
+  async skipAutoDispatchJob(
+    printerId: string,
+    dispatchStateETag: string,
+    jobETag: string
+  ): Promise<void> {
+    const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const jobEtag = this.reviewedEtag(jobETag, "The reviewed next job");
+    await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/skip`,
+      undefined,
+      {
+        headers: {
+          "If-Match": etag,
+          "X-Job-If-Match": jobEtag,
+        },
+      }
+    );
   }
 
-  async cancelAutoDispatch(printerId: string): Promise<void> {
-    await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`);
+  async cancelAutoDispatch(
+    printerId: string,
+    dispatchStateETag: string
+  ): Promise<void> {
+    const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/cancel`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
   }
 
-  async setAutoDispatchEnabled(printerId: string, enabled: boolean): Promise<void> {
-    await this.client.put(`${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`, { enabled });
+  async setAutoDispatchEnabled(
+    printerId: string,
+    enabled: boolean,
+    dispatchStateETag: string,
+    printerETag: string
+  ): Promise<void> {
+    const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const printerEtag = this.reviewedEtag(
+      printerETag,
+      "The reviewed printer"
+    );
+    await this.client.put(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/enabled`,
+      { enabled },
+      {
+        headers: {
+          "If-Match": etag,
+          "X-Printer-If-Match": printerEtag,
+        },
+      }
+    );
   }
 
-  async setAutoDispatchGlobalEnabled(enabled: boolean): Promise<void> {
-    await this.client.put(`${AUTO_DISPATCH_API_BASE}/enabled`, { enabled });
+  async setAutoDispatchGlobalEnabled(
+    enabled: boolean,
+    statuses: AutoDispatchStatus[]
+  ): Promise<void> {
+    const expectedVersions = Object.fromEntries(
+      statuses.map((status) => {
+        if (!status.dispatchStateETag || !status.printerETag) {
+          throw new Error(
+            `Printer ${status.printerId} does not have reviewed ETags`
+          );
+        }
+        return [
+          status.printerId,
+          {
+            dispatchStateETag: status.dispatchStateETag,
+            printerETag: status.printerETag,
+          },
+        ];
+      })
+    );
+    await this.client.put(`${AUTO_DISPATCH_API_BASE}/enabled`, {
+      enabled,
+      expectedVersions,
+    });
   }
 
-  async preClearAutoDispatchBed(printerId: string): Promise<AutoDispatchStatus> {
-    const response = await this.client.post(`${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`);
+  async preClearAutoDispatchBed(
+    printerId: string,
+    dispatchStateETag: string
+  ): Promise<AutoDispatchStatus> {
+    const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const response = await this.client.post(
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/pre-clear`,
+      undefined,
+      { headers: { "If-Match": etag } }
+    );
     return response.data;
+  }
+
+  async acknowledgeCalibrationBedClearAndStart(input: {
+    jobId: string;
+    printerId: string;
+    jobETag: string;
+    dispatchStateETag: string;
+    expectedPrinterConfigRevision?: number | null;
+    idempotencyKey: string;
+  }): Promise<BedClearAcknowledgementResult> {
+    const response = await this.client.post<
+      {
+        message?: string;
+        jobETag?: string | null;
+        dispatchStateETag?: string | null;
+        error?: string;
+        detail?: string;
+      }
+    >(
+      `/job-queue/${input.jobId}/acknowledge-bed-clear-and-start`,
+      {
+        printerId: input.printerId,
+        expectedPrinterConfigRevision:
+          input.expectedPrinterConfigRevision ?? null,
+      },
+      {
+        headers: {
+          "Idempotency-Key": input.idempotencyKey,
+          "If-Match": this.reviewedEtag(input.jobETag, "The reviewed job"),
+          "X-Dispatch-State-If-Match": this.reviewedEtag(
+            input.dispatchStateETag,
+            "The reviewed dispatch state"
+          ),
+        },
+        validateStatus: (status) =>
+          [200, 202, 409, 412, 422, 503].includes(status),
+      }
+    );
+    if (response.status === 200 || response.status === 202) {
+      return {
+        kind: response.status === 202 ? 'accepted' : 'replayed',
+        httpStatus: response.status,
+        message: response.data.message,
+        jobETag: response.data.jobETag,
+        dispatchStateETag: response.data.dispatchStateETag,
+      };
+    }
+    return {
+      kind:
+        response.status === 409
+          ? 'conflict'
+          : response.status === 412
+            ? 'stale'
+            : response.status === 422
+              ? 'incompatible'
+              : 'unavailable',
+      httpStatus: response.status as 409 | 412 | 422 | 503,
+      errorCode: response.data.error ?? 'bed_clear_acknowledgement_failed',
+      detail: response.data.detail,
+    };
   }
 
   // ============ Job Scheduling API methods ============
-  async getScheduledJobs(): Promise<ScheduledJob[]> {
-    const response = await this.client.get('/job-scheduling/scheduled');
+  async getScheduledJobs(dateFrom?: Date, dateTo?: Date): Promise<ScheduledJob[]> {
+    const response = await this.client.get('/job-scheduling/scheduled', {
+      params: {
+        dateFrom: dateFrom?.toISOString(),
+        dateTo: dateTo?.toISOString(),
+      },
+    });
     return response.data || [];
   }
 
@@ -3773,7 +5100,7 @@ export class ApiClient {
     return response.data;
   }
 
-  async rescheduleJob(jobId: string, request: ScheduleJobRequest): Promise<ScheduledJob> {
+  async rescheduleJob(jobId: string, request: RescheduleJobRequest): Promise<ScheduledJob> {
     const response = await this.client.put(`/job-scheduling/${jobId}/reschedule`, request);
     return response.data;
   }
@@ -3782,14 +5109,12 @@ export class ApiClient {
     await this.client.delete(`/job-scheduling/${jobId}/schedule`);
   }
 
-  async pauseSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/job-scheduling/${jobId}/pause`);
-    return response.data;
+  async pauseSchedule(jobId: string): Promise<void> {
+    await this.client.post(`/job-scheduling/${jobId}/pause`);
   }
 
-  async resumeSchedule(jobId: string): Promise<ScheduledJob> {
-    const response = await this.client.post(`/job-scheduling/${jobId}/resume`);
-    return response.data;
+  async resumeSchedule(jobId: string): Promise<void> {
+    await this.client.post(`/job-scheduling/${jobId}/resume`);
   }
 
   async getJobExecutions(jobId: string): Promise<JobExecution[]> {
@@ -3848,15 +5173,167 @@ export class ApiClient {
   /**
    * Assign a spool to a specific toolhead
    */
-  async setToolheadSpool(printerId: string, toolheadIndex: number, spoolId: number): Promise<void> {
-    await this.client.put(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`, { spoolId });
+  async setToolheadSpool(
+    printerId: string,
+    toolheadIndex: number,
+    spoolId: number,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    const response = await this.client.put(
+      `/printers/${printerId}/toolheads/${toolheadIndex}/spool`,
+      { spoolId },
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
+    return this.responseEtag(response.headers, "The toolhead spool mutation");
   }
 
   /**
    * Clear spool assignment from a specific toolhead
    */
-  async clearToolheadSpool(printerId: string, toolheadIndex: number): Promise<void> {
-    await this.client.delete(`/printers/${printerId}/toolheads/${toolheadIndex}/spool`);
+  async clearToolheadSpool(
+    printerId: string,
+    toolheadIndex: number,
+    reviewedRowVersion: string
+  ): Promise<string> {
+    const response = await this.client.delete(
+      `/printers/${printerId}/toolheads/${toolheadIndex}/spool`,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
+    return this.responseEtag(response.headers, "The toolhead spool mutation");
+  }
+
+  // ============ Model Collections API methods (#843/#846) ============
+  // Personal/shared collections that group 3D models. Owner-or-administrator may mutate;
+  // shared collections are readable by any authenticated user. See ModelCollectionsController.
+
+  /** Lists collections visible to the current user (owned + shared; admins see all). */
+  async getModelCollections(): Promise<ModelCollection[]> {
+    const response = await this.client.get("/model-collections");
+    return response.data || [];
+  }
+
+  /** Gets a single collection by id. */
+  async getModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.get(`/model-collections/${id}`);
+    return response.data;
+  }
+
+  /** Creates a new collection owned by the current user. */
+  async createModelCollection(dto: CreateModelCollectionRequest): Promise<ModelCollection> {
+    const response = await this.client.post("/model-collections", dto);
+    return response.data;
+  }
+
+  /** Updates a collection's name/description. */
+  async updateModelCollection(id: string, dto: UpdateModelCollectionRequest): Promise<ModelCollection> {
+    const response = await this.client.put(`/model-collections/${id}`, dto);
+    return response.data;
+  }
+
+  /** Deletes a collection and its memberships. */
+  async deleteModelCollection(id: string): Promise<void> {
+    await this.client.delete(`/model-collections/${id}`);
+  }
+
+  /** Shares a collection so any authenticated user can read it. */
+  async shareModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.post(`/model-collections/${id}/share`);
+    return response.data;
+  }
+
+  /** Unshares a collection so only the owner and administrators can read it. */
+  async unshareModelCollection(id: string): Promise<ModelCollection> {
+    const response = await this.client.post(`/model-collections/${id}/unshare`);
+    return response.data;
+  }
+
+  /** Lists the memberships (model references) of a collection. */
+  async listModelCollectionMembers(id: string): Promise<ModelCollectionMembership[]> {
+    const response = await this.client.get(`/model-collections/${id}/members`);
+    return response.data || [];
+  }
+
+  /** Adds a single model to a collection. Idempotent when already present. */
+  async addModelCollectionMember(id: string, modelId: string): Promise<ModelCollectionMembership> {
+    const response = await this.client.post(`/model-collections/${id}/members`, { modelId });
+    return response.data;
+  }
+
+  /** Removes a single model from a collection. Idempotent when already absent. */
+  async removeModelCollectionMember(id: string, modelId: string): Promise<void> {
+    await this.client.delete(`/model-collections/${id}/members/${modelId}`);
+  }
+
+  /** Replaces a collection's entire membership set. */
+  async replaceModelCollectionMembers(id: string, modelIds: string[]): Promise<ModelCollection> {
+    const response = await this.client.put(`/model-collections/${id}/members`, { modelIds });
+    return response.data;
+  }
+
+  // ── Quotas & Balances ───────────────────────────────────────────────
+
+  async getQuotas(): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>('/quotas');
+    return data;
+  }
+
+  async getQuotasForUser(userId: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/user/${userId}`);
+    return data;
+  }
+
+  async getQuotasForGroup(groupName: string): Promise<QuotaDto[]> {
+    const { data } = await this.client.get<QuotaDto[]>(`/quotas/group/${encodeURIComponent(groupName)}`);
+    return data;
+  }
+
+  async getQuota(id: string): Promise<QuotaDto> {
+    const { data } = await this.client.get<QuotaDto>(`/quotas/${id}`);
+    return data;
+  }
+
+  async createQuota(request: CreateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.post<QuotaDto>('/quotas', request);
+    return data;
+  }
+
+  async updateQuota(id: string, request: UpdateQuotaRequest): Promise<QuotaDto> {
+    const { data } = await this.client.put<QuotaDto>(`/quotas/${id}`, request);
+    return data;
+  }
+
+  async deleteQuota(id: string): Promise<void> {
+    await this.client.delete(`/quotas/${id}`);
+  }
+
+  async checkQuota(request: CheckQuotaRequest): Promise<QuotaCheckResult> {
+    const { data } = await this.client.post<QuotaCheckResult>('/quotas/check', request);
+    return data;
+  }
+
+  async resetExpiredQuotas(): Promise<{ resetCount: number }> {
+    const { data } = await this.client.post<{ resetCount: number }>('/quotas/reset-expired');
+    return data;
+  }
+
+  async getBalance(userId: string): Promise<UserBalanceDto> {
+    const { data } = await this.client.get<UserBalanceDto>(`/quotas/balance/${userId}`);
+    return data;
+  }
+
+  async creditBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/credit`, request);
+    return data;
+  }
+
+  async debitBalance(userId: string, request: BalanceAdjustRequest): Promise<UserBalanceDto> {
+    const { data } = await this.client.post<UserBalanceDto>(`/quotas/balance/${userId}/debit`, request);
+    return data;
+  }
+
+  async getBalanceTransactions(userId: string, take = 50): Promise<BalanceTransactionDto[]> {
+    const { data } = await this.client.get<BalanceTransactionDto[]>(`/quotas/balance/${userId}/transactions`, { params: { take } });
+    return data;
   }
 }
 

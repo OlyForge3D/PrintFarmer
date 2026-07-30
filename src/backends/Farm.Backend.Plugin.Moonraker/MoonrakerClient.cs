@@ -5,6 +5,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
@@ -14,7 +15,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, BackendTimeoutSettings timeouts) : PrinterClientBase, IMoonrakerClient,
+public class MoonrakerClient(
+    HttpClient http,
+    ILogger<MoonrakerClient> logger,
+    BackendTimeoutSettings timeouts,
+    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -24,6 +29,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsControlOperations,
     ISupportsCamera,
     ISupportsConfiguredCameraDetection,
+    ISupportsTriggeredCameraSnapshot,
     ISupportsFileMetadata,
     ISupportsMovement,
     ISupportsTemperatureControl,
@@ -35,12 +41,21 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     ISupportsCompositeStatus,
     ISupportsControlRestart,
     ISupportsGcodeExecution,
+    ISupportsObjectExclusion,
     ISupportsFilamentUsageQuery,
     ISupportsPerExtruderFilamentUsage
 {
+    private const int MaxExcludeObjectNameLength = 256;
+    private static readonly JsonSerializerOptions WebJsonOptions =
+        new(JsonSerializerDefaults.Web);
+
     private readonly HttpClient _http = http;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
+    private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
+        snapmakerU1CameraMonitorManager ?? new SnapmakerU1CameraMonitorManager(new MoonrakerJsonRpcClient());
+
+    private static readonly Regex SafeUnquotedObjectNamePattern = new(@"^[A-Za-z0-9_.:+/@-]+$", RegexOptions.Compiled);
 
     public async Task<PrinterStatus> GetStatusAsync(string baseUrl, CancellationToken ct = default)
     {
@@ -198,6 +213,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             double? progress = null;
             string? jobName = null;
             string? thumb = null;
+            double? printDuration = null;
 
             if (result.TryGetProperty("status", out JsonElement statusEl))
             {
@@ -216,10 +232,23 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                     progress = pv > 1.0 ? pv : pv * 100.0; // support 0..1 or 0..100
                 }
 
-                if (statusEl.TryGetProperty("print_stats", out JsonElement ps) &&
-                    ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                if (statusEl.TryGetProperty("print_stats", out JsonElement ps))
                 {
-                    jobName = fn.GetString();
+                    if (ps.TryGetProperty("filename", out JsonElement fn) && fn.ValueKind == JsonValueKind.String)
+                    {
+                        jobName = fn.GetString();
+                    }
+
+                    if (ps.TryGetProperty("print_duration", out JsonElement pd) && pd.ValueKind == JsonValueKind.Number)
+                    {
+                        try
+                        {
+                            printDuration = pd.GetDouble();
+                        }
+                        catch
+                        {
+                        }
+                    }
                 }
             }
 
@@ -269,7 +298,7 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
                 }
             }
 
-            return new PrinterJob(state, progress, jobName, thumb);
+            return new PrinterJob(state, progress, jobName, thumb, printDuration);
         }
         catch
         {
@@ -355,6 +384,69 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             using HttpResponseMessage resp = await _http.GetAsync(new Uri(url!, UriKind.RelativeOrAbsolute), cts.Token);
             return !resp.IsSuccessStatusCode ? null : await resp.Content.ReadAsByteArrayAsync(cts.Token);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public Task<(string? StreamUrl, string? SnapshotUrl)> GetSnapmakerU1CameraUrlsAsync(string baseUrl, int? frontendPort = null, CancellationToken ct = default)
+    {
+        try
+        {
+            Uri baseUri = new(baseUrl);
+            int port = frontendPort ?? (baseUri.Scheme == "https" ? 443 : 80);
+            UriBuilder builder = new(baseUri)
+            {
+                Port = port,
+                Path = "server/files/camera/monitor.jpg",
+                Query = string.Empty
+            };
+
+            return Task.FromResult<(string? StreamUrl, string? SnapshotUrl)>((null, builder.Uri.ToString()));
+        }
+        catch
+        {
+            return Task.FromResult<(string? StreamUrl, string? SnapshotUrl)>((null, null));
+        }
+    }
+
+    public async Task<byte[]?> GetSnapmakerU1CameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
+
+            bool started = await _snapmakerU1CameraMonitorManager
+                .EnsureMonitorStartedAsync(baseUrl, credential, cts.Token)
+                .ConfigureAwait(false);
+            if (!started)
+            {
+                return null;
+            }
+
+            (_, string? snapshotUrl) = await GetSnapmakerU1CameraUrlsAsync(baseUrl, null, cts.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(snapshotUrl))
+            {
+                return null;
+            }
+
+            using HttpRequestMessage request = new(HttpMethod.Get, snapshotUrl);
+            if (!string.IsNullOrWhiteSpace(credential?.ApiKey))
+            {
+                _ = request.Headers.TryAddWithoutValidation("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage response = await _http.SendAsync(request, cts.Token).ConfigureAwait(false);
+            return !response.IsSuccessStatusCode
+                ? null
+                : await response.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -541,7 +633,15 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             snap = snapshotUrl;
         }
 
-        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT);
+        // Calculate estimated time remaining from progress and elapsed print duration
+        double? printTimeLeftSeconds = null;
+        if (job?.Progress is > 0 and < 100 && job.PrintDurationSeconds is > 0)
+        {
+            double progressFraction = job.Progress.Value / 100.0;
+            printTimeLeftSeconds = job.PrintDurationSeconds.Value * (1.0 - progressFraction) / progressFraction;
+        }
+
+        return new PrinterCompositeStatus(status.IsOnline, state, job?.Progress, job?.JobName, job?.ThumbnailUrl, cam, snap, x, y, z, hotend, bed, hotendT, bedT, PrintTimeLeftSeconds: printTimeLeftSeconds);
     }
 
     public Task<PrinterDto> CreatePrinterDtoAsync(
@@ -602,11 +702,17 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
 
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+    {
+        _ = credential;
+        return await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+    }
 
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
-        => await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+    {
+        _ = credential;
+        return await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+    }
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
     {
@@ -783,6 +889,208 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         return SendGcodeAsync(baseUrl.ToString(), gcode, ct);
     }
 
+    public async Task<PrintJobObjectListDto?> GetCurrentJobObjectsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+    {
+        try
+        {
+            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(_timeouts.StatusPollTimeout);
+
+            Uri baseUri = new(baseUrl);
+            Uri uri = new(baseUri, "printer/objects/query?print_stats&exclude_object");
+            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token);
+            using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cts.Token);
+            if (!doc.RootElement.TryGetProperty("result", out JsonElement result) ||
+                !result.TryGetProperty("status", out JsonElement status))
+            {
+                return null;
+            }
+
+            if (!IsActivePrint(status))
+            {
+                return new PrintJobObjectListDto(Guid.Empty, null, Array.Empty<PrintJobObjectDto>());
+            }
+
+            string? jobName = TryGetJobName(status);
+            HashSet<string> excludedObjects = GetStringSet(status, "exclude_object", "excluded_objects");
+            string? currentObject = TryGetNestedString(status, "exclude_object", "current_object");
+
+            List<PrintJobObjectDto> objects = GetLiveExcludeObjects(status, excludedObjects, currentObject);
+            if (objects.Count == 0 && !string.IsNullOrWhiteSpace(jobName))
+            {
+                GCodeMetadata? metadata = await GetFileMetadataAsync(baseUrl, jobName, cts.Token);
+                objects = GetMetadataObjects(metadata, excludedObjects, currentObject);
+            }
+
+            return new PrintJobObjectListDto(Guid.Empty, jobName, objects);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<bool> ExcludeObjectAsync(string baseUrl, string objectName, CancellationToken ct = default)
+    {
+        string command = BuildExcludeObjectCommand(objectName);
+        return await SendGcodePrivateAsync(baseUrl, command, ct);
+    }
+
+    public static string BuildExcludeObjectCommand(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            throw new ArgumentException("Object name is required.", nameof(objectName));
+        }
+
+        if (objectName.Length > MaxExcludeObjectNameLength)
+        {
+            throw new ArgumentException("Object name is too long.", nameof(objectName));
+        }
+
+        if (objectName.Any(char.IsControl) || objectName.Contains(';', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Object name contains invalid characters.", nameof(objectName));
+        }
+
+        if (SafeUnquotedObjectNamePattern.IsMatch(objectName))
+        {
+            return $"EXCLUDE_OBJECT NAME={objectName}";
+        }
+
+        string escapedName = objectName
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("\"", "\\\"", StringComparison.Ordinal);
+
+        return $"EXCLUDE_OBJECT NAME=\"{escapedName}\"";
+    }
+
+    private static bool IsActivePrint(JsonElement status)
+    {
+        if (status.TryGetProperty("print_stats", out JsonElement printStats) &&
+            printStats.ValueKind == JsonValueKind.Object &&
+            printStats.TryGetProperty("state", out JsonElement state) &&
+            state.ValueKind == JsonValueKind.String)
+        {
+            string? printState = state.GetString();
+            return string.Equals(printState, "printing", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(printState, "paused", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string? TryGetJobName(JsonElement status)
+    {
+        if (status.TryGetProperty("print_stats", out JsonElement printStats) &&
+            printStats.ValueKind == JsonValueKind.Object &&
+            printStats.TryGetProperty("filename", out JsonElement filename) &&
+            filename.ValueKind == JsonValueKind.String)
+        {
+            return filename.GetString();
+        }
+
+        return null;
+    }
+
+    private static string? TryGetNestedString(JsonElement parent, string objectName, string propertyName)
+    {
+        if (parent.TryGetProperty(objectName, out JsonElement nested) &&
+            nested.ValueKind == JsonValueKind.Object &&
+            nested.TryGetProperty(propertyName, out JsonElement value) &&
+            value.ValueKind == JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+
+        return null;
+    }
+
+    private static HashSet<string> GetStringSet(JsonElement parent, string objectName, string propertyName)
+    {
+        HashSet<string> values = new(StringComparer.Ordinal);
+        if (!parent.TryGetProperty(objectName, out JsonElement nested) ||
+            nested.ValueKind != JsonValueKind.Object ||
+            !nested.TryGetProperty(propertyName, out JsonElement array) ||
+            array.ValueKind != JsonValueKind.Array)
+        {
+            return values;
+        }
+
+        foreach (JsonElement item in array.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                values.Add(item.GetString()!);
+            }
+        }
+
+        return values;
+    }
+
+    private static List<PrintJobObjectDto> GetLiveExcludeObjects(JsonElement status, HashSet<string> excludedObjects, string? currentObject)
+    {
+        if (!status.TryGetProperty("exclude_object", out JsonElement excludeObject) ||
+            excludeObject.ValueKind != JsonValueKind.Object ||
+            !excludeObject.TryGetProperty("objects", out JsonElement objectsElement) ||
+            objectsElement.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        List<PrintJobObjectDto> objects = [];
+        foreach (JsonElement objectElement in objectsElement.EnumerateArray())
+        {
+            if (objectElement.ValueKind != JsonValueKind.Object ||
+                !objectElement.TryGetProperty("name", out JsonElement nameElement) ||
+                nameElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            string? name = nameElement.GetString();
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            objects.Add(new PrintJobObjectDto(
+                name,
+                excludedObjects.Contains(name),
+                string.Equals(name, currentObject, StringComparison.Ordinal)));
+        }
+
+        return objects;
+    }
+
+    private static List<PrintJobObjectDto> GetMetadataObjects(GCodeMetadata? metadata, HashSet<string> excludedObjects, string? currentObject)
+    {
+        if (metadata?.ObjectInfo is not { Length: > 0 })
+        {
+            return [];
+        }
+
+        return metadata.ObjectInfo
+            .Select(o => o.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
+            .Select(name => new PrintJobObjectDto(
+                name!,
+                excludedObjects.Contains(name!),
+                string.Equals(name, currentObject, StringComparison.Ordinal)))
+            .ToList();
+    }
+
     // ISupportsFilamentControl implementation
     public async Task<bool> LoadFilamentAsync(string baseUrl, CancellationToken ct = default)
         => await SendGcodePrivateAsync(baseUrl, "LOAD_FILAMENT", ct);
@@ -805,12 +1113,75 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             Uri baseUri4 = new(baseUrl);
             Uri scriptUri = new(baseUri4, "printer/gcode/script");
             using HttpResponseMessage resp = await _http.PostAsJsonAsync(scriptUri, new { script = string.Join("\n", gcodes) }, cts.Token);
+
+            // Secondary defense (#317): translate firmware-level busy signals to PrinterBackendBusyException
+            // so the controller returns HTTP 409 Conflict to the caller.
+            //
+            // 409 Conflict — Moonraker/firmware explicitly blocked the command (gcode queue locked).
+            //   Always treat as printer-busy-printing.
+            //
+            // 503 Service Unavailable — Moonraker returns this when Klippy is unavailable
+            //   (disconnected, shutdown, or error state), NOT when the printer is actively printing.
+            //   Inspect the JSON body: only raise PrinterBackendBusyException when the message
+            //   contains printer-busy keywords (e.g. "printing", "busy"); otherwise treat as a
+            //   transient backend-unavailable condition and return false.
+            //   This narrows the overly-broad "503 = busy" rule from #317 (Bishop's review #318).
+            if (resp.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                throw new PrinterBackendBusyException(
+                    $"Moonraker refused gcode (409 Conflict) at {baseUrl}.");
+            }
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+            {
+                string errorBody = await resp.Content.ReadAsStringAsync(cts.Token);
+                if (IsMoonrakerBusyPrintingBody(errorBody))
+                {
+                    throw new PrinterBackendBusyException(
+                        $"Moonraker refused gcode (503 printing-busy) at {baseUrl}.");
+                }
+
+                // Klippy unavailable / error state — not a printer-busy signal.
+                return false;
+            }
+
             return resp.IsSuccessStatusCode;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            throw;
         }
         catch
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns true when a Moonraker 503 error body indicates the printer is actively printing
+    /// (as opposed to Klippy being disconnected or in a shutdown/error state).
+    /// Moonraker 503 bodies are JSON: <c>{"error": "WebRequestError", "message": "..."}</c>.
+    ///
+    /// Phrase allowlist (case-insensitive) — only unambiguous printer-job-busy signals:
+    ///   "printer is printing"           — gcode rejected while a job is active
+    ///   "printer is currently printing" — Klipper firmware variant
+    ///   "printer is busy"               — firmware variant
+    ///   "printer busy"                  — older firmware variant
+    ///   "sd busy"                       — SD-card busy variant
+    ///
+    /// Bare "busy" and bare "printing" are intentionally excluded: they over-match Klippy
+    /// startup states (e.g. "Klippy is busy initializing") and error messages that mention
+    /// "printing" in a non-job-busy context. Prefer false negatives over false positives —
+    /// a miss returns false (backend unavailable), not a wrong 409.
+    /// </summary>
+    private static bool IsMoonrakerBusyPrintingBody(string body)
+    {
+        string lower = body.ToLowerInvariant();
+        return lower.Contains("printer is printing")
+            || lower.Contains("printer is currently printing")
+            || lower.Contains("printer is busy")
+            || lower.Contains("printer busy")
+            || lower.Contains("sd busy");
     }
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
@@ -1890,78 +2261,295 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     {
         try
         {
-            using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(_timeouts.CommandTimeout);
-            Uri baseUri = new(baseUrl);
-            string relative = "server/history/list";
-            List<string> queryParams = new();
-
-            if (limit.HasValue)
+            int requestedStart = Math.Max(0, start ?? 0);
+            int? requestedLimit = limit is > 0 ? limit : null;
+            long requestedEnd = requestedLimit.HasValue
+                ? (long)requestedStart + requestedLimit.Value
+                : long.MaxValue;
+            const int PageSize = 100;
+            int offset = 0;
+            int sourceCount = 0;
+            int examinedCount = 0;
+            bool reachedSourceEnd = false;
+            var jobs = new List<HistoryJob>();
+            var excludedEntries = new List<HistoryExcludedEntryEvidence>();
+            while (true)
             {
-                queryParams.Add($"limit={limit.Value}");
+                int pageSize = requestedLimit.HasValue
+                    ? (int)Math.Min(
+                        PageSize,
+                        Math.Max(1L, requestedEnd - jobs.Count))
+                    : PageSize;
+                HistoryListResponse page = await FetchMoonrakerHistoryPageAsync(
+                    baseUrl,
+                    pageSize,
+                    offset,
+                    since,
+                    before,
+                    order,
+                    ct);
+                int examined = page.ExaminedSourceEntries;
+                if (examined > 0 && page.Count < offset + examined)
+                {
+                    throw new InvalidDataException(
+                        "Moonraker history count did not cover the returned source page.");
+                }
+
+                sourceCount = Math.Max(sourceCount, page.Count);
+                examinedCount += examined;
+                offset += examined;
+                jobs.AddRange(page.Jobs);
+                excludedEntries.AddRange(page.ExcludedEntries);
+                reachedSourceEnd = offset >= sourceCount;
+                bool requestedRangeFilled =
+                    requestedLimit.HasValue &&
+                    jobs.Count >= requestedEnd;
+                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                {
+                    break;
+                }
             }
 
-            if (start.HasValue)
+            HistoryJob[] requestedJobs = jobs
+                .Skip(requestedStart)
+                .Take(requestedLimit ?? int.MaxValue)
+                .ToArray();
+            bool coversRequestedRange =
+                requestedLimit.HasValue
+                    ? requestedJobs.Length >= requestedLimit.Value || reachedSourceEnd
+                    : reachedSourceEnd;
+            var result = new HistoryListResponse
             {
-                queryParams.Add($"start={start.Value}");
-            }
-
-            if (since.HasValue)
-            {
-                queryParams.Add($"since={((DateTimeOffset)since.Value).ToUnixTimeSeconds()}");
-            }
-
-            if (before.HasValue)
-            {
-                queryParams.Add($"before={((DateTimeOffset)before.Value).ToUnixTimeSeconds()}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(order))
-            {
-                queryParams.Add($"order={Uri.EscapeDataString(order)}");
-            }
-
-            if (queryParams.Count > 0)
-            {
-                relative += "?" + string.Join("&", queryParams);
-            }
-
-            Uri uri = new(baseUri, relative);
-            _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
-            using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
-            {
-                _logger.LogWarning("[Moonraker] History API returned {RespStatusCode} from {Uri}", resp.StatusCode, uri);
-                return null;
-            }
-
-            string content = await resp.Content.ReadAsStringAsync(cts.Token);
-            _logger.LogDebug("[Moonraker] History response: {Value0}...", content.Substring(0, Math.Min(200, content.Length)));
-            MoonrakerResponse<HistoryListResponse>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryListResponse>>(cancellationToken: cts.Token);
-            if (response?.Result == null)
-            {
-                _logger.LogWarning($"[Moonraker] History response deserialization returned null");
-                return null;
-            }
-
-            _logger.LogInformation("[Moonraker] Successfully fetched {Count} history items", response.Result.Count);
-            return response.Result;
+                Count = sourceCount,
+                Jobs = requestedJobs,
+                ExaminedSourceEntries = examinedCount,
+                AuthorityEvidence = new HistoryListAuthorityEvidence(
+                "moonraker",
+                Math.Max(sourceCount, examinedCount),
+                examinedCount,
+                StartsAtBeginning: true,
+                HasUnambiguousEnd: reachedSourceEnd,
+                CoversRequestedRange: coversRequestedRange,
+                ExcludedEntryCount: excludedEntries.Count),
+                ExcludedEntries = [.. excludedEntries],
+            };
+            _logger.LogInformation(
+                "[Moonraker] Successfully fetched {ReturnedCount} of {SourceCount} history items",
+                requestedJobs.Length,
+                sourceCount);
+            return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             _logger.LogDebug("History request cancelled by user");
             throw;
         }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        catch (OperationCanceledException ex)
         {
             _logger.LogWarning(ex, "[Moonraker] History request timed out for {BaseUrl}", baseUrl);
-            return null;
+            throw new TimeoutException("Moonraker history request timed out.", ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[Moonraker] History transport failed for {BaseUrl}", baseUrl);
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[Moonraker] Failed to get history list from {BaseUrl}: {Message}", baseUrl, ex.Message);
             return null;
         }
+    }
+
+    private async Task<HistoryListResponse> FetchMoonrakerHistoryPageAsync(
+        string baseUrl,
+        int limit,
+        int start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct)
+    {
+        using CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(_timeouts.CommandTimeout);
+        Uri baseUri = new(baseUrl);
+        var queryParams = new List<string>
+        {
+            $"limit={limit}",
+            $"start={start}",
+        };
+        if (since.HasValue)
+        {
+            queryParams.Add(
+                $"since={new DateTimeOffset(NormalizeUtc(since.Value)).ToUnixTimeSeconds()}");
+        }
+
+        if (before.HasValue)
+        {
+            queryParams.Add(
+                $"before={new DateTimeOffset(NormalizeUtc(before.Value)).ToUnixTimeSeconds()}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(order))
+        {
+            queryParams.Add($"order={Uri.EscapeDataString(order)}");
+        }
+
+        Uri uri = new(
+            baseUri,
+            $"server/history/list?{string.Join("&", queryParams)}");
+        _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
+        using HttpResponseMessage response = await _http.GetAsync(uri, cts.Token);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"Moonraker history API returned {(int)response.StatusCode}.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        string content = await response.Content.ReadAsStringAsync(cts.Token);
+        _logger.LogDebug(
+            "[Moonraker] History response: {Value0}...",
+            content[..Math.Min(200, content.Length)]);
+        if (!IsAuthoritativeHistoryListPayload(content))
+        {
+            throw new InvalidDataException(
+                "Moonraker history response was structurally incomplete.");
+        }
+
+        using JsonDocument document = JsonDocument.Parse(content);
+        JsonElement resultElement = document.RootElement.GetProperty("result");
+        JsonElement jobsElement = resultElement.GetProperty("jobs");
+        var jobs = new List<HistoryJob>(jobsElement.GetArrayLength());
+        var excludedEntries =
+            new List<HistoryExcludedEntryEvidence>(jobsElement.GetArrayLength());
+        int sourceIndex = 0;
+        foreach (JsonElement jobElement in jobsElement.EnumerateArray())
+        {
+            bool included = false;
+            if (jobElement.ValueKind == JsonValueKind.Object)
+            {
+                try
+                {
+                    HistoryJob? job = jobElement.Deserialize<HistoryJob>(WebJsonOptions);
+                    if (job is not null &&
+                        !string.IsNullOrWhiteSpace(job.JobId) &&
+                        !string.IsNullOrWhiteSpace(job.Filename) &&
+                        !string.IsNullOrWhiteSpace(job.Status) &&
+                        job.StartTime > 0)
+                    {
+                        jobs.Add(job);
+                        included = true;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogDebug(
+                        ex,
+                        "[Moonraker] Excluding malformed history entry at source offset {SourceOffset}",
+                        start + sourceIndex);
+                }
+            }
+
+            if (!included)
+            {
+                try
+                {
+                    excludedEntries.Add(
+                        CreateExcludedHistoryEvidence(jobElement));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "[Moonraker] History evidence extraction failed at source offset {SourceOffset}",
+                        start + sourceIndex);
+                    excludedEntries.Add(new HistoryExcludedEntryEvidence(
+                        BackendJobId: null,
+                        Filename: null,
+                        StartTime: null,
+                        Reason: "malformed_history_entry"));
+                }
+            }
+
+            sourceIndex++;
+        }
+
+        return new HistoryListResponse
+        {
+            Count = resultElement.GetProperty("count").GetInt32(),
+            Jobs = jobs.ToArray(),
+            ExaminedSourceEntries = jobsElement.GetArrayLength(),
+            ExcludedEntries = excludedEntries.ToArray(),
+        };
+    }
+
+    private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
+        JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            return new HistoryExcludedEntryEvidence(
+                BackendJobId: null,
+                Filename: null,
+                StartTime: null,
+                Reason: "malformed_history_entry");
+        }
+
+        string? filename = TryReadHistoryString(entry, "filename");
+        double? startTime =
+            entry.TryGetProperty("start_time", out JsonElement start) &&
+            start.ValueKind == JsonValueKind.Number &&
+            start.TryGetDouble(out double value)
+                ? value
+                : null;
+        return new HistoryExcludedEntryEvidence(
+            TryReadHistoryString(entry, "job_id"),
+            filename,
+            startTime,
+            "malformed_history_entry");
+    }
+
+    private static string? TryReadHistoryString(
+        JsonElement element,
+        string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : property.ToString();
+    }
+
+    private static DateTime NormalizeUtc(DateTime value) =>
+        value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+        };
+
+    private static bool IsAuthoritativeHistoryListPayload(string content)
+    {
+        using JsonDocument document = JsonDocument.Parse(content);
+        if (document.RootElement.ValueKind != JsonValueKind.Object ||
+            !document.RootElement.TryGetProperty("result", out JsonElement result) ||
+            result.ValueKind != JsonValueKind.Object ||
+            !result.TryGetProperty("count", out JsonElement countElement) ||
+            !countElement.TryGetInt32(out int count) ||
+            count < 0 ||
+            !result.TryGetProperty("jobs", out JsonElement jobsElement) ||
+            jobsElement.ValueKind != JsonValueKind.Array ||
+            count < jobsElement.GetArrayLength())
+        {
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1980,18 +2568,25 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
             Uri baseUri = new(baseUrl);
             Uri uri = new(baseUri, $"server/history/job?uid={Uri.EscapeDataString(jobId)}");
             using HttpResponseMessage resp = await _http.GetAsync(uri, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return null;
+                throw new HistoryJobNotFoundException(
+                    $"Moonraker history job {jobId} was not found.");
             }
 
+            resp.EnsureSuccessStatusCode();
             MoonrakerResponse<HistoryJob>? response = await resp.Content.ReadFromJsonAsync<MoonrakerResponse<HistoryJob>>(cancellationToken: cts.Token);
-            return response?.Result;
+            return response?.Result ?? throw new InvalidDataException(
+                $"Moonraker returned an empty history detail payload for {jobId}.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
-            return null;
+            throw;
         }
     }
 
@@ -2604,18 +3199,88 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     {
         progress?.Report(UploadAndPrintStage.Uploading);
 
-        // Single HTTP call: upload with print=true so Moonraker starts printing immediately
-        bool success = await UploadGcodeAsync(baseUrl, fileName, fileContent, print: true, ct);
-        if (!success)
+        try
         {
-            _logger.LogWarning("[Moonraker] UploadAndStartPrint: upload+print failed for {FileName}", fileName);
+            Uri uri = new(new Uri(baseUrl), "server/files/upload");
+            using MultipartFormDataContent formContent = new();
+            using StreamContent streamContent = new(fileContent);
+            streamContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            formContent.Add(streamContent, "file", fileName);
+            formContent.Add(new StringContent("gcodes"), "root");
+            formContent.Add(new StringContent("true"), "print");
+
+            // This is one start-capable request. Once PostAsync begins, a transport timeout
+            // cannot prove that Moonraker did not accept the upload and start the print.
+            using HttpResponseMessage response = await _http.PostAsync(uri, formContent, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                string body = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "[Moonraker] UploadAndStartPrint explicitly rejected {FileName} with {StatusCode}: {Body}",
+                    fileName,
+                    response.StatusCode,
+                    body);
+                progress?.Report(UploadAndPrintStage.Failed);
+                string error =
+                    $"Moonraker rejected upload and start with HTTP {(int)response.StatusCode}.";
+                return (int)response.StatusCode is >= 400 and < 500
+                    ? UploadAndPrintResult.FailedBeforeStart(
+                        UploadAndPrintStage.Uploading,
+                        error)
+                    : UploadAndPrintResult.Unknown(
+                        UploadAndPrintStage.Uploading,
+                        error);
+            }
+
+            string? providerFileIdentity = await ReadMoonrakerUploadIdentityAsync(response, fileName, ct);
+            _logger.LogInformation(
+                "[Moonraker] UploadAndStartPrint accepted {FileName} as {ProviderIdentity}",
+                fileName,
+                providerFileIdentity);
+            progress?.Report(UploadAndPrintStage.Completed);
+            return UploadAndPrintResult.Ok(backendFileIdentity: providerFileIdentity);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "[Moonraker] UploadAndStartPrint outcome unknown for {FileName}; reconciliation required",
+                fileName);
             progress?.Report(UploadAndPrintStage.Failed);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, $"Failed to upload and start print of {fileName}");
+            return UploadAndPrintResult.Unknown(
+                UploadAndPrintStage.StartingPrint,
+                "Moonraker may have accepted the print before the response was lost.");
+        }
+    }
+
+    private static async Task<string> ReadMoonrakerUploadIdentityAsync(
+        HttpResponseMessage response,
+        string fallbackFileName,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using Stream body = await response.Content.ReadAsStreamAsync(ct);
+            using JsonDocument document = await JsonDocument.ParseAsync(body, cancellationToken: ct);
+            if (document.RootElement.TryGetProperty("result", out JsonElement result) &&
+                result.TryGetProperty("item", out JsonElement item) &&
+                item.TryGetProperty("path", out JsonElement path) &&
+                path.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(path.GetString()))
+            {
+                return path.GetString()!;
+            }
+        }
+        catch (JsonException)
+        {
+            // A successful response without the optional path still proves acceptance.
         }
 
-        _logger.LogInformation("[Moonraker] UploadAndStartPrint: upload+print succeeded for {FileName} in single call", fileName);
-        progress?.Report(UploadAndPrintStage.Completed);
-        return UploadAndPrintResult.Ok();
+        return fallbackFileName;
     }
 
     /// <summary>
@@ -2661,6 +3326,9 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
         (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
         return (stream, snapshot);
     }
+
+    async Task<byte[]?> ISupportsTriggeredCameraSnapshot.GetTriggeredCameraSnapshotAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
+        => await GetSnapmakerU1CameraSnapshotAsync(baseUrl, credential, ct);
 
     /// <summary>
     /// ISupportsFileMetadata implementation - gets metadata for a file on the printer.
@@ -2742,10 +3410,27 @@ public class MoonrakerClient(HttpClient http, ILogger<MoonrakerClient> logger, B
     /// <param name="limit">Maximum number of jobs to return.</param>
     /// <param name="start">Index to start from for pagination.</param>
     /// <param name="since">Filter to only return jobs started after this UTC timestamp.</param>
+    /// <param name="before">Filter to only return jobs started before this UTC timestamp.</param>
+    /// <param name="order">Requested timestamp ordering.</param>
     /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(string baseUrl, int? limit = null, int? start = null, DateTime? since = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetHistoryListAsync(baseUrl, limit, start, since: since, ct: ct);
+    async Task<HistoryListResponse?> ISupportsHistory.GetHistoryListAsync(
+        string baseUrl,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        PrinterCredential? credential,
+        CancellationToken ct)
+        => await GetHistoryListAsync(
+            baseUrl,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            ct);
 
     async Task<HistoryJob?> ISupportsHistory.GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
         => await GetHistoryJobAsync(baseUrl, jobId, ct);

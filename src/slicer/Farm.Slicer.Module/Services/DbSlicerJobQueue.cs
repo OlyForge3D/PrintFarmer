@@ -2,6 +2,8 @@
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
+using Farm.Slicer.Module.Services.Configuration;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Services;
 
@@ -9,9 +11,14 @@ namespace Farm.Slicer.Module.Services;
 /// Database-backed implementation of ISlicerJobQueue which delegates to ISliceJobRepository/EfSliceJobRepository
 /// This provides equivalent semantics for the HTTP-based worker claim/renew/complete flow used by HttpJobPollerService.
 /// </summary>
-public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
+public class DbSlicerJobQueue(
+    ISliceJobRepository repo,
+    IOptions<JobDispatchRetrySettings>? retryOptions = null) : ISlicerJobQueue
 {
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
+    private readonly int _maxClaimRetries = Math.Max(
+        0,
+        retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
 
     public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
@@ -25,11 +32,16 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
     {
         if (!Guid.TryParse(workerId, out Guid wid))
         {
-            // WorkerId may be a GUID string in the shared model; try fallback
-            wid = Guid.NewGuid();
+            throw new ArgumentException("Worker ID must be a valid GUID.", nameof(workerId));
         }
 
-        SliceJob? job = await _repo.ClaimNextJobAsync(wid, preferredEngine == null ? null : new[] { preferredEngine.Value.ToString() }, leaseDurationSeconds: 300, ct: cancellationToken);
+        SliceJob? job = await _repo.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(
+                wid,
+                preferredEngine == null ? null : [preferredEngine.Value.ToString()]),
+            leaseDurationSeconds: 300,
+            maxRetries: _maxClaimRetries,
+            ct: cancellationToken);
         return job == null ? null : ToDistributedJob(job);
     }
 
@@ -44,14 +56,43 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         int? estPrint = result.EstimatedPrintTimeSeconds > 0 ? (int?)Convert.ToInt32(result.EstimatedPrintTimeSeconds) : null;
         decimal? filament = result.EstimatedFilamentUsageGrams > 0 ? (decimal?)Convert.ToDecimal(result.EstimatedFilamentUsageGrams) : null;
 
-        await _repo.MarkCompletedAsync(job.Id, resultUrl, estPrint, filament, cancellationToken);
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool completed = await _repo.TryCompleteForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            resultUrl,
+            [],
+            estPrint,
+            filament,
+            cancellationToken);
+        ThrowIfClaimLost(completed, job.Id);
     }
 
-    public Task FailJobAsync(Guid jobId, string errorMessage, CancellationToken cancellationToken = default)
-        => _repo.MarkFailedAsync(jobId, errorMessage, cancellationToken);
+    public async Task FailJobAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
+    {
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool failed = await _repo.TryFailForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            errorMessage,
+            cancellationToken);
+        ThrowIfClaimLost(failed, job.Id);
+    }
 
-    public Task UpdateProgressAsync(Guid jobId, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
-        => _repo.UpdateProgressAsync(jobId, progress, currentStep ?? string.Empty, cancellationToken);
+    public async Task UpdateProgressAsync(DistributedSlicingJob job, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
+    {
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool updated = await _repo.TryUpdateProgressForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            progress,
+            currentStep ?? string.Empty,
+            cancellationToken);
+        ThrowIfClaimLost(updated, job.Id);
+    }
 
     public async Task<DistributedSlicingJob?> GetJobAsync(Guid jobId, CancellationToken cancellationToken = default)
     {
@@ -99,12 +140,16 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
         return _repo.SaveChangesAsync(cancellationToken);
     }
 
-    public Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
+    public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(job);
-
-        // Bump retry and set status back to queued via repository
-        return _repo.IncrementRetryAndRequeueAsync(job.Id, maxRetries: 3, ct: cancellationToken);
+        (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
+        bool requeued = await _repo.TryRequeueForActiveLeaseAsync(
+            job.Id,
+            workerId,
+            claimToken,
+            maxRetries: 3,
+            cancellationToken);
+        ThrowIfClaimLost(requeued, job.Id);
     }
 
     public async Task<DistributedSlicingJob?> FindExistingJobAsync(Guid correlationId, string checksum, CancellationToken cancellationToken = default)
@@ -124,24 +169,60 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             return null!;
         }
 
+        SlicerEngineType engine = SlicerEngineNames.Resolve(sj);
         DistributedSlicingJob dsj = new DistributedSlicingJob
         {
             Id = sj.Id,
+            ClaimToken = sj.ClaimToken ?? Guid.Empty,
             UserId = sj.UserId,
             CreatedAt = sj.QueuedAt,
             Priority = (SlicingJobPriority)sj.Priority,
             Status = Enum.TryParse(sj.Status, true, out SlicingJobStatus st) ? st : SlicingJobStatus.Queued,
             ModelFileUrl = Uri.TryCreate(sj.ModelFileUrl, UriKind.RelativeOrAbsolute, out Uri? u) ? u : new Uri("about:blank", UriKind.RelativeOrAbsolute),
             ModelFileName = sj.ModelFileName,
-            EngineType = (SlicerEngineType)sj.SlicerEngine,
-            SlicerEngine = ((SlicerEngineType)sj.SlicerEngine).ToString(),
+            EngineType = engine,
+            SlicerEngine = engine.ToString(),
             WorkerId = sj.WorkerId?.ToString(),
             StartedAt = sj.StartedAt,
             CompletedAt = sj.CompletedAt,
-            RetryCount = sj.RetryCount
+            RetryCount = sj.RetryCount,
+
+            // The exact resolved profiles must survive the queue hop; dropping them here is what
+            // previously starved the worker of any usable slicer configuration.
+            NativeProfiles = NativeSlicerProfiles.FromJob(
+                sj.MachineProfileJson,
+                sj.ProcessProfileJson,
+                sj.FilamentProfileJson,
+                sj.MachineProfileSha256,
+                sj.ProcessProfileSha256,
+                sj.FilamentProfileSha256),
         };
 
         return dsj;
+    }
+
+    private static (Guid WorkerId, Guid ClaimToken) GetClaimIdentity(DistributedSlicingJob job)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        if (!Guid.TryParse(job.WorkerId, out Guid workerId) || workerId == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Slicing job {job.Id} does not have a valid worker claim.");
+        }
+
+        if (job.ClaimToken == Guid.Empty)
+        {
+            throw new InvalidOperationException($"Slicing job {job.Id} does not have a claim token.");
+        }
+
+        return (workerId, job.ClaimToken);
+    }
+
+    private static void ThrowIfClaimLost(bool operationSucceeded, Guid jobId)
+    {
+        if (!operationSucceeded)
+        {
+            throw new InvalidOperationException($"The active claim for slicing job {jobId} is no longer valid.");
+        }
     }
 
     private static SliceJob ToSliceJob(DistributedSlicingJob dj)
@@ -155,7 +236,16 @@ public class DbSlicerJobQueue(ISliceJobRepository repo) : ISlicerJobQueue
             Status = SliceJobStatus.Queued,
             ModelFileUrl = dj.ModelFileUrl?.ToString() ?? string.Empty,
             ModelFileName = dj.ModelFileName,
-            SlicerEngine = (int)dj.EngineType
+            SlicerEngine = (int)dj.EngineType,
+            SlicerEngineName = dj.EngineType.ToString(),
+            CorrelationId = dj.CorrelationId == Guid.Empty ? null : dj.CorrelationId,
+            Checksum = string.IsNullOrWhiteSpace(dj.Checksum) ? null : dj.Checksum,
+            MachineProfileJson = dj.NativeProfiles?.MachineJson,
+            ProcessProfileJson = dj.NativeProfiles?.ProcessJson,
+            FilamentProfileJson = dj.NativeProfiles?.FilamentJson,
+            MachineProfileSha256 = dj.NativeProfiles?.MachineSha256,
+            ProcessProfileSha256 = dj.NativeProfiles?.ProcessSha256,
+            FilamentProfileSha256 = dj.NativeProfiles?.FilamentSha256,
         };
     }
 }

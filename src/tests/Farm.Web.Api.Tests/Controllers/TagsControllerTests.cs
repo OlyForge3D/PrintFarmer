@@ -1,6 +1,7 @@
 ﻿using Farm.Api.Controllers;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -337,6 +338,77 @@ public class TagsControllerTests
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(suggestions, okResult.Value);
         _tagServiceMock.Verify(s => s.GetTagSuggestionsAsync(query, limit, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    #endregion
+
+    #region UpdateTagAsync Tests
+
+    [Fact]
+    public async Task UpdateTagAsync_WithNullBody_ReturnsBadRequest()
+    {
+        ActionResult<TagDto> result = await _controller.UpdateTagAsync(Guid.NewGuid(), null!, CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateTagAsync_WhenSuccessful_ReturnsOk()
+    {
+        Guid tagId = Guid.NewGuid();
+        var updated = new TagDto { Id = tagId, Name = "Renamed", Revision = 2, ConcurrencyToken = Guid.NewGuid() };
+        _tagServiceMock
+            .Setup(s => s.UpdateTagAsync(tagId, It.IsAny<UpdateTagDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(updated);
+
+        ActionResult<TagDto> result = await _controller.UpdateTagAsync(
+            tagId, new UpdateTagDto { Name = "Renamed", ExpectedRevision = 1 }, CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(updated, okResult.Value);
+    }
+
+    [Fact]
+    public async Task UpdateTagAsync_WhenNotFound_Returns404()
+    {
+        Guid tagId = Guid.NewGuid();
+        _tagServiceMock
+            .Setup(s => s.UpdateTagAsync(tagId, It.IsAny<UpdateTagDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("missing"));
+
+        ActionResult<TagDto> result = await _controller.UpdateTagAsync(
+            tagId, new UpdateTagDto { ExpectedRevision = 1 }, CancellationToken.None);
+
+        _ = Assert.IsType<NotFoundObjectResult>(result.Result);
+    }
+
+    [Fact]
+    public async Task UpdateTagAsync_OnConcurrencyConflict_Returns409()
+    {
+        Guid tagId = Guid.NewGuid();
+        _tagServiceMock
+            .Setup(s => s.UpdateTagAsync(tagId, It.IsAny<UpdateTagDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TagConcurrencyException(tagId, 1, 3));
+
+        ActionResult<TagDto> result = await _controller.UpdateTagAsync(
+            tagId, new UpdateTagDto { ExpectedRevision = 1 }, CancellationToken.None);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+    }
+
+    [Fact]
+    public async Task UpdateTagAsync_OnDuplicateName_Returns409()
+    {
+        Guid tagId = Guid.NewGuid();
+        _tagServiceMock
+            .Setup(s => s.UpdateTagAsync(tagId, It.IsAny<UpdateTagDto>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DuplicateEntityException("A tag named 'Alpha' already exists"));
+
+        ActionResult<TagDto> result = await _controller.UpdateTagAsync(
+            tagId, new UpdateTagDto { Name = "Alpha", ExpectedRevision = 1 }, CancellationToken.None);
+
+        _ = Assert.IsType<ConflictObjectResult>(result.Result);
     }
 
     #endregion

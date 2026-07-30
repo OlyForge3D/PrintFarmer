@@ -19,9 +19,10 @@ public sealed class ArtifactStorageSettings
     public long MaxFileSizeBytes { get; set; } = 100 * 1024 * 1024;
 
     /// <summary>
-    /// Comma-separated list of allowed kinds (e.g. "gcode,thumbnail,preview,log").
+    /// Comma-separated list of allowed artifact kinds. The default covers the slicing kinds plus the
+    /// calibration geometry, manifest, effective-profile and profile-patch kinds.
     /// </summary>
-    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log";
+    public string AllowedKinds { get; set; } = "gcode,thumbnail,preview,log,geometry,geometry-manifest,calibration-manifest,machine-profile,process-profile,filament-profile,profile-patch";
 
     /// <summary>
     /// Enable static file serving for artifacts at /artifacts/* URLs.
@@ -71,4 +72,10 @@ public sealed class ArtifactStorageSettings
     /// Default: 24 hours (daily cleanup).
     /// </summary>
     public int CleanupIntervalHours { get; set; } = 24;
+
+    /// <summary>
+    /// Age in minutes after which an abandoned cleanup reservation may be taken over.
+    /// Default: 30 minutes.
+    /// </summary>
+    public int CleanupReservationTimeoutMinutes { get; set; } = 30;
 }

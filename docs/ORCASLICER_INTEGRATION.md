@@ -63,6 +63,138 @@ While many components are implemented, the OrcaSlicer integration is **NOT produ
 
 ---
 
+## Dual-Engine (Current + Previous) Support
+
+As of issue #578, PrintFarmer can run **two** OrcaSlicer engine versions concurrently — the current default (`2.4.0`) plus the previous version (`2.3.1`). This lets operators finish jobs sliced against a prior engine while migrating to the newer one, without a big-bang cutover.
+
+### How dispatch works
+
+- Every OrcaSlicer plugin registers itself under a `(name, version)` key in `ISlicerRegistry`. `SlicerPluginDiscovery` de-duplicates on that tuple so a repeated version is a no-op.
+- Slice jobs carry an optional `slicerEngineVersion` (persisted on `SliceJob` — see the `AddSliceJobSlicerEngineVersion` migrations for PostgreSQL and SQL Server). `SliceJobController.SubmitAsync` validates the version against the registry and returns HTTP 400 with the list of registered versions if it's unknown.
+- The controller **server-derives** `RequiredCapabilitiesJson`:
+  - Pinned to a version → `["orcaslicer:<version>"]` only. No generic `orcaslicer` capability.
+  - Unpinned → `["orcaslicer"]` only.
+  This is deliberate: `EfSliceJobRepository.ClaimNextJobAsync` uses OR-match, so a mixed capability set would let a wrong-version worker claim a pinned job.
+- Workers advertise their supported capabilities via `WorkerCapabilityProvider`, which emits `["orcaslicer","orcaslicer:<Worker:EngineVersion>","stl-processing","gcode-generation"]`. Both `SlicerRegistrationClient` (initial registration payload) and `QueueConsumerService` (per-poll capability list) use the same provider so they never drift.
+- `GET /api/slicers/engines` returns `[{ engine, versions[], latest }]` for the React version picker.
+
+### Deploying a second (previous) worker
+
+1. Set `Worker__EngineVersion=2.3.1` (or your previous version), and set **distinct** values for `SlicerRegistry__Host`, `Worker__WorkerId`, `Worker__InstanceId`, and `SlicerRegistry__ServiceName` so `SlicersService.UpsertAsync` doesn't collapse the two workers into one row.
+2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` does exactly this. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
+3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
+
+### Lifecycle policy
+
+We ship **at most two** engine versions in-tree at any time: the current default and one prior. When a new default is promoted, retire the oldest plugin project and its Dockerfile restore stanza only after completing the drain gate below. This keeps the arm64 emulation cost, image size, and cache surface bounded, and matches the operational reality that operators rarely need more than one migration window overlap.
+
+### Retiring the previous engine safely
+
+> **Drain gate:** Never disable or remove the previous-version worker while jobs
+> remain pinned to it. A pinned job carries only the capability
+> `orcaslicer:<version>`; after the matching worker disappears, no current
+> worker can claim that job.
+
+Use this sequence before retiring a version such as `2.3.1`:
+
+1. **Stop new pins.** Start a slicing maintenance window, or require users to
+   leave **New Slice Job → Engine version** on **Latest**. The page defaults to
+   the `latest` version returned by `GET /api/slicers/engines`; a specific
+   previous version is an explicit user selection. There is currently no
+   admin setting or environment allowlist that hides only the previous
+   version while its worker remains online, so do not allow unrestricted new
+   submissions during the drain. Do **not** set
+   `ENABLE_ORCA_WORKER_PREVIOUS=no` yet.
+2. **Find every pinned queued or in-flight job.** The Jobs view is at
+   **Admin → Manage → Operations → Workers → Jobs**. Use the database as the
+   authoritative version filter because the queue view does not expose the
+   engine-version pin. For PostgreSQL:
+
+   ```sql
+   SELECT
+       "Id",
+       "Status",
+       "SlicerEngineVersion",
+       "RequiredCapabilitiesJson",
+       "LeaseExpiresAt",
+       "QueuedAt"
+   FROM slicer."SliceJobs"
+   WHERE (
+       "SlicerEngineVersion" = '2.3.1'
+       OR "RequiredCapabilitiesJson" LIKE '%"orcaslicer:2.3.1"%'
+   )
+   AND "Status" IN ('Queued', 'Processing')
+   ORDER BY "QueuedAt";
+   ```
+
+   SQL Server deployments use the same columns under
+   `[slicer].[SliceJobs]`. Include all `Processing` rows: an expired lease
+   remains eligible for the retiring worker to reclaim.
+3. **Drain, migrate, or cancel.** Keep the previous worker healthy until the
+   query returns zero rows. Let compatible jobs complete. To migrate a job,
+   cancel it and submit an equivalent replacement from **New Slice Job** with
+   **Latest** or a specific still-supported version after checking its
+   version-scoped profiles and settings. There is no in-place repin API or UI;
+   changing only `SlicerEngineVersion` in the database would leave
+   `RequiredCapabilitiesJson` and the settings snapshot inconsistent. If
+   compatibility is uncertain, cancel the job in the Jobs view and ask its
+   owner to review the settings and resubmit.
+4. **Remove the lane only after the query is empty.** Regenerate the compose
+   file through the deployment script, then reconcile the stack with orphan
+   removal:
+
+   ```bash
+   ENABLE_ORCA_WORKER_PREVIOUS=no \
+     ./scripts/deploy-docker.sh --regenerate-config
+   docker compose --env-file .env -f docker-compose.yml \
+     up -d --remove-orphans
+   ```
+
+   After `orcaslicer-worker-previous` is absent from `docker compose ps`, the
+   retired image and bind-mounted temporary state can be removed:
+
+   ```bash
+   docker image rm printfarmer-orcaslicer-worker-previous
+   rm -rf .volumes/printfarmer-orcaslicer-previous-temp
+   ```
+
+5. **Validate the retirement.** Run the SQL query again and confirm that it
+   returns zero rows. Check the queue view for no stranded `Queued` or
+   `Processing` jobs, then inspect engine discovery. The default targets
+   monolithic/single-container deployments on the main API port (`5245`); for
+   microservices deployments, override the URL to reach `slicer-host` on
+   `5246` (nginx routes `/api/slicers` there in split mode):
+
+   ```bash
+   SLICER_ENGINES_URL="${SLICER_ENGINES_URL:-http://localhost:5245/api/slicers/engines}"
+   curl -fsS "$SLICER_ENGINES_URL" | jq .
+   ```
+
+   After deploying the application release that removes the retired plugin,
+   the retired version must no longer appear. An entry that still advertises
+   `2.3.1` with `available: false` means the plugin is loaded but its worker is
+   missing; either restore the lane immediately or finish deploying the
+   release that removes that plugin before reopening submissions.
+
+If the drain was incomplete and orphaned jobs surface, roll back the worker
+removal before changing or cancelling those jobs:
+
+```bash
+ORCASLICER_VERSION_PREVIOUS=2.3.1 \
+  ENABLE_ORCA_WORKER_PREVIOUS=yes \
+  ./scripts/deploy-docker.sh --regenerate-config
+docker compose --env-file .env -f docker-compose.yml up -d --build
+```
+
+Wait for `GET /api/slicers/engines` to report `2.3.1` as
+`available: true`, then resume the drain from step 2.
+
+### Caveats
+
+- **arm64 hosts**: OrcaSlicer AppImages are x86-64; running two workers on an arm64 host doubles the emulation overhead. Prefer running the previous-version worker on x86-64 nodes when possible.
+- **Profile/asset caches** are keyed per plugin assembly, so v2.3.1 and v2.4.0 have independent embedded resources and cannot poison each other.
+- **Backwards compatibility**: `slicerEngineVersion` is nullable everywhere. Jobs submitted before this change (or by clients that omit the field) route to any registered `orcaslicer` worker exactly as before.
+
 ## Architecture Overview
 
 ### System Diagram
@@ -146,7 +278,7 @@ Original builds downloaded 200MB+ OrcaSlicer AppImage on every rebuild, taking 8
 
 ```dockerfile
 FROM ubuntu:24.04 AS orcaslicer-binaries-base
-ARG ORCASLICER_VERSION=2.3.1
+ARG ORCASLICER_VERSION=2.4.0
 ARG GITHUB_TOKEN
 
 # Install extraction tools
@@ -175,7 +307,7 @@ LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSIO
 ./scripts/build-orcaslicer-optimized.sh
 
 # With specific version
-ORCASLICER_VERSION=2.3.1 ./scripts/build-orcaslicer-optimized.sh
+ORCASLICER_VERSION=2.4.0 ./scripts/build-orcaslicer-optimized.sh
 
 # With GitHub token (avoid rate limits)
 GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
@@ -183,15 +315,15 @@ GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 # Option 2: Manual two-stage build
 # Step 1: Build binary layer (slow first time, cached after)
 docker build -f scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries \
-  -t orcaslicer-binaries:2.3.1 \
-  --build-arg ORCASLICER_VERSION=2.3.1 \
+  -t orcaslicer-binaries:2.4.0 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # Step 2: Build worker (fast, uses cached binaries)
 docker build -f Dockerfile.multistage \
   --target orcaslicer-worker \
   -t printfarmer-orcaslicer-worker \
-  --build-arg ORCASLICER_VERSION=2.3.1 \
+  --build-arg ORCASLICER_VERSION=2.4.0 \
   .
 
 # Option 3: Docker Compose
@@ -203,7 +335,7 @@ docker compose --profile orca build orcaslicer-worker
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ORCASLICER_VERSION` | 2.3.1 | OrcaSlicer release version to download |
+| `ORCASLICER_VERSION` | 2.4.0 | OrcaSlicer release version to download |
 | `ORCASLICER_URL` | (auto-discovered) | Override download URL |
 | `ALLOW_STUB` | true | Create stub binary if download fails |
 | `GITHUB_TOKEN` | (optional) | Avoid GitHub API rate limits |
@@ -266,7 +398,7 @@ Each manufacturer has a JSON bundle at `/opt/orcaslicer/resources/profiles/{manu
 - **compatible_printers** array contains exact machine_list names
 - **compatible_printers_condition** is an expression evaluated against machine properties
 
-### Profile Counts (OrcaSlicer 2.3.x)
+### Profile Counts (OrcaSlicer 2.4.x)
 
 - ~200 machine profiles (variants across manufacturers)
 - ~2000 filament profiles
@@ -543,7 +675,7 @@ Allows users to import their own OrcaSlicer config bundle JSON files.
 
 ### Components
 
-**Wizard UI**: `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx`
+**Wizard UI**: `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx`
 
 ```
 Step 1: Upload
@@ -790,7 +922,7 @@ To load bed STL models:
 | `src/Web/ReactApp/src/features/slicer/components/settings/SlicerSettingsPanel.tsx` | Settings UI |
 | `src/Web/ReactApp/src/features/models3d/components/3d/ModelViewer3D.tsx` | 3D viewer |
 | `src/Web/ReactApp/src/contexts/SlicerContext.tsx` | Slicer availability state |
-| `src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/ui/components/OrcaImportWizard.tsx` | Import wizard |
+| `src/Web/ReactApp/src/features/slicer/orca/components/OrcaImportWizard.tsx` | Import wizard |
 
 ### Docker
 
@@ -804,6 +936,71 @@ To load bed STL models:
 ---
 
 ## Debugging & Testing
+
+### Pinned Worker Publication & Mandatory Calibration Smoke Gate
+
+Calibration generation (issue #899) is only allowed to report itself operational after the **published,
+digest-pinned** OrcaSlicer 2.3.1 worker has completed a real calibration run. This is enforced by
+`.github/workflows/orcaslicer-strict-build.yml`, which is manual-dispatch only and double-guarded.
+
+**Publication (`build-orcaslicer-strict`)**
+
+- Job permissions are exactly `contents: read` and `packages: write`; `GITHUB_TOKEN` is used only to log
+  in to GHCR.
+- Only an image that already passed `scripts/verify-orcaslicer-worker.sh require-real` is pushed.
+- Two immutable tags are pushed to `ghcr.io/<owner>/printfarmer-orcaslicer-worker-pinned`:
+  `sha-<commit>` and `<orcaVersion>-sha-<commit>`.
+- The manifest digest is taken from the push result **and** re-read from the registry with
+  `docker buildx imagetools inspect`; both must agree and must match `^sha256:[0-9a-f]{64}$`. The digest
+  is never invented or pre-embedded.
+- The published image is then re-verified **by digest** (`repository@sha256:...`).
+- Job outputs `image`, `digest` and `image_ref` carry the identity forward; a small non-secret evidence
+  artifact (`pinned-orca-publication.json`) records repository, tags, digest and the pinned upstream
+  checksum.
+
+General 2.4.x slicing is unaffected: it is built and published by `docker-publish.yml` and
+`orcaslicer-base-image.yml`, which this workflow does not touch.
+
+**Mandatory smoke gate (`calibration-pinned-smoke`)**
+
+Permissions are `contents: read` and `packages: read`. The job pulls the published image by digest and
+runs the explicitly filtered gate:
+
+```bash
+cd src
+RunIntegrationTests=true \
+PRINTFARMER_ORCA_SMOKE=required \
+PRINTFARMER_ORCASLICER_IMAGE=ghcr.io/<owner>/printfarmer-orcaslicer-worker-pinned \
+PRINTFARMER_ORCASLICER_IMAGE_DIGEST=sha256:<64 hex> \
+dotnet test ./tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj \
+  -c Release -p:RunIntegrationTests=true --filter 'Category=PinnedOrcaSmoke'
+```
+
+The gate (`src/tests/Farm.Web.IntegrationTests/Calibration/`) drives every hop through production code:
+
+1. The API runs on a **real Kestrel loopback listener** (`KestrelCalibrationApiHost`), not an in-memory
+   test server, so the container can dial it. The container joins the runner's network namespace.
+2. Capability is asserted **false** first, with `pinned_worker_unavailable` as the only blocked hop.
+3. The published worker is pulled and run **by digest**; `Worker__ContainerDigest` is injected at
+   runtime only, because embedding it during the build would change the digest it claims.
+4. The worker registers itself through `POST /api/slicers/register` with `X-Slicer-Api-Key`, receives its
+   registry-issued identity and key, and claims work with `X-Worker-Key` + `X-Worker-Id` under an active
+   lease and fencing token.
+5. A tiny deterministic STL is uploaded through `POST /api/3d-models/upload` and proven to round-trip
+   byte for byte through the authenticated download route.
+6. The immutable snapshot is seeded with the **exact native profiles the running container publishes**
+   (`GET /api/profiles`), so OrcaSlicer receives its own documents back and verifies their digests.
+7. The worker downloads the model over the authenticated worker route, runs the pinned build, uploads its
+   artifact and completes the job; the saga reconciles, annotates, safety-validates and promotes the
+   result to an immutable `GcodeFile`, and the test asserts byte, hash and lineage equality.
+
+If the gate cannot execute, `PRINTFARMER_ORCA_SMOKE=required` turns the blocker into a failure, so the
+workflow fails and capability never flips. Without that variable the same test reports the concrete
+blocker and asserts capability stayed false, which is the only honest local outcome.
+
+Digest validation and gating rules are unit-tested in the default suite
+(`Farm.Web.Api.Tests.Calibration.Generation.PinnedOrcaPublicationTests`); the gate compiles the same
+source file, so there is one implementation rather than two.
 
 ### Verify Worker Container
 
@@ -858,6 +1055,105 @@ dotnet test --filter "FullyQualifiedName~OrcaSlicer"
 # - src/tests/Farm.Web.Api.Tests/Slicing/OrcaMappingAccuracyTests.cs
 # - src/tests/Farm.Web.Api.Tests/Slicing/OrcaBundleIntegrationTests.cs
 ```
+
+---
+
+## Schema Version Awareness (#578)
+
+PrintFarmer runs two OrcaSlicer engine versions side by side (current 2.4.1 and previous 2.3.1). Settings that a user edits on the Slice Job page must match the engine that will actually process the job — fields added in 2.4.x must not appear when the job is pinned to 2.3.1, fields retired in 2.4.x must not appear when the job is pinned to 2.4.1, and fields that were renamed between versions must resolve to the correct key for the pinned engine.
+
+### API surface
+
+Four profile-schema endpoints on `ProfilesController` accept an optional `engineVersion` query parameter:
+
+- `GET /api/slicer/profiles/schemas?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/process?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/machine?engineVersion={version}`
+- `GET /api/slicer/profiles/schemas/filament?engineVersion={version}`
+
+The response is cached with `VaryByQueryKeys = ["engineVersion"]` so upstream/CDN caches key by version. Omitting `engineVersion` (or passing an unparsable string) returns the full unfiltered schema — this is the safe fallback for legacy callers and engine-agnostic surfaces such as the Profile Management pages.
+
+### Field-metadata model
+
+`ProfileFieldMetadata` carries four optional version-aware attributes:
+
+| Property | Meaning |
+|---|---|
+| `minEngineVersion` | Field is included only when the requested version ≥ this value. Used for fields added in a newer engine (e.g. `wallGenerator`, `enableArcFitting` added in 2.4.0). |
+| `maxEngineVersion` | Field is included only when the requested version ≤ this value. Used for retired settings (e.g. `legacyPreviewSetting` retired in 2.4.0). |
+| `renamedFromKey` + `renamedInVersion` | Field is emitted under `renamedFromKey` when the requested version < `renamedInVersion`, otherwise under `key`. Preserves all other metadata across the rename. |
+
+Version filtering uses `System.Version` semantic comparison. Unparsable requests fall through to unfiltered (safe fallback).
+
+### Runtime data delivery
+
+The 2.3.1 backend plugin ships `NullProfilesProvider` with an empty assets manifest **by design**: the version-correct profile/asset content is delivered at runtime from the version-matched OrcaSlicer worker's `/opt/orcaslicer/resources` tree, not from the plugin binary. This avoids data drift between the plugin and the actual engine and lets the workers upgrade profiles independently of the .NET deployment.
+
+### React consumers
+
+`useProfileSchema(profileType, engineVersion?)` includes `engineVersion` in its TanStack Query `queryKey` (`['profile-schema', profileType, engineVersion ?? null]`), so:
+
+- Switching the pinned engine invalidates the cache and re-fetches.
+- Two schema instances for two versions coexist in the cache without cross-contamination.
+- Passing `undefined` returns the unfiltered schema (engine-agnostic pages).
+
+The live New Slice Job page inherits this behaviour: profile queries include `selectedEngineVersion` in their query keys, and the `advancedProcessSettings` state is re-seeded from the version-scoped profile JSON when the query returns, so payloads submitted to the slicer never include stale keys from a previously-selected engine.
+
+### Testing
+
+- `Farm.Slicer.Module.Tests/Services/ProfileSchemaProviderTests` — added/removed/renamed field mechanic and edge cases (null, unparsable version).
+- `Farm.Slicer.Module.Tests/Controllers/ProfilesControllerSchemaVersionTests` — controller-level pass-through and `VaryByQueryKeys` behaviour.
+- `ReactApp/src/features/slicer/components/settings/schema/__tests__/useProfileSchema.test.tsx` — hook contract, per-version queryKey isolation, undefined-version fallback.
+
+### Follow-up
+
+The example version-scoped fields (`wallGenerator`, `enableArcFitting`, `legacyPreviewSetting`, `bedAdhesionOverride`/`firstLayerAdhesion`) illustrate the plumbing but are not an authoritative OrcaSlicer 2.3 → 2.4 delta. The exact field windows should be refined against upstream OrcaSlicer release notes before consumers depend on the specific field set.
+
+---
+
+## Live Slice-Job Editor Version Scoping (#578 Path B)
+
+The schema endpoints above serve the profile-management surface. The **live New Slice Job page** — the primary settings editor for a running slice — historically consumed the static `orcaSettingsMetadata.json` bundle directly, bypassing the versioned schema pipeline. Issue #578 (Path B) closes that gap so the live editor renders and submits the correct field set for the pinned engine.
+
+### Resolver
+
+`src/Web/ReactApp/src/features/slicer/components/settings/orcaSettingsMetadataResolver.ts` exposes two pure functions:
+
+- `getMetadataForVersion(engineVersion?)` returns a version-scoped `{ profileTypes, renameFromNewToThis, renameFromThisToNew, resolvedFor }` view of the static bundle:
+  - Fields whose `addedIn` window falls after `engineVersion` are omitted from `settings` and from every tab.
+  - Fields whose `renamedIn` window falls after `engineVersion` are emitted under the older key, and the newer key is hidden.
+  - Passing `undefined`/`null`/`''` returns the full union bundle unchanged — safe fallback for engine-agnostic surfaces.
+- `scrubSettingsForVersion(settings, profileType, engineVersion, deltasOverride?)` returns a new dictionary containing only the keys valid for `engineVersion`, migrating renamed values to the version-correct key and dropping any key that has no version-correct home.
+
+Both functions are driven by `orca-settings-version-delta.ts`, a hand-maintained delta table that pins real 2.4 additions (`precise_z_height`, `alternate_extra_wall`, `interlocking_beam`). The rename mechanic is present but unused in the shipped delta pending confirmation of a real 2.3 → 2.4 rename; injected test deltas exercise it in the test suite.
+
+### Live wiring
+
+`MetadataProfileEditor` (used by `SlicerSettingsPanel` and therefore by `NewSliceJobPage`) accepts an optional `engineVersion?: string` prop and calls `getMetadataForVersion(engineVersion)` inside a `useMemo`. All tabs/sections/settings the user sees come from the returned scoped bundle — so:
+
+- 2.4-added fields disappear from tabs and from the "Other Settings" fallback when the job is pinned to 2.3.1.
+- Renamed fields render under the version-correct key (older key on 2.3.1, newer key on 2.4.1) when a rename is declared in the delta.
+
+`NewSliceJobPage` computes `effectiveEngineVersion = selectedEngineVersion ?? latestAvailableForEngine` and passes it to `<SlicerSettingsPanel>`. A dedicated `useEffect` on `effectiveEngineVersion` runs `scrubSettingsForVersion` against **all three** in-flight settings state objects atomically — `advancedProcessSettings` (dynamic dict), `slicerSettings` (typed OrcaProcessSettings the inline editor writes to), and `originalProcessSettings` (baseline snapshot used by `diffProcessOverrides` at submit time). This is what makes the added/removed/renamed guarantee real:
+
+- Keys not valid on the newly selected engine are dropped from every state path.
+- Renamed keys migrate atomically (newer-key → older-key on downgrade, and are dropped on upgrade because they no longer exist in the target metadata — the user must re-opt into the new field).
+- Identity is preserved when settings are already clean to avoid render loops.
+
+The submit payload constructs `overrides` as `{ ...advancedProcessSettings, ...diffProcessOverrides(slicerSettings, originalProcessSettings) }`. Both source objects are scrubbed by the effect, and the merged result is additionally scrubbed by `scrubSettingsForVersion` at submit time as defense-in-depth so a stale key introduced by any future state path cannot leak into `POST /api/slicer/jobs`. The persisted `slicerEngineVersion` field on the job (Path A) binds the job to that engine.
+
+### Persisted-job reopen
+
+A slice job carries `slicerEngineVersion` in its record. Any future edit/reopen entry that rehydrates `selectedEngineVersion` from that stored value will drive the same resolver + scrub flow, so the reopened editor renders and submits under the job's pinned engine version without cross-version contamination.
+
+### Testing (Path B)
+
+- `orcaSettingsMetadataResolver.test.ts` — verifies 2.4.1 includes real Orca 2.4 additions (`precise_z_height`, `alternate_extra_wall`, `interlocking_beam`); 2.3.1 hides them from both `settings` and tab layouts. Injected test deltas prove the rename mechanic in both directions (2.4→2.3 migrates value onto old key; 2.3→2.4 drops old key). Idempotence and unfiltered fallback are covered.
+- Path A tests (`useProfileSchema.test.tsx`, `ProfileSchemaProviderTests`, `ProfilesControllerSchemaVersionTests`) continue to guard the profile-management schema endpoints.
+
+### Deprecation lifecycle
+
+The runtime supports exactly the **current** OrcaSlicer major version and the **immediately previous** major version. When the current engine advances (e.g. 2.5.0 becomes current), operators must complete **Retiring the previous engine safely** before disabling or removing the previous 2.3.1 worker. Only after the pinned-job query is empty are the plugin project, worker Docker layer, and `orca-settings-version-delta.ts` entries for that version removed together; the next release notes call out the removal. The delta file is the single audit point for the frontend — refreshing it to match new upstream release notes is the recommended step whenever a new OrcaSlicer major version is added.
 
 ---
 

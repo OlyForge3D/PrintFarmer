@@ -16,3 +16,16 @@ public interface IDispatchScorer
     /// <returns>Scored printers ordered by TotalScore descending, eliminated last.</returns>
     Task<List<DispatchScore>> ScorePrintersForJobAsync(Guid jobId, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Optional dispatch-scoring capability that carries original input provenance.
+/// </summary>
+public interface IDispatchScorerWithOrigin : IDispatchScorer
+{
+    /// <summary>
+    /// Evaluates printers and returns the score set with nullable origin provenance.
+    /// </summary>
+    Task<DispatchScoreResult> ScorePrintersForJobWithOriginAsync(
+        Guid jobId,
+        CancellationToken ct = default);
+}

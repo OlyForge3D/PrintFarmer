@@ -35,6 +35,19 @@ public class PrinterMaintenanceSchedule
     public bool IsActive { get; set; } = true;
 
     /// <summary>
+    /// Optional physical toolhead scope. When null, the schedule is printer-wide (legacy
+    /// behavior). When set, the schedule tracks a specific physical toolhead so per-tool
+    /// nozzle/hotend intervals can accrue independently (issue #711, F6). Service layer
+    /// enforces <see cref="ToolheadType.Physical"/> — MMU gates are not eligible.
+    /// </summary>
+    public Guid? ToolheadId { get; set; }
+
+    /// <summary>
+    /// Navigation property to the scoped toolhead. Null when the schedule is printer-wide.
+    /// </summary>
+    public Toolhead? Toolhead { get; set; }
+
+    /// <summary>
     /// When the plan was deployed to this printer
     /// </summary>
     public DateTime DeployedAt { get; set; } = DateTime.UtcNow;

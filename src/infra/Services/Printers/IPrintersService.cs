@@ -9,6 +9,30 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>
+/// Determines how <see cref="IPrintersService"/> spool binding treats a commit-time Spoolman
+/// re-resolution that returns <c>null</c> (the spool the validator approved has since become
+/// unresolvable). Introduced for GitHub issue OlyForge3D/PrintFarmer#710, C1.
+/// </summary>
+public enum SpoolBindPolicy
+{
+    /// <summary>
+    /// Legacy direct binding: the spool id is assigned even if the commit-time Spoolman lookup
+    /// returns null (denormalized material simply stays unset). Resolution continues to use the
+    /// centrally configured <c>ISpoolmanService</c>. Used whenever the guided-swap feature is
+    /// disabled, preserving the established direct-control semantics.
+    /// </summary>
+    Direct,
+
+    /// <summary>
+    /// Guided binding: fail closed if the commit-time Spoolman re-resolution returns null — no
+    /// spool id, material, gate row, MultiMaterial promotion, or override audit is persisted.
+    /// Resolution uses the printer-owned source selected by the shared #709 coverage resolver,
+    /// so native Moonraker ids never collide with central Spoolman ids.
+    /// </summary>
+    Guided,
+}
+
+/// <summary>
 /// Service interface for printer management and operations.
 /// Provides CRUD operations, status retrieval, file management, printer control operations,
 /// and integration with multiple printer backend types (Moonraker, PrusaLink, OctoPrint, SDCP).
@@ -254,6 +278,27 @@ public interface IPrintersService
     Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct);
 
     /// <summary>
+    /// Probes backend history without collapsing unsupported, unavailable, and
+    /// failed queries into an authoritative empty history.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="limit">Maximum number of jobs to return.</param>
+    /// <param name="start">Starting pagination index.</param>
+    /// <param name="since">Inclusive lower timestamp bound.</param>
+    /// <param name="before">Exclusive upper timestamp bound.</param>
+    /// <param name="order">Sort order.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed result whose authoritative value may validly contain zero jobs.</returns>
+    Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct);
+
+    /// <summary>
     /// Retrieves details for a specific print job from printer history.
     /// </summary>
     /// <param name="printerId">The printer ID</param>
@@ -261,6 +306,19 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>Complete job details including print time, filament used, and outcome</returns>
     Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
+
+    /// <summary>
+    /// Probes one exact backend history ID without treating malformed, unavailable,
+    /// or unsupported responses as authoritative absence.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="jobId">Backend-specific history identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>A typed exact-detail authority result.</returns>
+    Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct);
 
     /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
@@ -326,8 +384,8 @@ public interface IPrintersService
     /// <param name="hotend">Target hotend temperature in Celsius, or null to leave unchanged</param>
     /// <param name="bed">Target bed temperature in Celsius, or null to leave unchanged</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if temperature command succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head by specified offsets from current position (relative movement).
@@ -338,8 +396,8 @@ public interface IPrintersService
     /// <param name="z">Z-axis offset in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if movement succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Moves the print head to specified absolute position coordinates.
@@ -350,8 +408,8 @@ public interface IPrintersService
     /// <param name="z">Target Z-axis position in millimeters, or null to skip Z movement</param>
     /// <param name="f">Feedrate in mm/min, or null to use backend default</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>True if positioning succeeded, false if backend unavailable or unsupported</returns>
-    Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
+    /// <returns>Outcome distinguishing success, missing printer, unsupported backend, busy upstream, or unreachable backend.</returns>
+    Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct);
 
     /// <summary>
     /// Pauses the currently running print job without canceling it.
@@ -378,6 +436,15 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if cancel succeeded, false if backend unavailable or unsupported</returns>
     Task<bool> CancelPrintAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Executes a lifecycle command with a typed result suitable for durable queue control.
+    /// A false provider response is unknown unless the command was rejected before I/O.
+    /// </summary>
+    Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct);
 
     /// <summary>
     /// Immediately stops and cancels the currently running print job using emergency stop (M112).
@@ -414,6 +481,23 @@ public interface IPrintersService
     Task<bool> SendGcodeAsync(Guid id, string gcode, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves object-exclusion state for the active print job.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Current job objects, or null if the printer does not exist.</returns>
+    Task<PrintJobObjectListDto?> GetPrintJobObjectsAsync(Guid id, CancellationToken ct);
+
+    /// <summary>
+    /// Excludes a named object from the active print job.
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="objectName">The object name from object-exclusion metadata</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>Command result indicating success or validation/backend failure.</returns>
+    Task<CommandResult> ExcludePrintJobObjectAsync(Guid id, string objectName, CancellationToken ct);
+
+    /// <summary>
     /// Loads filament into the extruder via the backend's filament control capability.
     /// </summary>
     /// <param name="id">The printer ID</param>
@@ -423,11 +507,21 @@ public interface IPrintersService
 
     /// <summary>
     /// Unloads filament from the extruder via the backend's filament control capability.
+    /// Returns the residual weight of the outgoing spool so the operator's
+    /// "return to shelf" workflow can log inventory in one round-trip.
     /// </summary>
     /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">
+    /// Optional zero-based toolhead / lane index whose spool should be treated as the
+    /// outgoing spool for residual-weight capture. When <c>null</c>, the source of truth
+    /// is <see cref="Printer.CurrentSpoolId"/> falling back to the primary toolhead's
+    /// <see cref="Toolhead.CurrentSpoolId"/> (legacy single-tool behaviour). Provided so
+    /// the guided swap flow can target a specific MMU gate / U1 lane without breaking
+    /// existing callers.
+    /// </param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>CommandResult with success/failure and descriptive message</returns>
-    Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct);
+    /// <returns>FilamentUnloadResult with success/failure, message, and residual spool weight.</returns>
+    Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct);
 
     /// <summary>
     /// Initiates a filament change procedure via the backend's filament control capability.
@@ -467,6 +561,35 @@ public interface IPrintersService
     Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct);
 
     /// <summary>
+    /// Assigns a Spoolman spool to a specific toolhead, optionally writing a durable
+    /// guided-swap override audit record in the SAME transaction as the binding so the two
+    /// commit atomically (GitHub issue OlyForge3D/PrintFarmer#710, B6).
+    /// </summary>
+    /// <param name="id">The printer ID</param>
+    /// <param name="toolheadIndex">Zero-based index of the toolhead (T0, T1, T2, etc.)</param>
+    /// <param name="spoolId">The Spoolman spool ID to assign</param>
+    /// <param name="overrideAudit">
+    /// When non-null, an override audit record is staged and committed atomically with the
+    /// binding. Supplied only for an authorized mismatch override; never persisted on a failed
+    /// bind. Pass null for normal (non-override) assignments.
+    /// </param>
+    /// <param name="policy">
+    /// Governs how a null commit-time Spoolman re-resolution is handled.
+    /// <see cref="SpoolBindPolicy.Guided"/> fails closed (persists nothing);
+    /// <see cref="SpoolBindPolicy.Direct"/> preserves the legacy assign-anyway behavior for
+    /// the generic direct control and the disabled-gate path (issue #710, C1).
+    /// </param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>CommandResult with success/failure and descriptive message</returns>
+    Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
+        CancellationToken ct);
+
+    /// <summary>
     /// Clears the spool assignment from a specific toolhead (by index) on a printer.
     /// Removes the spool ID, material, and color information.
     /// </summary>
@@ -490,12 +613,26 @@ public interface IPrintersService
     /// <summary>
     /// Synchronizes MMU virtual toolheads on an already-loaded Printer entity after
     /// the MultiMaterial property changes. Creates MmuGate toolheads when toggled on,
-    /// removes them when toggled off. Does NOT save changes — caller must call SaveChangesAsync.
+    /// removes them and their fallback memberships when toggled off. Does NOT save changes —
+    /// caller must call SaveChangesAsync.
     /// </summary>
     /// <param name="printer">The loaded Printer entity (with Toolheads navigation populated)</param>
     /// <param name="wasMultiMaterial">The previous value of MultiMaterial before the edit</param>
     /// <param name="mmuGateCount">Number of MMU gate slots (default 4)</param>
-    void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4);
+    /// <param name="ct">Cancellation token.</param>
+    Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Synchronizes the Buddy camera entity when BuddyCameraIp is set, changed, or cleared.
+    /// Creates a new Camera when an IP is set for the first time, updates the StreamUrl when
+    /// the IP changes, or removes the Camera entity when the IP is cleared (empty string).
+    /// Does NOT save changes — caller must call SaveChangesAsync.
+    /// </summary>
+    Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct);
 
     /// <summary>
     /// Starts printing a gcode file that exists on the printer's storage.

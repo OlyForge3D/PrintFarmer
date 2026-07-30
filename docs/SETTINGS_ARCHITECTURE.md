@@ -1,232 +1,431 @@
+# Settings And Admin Surface Architecture
 
+PrintFarmer's settings and admin UI is a two-layer system:
 
-# Modular Extensible Settings System Implementation Plan
+- **Backend** (`src/infra/Settings/`) — attribute-driven settings classes discovered by
+  reflection. Each class is one persisted section. The `SettingsService` exposes them via
+  a small set of unified endpoints.
+- **Frontend** (`src/Web/ReactApp/src/features/settings/` and `.../features/admin/`) —
+  a single `SettingsShell` React component drives every settings and admin page from the
+  URL. It renders a `SettingsPage` that consumes the backend metadata and edits one
+  section at a time.
 
-## ✅ Status Summary (as of 2025-09-26)
+This document is the source of truth for how the two layers connect, how new settings
+show up in the UI without any React changes, and where the sharp edges are.
 
-**All phases of the modular, extensible settings system are now complete.**
+## Routes And Scopes
 
-- All backend settings are modular, discoverable, validated, and loaded via attribute-driven reflection.
-- The SettingsService is the single source of truth; all legacy settings code is removed.
-- The backend exposes settings metadata and values via `/api/settings/metadata` for dynamic UI.
-- The React Admin UI now dynamically renders all settings classes as pagelets using backend metadata (no hardcoded forms).
-- Adding a new settings class in the backend automatically exposes it in the UI with no frontend code changes required.
-- All frontend and backend tests for settings are passing.
-- Documentation for extensibility is available in `EXTENDING_DYNAMIC_SETTINGS_UI.md`.
+Every settings and admin page is rendered by `SettingsShell` under one of three routes,
+mapped to the three settings **scopes** in
+`src/Web/ReactApp/src/features/settings/types.ts`:
 
----
+| Route | Scope | Access | Rendered by |
+|---|---|---|---|
+| `/settings` | `user` | Any authenticated user | `<SettingsShell routeScope="user" />` |
+| `/admin/settings` | `system` | `farm_admin` role | `<SettingsShell routeScope="system" />` via `SystemSettingsRoute` |
+| `/admin/manage` | `admin` | `farm_admin` role | `<SettingsShell routeScope="admin" />` |
+| `/admin` | — | `farm_admin` role | `AdminControlCenterPage` (hub, not a shell) |
 
-## Overview
-This plan describes how to migrate PrintFarmer's settings architecture to a modular, attribute-driven, and extensible system. Each settings class is independently discoverable, validated, and loaded at runtime, enabling easy addition of new settings (e.g., for slicers, integrations, or features) without central code changes.
+`/admin` itself is the Admin Control Center hub — a tiled landing page that links out to
+individual destinations from `adminDestinations.ts`. Every other admin/settings surface
+is one of the three shell routes above with query parameters.
 
+## URL Contract
 
-## Goals
-- **No static coupling:** No more hardcoded properties in a central `AppSettings` class.
-- **Runtime discovery:** All settings classes are discovered via reflection and attributes.
-- **Per-class validation:** Each settings class can implement its own validation logic.
-- **Extensibility:** Adding new settings is as simple as creating a new class and decorating it.
-- **Centralized access:** All settings are available via a unified service API.
-- **UI-Driven:** All settings currently editable in the Admin UI are migrated to settings classes, and the Admin UI dynamically discovers and displays all settings classes as logical, extensible pagelets.
+`SettingsShell` is entirely URL-driven. Deep-links, palette navigation, and the back
+button all round-trip through these parameters:
 
----
+| Parameter | Purpose | Values |
+|---|---|---|
+| `?scope` | Which of the three shells this URL belongs to. Falls back to the route's `routeScope` when omitted. | `user` / `system` / `admin` |
+| `?tab` | Category within the scope (e.g. `general`, `slicing`, `operations`). | See `SETTINGS_CATEGORIES` in `types.ts`. |
+| `?sub` | Sub-page within the tab. Falls back to the first sub-page in the category. | See each category's `subPages` array. |
+| `?q` | Search query, applied to the current sub-page's settings metadata. | Free text. |
+| `?field` | Deep-link to a single property row on the current sub-page. Section-qualified — see below. | e.g. `SystemLog.Enabled`. |
 
-## Sample Code and Usage Examples
+Exactly ONE `SettingsPage` mounts at a time, selected by the key `${scope}.${category}.${subPage}`
+into `SUB_PAGE_CONTENT` in `SettingsShell.tsx`. Everything else on the page (sidebar,
+scope switcher, breadcrumbs) is chrome around that single mounted content.
 
-### 1. Attribute and Interfaces
+## Categories And Sub-Pages
+
+Categories are defined in `SETTINGS_CATEGORIES` (`src/Web/ReactApp/src/features/settings/types.ts`):
+
+- **User scope** (`/settings`):
+  - `profile` → Preferences, API Keys, Notifications, Passkeys
+- **System scope** (`/admin/settings`):
+  - `general` → Farm Defaults, System Config, Automation & Costs
+  - `slicing` → Defaults, Bed Types, Slicer Profiles
+  - `hardware` → Cameras, NFC Devices, Printer Groups, NFC Bindings, Custom Fields
+  - `integrations` → External Services, Webhooks
+  - `quotas` (no sub-pages yet)
+- **Admin scope** (`/admin/manage`):
+  - `operations` → Status, Workers
+  - `users` → User Accounts, Login Audit
+  - `data` → Tags, Data Management
+
+Categories/sub-pages that render *metadata-driven* settings (Farm Defaults, System Config,
+Automation & Costs, External Services, Slicing Defaults) do so by mounting `<SettingsPage
+allowedGroups={[...]} />` and filtering the backend metadata down to the listed groups.
+
+## Tab-to-Group Map
+
+The subset of tabs that host `<SettingsPage>` filter backend metadata by group. The
+mapping is declared in `SUB_PAGE_CONTENT` in
+`src/Web/ReactApp/src/features/settings/pages/SettingsShell.tsx`:
+
+| Tab key | `allowedGroups` on `<SettingsPage>` | Additional content |
+|---|---|---|
+| `general.farm` | `['General']` | `<FarmSettingsSection />` via `afterContent` |
+| `general.system` | `['System', 'Networking', 'Catalog', 'Files', 'Printers']` | — |
+| `general.automation` | `['Operations', 'Monitoring', 'Maintenance']` | — |
+| `integrations.connections` | `['Integrations']` | `<TelegramSettingsCard />` via `afterContent` |
+| `slicing.defaults` | `['Slicing']` | — |
+
+Other sub-pages (`operations.status`, `data.tags`, `hardware.cameras`, etc.) render
+bespoke pages instead of a metadata-driven `<SettingsPage>`.
+
+### Groups declared in the code but not reachable via `allowedGroups`
+
+- **`General`** — no backend settings class currently declares `Group = "General"`, so
+  the Farm Defaults tab renders only `<FarmSettingsSection />` (its `afterContent`) with
+  an empty metadata section list. If you add a class with `[SettingDisplay(Group = "General")]`,
+  it will begin appearing on that tab automatically.
+
+### `Job Queue` — fixed during this epic
+
+`HistorySeedingBackgroundService.cs` declares `Group = "Job Queue"`. Until #939 no tab
+listed that group in `allowedGroups` and `SETTINGS_GROUP_TO_LOCATION` had no entry for
+it, so the section rendered nowhere *and* the command palette skipped it — leaving it
+unreachable by any route. It is now mapped onto the **Automation** sub-page alongside
+`Operations`, `Monitoring` and `Maintenance`, and is a normal configurable section.
+
+> **If you add a new group,** add it in **both** places or it will silently disappear:
+> the owning tab's `allowedGroups` in `SettingsShell.tsx`, and `SETTINGS_GROUP_TO_LOCATION`
+> in `settings-navigation.ts`. The palette skips any group missing from the latter via its
+> `if (!location) continue` guard, and it does so without warning.
+
+## Backend Settings Classes
+
+Settings classes live in `src/infra/Settings/` (and feature-specific sub-folders such as
+`Settings/Maintenance/`, `Settings/OctoPrint/`). Each class is a persisted section, keyed
+by a stable `SectionName` string.
+
+A typical class:
 
 ```csharp
-// Attribute to mark settings classes
-[AttributeUsage(AttributeTargets.Class, Inherited = false)]
-public sealed class SystemSettingAttribute : Attribute
-# Implementation Status (as of 2025-09-26)
-
-**Backend:**
-- All settings classes are now modular, discoverable, and decorated with `[AppSetting]`.
-- The `ISystemSetting` interface now requires a static `SectionKey` property (no longer empty).
-- All legacy settings services and registrations (e.g., `AppSettingsService`, `IAppSettingsService`, `IOptions<T>`) have been removed from the backend.
-- The `SettingsService` is the single source of truth for all settings, using reflection and attributes for discovery and loading.
-- All settings classes implement validation via `IValidatableSetting` where appropriate.
-- Duplicate/ambiguous types (e.g., `TempTargets`, `PerEngineSlicerSetting`) have been resolved; only one canonical definition is used throughout the codebase.
-- All usages in controllers and services have been migrated to use the new `SettingsService` model.
-- Lint/style issues (formatting, nullability, collection types) have been resolved in all settings-related files.
+[AppSetting(SystemLogSettings.SectionName)]
+[SettingGroup("System", DisplayName = "System",
+    Description = "System-level configuration",
+    Icon = "pf-icon-system", Order = 10)]
+[SettingDisplay(Name = "System Logging",
+    Description = "Database logging configuration, retention, and export settings.",
+    Icon = "pf-icon-systemlog", Group = "System", Order = 4)]
+public class SystemLogSettings : IAppSetting, IValidatableSetting
 {
-**Frontend/UI:**
-- The backend is ready for dynamic UI discovery: all settings classes are exposed and can be listed/queried via the service.
-- The Admin UI migration to dynamic, pagelet-based settings is planned/underway (see Phase 5).
-    public string Key { get; }
-**Documentation:**
-- This document and all onboarding guides are up to date with the new architecture and usage patterns.
-    public SystemSettingAttribute(string key) => Key = key;
-**Outstanding/Next Steps:**
-- Complete dynamic UI migration (Phase 5) and add frontend tests for settings pagelets.
-- Continue to add new settings classes as needed using the documented pattern.
-- Optional: implement advanced features (versioning, per-tenant overrides, etc.).
-}
----
+    public const string SectionName = "SystemLog";
+    public static string SectionKey => SectionName;
 
-// Marker interface (optional)
-public interface ISystemSetting { }
+    [SettingDisplay(Name = "Enable Database Logging",
+        Description = "Write application logs to the database.",
+        InputType = SettingInputType.Boolean, Order = 1)]
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; } = true;
 
-// Validation interface
-public interface IValidatableSetting
-{
-    void Validate();
-    // Optionally: Task ValidateAsync();
-}
-```
-
-### 2. Example Settings Class
-
-```csharp
-[SystemSetting("Slicer.MySlicer")]
-public class MySlicerSettings : ISystemSetting, IValidatableSetting
-{
-    public string Path { get; set; }
-    public int Threads { get; set; }
+    [SettingDisplay(Name = "Retention Days",
+        MinValue = 1, MaxValue = 365,
+        InputType = SettingInputType.Number, Order = 3)]
+    [Range(1, 365)]
+    [JsonPropertyName("retentionDays")]
+    public int RetentionDays { get; set; } = 30;
 
     public void Validate()
     {
-        if (string.IsNullOrWhiteSpace(Path))
-            throw new ValidationException("Path is required.");
-        if (Threads < 1)
-            throw new ValidationException("Threads must be >= 1.");
+        if (RetentionDays is < 1 or > 365)
+            throw new ValidationException("RetentionDays must be between 1 and 365.");
     }
 }
 ```
 
-### 3. Settings Service Discovery (Simplified)
+Key rules:
 
-```csharp
-public class SettingsService
+- `[AppSetting("SectionName")]` on the class registers it with `SettingsService`.
+- `[SettingGroup("System", ...)]` declares the group the class belongs to. Multiple classes
+  can share a group; each group is rendered as a sidebar entry on the sub-page whose
+  `allowedGroups` includes it.
+- `[SettingDisplay(...)]` at the class level provides the display name, description, and
+  icon for the metadata card.
+- `[SettingDisplay(...)]` at the property level controls how each field is rendered
+  (`InputType`, `Order`, `MinValue`/`MaxValue`, `AllowedValues`, etc.).
+- `IValidatableSetting.Validate()` runs on save. Throw `ValidationException` to reject
+  invalid input — the API translates it into `400 Bad Request` with per-field errors.
+- `[JsonPropertyName("...")]` on every property is required. The metadata API exposes
+  `property.name` as the `JsonPropertyName`, and the frontend uses that name for the
+  save payload, the Essential-mode manifest, and palette deep-links.
+- Secrets: set `InputType = SettingInputType.Password` and the metadata surface will
+  render the field as `<input type="password">` in the UI.
+
+### Sections that handle their own secrets
+
+Two sections manage encrypted tokens and are **blocked from the generic settings API**
+so their secret fields cannot be read or overwritten in the clear:
+
+- `HomeAssistantSettings.SectionName` — served by a dedicated admin controller.
+- `TelegramSettings.SectionName` — served by a dedicated admin controller.
+
+They still appear in the UI (Telegram is rendered by `<TelegramSettingsCard />` on the
+`integrations.connections` tab), but their save path is separate. Do not try to save them
+via `POST /api/settings/{keyName}` — the controller returns `404 Not Found`.
+
+## Save Model — One Section At A Time
+
+There is **no "Save All" button** anywhere in the settings UI. Each group renders a
+`GroupSaveBlock` (in `SettingsPage.tsx`) with its own Save/Reset controls, and saves fire
+one section at a time via:
+
+```http
+POST /api/settings/{keyName}
+Content-Type: application/json
+
 {
-    private readonly Dictionary<string, object> _settings = new();
-
-    public SettingsService(IConfiguration config)
-    {
-        var settingTypes = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(a => a.GetTypes())
-            .Where(t => t.GetCustomAttribute<SystemSettingAttribute>() != null);
-        foreach (var type in settingTypes)
-        {
-            var attr = type.GetCustomAttribute<SystemSettingAttribute>();
-            var instance = config.GetSection(attr.Key).Get(type) ?? Activator.CreateInstance(type);
-            if (instance is IValidatableSetting validatable)
-                validatable.Validate();
-            _settings[attr.Key] = instance;
-        }
-    }
-
-    public T Get<T>() where T : class, ISystemSetting => _settings.Values.OfType<T>().First();
-    public object GetByKey(string key) => _settings[key];
-    public IEnumerable<object> GetAll() => _settings.Values;
+  "enabled": true,
+  "retentionDays": 30,
+  "minimumLevel": "Warning"
 }
 ```
 
-### 4. Usage Example
+`keyName` is the `SectionName` (`"SystemLog"`, `"NetworkDiscovery"`, `"CostTracking"`, …).
 
-```csharp
-// In DI registration:
-services.AddSingleton<SettingsService>();
+Responses:
 
-// In a controller or service:
-var mySlicerSettings = settingsService.Get<MySlicerSettings>();
-```
+- **200 OK** — section saved.
+- **400 Bad Request** — validation failed. Body shape:
+  `{ "message": "Validation failed for class 'SystemLog'", "errors": { "<propertyName>": "..." } }`.
+- **404 Not Found** — the section is blocklisted (`HomeAssistant`, `Telegram`) or does
+  not exist.
 
----
+After a successful save the group's `state.markPristine(values)` marks its own edits as
+the new baseline. The page intentionally does not refetch other groups' values — that
+would clobber unsaved edits elsewhere. Refreshing the page always reflects server state.
 
-## Phase 1: Foundation & Attribute Model
-- [x] Define `[AppSetting]` attribute for marking settings classes.
-- [x] Define `ISystemSetting` marker interface (for type safety).
-- [x] Define `IValidatableSetting` interface with `Validate()`/`ValidateAsync()`.
-- [x] Refactor existing settings classes to use attribute and interfaces.
+### `saveAllSettings` is dead code
 
----
+An older batch endpoint (`POST /api/settings`) and its API-wrapper `saveAllSettings` still
+exist for tests and seed scripts, but they have zero production callers and the settings
+page tests explicitly assert that `saveAllSettingsMock` is **not** invoked on save. Do
+not add a "Save All" button — the per-group save is the intended UX.
 
-## Phase 2: Settings Service & Discovery
-- [x] Implement `SettingsService`:
-    - [x] Use reflection to scan assemblies for `[AppSetting]` classes.
-    - [x] Register discovered settings using the attribute's key.
-    - [x] Load settings from configuration (JSON, env vars, etc.) by key.
-    - [x] Expose `Get<T>()`, `GetByKey(string)`, and `GetAll()` APIs.
-- [x] Support reload/refresh of settings at runtime (optional).
+## Essential vs. Everything Mode
 
----
+`SettingsPage` renders in one of two modes controlled by a scope-specific persisted
+preference:
 
-## Phase 3: Validation Pipeline
-- [x] On load, call `Validate()`/`ValidateAsync()` for all settings implementing `IValidatableSetting`.
-- [x] Aggregate and surface validation errors at startup (fail fast or log as warnings).
-- [x] Add tests for validation logic and error handling.
+- **Essential** (default) — hides anything not on the essential list. Fewer knobs,
+  friendlier landing for new operators.
+- **Everything** — shows every property.
 
----
+The classification lives in `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`
+and currently marks **22 properties across 12 sections** as essential. Examples:
 
+- `SystemLog` → `enabled`, `retentionDays`
+- `NetworkDiscovery` → `enableDiscovery`, `discoverySubnets`, `backgroundScanEnabled`
+- `CostTracking` → `enableAutomaticCostCalculation`, `electricityRatePerKwh`, `defaultMachineHourlyRate`
+- `Spoolman` → `baseUrl`
 
-## Phase 4: Migration, Integration & UI Alignment
-- [x] Audit all settings currently editable in the Admin UI (review existing settings pages/components and API endpoints).
-- [x] For each setting, ensure it is represented as a settings class using `[AppSetting]` and interfaces.
-- [x] For any setting not yet represented as a settings class, create a new class in `src/Farm.Infrastructure/Settings/`:
-    - [x] Decorate with `[SystemSetting("Key")]`.
-    - [x] Implement `ISystemSetting` and, if needed, `IValidatableSetting`.
-    - [x] Add properties for each setting field.
-    - [x] Add validation logic as appropriate.
-- [x] Migrate configuration binding and persistence to use the new settings classes.
-- [x] Update the settings service to ensure all new classes are discoverable and loaded.
-- [x] Update all usages to use `SettingsService` instead of direct property access.
-- [x] Update configuration binding logic to support new model.
-- [x] Update startup and validation logic to use new service.
-- [x] Expose a generic API endpoint (e.g., `/api/settings`) to:
-    - [x] List all available settings classes (with metadata: key, display name, description).
-    - [x] Get and update values for each settings class by key.
-- [x] Ensure validation is enforced on update.
-- [x] Add OpenAPI documentation for the new endpoints.
+### ⚠️ Rename Gotcha — Silent Demotion
 
----
+The manifest keys settings by their **backend `SectionName` and `JsonPropertyName`**, not
+by property identity. That has one dangerous consequence:
 
+> **Renaming a backend `SectionName` or `JsonPropertyName` silently demotes that setting
+> from Essential to Advanced.** The property still exists, still appears in Everything
+> mode, still saves correctly — but it disappears from the default Essential landing
+> without any build error, without any warning, and without any test failure unless the
+> essential-manifest unit tests were updated in the same change.
 
+If you rename a settings property on the backend, you **must** update
+`essential-manifest.ts` in the same PR. There is no metadata-side check for this because
+the classification is intentionally client-side (see the file's JSDoc for why).
 
-## Phase 5: Extensibility, Dynamic UI & Documentation
-- [x] Refactor the Admin UI to fetch the list of all available settings classes from the backend (via the new API endpoint).
-- [x] For each settings class, dynamically generate a UI section ("settings pagelet") based on its metadata and properties.
-- [x] Group settings pagelets logically (e.g., by feature, integration, or category) using metadata from the backend or a local mapping.
-- [x] Each pagelet should display all editable fields for its settings class, with appropriate input types and validation messages.
-- [x] Provide clear display names, descriptions, and help text for each field (using metadata or annotations).
-- [x] Allow users to edit settings in each pagelet and submit changes individually.
-- [x] On save, call the backend API to update the settings class; display validation errors inline.
-- [x] Provide feedback on successful save or error.
-- [x] Ensure the UI automatically reflects new settings classes added in the backend, with no frontend code changes required.
-- [x] Add search/filtering for settings if the list grows large.
-- [x] Ensure accessibility and responsive design for all settings pagelets.
-- [x] Add frontend tests for dynamic rendering, editing, and validation of settings pagelets.
-- [x] Document how to add new settings classes (with attribute, interface, and validation).
-- [x] Add example: custom slicer settings with validation.
-- [x] Add developer guide for extending settings (see `EXTENDING_DYNAMIC_SETTINGS_UI.md`).
+## Search And Deep-Links
 
----
+`?q=<query>` filters the current sub-page's settings by title, description, group, or
+property name. Search matches expand advanced properties even when Essential mode would
+otherwise hide them.
 
-## Phase 6: Advanced Features (Optional)
-- [ ] Support settings versioning/migration.
-- [ ] Support per-tenant/user overrides.
-- [ ] Add UI for dynamic settings management (future).
+`?field=<Section.Property>` deep-links to a single property row. When present:
 
----
+- `SettingsPage` overrides `effectiveMode` to `'everything'` so the target row is
+  visible even if it's advanced.
+- The row is scrolled into view and briefly highlighted with `.pf-setting-focus`
+  (2-second flash).
+- The URL param stays put so the link remains copy-pasteable.
+
+### `?field=` must be section-qualified
+
+The palette generates section-qualified `?field=Section.Property` values (e.g.
+`?field=SystemLog.Enabled`) rather than bare property names. This is load-bearing:
+
+> `public bool Enabled` is declared on **13 different settings classes** — several of
+> which render on the same page (for example, Telegram, HomeAssistant, Obico, and
+> SystemLog can all appear on the integrations or system tabs). A bare `?field=Enabled`
+> would scroll to whichever section rendered first, not the one the user wanted.
+
+Selector logic in `SettingsPage.tsx`:
+
+- Dotted param → exact match `[data-setting-property="Section.Property"]`.
+- Bare param → suffix match `[data-setting-property$=".Property"]`. Kept for legacy
+  bookmarks; do not generate new bare links.
+
+## Global Command Palette
+
+`GlobalCommandPaletteProvider` is mounted **once, globally, in `Layout.tsx`** so `Ctrl+K`
+(or `Cmd+K` on macOS) works on every authenticated route — not just settings.
+
+- Provider: `src/Web/ReactApp/src/features/settings/components/GlobalCommandPaletteProvider.tsx`
+- Mount point: `Layout.tsx` inside every authenticated `<Outlet />`.
+
+Palette items are assembled from four sources:
+
+1. **Places** — `buildAdminDestinationCommandItems(ADMIN_DESTINATIONS)`. Points at every
+   registered admin destination, grouped by hub group.
+2. **Settings sections** (user scope only) — `buildSettingsCommandItems()` filtered to
+   `scopeId === 'user'`. Avoids duplicating admin destinations that already appear under
+   Places.
+3. **Individual setting properties** (farm_admin only) — `buildSettingCommandItems(metadata,
+   groups)` walks the metadata API and emits one row per property, each linking to a
+   `?field=Section.Property` deep-link.
+4. **Actions** — a curated list: **Sign out** (any user, with in-app confirmation),
+   **Refresh admin overview** (farm_admin — invalidates `ADMIN_OVERVIEW_QUERY_KEY`),
+   **Switch to light/dark theme** (any user).
+
+Keyboard handler details:
+
+- Triggers on `Ctrl+K` or `Meta+K`. Ignores modifier combos (Alt, Shift alone) and edits
+  inside `<input>`, `<textarea>`, `<select>`, or `contentEditable` elements.
+- Confirmations use the in-app `ConfirmationModal`, not `window.confirm`.
+- The settings metadata query is disabled until the palette is first opened. This avoids
+  a background `401` for signed-out users; the metadata endpoint is `[Authorize]` under
+  the hood.
+
+## Admin Control Center Overview
+
+The `/admin` hub renders `AdminControlCenterPage` and fetches
+`GET /api/admin/overview` for the health tiles and attention list. That endpoint is
+documented in [API.md](./API.md#admin-control-center) — the important architectural
+notes here are:
+
+- The endpoint **aggregates existing `HealthCheckService` results**; it does not run
+  new probes. Time budget is 8 seconds.
+- It never returns 500. On probe failure it marks non-API subsystems `Unknown` and adds
+  an `Error`-severity attention item.
+- Adding a new tile means either registering the sub-check under the existing
+  `comprehensive` health check and adding a `BuildTileFromEntry` / `BuildTileFromSubcheck`
+  call in `AdminOverviewService.BuildSubsystems`, or a new top-level health check plus a
+  tile builder. Adding a new attention item means appending to `AppendAttentionForEntry`
+  or `AppendExternalServicesAttention` in the same service.
+
+## Adding A New Settings Section
+
+The end-to-end steps to expose a new setting in the UI, without touching any React
+component code:
+
+1. **Create the settings class** in `src/infra/Settings/` (or a feature-specific
+   sub-folder):
+   - Add `[AppSetting("<SectionName>")]` at the class level.
+   - Pick the `[SettingGroup(...)]` you want the section to live under. If the group is
+     new, make sure a sub-page in `SUB_PAGE_CONTENT` includes it in `allowedGroups` — or
+     add a new sub-page there.
+   - Add `[SettingDisplay(...)]` at the class level (for the section card) and on every
+     property (for the field rendering).
+   - Add `[JsonPropertyName("...")]` on every property.
+   - Implement `IAppSetting`. Add `public const string SectionName = "..."` and
+     `public static string SectionKey => SectionName;`.
+   - Add `IValidatableSetting.Validate()` if you have cross-field validation.
+2. **(Optional) Mark essential properties.** If any property is essential to a
+   day-one operator experience, add it to `ESSENTIAL_SETTINGS_MAP` in
+   `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`. Use the
+   `SectionName` as the map key and `JsonPropertyName` values inside the set.
+3. **(Optional) Register a palette entry.** Metadata-driven properties automatically
+   appear in the palette via `buildSettingCommandItems`. You only need to touch the
+   palette code if you want a bespoke command (e.g. a specific action, not a settings
+   deep-link).
+4. **Test it.** The settings shell picks up the new class from the metadata endpoint
+   automatically, but adjust or add tests near the changed class and update
+   `essential-manifest.ts` tests if the property count changed.
+
+You do **not** need to write React form code, add a save handler, wire validation, or
+add the property to a hand-maintained list. The metadata pipeline handles all of that.
+
+## Legacy Path Redirects
+
+`src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts` is the canonical list
+of moved URLs. It backs both this documentation and the redirect regression tests. Do
+not delete entries when you rename a route — add a NEW entry pointing the old path to the
+new path so external bookmarks keep working.
+
+The current list:
+
+| Legacy path | Now lands at | Notes |
+|---|---|---|
+| `/admin/printers` | `/printers` | Duplicate of the top-level Printers destination. |
+| `/admin/file-health` | `/admin/manage?tab=operations&sub=status` | Folded into System Status. |
+| `/admin/slicer-profiles` | `/admin/settings?tab=slicing&sub=profiles` | Moved into System Settings > Slicing. |
+| `/admin/tags` | `/admin/manage?tab=data&sub=tags` | Moved into Admin Console > Data. |
+| `/admin/bed-types` | `/admin/settings?tab=slicing&sub=bed-types` | Moved into System Settings > Slicing. |
+| `/admin/custom-fields` | `/admin/settings?tab=hardware&sub=custom-fields` | Moved into System Settings > Hardware. |
+| `/admin/webhooks` | `/admin/settings?tab=integrations` | Lands on the Integrations tab. |
+| `/admin/quotas` | `/admin/settings?tab=quotas` | Moved into System Settings > Quotas. |
+| `/admin/data` | `/admin/manage?tab=data&sub=management` | Moved into Admin Console > Data. |
+| `/admin/monitoring` | `/admin/manage?tab=operations&sub=status` | Folded into System Status. |
+| `/admin/cameras` | `/admin/settings?tab=hardware&sub=cameras` | Moved into System Settings > Hardware. |
+| `/admin/security/login-audit` | `/admin/manage?tab=users&sub=audit` | Moved into Admin Console > Users. |
+| `/admin/settings-legacy` | `/admin/settings?tab=general` | Legacy alias for the pre-shell admin settings page. |
+| `/admin/workers` | `/admin/manage?tab=operations&sub=workers` | Any incoming `?tab=` is remapped to `?workerTab=` so deep-links to a specific worker tab keep working. |
+| `/admin/system` | `/admin/manage?tab=operations&sub=status` | Legacy `?tab=services\|logs\|connections\|monitoring` values each map to a specific Operations sub-page. |
+| `/users` | `/admin/manage?tab=users&sub=accounts` | Top-level Users route now under the admin namespace. |
+| `/settings/system` | `/admin/settings?tab=general` | Legacy top-level System Settings shortcut. |
+| `/preferences` | `/settings` | Legacy preferences shortcut — now the user Settings page. |
+| `/locations` | `/locations/dashboard` | Bare `/locations` lands on the dashboard. |
+| `/cameras` | `/admin/settings?tab=hardware&sub=cameras` | Legacy top-level Cameras page. |
+| `/nfc-devices` | `/admin/settings?tab=hardware&sub=nfc` | Legacy top-level NFC Devices page. |
+| `/statistics` | `/analytics?lens=production` | Legacy Statistics route — now the Analytics production lens. |
+| `/statistics/costs` | `/analytics?lens=cost` | Legacy statistics cost view — now the Analytics cost lens. |
+| `/slicer-profiles` | `/admin/settings?tab=slicing&sub=profiles` | Legacy top-level Slicer Profiles page. |
+| `/slicer/import-official` | `/profiles/import` | Legacy import-official shortcut — now the shared profile import wizard. |
+| `/slice-jobs` | `/admin/manage?tab=operations&sub=workers&workerTab=jobs` | Legacy Slice Jobs list — now the Jobs tab under Workers. |
+| `/files/projects` | `/projects` | Legacy nested Projects path. |
+
+Most redirects drop incoming search params (they use a plain `<Navigate>`). The two
+exceptions — `/admin/workers` and `/admin/system` — remap parameters so their historical
+deep-links keep working; see the `notes` field in `legacyRedirects.ts` for each rule.
 
 ## File Locations
-- Attribute, interfaces: `src/Farm.Infrastructure/Settings/`
-- Service: `src/Farm.Infrastructure/Settings/SettingsService.cs`
-- Settings classes: `src/Farm.Infrastructure/Settings/` (or feature-specific folders)
-- Documentation: `docs/SETTINGS_ARCHITECTURE.md`
 
----
+Backend:
 
+- Attributes and interfaces: `src/infra/Settings/` (e.g. `SettingDisplayAttribute.cs`,
+  `IAppSetting.cs`, `IValidatableSetting.cs`).
+- Service: `src/infra/Settings/SettingsService.cs`.
+- Settings classes: `src/infra/Settings/` and feature-specific sub-folders.
+- Admin overview: `src/api/Controllers/Admin/AdminOverviewController.cs`,
+  `src/api/Services/Admin/AdminOverviewService.cs`,
+  `src/infra/Dtos/AdminOverviewDto.cs`.
+- Settings HTTP controller: `src/api/Controllers/UnifiedSettingsController.cs`.
 
-## Acceptance Criteria
-- All settings are discoverable and loaded via attribute at runtime.
-- Each settings class can provide its own validation logic.
-- Adding a new settings class requires no changes to central code or UI code.
-- All existing settings and all settings editable in the Admin UI are migrated and validated.
-- The Admin UI displays all settings classes as logical, discoverable pagelets, and adding a new settings class in the backend automatically exposes it in the UI.
-- All settings are validated and persisted via the new model.
-- Documentation and onboarding guides are updated.
+Frontend:
 
----
+- Shell: `src/Web/ReactApp/src/features/settings/pages/SettingsShell.tsx`.
+- Metadata-driven page: `src/Web/ReactApp/src/features/admin/pages/SettingsPage.tsx`.
+- Categories / scopes: `src/Web/ReactApp/src/features/settings/types.ts`.
+- Group → location map: `src/Web/ReactApp/src/features/settings/settings-navigation.ts`.
+- Admin destination registry: `src/Web/ReactApp/src/features/admin/registry/adminDestinations.ts`.
+- Legacy redirects: `src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`.
+- Essential manifest: `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`.
+- Command palette: `src/Web/ReactApp/src/features/settings/components/GlobalCommandPaletteProvider.tsx`.
+- Palette mount: `src/Web/ReactApp/src/common/components/Layout.tsx`.
 
+## Related Documentation
 
+- [API.md](./API.md) — HTTP contracts for the settings and admin-overview endpoints.
+- [UI.md](./UI.md) — general frontend documentation, including the Admin surface.

@@ -4,6 +4,16 @@ import SwiftUI
 struct PrinterCardView: View {
     let printer: Printer
     var isPendingReady: Bool = false
+    /// Optional coverage snapshot for the badge overlay. When `nil`,
+    /// or when the snapshot's status is `.unknown`, no coverage badge
+    /// is shown (per the #778 contract: `unknown` must not surface a
+    /// covers/runout claim).
+    var coverage: PrinterFilamentCoverage? = nil
+    /// When true the card is rendering a cached, unconfirmed snapshot in the
+    /// cold-offline shell. The visual projection is identical to a live card
+    /// (online parity); staleness is conveyed only through the accessibility
+    /// hint here, and by the shell's stale banner — never by altering the card.
+    var isReadOnly: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -46,6 +56,17 @@ struct PrinterCardView: View {
 
                 // Filament row — always visible
                 filamentSection
+
+                // Filament coverage badge (#778) — hidden for .unknown.
+                if let coverage, coverage.status != .unknown {
+                    HStack {
+                        FilamentCoverageBadge(
+                            status: coverage.status,
+                            earliestPredictedRunoutAt: coverage.earliestPredictedRunoutAt
+                        )
+                        Spacer()
+                    }
+                }
             }
             .padding(14)
         }
@@ -55,11 +76,13 @@ struct PrinterCardView: View {
             RoundedRectangle(cornerRadius: 12)
                 .strokeBorder(statusAccentColor.opacity(0.3), lineWidth: 1)
         )
+        // Do NOT combine children here: the filament-coverage badge must remain
+        // an independently queryable descendant (see FilamentCoverageUITests).
+        .accessibilityHint(isReadOnly ? "Read-only cached status. Reconnect to control this printer." : "")
     }
 
     private var headerSection: some View {
-        let _ = print("DEBUG headerBaseColor: printer=\(printer.name), state='\(printer.state ?? "nil")', isOnline=\(printer.isOnline)")
-        return HStack {
+        HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(printer.name)
                     .font(.headline)

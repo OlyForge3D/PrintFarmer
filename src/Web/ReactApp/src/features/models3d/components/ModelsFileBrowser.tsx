@@ -8,10 +8,14 @@ import {
 } from '@/features/fileBrowser/types';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
+import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
+import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
 import { Button } from '@/common/components/ui';
-import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
+import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
+import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -108,6 +112,76 @@ interface ModelsFileBrowserProps {
   onSelectionChange?: (ids: string[]) => void;
   onOpenModel?: (model: Model) => void;
   onSliceModel?: (model: Model) => void;
+  /**
+   * When provided (non-null), restricts the browser to only these model ids, filtered
+   * client-side (the /3d-models/query endpoint has no collection/id filter, #846). Pass
+   * `null`/`undefined` to show all models.
+   */
+  collectionModelIds?: string[] | null;
+  /** Shown alongside the tag bulk-action button when there is a selection. */
+  onShowCollectionModal?: () => void;
+}
+
+/** Page size used to fetch models when a collection filter is active, so the client-side
+ * id filter operates over the whole collection rather than one server page at a time. */
+const COLLECTION_FILTER_PAGE_SIZE = 500;
+
+/**
+ * Normalizes every response shape `/3d-models/query` may return into a single paged
+ * shape. Some deployments (e.g. the slicer module disabled) return a bare `[]` instead
+ * of the `{ models, totalPages, ... }` envelope, and any response can otherwise omit
+ * fields. Both the collection-filtering loop and the plain query path must go through
+ * this before reading `models` or `totalPages`, so neither ever assumes the "full"
+ * shape is present.
+ */
+function normalizeModelsSearchResponse(response: unknown): {
+  models: Model[];
+  totalCount: number;
+  totalPages: number;
+  page: number;
+} {
+  if (Array.isArray(response)) {
+    return { models: response as Model[], totalCount: response.length, totalPages: 1, page: 1 };
+  }
+
+  const searchResponse = response as Partial<Model3DSearchResponse> | null | undefined;
+  const models = Array.isArray(searchResponse?.models) ? searchResponse.models : [];
+  return {
+    models,
+    totalCount: searchResponse?.totalCount ?? models.length,
+    totalPages: searchResponse?.totalPages ?? 1,
+    page: searchResponse?.page ?? 1,
+  };
+}
+
+/** Params sent to the `/3d-models/query` endpoint (mirrors `apiClient.get3DModelsQuery`'s
+ * request shape). Kept separate from `ModelsQueryKeyParams` below so the collection
+ * discriminator can never leak into the network request. */
+interface ModelsApiQueryParams {
+  query?: string;
+  tagIds?: string[];
+  page: number;
+  pageSize: number;
+  sortBy: 'name' | 'size' | 'uploadedAt';
+  descending: boolean;
+}
+
+/**
+ * `mapQueryParams` return type used by `useFileBrowser` to build both the fetcher input
+ * *and* the React Query cache key (`JSON.stringify(actualQueryParams)`, see useFileBrowser.ts).
+ * `collectionMembershipKey` rides along only to keep the cache key in sync with which
+ * collection - and which of its members - are active; it is stripped before the request
+ * reaches the backend (see `fetcher` below) since `/3d-models/query` has no such field.
+ */
+interface ModelsQueryKeyParams extends ModelsApiQueryParams {
+  /**
+   * Stable discriminator for the active collection's membership, so switching collections
+   * (or a collection's membership resolving from `[]` to its real ids after
+   * `useModelCollectionMembers` loads) always produces a new cache key instead of silently
+   * reusing another collection's - or the loading placeholder's - cached results (#846).
+   * `undefined` when no collection filter is active (matches the "all models" query key).
+   */
+  collectionMembershipKey?: string;
 }
 
 export const ModelsFileBrowser = ({
@@ -121,9 +195,14 @@ export const ModelsFileBrowser = ({
   onSelectionChange,
   onOpenModel,
   onSliceModel,
+  collectionModelIds,
+  onShowCollectionModal,
 }: ModelsFileBrowserProps) => {
   const { hasPermission } = useAuth();
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
+  const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
+  const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
   const [localSelection, setLocalSelection] = useState<string[]>([]);
   const fileBrowserRef = useRef<FileBrowserHandle>(null);
 
@@ -132,7 +211,7 @@ export const ModelsFileBrowser = ({
       if (onSliceModel) {
         onSliceModel(model);
       } else {
-        window.location.assign(`/jobs/new?modelId=${model.id}`);
+        window.location.assign(`/slicer?modelId=${model.id}`);
       }
     },
     [onSliceModel]
@@ -142,7 +221,7 @@ export const ModelsFileBrowser = ({
     if (file.isDirectory) return;
     const model3dFile = file.meta?.model3d as { name?: string } | undefined;
     const originalName = model3dFile?.name || file.fileName;
-    const downloadUrl = `/api/3d-models/file/${file.id}`;
+    const downloadUrl = `${getApiBaseUrl()}/3d-models/file/${file.id}`;
     
     // Create a link with the original filename for download
     const link = document.createElement('a');
@@ -170,6 +249,7 @@ export const ModelsFileBrowser = ({
     try {
       await apiClient.deleteModel3dFile(file.id);
       toast.success('Model deleted successfully');
+      await fileBrowserRef.current?.refetch();
     } catch (error) {
       toast.error('Failed to delete model');
       console.error('Delete error:', error);
@@ -202,34 +282,87 @@ export const ModelsFileBrowser = ({
   );
 
   const mapQueryParams = useCallback(
-    (query: FileQueryState) => ({
+    (query: FileQueryState): ModelsQueryKeyParams => ({
       query: query.search || undefined,
       tagIds: selectedTags.length ? selectedTags : undefined,
-      page: query.page,
-      pageSize: query.pageSize,
+      page: collectionModelIds ? 1 : query.page,
+      pageSize: collectionModelIds ? COLLECTION_FILTER_PAGE_SIZE : query.pageSize,
       sortBy: query.sortBy === 'name' ? 'name' : query.sortBy === 'size' ? 'size' : 'uploadedAt',
       descending: query.sortOrder === 'desc',
+      // Sorted so the key is stable regardless of membership ordering; `undefined` (not an
+      // empty string) when there is no active collection filter, so it never collides with
+      // an active-but-empty collection's key.
+      collectionMembershipKey: collectionModelIds ? [...collectionModelIds].sort().join(',') : undefined,
     }),
-    [selectedTags]
+    [selectedTags, collectionModelIds]
   );
 
   const fetcher = useCallback(
     async (params: unknown) => {
-      const payload = params as ReturnType<typeof mapQueryParams>;
+      // Drop the query-key-only discriminator before it can reach the backend - only
+      // `payload` (never the raw params) is ever passed to `apiClient.get3DModelsQuery`.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { collectionMembershipKey, ...payload } = params as ModelsQueryKeyParams;
+
+      if (collectionModelIds) {
+        // An empty collection has no members to look up - skip the network round-trip
+        // entirely rather than issuing a query guaranteed to return zero matches.
+        if (collectionModelIds.length === 0) {
+          return { items: [], totalItems: 0, totalPages: 1, totalSize: 0, page: 1 };
+        }
+
+        // The /3d-models/query endpoint has no collection/id-list filter (#846), so the
+        // client-side id filter must page through the *entire* (search/tag-filtered) result
+        // set - stopping after a single page would silently drop collection members that
+        // fall on later pages.
+        const idSet = new Set(collectionModelIds);
+        const matches: Model[] = [];
+        const foundIds = new Set<string>();
+        let page = 1;
+        let totalPages: number;
+        do {
+          const response = await apiClient.get3DModelsQuery({
+            ...payload,
+            page,
+            pageSize: COLLECTION_FILTER_PAGE_SIZE,
+          });
+          const { models, totalPages: responseTotalPages } = normalizeModelsSearchResponse(response);
+          totalPages = responseTotalPages || 1;
+          for (const model of models) {
+            if (idSet.has(model.id) && !foundIds.has(model.id)) {
+              foundIds.add(model.id);
+              matches.push(model);
+            }
+          }
+          page += 1;
+        } while (page <= totalPages && foundIds.size < idSet.size);
+
+        const totalSize = matches.reduce((sum, model) => sum + (model.fileSize || 0), 0);
+        return {
+          items: matches,
+          totalItems: matches.length,
+          totalPages: 1,
+          totalSize,
+          page: 1,
+        };
+      }
+
       const response = await apiClient.get3DModelsQuery(payload);
 
-      const searchResponse = response as unknown as Model3DSearchResponse;
-      const totalSize = searchResponse.models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
+      // Normalize before reading `models`/`totalPages` - the endpoint can return a bare
+      // `[]` (e.g. slicer module disabled) instead of the full paged envelope.
+      const { models, totalCount, totalPages, page: responsePage } = normalizeModelsSearchResponse(response);
+      const totalSize = models.reduce((sum: number, model: Model) => sum + (model.fileSize || 0), 0);
 
       return {
-        items: searchResponse.models,
-        totalItems: searchResponse.totalCount,
-        totalPages: searchResponse.totalPages,
+        items: models,
+        totalItems: totalCount,
+        totalPages,
         totalSize,
-        page: searchResponse.page,
+        page: responsePage,
       };
     },
-    []
+    [collectionModelIds]
   );
 
   const config: UseFileBrowserConfig<Model> = useMemo(
@@ -320,6 +453,18 @@ export const ModelsFileBrowser = ({
       {hasPermission('3d_models', 'create') && (
         <Button
           type="button"
+          onClick={() => setShowPrintablesBrowserModal(true)}
+          variant="secondary"
+          size="sm"
+          title="Import from Printables"
+          iconLeft={<PrintablesIcon />}
+        >
+          Printables
+        </Button>
+      )}
+      {hasPermission('3d_models', 'create') && (
+        <Button
+          type="button"
           onClick={() => setShowUploadModal(true)}
           variant="secondary"
           size="sm"
@@ -337,6 +482,18 @@ export const ModelsFileBrowser = ({
           iconLeft={<TagIcon className="h-4 w-4" />}
         >
           ({selection.length})
+        </Button>
+      )}
+      {selection.length > 0 && onShowCollectionModal && (
+        <Button
+          type="button"
+          onClick={onShowCollectionModal}
+          variant="secondary"
+          size="sm"
+          title="Add selected models to a collection"
+          iconLeft={<FolderPlusIcon className="h-4 w-4" />}
+        >
+          Add to collection ({selection.length})
         </Button>
       )}
     </>
@@ -359,6 +516,25 @@ export const ModelsFileBrowser = ({
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
         onUploadSuccess={() => fileBrowserRef.current?.refetch() ?? Promise.resolve()}
+      />
+      {showPrintablesBrowserModal && (
+        <PrintablesBrowserModal
+          isOpen={showPrintablesBrowserModal}
+          onClose={() => setShowPrintablesBrowserModal(false)}
+          onImportUrl={(url) => {
+            setSelectedPrintablesUrl(url);
+            setShowPrintablesBrowserModal(false);
+            setShowPrintablesImportModal(true);
+          }}
+        />
+      )}
+      <PrintablesImportModal
+        isOpen={showPrintablesImportModal}
+        initialUrl={selectedPrintablesUrl}
+        onClose={() => {
+          setShowPrintablesImportModal(false);
+          setSelectedPrintablesUrl(null);
+        }}
       />
       <ConfirmationModal
         isOpen={deleteConfirm.isOpen}

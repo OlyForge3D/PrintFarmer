@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -21,6 +23,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using SixLabors.ImageSharp;
 
 namespace Farm.Slicer.Module.Services;
 
@@ -39,6 +42,13 @@ namespace Farm.Slicer.Module.Services;
 /// </remarks>
 public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileService
 {
+    private const int StreamBufferSize = 81_920;
+    private const long MaxClientThumbnailBytes = 10 * 1024 * 1024;
+    private const int MaxClientThumbnailDimension = 4_096;
+    private const long MaxClientThumbnailPixels = 16_000_000;
+
+    private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
+
     private readonly IModel3DFileRepository _model3dFiles;
     private readonly ITagRepository _tagRepository;
     private readonly ILogger<Model3DFileService> _logger;
@@ -50,6 +60,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     private readonly IThumbnailGenerationService? _thumbnailService;
     private readonly IFolderManagementService _folderManagementService;
     private readonly IStoragePathService _storagePathService;
+    private readonly IThreeMfMetadataService? _threeMfMetadataService;
 
     public Model3DFileService(
         IModel3DFileRepository model3dFiles,
@@ -62,13 +73,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         IStoragePathService storagePathService,
         IStoredFileOperationsService fileOperations,
         IModelAnalysisService? analysisService = null,
-        IThumbnailGenerationService? thumbnailService = null)
+        IThumbnailGenerationService? thumbnailService = null,
+        IThreeMfMetadataService? threeMfMetadataService = null)
     {
         _model3dFiles = model3dFiles ?? throw new ArgumentNullException(nameof(model3dFiles));
         _tagRepository = tagRepository ?? throw new ArgumentNullException(nameof(tagRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _analysisService = analysisService;
         _thumbnailService = thumbnailService;
+        _threeMfMetadataService = threeMfMetadataService;
         _fileSystem = fileSystem ?? throw new ArgumentNullException(nameof(fileSystem));
         _fileManagementService = fileManagementService ?? throw new ArgumentNullException(nameof(fileManagementService));
         _folderManagementService = folderManagementService ?? throw new ArgumentNullException(nameof(folderManagementService));
@@ -193,7 +206,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             catch
             {
                 // Path doesn't exist — return empty results
-                return new Model3DListResponse([], 0, 0, page, pageSize, 0, 0);
+                return new Model3DListResponse(Models: [], TotalCount: 0, TotalSize: 0, Page: page, PageSize: pageSize, TotalPages: 0, TotalItems: 0);
             }
         }
 
@@ -222,8 +235,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         int totalPages = totalCount > 0 ? (int)Math.Ceiling((double)totalCount / pageSize) : 0;
 
         return new Model3DListResponse(
-            Files: entries,
-            TotalFiles: totalCount,
+            Models: entries,
+            TotalCount: totalCount,
             TotalSize: totalSize,
             Page: page,
             PageSize: pageSize,
@@ -253,15 +266,15 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to the model file, or null if not found</returns>
     public async Task<string?> GetModelFilePathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
+        // Use unfiltered query for file operations - files should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
         if (model == null)
         {
             return null;
         }
 
-        // Return relative path by combining FilePath (directory) with FileName (GUID filename)
-        // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Combine(model.FilePath, model.FileName).Replace(_modelsPath, string.Empty).TrimStart(Path.DirectorySeparatorChar, '/');
+        // Return absolute path using the configured storage directory
+        return Path.Combine(_modelsPath, model.FileName);
     }
 
     /// <summary>
@@ -272,8 +285,9 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Full filesystem path to thumbnail, or null if thumbnail not available</returns>
     public async Task<string?> GetModelThumbnailPathAsync(Guid id, CancellationToken ct)
     {
-        Model3D? model = await _model3dFiles.GetByIdAsync(id, ct);
-        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(model.FilePath, model.ThumbnailFileName));
+        // Use unfiltered query for file operations - thumbnails should be accessible regardless of validation status
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
+        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(_modelsPath, model.ThumbnailFileName));
     }
 
     /// <summary>
@@ -334,7 +348,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <remarks>
     /// Validates:
     /// - File is not null or empty
-    /// - File extension is supported (.stl, .obj, .3mf)
+    /// - File extension is supported (.stl, .obj, .3mf, .step, .stp)
     /// - File size is within limits (max 100 MB)
     /// </remarks>
     public Model3DValidationResultDto ValidateModel(IFormFile modelFile)
@@ -369,11 +383,133 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         };
     }
 
-    public async Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct)
+    /// <inheritdoc />
+    public Task<Model3DUploadResultDto> UploadModelAsync(IFormFile modelFile, CancellationToken ct)
+        => UploadModelCoreAsync(modelFile, thumbnailFile: null, userId: null, clientUploadId: null, ct);
+
+    /// <inheritdoc />
+    public Task<Model3DUploadResultDto> UploadModelAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        CancellationToken ct)
+        => UploadModelCoreAsync(modelFile, thumbnailFile, userId: null, clientUploadId: null, ct);
+
+    /// <inheritdoc />
+    public Task<Model3DUploadResultDto> UploadModelAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        Guid userId,
+        Guid? clientUploadId,
+        CancellationToken ct)
+    {
+        if (userId == Guid.Empty)
+        {
+            throw new ArgumentException("Upload owner is required", nameof(userId));
+        }
+
+        if (clientUploadId == Guid.Empty)
+        {
+            throw new ArgumentException("clientUploadId must be a non-empty GUID", nameof(clientUploadId));
+        }
+
+        return UploadModelCoreAsync(modelFile, thumbnailFile, userId, clientUploadId, ct);
+    }
+
+    /// <inheritdoc />
+    public async Task<Model3DThumbnailUpdateResultDto> ReplaceThumbnailAsync(
+        Guid modelId,
+        IFormFile thumbnailFile,
+        Guid? userId,
+        bool isAdmin,
+        string? ifMatch,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(thumbnailFile);
+
+        Model3D model = await _model3dFiles.GetByIdAsync(modelId, ct)
+            ?? throw new KeyNotFoundException("Model not found");
+
+        if (!isAdmin && (!userId.HasValue || model.UploadedByUserId != userId))
+        {
+            throw new UnauthorizedAccessException("Only the model owner or an administrator can replace its thumbnail");
+        }
+
+        string currentETag = CreateETag(model);
+        if (!MatchesIfMatch(ifMatch, currentETag))
+        {
+            throw new DbUpdateConcurrencyException("The model was modified after the supplied ETag was issued");
+        }
+
+        string thumbnailBaseName = _fileOperations.GenerateThumbnailFileName(modelId, ".png");
+        string thumbnailFileName = $"{Path.GetFileNameWithoutExtension(thumbnailBaseName)}_{Guid.NewGuid():N}.png";
+        string thumbnailFinalPath = Path.Combine(_modelsPath, thumbnailFileName);
+        string thumbnailTempPath = $"{thumbnailFinalPath}.tmp";
+        string? previousThumbnailFileName = model.ThumbnailFileName;
+        string? previousThumbnailPath = previousThumbnailFileName is null
+            ? null
+            : Path.Combine(_modelsPath, previousThumbnailFileName);
+        DateTime previousUpdatedAt = model.UpdatedAt;
+
+        if (!_fileManagementService.IsSafePath(thumbnailFinalPath, _modelsPath)
+            || !_fileManagementService.IsSafePath(thumbnailTempPath, _modelsPath)
+            || (previousThumbnailPath is not null
+                && !_fileManagementService.IsSafePath(previousThumbnailPath, _modelsPath)))
+        {
+            throw new InvalidOperationException("Unsafe thumbnail storage path generated");
+        }
+
+        try
+        {
+            await StageAndValidateClientThumbnailAsync(thumbnailFile, thumbnailTempPath, ct);
+            MoveStagedFile(thumbnailTempPath, thumbnailFinalPath, "thumbnail");
+            model.ThumbnailFileName = thumbnailFileName;
+            DateTime now = DateTime.UtcNow;
+            model.UpdatedAt = now > previousUpdatedAt ? now : previousUpdatedAt.AddMilliseconds(1);
+            await _model3dFiles.UpdateAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+
+            if (previousThumbnailPath is not null
+                && !string.Equals(previousThumbnailPath, thumbnailFinalPath, StringComparison.OrdinalIgnoreCase))
+            {
+                DeleteUploadArtifact(previousThumbnailPath);
+            }
+
+            return new Model3DThumbnailUpdateResultDto
+            {
+                Id = model.Id,
+                ThumbnailUrl = _fileOperations.BuildModel3DThumbnailUrl(model.Id),
+                ETag = CreateETag(model)
+            };
+        }
+        catch
+        {
+            model.ThumbnailFileName = previousThumbnailFileName;
+            model.UpdatedAt = previousUpdatedAt;
+            DeleteUploadArtifact(thumbnailFinalPath);
+
+            throw;
+        }
+        finally
+        {
+            DeleteUploadArtifact(thumbnailTempPath);
+        }
+    }
+
+    private async Task<Model3DUploadResultDto> UploadModelCoreAsync(
+        IFormFile modelFile,
+        IFormFile? thumbnailFile,
+        Guid? userId,
+        Guid? clientUploadId,
+        CancellationToken ct)
     {
         if (modelFile == null || modelFile.Length == 0)
         {
             throw new ArgumentException("Model file is required", nameof(modelFile));
+        }
+
+        if (clientUploadId.HasValue && !userId.HasValue)
+        {
+            throw new ArgumentException("An upload owner is required when clientUploadId is provided", nameof(userId));
         }
 
         string originalName = modelFile.FileName ?? string.Empty;
@@ -390,75 +526,101 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             throw new InvalidOperationException("Unsafe file path generated");
         }
 
+        _logger.LogInformation("Starting model upload: {FileName} ({FileSize} bytes), ID: {ModelId}", originalName, modelFile.Length, modelId);
+
         // Use temp file pattern for safety: write to temp, then move to final location
         string tempFileName = $"{modelId}.tmp{fileExtension}";
         string tempFilePath = Path.Combine(_modelsPath, tempFileName);
+        if (!_fileManagementService.IsSafePath(tempFilePath, _modelsPath))
+        {
+            throw new InvalidOperationException("Unsafe temporary file path generated");
+        }
+
+        string? thumbnailFileName = null;
+        string? thumbnailTempPath = null;
+        string? thumbnailFinalPath = null;
 
         try
         {
-            // Step 1: Write to temp file and compute hash
-            string fileHash;
-            try
+            string fileHash = await StreamModelToTempAndHashAsync(modelFile, tempFilePath, ct);
+            string clientUploadHash = fileHash;
+
+            if (userId.HasValue && clientUploadId.HasValue)
             {
-                using (Stream stream = _fileSystem.OpenWrite(tempFilePath))
+                Model3D? existingUpload = await _model3dFiles.GetByClientUploadIdAsync(
+                    userId.Value,
+                    clientUploadId.Value,
+                    ct);
+                if (existingUpload is not null)
                 {
-                    using MemoryStream memoryStream = new();
-                    await modelFile.CopyToAsync(memoryStream, ct);
-                    memoryStream.Position = 0;
-
-                    byte[] hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(memoryStream, ct);
-                    fileHash = _fileManagementService.ToHex(hashBytes);
-
-                    memoryStream.Position = 0;
-                    await memoryStream.CopyToAsync(stream, ct);
+                    DeleteUploadArtifact(tempFilePath);
+                    return CreateIdempotentRetryResult(existingUpload, clientUploadHash);
                 }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError("Failed to write model file to temp location: {Message}", ex.Message);
 
-                // Cleanup temp file if write failed
-                try
+            if (thumbnailFile is not null)
+            {
+                thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, ".png");
+                thumbnailFinalPath = Path.Combine(_modelsPath, thumbnailFileName);
+                thumbnailTempPath = Path.Combine(_modelsPath, $"{modelId}_thumb.{Guid.NewGuid():N}.tmp");
+                if (!_fileManagementService.IsSafePath(thumbnailFinalPath, _modelsPath)
+                    || !_fileManagementService.IsSafePath(thumbnailTempPath, _modelsPath))
                 {
-                    if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
-                    {
-                        _fileSystem.DeleteFile(tempFilePath);
-                    }
-                }
-                catch
-                { /* ignore cleanup errors */
+                    throw new InvalidOperationException("Unsafe thumbnail storage path generated");
                 }
 
-                throw;
+                await StageAndValidateClientThumbnailAsync(thumbnailFile, thumbnailTempPath, ct);
             }
 
-            // Virus scan best-effort: if scanner not available skip
-            try
-            {
-                // Resolve a scanner service via DI would be better; for now skip
-            }
-            catch
-            {
-            }
-
-            // Step 2: Analyze model metadata (best-effort)
             Farm.Infrastructure.Services.Models.ModelAnalysisResult? analysis = null;
             try
             {
-                // analysis is optional; resolve from DI if available via _analysisService
                 if (_analysisService != null)
                 {
+                    _logger.LogDebug("Analyzing model metadata for {ModelId}", modelId);
                     analysis = await _analysisService.AnalyzeModelAsync(tempFilePath, fileExtension, ct);
+                    _logger.LogDebug("Model analysis complete for {ModelId}: {DimensionX}x{DimensionY}x{DimensionZ}mm", modelId, analysis?.DimensionX, analysis?.DimensionY, analysis?.DimensionZ);
                 }
             }
-            catch
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
+                throw;
+            }
+            catch (Exception analysisEx)
+            {
+                _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, analysisEx.Message);
+            }
+
+            // Step 2b: Extract 3MF metadata (best-effort)
+            ThreeMfMetadataDto? threeMfMetadata = null;
+            try
+            {
+                if (_threeMfMetadataService != null &&
+                    fileExtension.Equals(".3mf", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("Extracting 3MF metadata for {ModelId}", modelId);
+                    threeMfMetadata = await _threeMfMetadataService.ExtractMetadataAsync(tempFilePath, ct);
+                    if (threeMfMetadata != null)
+                    {
+                        _logger.LogDebug(
+                            "3MF metadata extracted for {ModelId}: Title={Title}, Designer={Designer}, AutoTags={TagCount}",
+                            modelId, threeMfMetadata.Title, threeMfMetadata.Designer, threeMfMetadata.AutoTags.Count);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception metadataEx)
+            {
+                _logger.LogWarning("3MF metadata extraction failed for {ModelId}: {Message}", modelId, metadataEx.Message);
             }
 
             // Step 3: Check for duplicates
             Model3D? existingModel = await _model3dFiles.GetByHashAsync(fileHash, ct);
             string baseName = Path.GetFileNameWithoutExtension(originalName);
-            if (existingModel != null)
+            if (existingModel != null && !clientUploadId.HasValue)
             {
                 string existingBaseName = Path.GetFileNameWithoutExtension(existingModel.FileName);
                 string existingExt = Path.GetExtension(existingModel.FileName);
@@ -470,25 +632,21 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
                 if (treatAsDuplicate)
                 {
-                    // Cleanup temp file before returning existing
-                    if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
-                    {
-                        _fileSystem.DeleteFile(tempFilePath);
-                    }
+                    DeleteUploadArtifact(tempFilePath);
+                    DeleteUploadArtifact(thumbnailTempPath);
 
-                    return new Model3DUploadResultDto
-                    {
-                        Id = existingModel.Id,
-                        FileName = existingModel.FileName,
-                        FileSize = existingModel.FileSizeBytes,
-                        FileType = _fileManagementService.GetModelFileFormatString(existingModel.FileFormat),
-                        UploadedAt = existingModel.UploadedAt,
-                        Url = _fileOperations.BuildModel3DFileUrl(existingModel.Id, existingModel.FileFormat)
-                    };
+                    return CreateUploadResult(existingModel, wasExisting: true);
                 }
 
                 byte[] composite = System.Text.Encoding.UTF8.GetBytes(fileHash + "|" + originalName);
-                byte[] newHashBytes = System.Security.Cryptography.SHA256.HashData(composite);
+                byte[] newHashBytes = SHA256.HashData(composite);
+                fileHash = _fileManagementService.ToHex(newHashBytes);
+            }
+            else if (existingModel is not null)
+            {
+                byte[] composite = System.Text.Encoding.UTF8.GetBytes(
+                    $"{fileHash}|{userId:D}|{clientUploadId:D}");
+                byte[] newHashBytes = SHA256.HashData(composite);
                 fileHash = _fileManagementService.ToHex(newHashBytes);
             }
 
@@ -526,7 +684,11 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 throw new InvalidOperationException("Failed to finalize model file", moveEx);
             }
 
-            // Step 5: Create folder and database record AFTER file is confirmed on disk
+            if (thumbnailTempPath is not null && thumbnailFinalPath is not null)
+            {
+                MoveStagedFile(thumbnailTempPath, thumbnailFinalPath, "thumbnail");
+            }
+
             FolderNode rootFolder = await _folderManagementService.GetOrCreateFolderAsync("/", "models", ct);
 
             Model3D model = new()
@@ -546,19 +708,52 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 DimensionX = analysis?.DimensionX,
                 DimensionY = analysis?.DimensionY,
                 DimensionZ = analysis?.DimensionZ,
-                TriangleCount = analysis?.TriangleCount
+                TriangleCount = analysis?.TriangleCount,
+                ThumbnailFileName = thumbnailFileName,
+                UploadedByUserId = userId,
+                ClientUploadId = clientUploadId,
+                ClientUploadHash = clientUploadId.HasValue ? clientUploadHash : null,
+                ExtractedMetadataJson = threeMfMetadata != null ? System.Text.Json.JsonSerializer.Serialize(threeMfMetadata) : null
             };
 
             await _model3dFiles.AddAsync(model, ct);
-            await _model3dFiles.SaveChangesAsync(ct);
+            try
+            {
+                await _model3dFiles.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException) when (userId.HasValue && clientUploadId.HasValue)
+            {
+                await _model3dFiles.RemoveAsync(model, CancellationToken.None);
+                Model3D? winningUpload = await _model3dFiles.GetByClientUploadIdAsync(
+                    userId.Value,
+                    clientUploadId.Value,
+                    ct);
+                if (winningUpload is null)
+                {
+                    throw;
+                }
+
+                Model3DUploadResultDto retryResult = CreateIdempotentRetryResult(
+                    winningUpload,
+                    clientUploadHash);
+                DeleteUploadArtifact(tempFilePath);
+                DeleteUploadArtifact(finalFilePath);
+                DeleteUploadArtifact(thumbnailTempPath);
+                DeleteUploadArtifact(thumbnailFinalPath);
+                return retryResult;
+            }
+
+            _logger.LogInformation("Model record saved to database: {ModelId}", modelId);
 
             // Step 6: Thumbnail generation (best-effort - don't fail upload if thumbnail fails)
             try
             {
-                if (_thumbnailService != null)
+                if (thumbnailFile is null && _thumbnailService != null)
                 {
-                    string thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
-                    string thumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
+                    _logger.LogDebug("Starting thumbnail generation for {ModelId}", modelId);
+                    string generatedThumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
+                    string thumbnailPath = Path.Combine(_modelsPath, generatedThumbnailFileName);
+                    thumbnailFinalPath = thumbnailPath;
 
                     if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
                     {
@@ -572,53 +767,269 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                         if (thumbSuccess)
                         {
                             // Update model with thumbnail filename
-                            model.ThumbnailFileName = thumbnailFileName;
+                            model.ThumbnailFileName = generatedThumbnailFileName;
                             await _model3dFiles.SaveChangesAsync(ct);
 
                             _logger.LogInformation("Thumbnail generated successfully for model {ModelId}", modelId);
                         }
+                        else
+                        {
+                            _logger.LogWarning("Thumbnail generation returned false for model {ModelId}", modelId);
+                            DeleteUploadArtifact(thumbnailFinalPath);
+                            thumbnailFinalPath = null;
+                        }
                     }
+                }
+                else if (thumbnailFile is null)
+                {
+                    _logger.LogDebug("Thumbnail service not available, skipping thumbnail generation for {ModelId}", modelId);
                 }
             }
             catch (Exception thumbnailEx)
             {
+                DeleteUploadArtifact(thumbnailFinalPath);
+                thumbnailFinalPath = null;
+                model.ThumbnailFileName = null;
                 _logger.LogWarning("Failed to generate thumbnail for model {ModelId}: {ThumbnailExMessage}. Continuing without thumbnail.", modelId, thumbnailEx.Message);
 
                 // Don't rethrow - upload should succeed even if thumbnail generation fails
             }
 
-            return new Model3DUploadResultDto
-            {
-                Id = modelId,
-                FileName = model.FileName,
-                FileSize = modelFile.Length,
-                FileType = fileExtension.TrimStart('.'),
-                UploadedAt = model.UploadedAt,
-                Url = _fileOperations.BuildModel3DFileUrl(modelId, model.FileFormat)
-            };
+            _logger.LogInformation("Model upload complete: {ModelId} ({FileName}). All post-processing finished.", modelId, fileName);
+            return CreateUploadResult(model, wasExisting: false);
         }
         catch
         {
-            // Cleanup both temp and final files if something fails
-            try
-            {
-                // Try to clean up temp file
-                if (_fileManagementService.IsSafePath(tempFilePath, _modelsPath) && _fileSystem.FileExists(tempFilePath))
-                {
-                    _fileSystem.DeleteFile(tempFilePath);
-                }
-
-                // Try to clean up final file if it was already moved
-                if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
-                {
-                    _fileSystem.DeleteFile(finalFilePath);
-                }
-            }
-            catch
-            { /* ignore cleanup errors */
-            }
+            DeleteUploadArtifact(tempFilePath);
+            DeleteUploadArtifact(finalFilePath);
+            DeleteUploadArtifact(thumbnailTempPath);
+            DeleteUploadArtifact(thumbnailFinalPath);
 
             throw;
+        }
+    }
+
+    private Model3DUploadResultDto CreateIdempotentRetryResult(Model3D existingModel, string clientUploadHash)
+    {
+        if (!string.Equals(existingModel.ClientUploadHash, clientUploadHash, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "clientUploadId has already been used for a different model payload.",
+                nameof(clientUploadHash));
+        }
+
+        return CreateUploadResult(existingModel, wasExisting: true);
+    }
+
+    private Model3DUploadResultDto CreateUploadResult(Model3D model, bool wasExisting)
+    {
+        return new Model3DUploadResultDto
+        {
+            Id = model.Id,
+            Name = model.Name ?? model.FileName,
+            FileName = model.FileName,
+            FileSize = model.FileSizeBytes,
+            FileType = _fileManagementService.GetModelFileFormatString(model.FileFormat)
+                ?? Path.GetExtension(model.FileName).TrimStart('.'),
+            UploadedAt = model.UploadedAt,
+            Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
+            ThumbnailUrl = model.ThumbnailFileName is null
+                ? null
+                : _fileOperations.BuildModel3DThumbnailUrl(model.Id),
+            WasExisting = wasExisting,
+            ClientUploadId = model.ClientUploadId,
+            ETag = CreateETag(model)
+        };
+    }
+
+    private static string CreateETag(Model3D model)
+    {
+        byte[] token = model.RowVersion is { Length: > 0 }
+            ? model.RowVersion
+            : BitConverter.GetBytes(model.UpdatedAt.ToUniversalTime().Ticks);
+        return $"\"{Convert.ToHexString(token)}\"";
+    }
+
+    private static bool MatchesIfMatch(string? ifMatch, string currentETag)
+    {
+        if (string.IsNullOrWhiteSpace(ifMatch))
+        {
+            return true;
+        }
+
+        return ifMatch
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(candidate => candidate == "*" || string.Equals(candidate, currentETag, StringComparison.Ordinal));
+    }
+
+    private async Task<string> StreamModelToTempAndHashAsync(
+        IFormFile modelFile,
+        string tempFilePath,
+        CancellationToken ct)
+    {
+        await using Stream source = modelFile.OpenReadStream();
+        await using Stream destination = _fileSystem.OpenWrite(tempFilePath);
+        using IncrementalHash hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+        try
+        {
+            int bytesRead;
+            while ((bytesRead = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+            {
+                hash.AppendData(buffer, 0, bytesRead);
+                await destination.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+            }
+
+            await destination.FlushAsync(ct);
+            return _fileManagementService.ToHex(hash.GetHashAndReset());
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private async Task StageAndValidateClientThumbnailAsync(
+        IFormFile thumbnailFile,
+        string thumbnailTempPath,
+        CancellationToken ct)
+    {
+        if (thumbnailFile.Length <= 0)
+        {
+            throw new ArgumentException("Client thumbnail is empty", nameof(thumbnailFile));
+        }
+
+        if (thumbnailFile.Length > MaxClientThumbnailBytes)
+        {
+            throw new ArgumentException("Client thumbnail exceeds the 10 MB size limit", nameof(thumbnailFile));
+        }
+
+        await using (Stream source = thumbnailFile.OpenReadStream())
+        await using (Stream destination = _fileSystem.OpenWrite(thumbnailTempPath))
+        {
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(StreamBufferSize);
+            try
+            {
+                long totalBytes = 0;
+                int bytesRead;
+                while ((bytesRead = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct)) > 0)
+                {
+                    totalBytes += bytesRead;
+                    if (totalBytes > MaxClientThumbnailBytes)
+                    {
+                        throw new ArgumentException("Client thumbnail exceeds the 10 MB size limit", nameof(thumbnailFile));
+                    }
+
+                    await destination.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
+                }
+
+                await destination.FlushAsync(ct);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        await ValidateClientPngAsync(thumbnailTempPath, ct);
+    }
+
+    private async Task ValidateClientPngAsync(string thumbnailTempPath, CancellationToken ct)
+    {
+        await using Stream stream = _fileSystem.OpenRead(thumbnailTempPath);
+        byte[] signature = new byte[PngSignature.Length];
+        int signatureBytesRead = 0;
+        while (signatureBytesRead < signature.Length)
+        {
+            int bytesRead = await stream.ReadAsync(signature.AsMemory(signatureBytesRead), ct);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            signatureBytesRead += bytesRead;
+        }
+
+        if (signatureBytesRead != signature.Length || !signature.AsSpan().SequenceEqual(PngSignature))
+        {
+            throw new ArgumentException("Client thumbnail does not have a valid PNG signature");
+        }
+
+        stream.Position = 0;
+
+        try
+        {
+            ImageInfo? imageInfo = await Image.IdentifyAsync(stream, ct);
+            if (imageInfo is null
+                || !string.Equals(imageInfo.Metadata.DecodedImageFormat?.Name, "PNG", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("Client thumbnail is not a decodable PNG");
+            }
+
+            if (imageInfo.Width > MaxClientThumbnailDimension || imageInfo.Height > MaxClientThumbnailDimension)
+            {
+                throw new ArgumentException("Client thumbnail dimensions exceed 4096 x 4096 pixels");
+            }
+
+            long pixelCount = (long)imageInfo.Width * imageInfo.Height;
+            if (pixelCount > MaxClientThumbnailPixels)
+            {
+                throw new ArgumentException("Client thumbnail exceeds the 16,000,000 pixel limit");
+            }
+
+            stream.Position = 0;
+            using Image image = await Image.LoadAsync(stream, ct);
+            if (!string.Equals(image.Metadata.DecodedImageFormat?.Name, "PNG", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("Client thumbnail is not a decodable PNG");
+            }
+        }
+        catch (UnknownImageFormatException ex)
+        {
+            throw new ArgumentException("Client thumbnail is not a decodable PNG", ex);
+        }
+        catch (InvalidImageContentException ex)
+        {
+            throw new ArgumentException("Client thumbnail is not a decodable PNG", ex);
+        }
+    }
+
+    private void MoveStagedFile(string tempPath, string finalPath, string artifactName)
+    {
+        if (!_fileSystem.FileExists(tempPath))
+        {
+            throw new InvalidOperationException($"Staged {artifactName} file was not found");
+        }
+
+        _fileSystem.MoveFile(tempPath, finalPath, overwrite: false);
+        if (!_fileSystem.FileExists(finalPath))
+        {
+            throw new InvalidOperationException($"{artifactName} file move could not be verified");
+        }
+    }
+
+    private void DeleteUploadArtifact(string? path)
+    {
+        if (path is null || !_fileManagementService.IsSafePath(path, _modelsPath))
+        {
+            return;
+        }
+
+        try
+        {
+            if (_fileSystem.FileExists(path))
+            {
+                _fileSystem.DeleteFile(path);
+            }
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", path);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", path);
         }
     }
 
@@ -775,6 +1186,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             .Select(t => new TagDto { Id = t.Id, Name = t.Name, Color = t.Color })
             .ToArray();
 
+        ThreeMfMetadataDto? metadata = DeserializeMetadata(model.ExtractedMetadataJson);
+
         return new Model3DDto
         {
             Id = model.Id,
@@ -785,8 +1198,32 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             UploadedAt = model.UploadedAt,
             Url = _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
             ThumbnailUrl = thumbnailUrl,
-            Tags = tags
+            Tags = tags,
+            ExtractedMetadata = metadata,
+            AutoTags = metadata?.AutoTags?.ToArray(),
+            SourceUrl = model.SourceUrl,
+            SourceLicense = model.SourceLicense,
+            SourceCreator = model.SourceCreator,
+            ImportedAt = model.ImportedAt,
+            ETag = CreateETag(model)
         };
+    }
+
+    private static ThreeMfMetadataDto? DeserializeMetadata(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<ThreeMfMetadataDto>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -816,4 +1253,159 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     }
 
     #endregion
+
+    /// <inheritdoc />
+    public async Task<GeometryUploadResultDto> UploadGeometryAsync(IFormFile geometryFile, CancellationToken ct)
+    {
+        if (geometryFile is null || geometryFile.Length == 0)
+        {
+            throw new ArgumentException("Geometry file is required", nameof(geometryFile));
+        }
+
+        const long maxFileSize = 200_000_000; // 200 MB
+        if (geometryFile.Length > maxFileSize)
+        {
+            throw new ArgumentException($"File exceeds maximum allowed size of {maxFileSize / 1_000_000} MB", nameof(geometryFile));
+        }
+
+        Guid modelId = Guid.NewGuid();
+        string fileName = $"{modelId}.stl";
+        string finalFilePath = Path.Combine(_modelsPath, fileName);
+
+        if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
+        {
+            throw new InvalidOperationException("Unsafe file path generated");
+        }
+
+        _logger.LogInformation("Geometry upload started: {ModelId} ({FileSize} bytes)", modelId, geometryFile.Length);
+
+        // Write file to a temp path, then move to final location
+        string tempFilePath = Path.Combine(_modelsPath, $"{modelId}.tmp.stl");
+        try
+        {
+            using (Stream dest = _fileSystem.OpenWrite(tempFilePath))
+            {
+                await geometryFile.CopyToAsync(dest, ct);
+            }
+
+            if (_fileSystem.FileExists(finalFilePath))
+            {
+                _fileSystem.DeleteFile(finalFilePath);
+            }
+
+            _fileSystem.MoveFile(tempFilePath, finalFilePath, overwrite: true);
+
+            if (!_fileSystem.FileExists(finalFilePath))
+            {
+                throw new InvalidOperationException("File move succeeded but verification failed");
+            }
+        }
+        catch
+        {
+            // Cleanup on failure
+            foreach (string path in new[] { tempFilePath, finalFilePath })
+            {
+                try
+                {
+                    if (_fileManagementService.IsSafePath(path, _modelsPath) && _fileSystem.FileExists(path))
+                    {
+                        _fileSystem.DeleteFile(path);
+                    }
+                }
+                catch
+                {
+                    // ignore cleanup errors
+                }
+            }
+
+            throw;
+        }
+
+        // Create minimal DB entry so the existing download endpoint can serve the file
+        FolderNode rootFolder = await _folderManagementService.GetOrCreateFolderAsync("/", "models", ct);
+
+        Model3D model = new()
+        {
+            Id = modelId,
+            Name = geometryFile.FileName ?? $"cut-geometry-{modelId:N}.stl",
+            FileName = fileName,
+            FolderId = rootFolder.Id,
+            FilePath = "/",
+            FileSizeBytes = geometryFile.Length,
+            FileHash = modelId.ToString("N"), // Use model ID as hash — no dedup for generated geometry
+            FileFormat = ModelFileFormat.STL,
+            UploadedAt = DateTime.UtcNow,
+            IsValid = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await _model3dFiles.AddAsync(model, ct);
+            await _model3dFiles.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // DB write failed — clean up the orphaned file on disk
+            try
+            {
+                if (_fileManagementService.IsSafePath(finalFilePath, _modelsPath) && _fileSystem.FileExists(finalFilePath))
+                {
+                    _fileSystem.DeleteFile(finalFilePath);
+                }
+            }
+            catch
+            {
+                // ignore cleanup errors
+            }
+
+            throw;
+        }
+
+        string fileUrl = _fileOperations.BuildModel3DFileUrl(modelId, ModelFileFormat.STL);
+        _logger.LogInformation("Geometry upload complete: {ModelId}, URL: {FileUrl}", modelId, fileUrl);
+
+        return new GeometryUploadResultDto
+        {
+            Id = modelId,
+            FileName = fileName,
+            FileSize = geometryFile.Length,
+            FileUrl = fileUrl
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task SetAttributionAsync(Guid modelId, string? sourceUrl, string? sourceCreator, string? sourceLicense, DateTime? importedAt, CancellationToken ct)
+    {
+        if (sourceUrl is not null && sourceUrl.Length > 2048)
+        {
+            throw new ArgumentException("SourceUrl must not exceed 2048 characters.", nameof(sourceUrl));
+        }
+
+        if (sourceCreator is not null && sourceCreator.Length > 256)
+        {
+            throw new ArgumentException("SourceCreator must not exceed 256 characters.", nameof(sourceCreator));
+        }
+
+        if (sourceLicense is not null && sourceLicense.Length > 128)
+        {
+            throw new ArgumentException("SourceLicense must not exceed 128 characters.", nameof(sourceLicense));
+        }
+
+        Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(modelId, ct);
+        if (model == null)
+        {
+            throw new InvalidOperationException($"Model {modelId} not found.");
+        }
+
+        model.SourceUrl = sourceUrl;
+        model.SourceCreator = sourceCreator;
+        model.SourceLicense = sourceLicense;
+        model.ImportedAt = importedAt;
+        model.UpdatedAt = DateTime.UtcNow;
+
+        await _model3dFiles.UpdateAsync(model, ct);
+        await _model3dFiles.SaveChangesAsync(ct);
+    }
 }

@@ -32,7 +32,10 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertTrue(printer.isEnabled)
         XCTAssertTrue(printer.isOnline)
         XCTAssertEqual(printer.state, "printing")
-        XCTAssertEqual(printer.progress, 45.5)
+        // Backend delivers progress on a 0–100 scale; Printer.init(from:) clamps and
+        // rescales it to the 0–1.0 UI-internal scale. See Models/Models.swift and
+        // PrinterProgressContractTests (issue #277).
+        XCTAssertEqual(printer.progress, 0.455)
         XCTAssertEqual(printer.jobName, "benchy.gcode")
     }
 
@@ -96,6 +99,113 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(printer.frontendUrl, "http://192.168.1.100")
         XCTAssertNotNil(printer.thumbnailUrl)
         XCTAssertNotNil(printer.cameraStreamUrl)
+        XCTAssertEqual(printer.cameraSnapshotUrl, "http://192.168.1.100/snapshot.jpg")
+        XCTAssertEqual(printer.cameraAccessMode, .streamAndSnapshot)
+        XCTAssertEqual(printer.cameraStreamFormat, .mjpeg)
+        XCTAssertEqual(printer.cameraSnapshotStrategy, .directUrl)
+    }
+
+    func testCameraAccessModeDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraAccessMode)] = [
+            ("Unknown", .unknown),
+            ("StreamAndSnapshot", .streamAndSnapshot),
+            ("SnapshotOnly", .snapshotOnly),
+            ("StreamOnly", .streamOnly),
+            ("UnsupportedStream", .unsupportedStream),
+            ("FutureMode", .unknown)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraAccessMode.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testCameraStreamFormatDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraStreamFormat)] = [
+            ("Unknown", .unknown),
+            ("Mjpeg", .mjpeg),
+            ("WebRtc", .webRtc),
+            ("Rtsp", .rtsp),
+            ("Unsupported", .unsupported),
+            ("FutureFormat", .unknown)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraStreamFormat.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testCameraSnapshotStrategyDecodesKnownAndUnknownValues() throws {
+        let cases: [(String, CameraSnapshotStrategy)] = [
+            ("None", .none),
+            ("DirectUrl", .directUrl),
+            ("SnapmakerU1MonitorJpeg", .snapmakerU1MonitorJpeg),
+            ("FutureStrategy", .none)
+        ]
+
+        for (raw, expected) in cases {
+            let decoded = try decoder.decode(CameraSnapshotStrategy.self, from: Data("\"\(raw)\"".utf8))
+            XCTAssertEqual(decoded, expected)
+        }
+    }
+
+    func testPrinterCameraUrlsContractDecodes() throws {
+        let cameras = try decoder.decode(
+            [PrinterCameraUrls].self,
+            from: TestJSON.printerCameraUrls.data(using: .utf8)!
+        )
+
+        XCTAssertEqual(cameras.count, 2)
+        XCTAssertEqual(cameras[0].cameraAccessMode, .streamAndSnapshot)
+        XCTAssertEqual(cameras[0].cameraStreamFormat, .mjpeg)
+        XCTAssertEqual(cameras[0].cameraSnapshotStrategy, .directUrl)
+        XCTAssertEqual(cameras[1].cameraAccessMode, .snapshotOnly)
+        XCTAssertEqual(cameras[1].cameraSnapshotStrategy, .snapmakerU1MonitorJpeg)
+    }
+
+    func testPrinterCameraUrlContractDecodes() throws {
+        let camera = try decoder.decode(
+            PrinterCameraUrl.self,
+            from: TestJSON.printerCameraUrl.data(using: .utf8)!
+        )
+
+        XCTAssertNil(camera.streamUrl)
+        XCTAssertNil(camera.snapshotUrl)
+        XCTAssertEqual(camera.accessMode, .snapshotOnly)
+        XCTAssertEqual(camera.streamFormat, .unknown)
+        XCTAssertEqual(camera.snapshotStrategy, .snapmakerU1MonitorJpeg)
+    }
+
+    // MARK: - PrinterStatusDetail homedAxes (#276)
+
+    private func decodeStatusDetail(_ json: String) throws -> PrinterStatusDetail {
+        try decoder.decode(PrinterStatusDetail.self, from: json.data(using: .utf8)!)
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesPresent() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":true,"state":"idle","homedAxes":"xyz"}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertEqual(detail.homedAxes, "xyz")
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesAbsent() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":true,"state":"idle"}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertNil(detail.homedAxes)
+    }
+
+    func testPrinterStatusDetailDecodesHomedAxesEmpty() throws {
+        let json = """
+        {"id":"550e8400-e29b-41d4-a716-446655440000","isOnline":false,"state":null,"homedAxes":""}
+        """
+        let detail = try decodeStatusDetail(json)
+        XCTAssertEqual(detail.homedAxes, "")
     }
 
     func testPrinterMinimalJSON() throws {
@@ -142,6 +252,19 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(job.priority, 1)
         XCTAssertEqual(job.queuePosition, 1)
         XCTAssertEqual(job.assignedPrinterName, "Prusa MK4")
+        XCTAssertNil(job.harvestedAt, "harvestedAt is absent from the JSON and must decode as nil")
+    }
+
+    /// Dispute C (#714): `harvestedAt` must decode when present on a
+    /// completed, already-harvested job.
+    func testPrintJobDecodesHarvestedAtWhenPresent() throws {
+        let job = try decoder.decode(
+            PrintJob.self,
+            from: TestJSON.printJobHarvested.data(using: .utf8)!
+        )
+
+        XCTAssertEqual(job.status, .completed)
+        XCTAssertNotNil(job.harvestedAt)
     }
 
     func testPrintJobDecodesTimestamps() throws {
@@ -215,6 +338,45 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(jobs.count, 2)
         XCTAssertEqual(jobs[0].status, .printing)
         XCTAssertEqual(jobs[1].status, .queued)
+    }
+
+    // MARK: - QueuedJobInfo (QueuedPrintJobWithFileMetaDto, Dispute C harvestedAt)
+
+    func testQueuedJobInfoDecodesNilHarvestedAtWhenAbsent() throws {
+        let response = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompleted
+        )
+
+        XCTAssertEqual(response.job.jobStatus, .completed)
+        XCTAssertNil(response.job.harvestedAt, "harvestedAt is absent from the JSON and must decode as nil")
+    }
+
+    func testQueuedJobInfoDecodesHarvestedAtWhenPresent() throws {
+        let response = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompletedHarvested
+        )
+
+        XCTAssertEqual(response.job.jobStatus, .completed)
+        XCTAssertNotNil(response.job.harvestedAt)
+    }
+
+    /// Dispute C (#714): the bin-scan harvest picker's eligibility predicate
+    /// (`isHarvestEligible` in BinScanResultView.swift) must admit only
+    /// completed, not-yet-harvested jobs.
+    func testHarvestEligiblePredicateExcludesAlreadyHarvestedJobs() throws {
+        let notHarvested = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompleted
+        )
+        let alreadyHarvested = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponseCompletedHarvested
+        )
+        let stillPrinting = try TestData.decodeQueuedPrintJobResponse(
+            from: TestJSON.queuedPrintJobResponsePrinting
+        )
+
+        XCTAssertTrue(isHarvestEligible(notHarvested))
+        XCTAssertFalse(isHarvestEligible(alreadyHarvested), "Already-harvested jobs must not reappear in the picker")
+        XCTAssertFalse(isHarvestEligible(stillPrinting), "Only Completed jobs are eligible")
     }
 
     // MARK: - Location (LocationDto)
@@ -520,6 +682,196 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertFalse(update.isOnline)
         XCTAssertEqual(update.state, "idle")
         XCTAssertNil(update.jobName)
+    }
+
+    // MARK: - Queue History Parity (#675)
+
+    func testQueueHistoryEntryDecodesNewParityFieldsWhenCostIsActual() throws {
+        let json = """
+        {
+            "id": "job-actual",
+            "jobName": "multi-material.gcode",
+            "printerName": "Prusa XL",
+            "status": "failed",
+            "completionPercentage": 42,
+            "startedAtUtc": "2026-03-25T00:00:00Z",
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "deadlineAtUtc": "2026-03-26T00:00:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 3.14,
+            "totalCostUsd": 4.50,
+            "costIsEstimated": false,
+            "materialType": "PLA",
+            "filamentName": "Prusament PLA",
+            "filamentColor": "#FF6600",
+            "actualFilamentUsageGrams": 156.8,
+            "estimatedFilamentUsageGrams": 160.0,
+            "actualCost": 3.14,
+            "failureReason": "Layer shift",
+            "toolheadUsages": [
+                {
+                    "id": "usage-1",
+                    "printJobId": "job-actual",
+                    "toolheadIndex": 0,
+                    "spoolmanSpoolId": 10,
+                    "filamentUsageGrams": 100.5,
+                    "slicerEstimateGrams": 101.0,
+                    "filamentName": "Prusament PLA",
+                    "filamentColor": "#FF6600",
+                    "materialCostUsd": 2.01
+                },
+                {
+                    "id": "usage-2",
+                    "printJobId": "job-actual",
+                    "toolheadIndex": 1,
+                    "spoolmanSpoolId": 11,
+                    "filamentUsageGrams": 56.3,
+                    "slicerEstimateGrams": 59.0,
+                    "filamentName": "Prusament PETG",
+                    "filamentColor": "#0066FF",
+                    "materialCostUsd": 1.13
+                }
+            ],
+            "tags": [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "name": "urgent",
+                    "category": "priority",
+                    "isAutoGenerated": false,
+                    "color": "#FF0000",
+                    "description": "Rush job"
+                }
+            ]
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.id, "job-actual")
+        XCTAssertEqual(entry.completionPercentage, 42)
+        XCTAssertEqual(entry.statusBadgeText, "Failed @ 42%")
+        XCTAssertEqual(entry.materialCostUsd, Decimal(string: "3.14"))
+        XCTAssertEqual(entry.totalCostUsd, Decimal(string: "4.50"))
+        XCTAssertFalse(entry.costIsEstimated ?? true)
+        XCTAssertEqual(entry.materialType, "PLA")
+        XCTAssertEqual(entry.filamentName, "Prusament PLA")
+        XCTAssertEqual(entry.filamentColor, "#FF6600")
+        XCTAssertEqual(entry.actualFilamentUsageGrams ?? 0, 156.8, accuracy: 0.001)
+        XCTAssertEqual(entry.estimatedFilamentUsageGrams ?? 0, 160.0, accuracy: 0.001)
+        XCTAssertEqual(entry.actualCost, Decimal(string: "3.14"))
+        XCTAssertEqual(entry.failureReason, "Layer shift")
+        XCTAssertNotNil(entry.startedAt)
+        XCTAssertNotNil(entry.deadlineAt)
+        XCTAssertEqual(entry.toolheadUsages?.count, 2)
+        XCTAssertEqual(entry.toolheadUsages?.first?.toolheadIndex, 0)
+        XCTAssertEqual(entry.toolheadUsages?.first?.materialCostUsd, Decimal(string: "2.01"))
+        XCTAssertEqual(entry.tags?.first?.name, "urgent")
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 156.8, accuracy: 0.001)
+        XCTAssertEqual(entry.displayMaterialCostUsd, Decimal(string: "3.14"))
+    }
+
+    func testQueueHistoryEntryDecodesNewParityFieldsWhenCostIsEstimated() throws {
+        let json = """
+        {
+            "id": "job-estimated",
+            "jobName": "history-seeded.gcode",
+            "printerName": "Moonraker",
+            "status": "cancelled",
+            "completionPercentage": 63.7,
+            "startedAtUtc": "2026-03-25T00:00:00Z",
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 1.06,
+            "costIsEstimated": true,
+            "materialType": "PETG",
+            "estimatedFilamentUsageGrams": 42.5,
+            "toolheadUsages": [],
+            "tags": []
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.statusBadgeText, "Cancelled @ 64%")
+        XCTAssertTrue(entry.costIsEstimated ?? false)
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 42.5, accuracy: 0.001)
+        XCTAssertTrue(entry.displayFilamentUsageIsEstimated)
+        XCTAssertEqual(entry.displayMaterialCostUsd, Decimal(string: "1.06"))
+    }
+
+    func testQueueHistoryEntryFallsBackToJobLevelCostAndUsageWhenToolheadsHaveNoMeasurements() throws {
+        let json = """
+        {
+            "id": "job-fallback",
+            "jobName": "fallback.gcode",
+            "printerName": "Prusa XL",
+            "status": "failed",
+            "completionPercentage": 12,
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 2.22,
+            "totalCostUsd": 5.00,
+            "costIsEstimated": false,
+            "actualFilamentUsageGrams": 12.3,
+            "estimatedFilamentUsageGrams": 20.0,
+            "toolheadUsages": [
+                { "toolheadIndex": 0, "filamentName": "PLA" },
+                { "toolheadIndex": 1, "filamentName": "PETG" }
+            ]
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.displayMaterialCostUsd, Decimal(string: "2.22"))
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 12.3, accuracy: 0.001)
+        XCTAssertFalse(entry.displayFilamentUsageIsEstimated)
+    }
+
+    func testQueueHistoryEntrySumsToolheadSlicerEstimatesAndMarksUsageEstimated() throws {
+        let json = """
+        {
+            "id": "job-toolhead-estimates",
+            "jobName": "estimate-only.gcode",
+            "printerName": "Prusa XL",
+            "status": "cancelled",
+            "completionPercentage": 37,
+            "completedAtUtc": "2026-03-25T00:30:00Z",
+            "actualPrintTimeSeconds": 1800,
+            "materialCostUsd": 1.23,
+            "costIsEstimated": true,
+            "toolheadUsages": [
+                { "toolheadIndex": 0, "slicerEstimateGrams": 10.5, "filamentName": "PLA" },
+                { "toolheadIndex": 1, "slicerEstimateGrams": 20.0, "filamentName": "PETG" }
+            ]
+        }
+        """
+
+        let entry = try decoder.decode(QueueHistoryEntry.self, from: json.data(using: .utf8)!)
+
+        XCTAssertEqual(entry.displayFilamentUsageGrams ?? 0, 30.5, accuracy: 0.001)
+        XCTAssertTrue(entry.displayFilamentUsageIsEstimated)
+    }
+
+    func testQueueHistoryEntryCompletionBadgeLogicMatchesWeb() {
+        func entry(status: String, completionPercentage: Double?) -> QueueHistoryEntry {
+            QueueHistoryEntry(
+                id: UUID().uuidString,
+                jobName: "part.gcode",
+                printerName: "U1-2",
+                status: status,
+                completedAt: Date(),
+                durationSeconds: 1800,
+                completionPercentage: completionPercentage
+            )
+        }
+
+        XCTAssertEqual(entry(status: "failed", completionPercentage: 42).statusBadgeText, "Failed @ 42%")
+        XCTAssertEqual(entry(status: "cancelled", completionPercentage: 63.7).statusBadgeText, "Cancelled @ 64%")
+        XCTAssertEqual(entry(status: "completed", completionPercentage: 100).statusBadgeText, "Completed")
+        XCTAssertEqual(entry(status: "failed", completionPercentage: 0).statusBadgeText, "Failed")
+        XCTAssertEqual(entry(status: "cancelled", completionPercentage: 100).statusBadgeText, "Cancelled")
+        XCTAssertEqual(entry(status: "failed", completionPercentage: nil).statusBadgeText, "Failed")
     }
 
     // MARK: - Computed Properties

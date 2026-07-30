@@ -148,6 +148,7 @@ OPTIONS:
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
     --include-obico-ml      Include Obico ML API for AI print failure detection
+    --include-go2rtc        Include go2rtc RTSP-to-WebRTC bridge sidecar
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
     --enable-pgadmin            Enable pgAdmin web UI (PostgreSQL only)
 
@@ -219,7 +220,9 @@ parse_args() {
     INCLUDE_DISCOVERY="false"
     INCLUDE_SPOOLMAN="false"
     INCLUDE_OBICO_ML="false"
-    ENABLE_ORCA_WORKER=""
+    INCLUDE_GO2RTC="false"
+    ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-}"
+    ENABLE_ORCA_WORKER_PREVIOUS="${ENABLE_ORCA_WORKER_PREVIOUS:-}"
     ENABLE_PGADMIN="false"
     API_PORT=""
     DB_PROVIDER="${DB_PROVIDER:-postgres}"
@@ -255,8 +258,12 @@ parse_args() {
                 INCLUDE_SPOOLMAN="true"; shift ;;
             --include-obico-ml|--enable-obico-ml)
                 INCLUDE_OBICO_ML="true"; shift ;;
+            --include-go2rtc)
+                INCLUDE_GO2RTC="true"; shift ;;
             --enable-orca-worker)
                 ENABLE_ORCA_WORKER="$2"; shift 2 ;;
+            --enable-orca-worker-previous)
+                ENABLE_ORCA_WORKER_PREVIOUS="$2"; shift 2 ;;
             --enable-pgadmin)
                 ENABLE_PGADMIN="true"; shift ;;
             --db-provider)
@@ -277,6 +284,7 @@ parse_args() {
 
     OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT}"
     ENABLE_ORCA_WORKER="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
+    ENABLE_ORCA_WORKER_PREVIOUS="${ENABLE_ORCA_WORKER_PREVIOUS:-no}"
 }
 
 # Function to validate port numbers
@@ -607,7 +615,15 @@ generate_compose() {
     # This ensures the single source of truth (container-versions.conf) is used
     if command -v envsubst >/dev/null 2>&1; then
         log_info "Populating container image versions from container-versions.conf..."
-        envsubst < "$compose_file" > "${compose_file}.tmp" && mv "${compose_file}.tmp" "$compose_file"
+        local envsubst_output
+        envsubst_output="$(mktemp)"
+        if ! envsubst < "$compose_file" > "$envsubst_output"; then
+            rm -f "$envsubst_output"
+            log_error "Failed to populate container image versions"
+            return 1
+        fi
+
+        mv "$envsubst_output" "$compose_file"
     fi
     
     # Inject health check anchors from common compose file
@@ -754,6 +770,17 @@ generate_compose() {
             else
                 log_warning "Failed to merge slicer-host service, continuing without it"
             fi
+
+            # Optional previous-version OrcaSlicer worker for dual-engine support (issue #578)
+            local need_orca_worker_previous="${ENABLE_ORCA_WORKER_PREVIOUS:-no}"
+            if [[ "$need_orca_worker_previous" =~ ^(yes|true|1)$ ]]; then
+                if merge_addon_services "$compose_file" "orcaslicer-worker-previous"; then
+                    log_info "Merged previous-version OrcaSlicer worker (ENABLE_ORCA_WORKER_PREVIOUS=$need_orca_worker_previous, version=${ORCASLICER_VERSION_PREVIOUS:-2.3.1})"
+                    addons_merged=true
+                else
+                    log_warning "Failed to merge previous-version OrcaSlicer worker, continuing without it"
+                fi
+            fi
         else
             log_info "OrcaSlicer worker service disabled (ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER)"
         fi
@@ -791,6 +818,16 @@ generate_compose() {
             addons_merged=true
         else
             log_warning "Failed to merge Obico ML API service, continuing without it"
+        fi
+    fi
+    
+    # Conditionally merge go2rtc RTSP-to-WebRTC bridge if enabled
+    if [[ "$INCLUDE_GO2RTC" == "true" ]]; then
+        if merge_addon_services "$compose_file" "go2rtc"; then
+            log_info "Merged go2rtc RTSP-to-WebRTC bridge service"
+            addons_merged=true
+        else
+            log_warning "Failed to merge go2rtc service, continuing without it"
         fi
     fi
     

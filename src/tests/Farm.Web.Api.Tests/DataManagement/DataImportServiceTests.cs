@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Infrastructure.Services.Security;
 using FluentAssertions;
@@ -30,7 +31,12 @@ public class DataImportServiceTests
             .Setup(x => x.Protect(It.IsAny<string?>()))
             .Returns<string?>(s => string.IsNullOrEmpty(s) ? null : $"prot:{s}");
 
-        _importService = new DataImportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object);
+        // Real repository over the in-memory DbContext — Replace-mode tests exercise the
+        // Dallas cascade adjudication cleanup that DataImportService.DeleteAllPrintersAsync
+        // now routes through IPrintersRepository.RemoveAsync.
+        IPrintersRepository printersRepository = new EfPrintersRepository(_context, _sensitiveDataProtectorMock.Object);
+
+        _importService = new DataImportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object, printersRepository);
     }
 
     [Fact]

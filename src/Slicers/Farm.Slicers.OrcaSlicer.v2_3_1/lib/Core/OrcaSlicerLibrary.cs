@@ -3,10 +3,11 @@
 namespace Farm.Slicers.OrcaSlicer.v2_3_1;
 
 /// <summary>
-/// OrcaSlicer v2.3.1 slicer library implementation.
+/// OrcaSlicer v2.3.1 slicer library implementation. Ships alongside v2_4_0 to
+/// support the "current + previous" engine matrix (issue #578).
 /// </summary>
 #pragma warning disable S101 // Class name required to match version numbering for plugin discovery
-public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
+public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary, IDisposable
 #pragma warning restore S101
 {
     private readonly ISlicerProfilesProvider _profilesProvider;
@@ -14,6 +15,7 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 
     public string SlicerName => "OrcaSlicer";
 
+    // Must parse as System.Version — SlicerRegistry sorts descending by version.
     public string SlicerVersion => "2.3.1";
 
     public string SlicerType => "OrcaSlicer";
@@ -24,8 +26,6 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
 
     public OrcaSlicerLibrary_v2_3_1()
     {
-        // Profiles are loaded from the OrcaSlicer worker service (/api/profiles), not from bundled resources
-        // The worker parses profiles from the official OrcaSlicer installation at /opt/orcaslicer/resources/profiles/
         _profilesProvider = new NullProfilesProvider();
         _assetRegistry = new OrcaSlicerAssetRegistry();
     }
@@ -34,7 +34,12 @@ public class OrcaSlicerLibrary_v2_3_1 : ISlicerLibrary
         object config,
         CancellationToken ct = default)
     {
-        // For now, accept any config. This can be enhanced to validate OrcaSlicer-specific properties.
         return Task.FromResult(new SlicerConfigValidationResult());
+    }
+
+    public void Dispose()
+    {
+        (_assetRegistry as IDisposable)?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

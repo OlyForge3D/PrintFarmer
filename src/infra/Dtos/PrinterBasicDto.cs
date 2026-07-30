@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure;
 
@@ -13,9 +14,13 @@ public record PrinterBasicDto(
     string? ManufacturerName = null,
     string? ModelName = null,
     PrinterBackend Backend = PrinterBackend.Moonraker,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? ApiKey = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? OriginalServerUrl = null,
     int BackendPort = 80,  // NOTE: Default 80 is for HTTP. Actual values: 7125 (Moonraker), 80 (PrusaLink/OctoPrint/SDCP). See PrinterBackendHelpers.GetDefaultPort()
     int? FrontendPort = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? BackendUrl = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? FrontendUrl = null);

@@ -15,6 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/evgenyneu/keychain-swift.git", from: "24.0.0"),
+        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing.git", from: "1.18.0"),
     ],
     targets: [
         .target(
@@ -26,7 +27,10 @@ let package = Package(
         ),
         .testTarget(
             name: "PrintFarmerTests",
-            dependencies: ["PrintFarmer"],
+            dependencies: [
+                "PrintFarmer",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ],
             path: "PrintFarmerTests"
         )
     ]

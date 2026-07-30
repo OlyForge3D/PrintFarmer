@@ -37,4 +37,12 @@ public class AuthenticationRateLimitOptions
     public int MaxLoginAttemptsPerMinute { get; set; } = 10;
 
     public int MaxRegisterAttemptsPerMinute { get; set; } = 10;
+
+    /// <summary>
+    /// Maximum Desktop API-key exchange attempts allowed per minute per IP address.
+    /// Kept tighter than login/register since a legitimate desktop client only needs
+    /// to exchange a key roughly once per token lifetime, while a lower ceiling makes
+    /// brute-forcing keys or enumerating valid ones materially slower.
+    /// </summary>
+    public int MaxApiKeyExchangeAttemptsPerMinute { get; set; } = 5;
 }

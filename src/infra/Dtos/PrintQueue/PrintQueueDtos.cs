@@ -1,4 +1,7 @@
-﻿namespace Farm.Infrastructure.Dtos.PrintQueue;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos;
+
+namespace Farm.Infrastructure.Dtos.PrintQueue;
 
 // ============= MAIN RESPONSE DTOs =============
 
@@ -13,6 +16,9 @@ public class QueuedPrintJobWithFileMetaDto
 
     public QueuePrinterMetaDto? AssignedPrinter { get; set; }
 
+    /// <summary>Base-64 dispatch-state revision displayed with the assigned printer.</summary>
+    public string? DispatchStateRowVersion { get; set; }
+
     public DateTime? EstimatedStartTime { get; set; }
 
     public DateTime? EstimatedCompletionTime { get; set; }
@@ -25,6 +31,9 @@ public class QueuedPrintJobDto
 {
     public string Id { get; set; } = string.Empty;
 
+    /// <summary>Base-64 job revision used as the public ETag.</summary>
+    public string? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     /// <summary>
@@ -36,6 +45,11 @@ public class QueuedPrintJobDto
     public string? FileName { get; set; } // Original G-code filename for display
 
     public string? AssignedPrinterId { get; set; }
+
+    public string JobKind { get; set; } =
+        nameof(Farm.Infrastructure.Domain.JobKind.Standard);
+
+    public Guid? CalibrationProjectId { get; set; }
 
     /// <summary>
     /// Name of the assigned printer (denormalized for display)
@@ -56,6 +70,13 @@ public class QueuedPrintJobDto
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Authoritative per-tool material requirements for multi-material / MMU jobs
+    /// (issue #710). Empty for single-material jobs; the legacy scalar
+    /// <see cref="RequiredMaterialType"/> is always preserved alongside this array.
+    /// </summary>
+    public List<PrintJobToolRequirementDto> ToolRequirements { get; set; } = [];
 
     public string[]? RequiredCapabilities { get; set; }
 
@@ -78,6 +99,11 @@ public class QueuedPrintJobDto
     public DateTime UpdatedAtUtc { get; set; }
 
     public DateTime QueuedAtUtc { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 
     /// <summary>
     /// True when the job was imported from a printer history API.
@@ -164,6 +190,45 @@ public class QueuedPrintJobDto
     /// Empty for single-extruder jobs.
     /// </summary>
     public List<PrintJobToolheadUsageDto> ToolheadUsages { get; set; } = [];
+
+    /// <summary>
+    /// UTC timestamp when this completed job was harvested into printed-part
+    /// stock (#714). Null when the job has not been harvested yet. Harvest is
+    /// orthogonal to lifecycle: harvested jobs remain <c>Completed</c>, and
+    /// this timestamp is the durable discriminator used by mobile clients to
+    /// gate the Harvest action and filter already-harvested jobs from the
+    /// scan-station picker.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
+
+    /// <summary>Typed result of the most recent physical dispatch invocation.</summary>
+    public DispatchAttemptResultDto? DispatchResult { get; set; }
+}
+
+/// <summary>
+/// Typed physical dispatch result carried by manual, scored, batch, and automatic callers.
+/// </summary>
+public sealed class DispatchAttemptResultDto
+{
+    public Guid? AttemptId { get; set; }
+
+    public int? AttemptNumber { get; set; }
+
+    public DispatchAttemptOutcome Outcome { get; set; }
+
+    public DateTime? BackendAcceptedAtUtc { get; set; }
+
+    public string? ErrorCode { get; set; }
+
+    public string? ErrorDetail { get; set; }
+
+    public bool IsRetryable { get; set; }
+
+    public bool RequiresReconciliation { get; set; }
+
+    public string? JobRevision { get; set; }
+
+    public string? DispatchStateRevision { get; set; }
 }
 
 /// <summary>
@@ -199,6 +264,8 @@ public class QueuePrinterMetaDto
 {
     public string Id { get; set; } = string.Empty;
 
+    public string? RowVersion { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public string ModelName { get; set; } = string.Empty;
@@ -219,11 +286,18 @@ public class EnqueueQueueJobRequest
 
     public int Priority { get; set; } = 1;
 
+    public JobKind? JobKind { get; set; }
+
     public string? AssignedPrinterId { get; set; }
 
     public decimal? RequiredNozzleDiameter { get; set; }
 
     public string? RequiredMaterialType { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -238,6 +312,11 @@ public class UpdateQueueJobRequest
     public string? Status { get; set; }
 
     public string? FailureReason { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>
@@ -254,6 +333,8 @@ public class UpdateQueueJobPriorityRequest
 public class BulkCancelQueueJobsRequest
 {
     public List<string> JobIds { get; set; } = new();
+
+    public Dictionary<string, string> JobETags { get; set; } = new();
 }
 
 /// <summary>
@@ -272,6 +353,8 @@ public class QueueJobReorderMove
     public string JobId { get; set; } = null!;
 
     public int NewPosition { get; set; }
+
+    public string? IfMatch { get; set; }
 }
 
 /// <summary>
@@ -288,6 +371,61 @@ public class SeedQueueHistoryRequest
 }
 
 // ============= RESPONSE DTOs =============
+
+/// <summary>
+/// Result of a seeded-history duplicate cleanup run. Duplicates are jobs that share
+/// the same printer and the same whole-second <c>ActualStartTime</c> (mirroring the
+/// harvest-time dedup guard). Only history-seeded rows are removed; native jobs are kept.
+/// </summary>
+public class DeduplicateHistoryResultDto
+{
+    /// <summary>
+    /// When true, no rows were deleted; the result reports what would have been removed.
+    /// </summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>
+    /// Number of duplicate groups (printer + whole-second start) that had at least one
+    /// removable seeded duplicate.
+    /// </summary>
+    public int DuplicateGroups { get; set; }
+
+    /// <summary>
+    /// Number of seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public int JobsRemoved { get; set; }
+
+    /// <summary>
+    /// Per-group detail of the retained job and the removed duplicates.
+    /// </summary>
+    public List<DeduplicateHistoryGroupDto> Groups { get; set; } = new();
+}
+
+/// <summary>
+/// Detail of a single duplicate group processed by the seeded-history cleanup.
+/// </summary>
+public class DeduplicateHistoryGroupDto
+{
+    /// <summary>
+    /// Effective printer the duplicate jobs belong to (source printer, else assigned printer).
+    /// </summary>
+    public Guid PrinterId { get; set; }
+
+    /// <summary>
+    /// Whole-second UTC start time shared by the jobs in this group.
+    /// </summary>
+    public DateTime StartTimeUtc { get; set; }
+
+    /// <summary>
+    /// The job retained as the canonical record for this group.
+    /// </summary>
+    public Guid RetainedJobId { get; set; }
+
+    /// <summary>
+    /// The seeded duplicate jobs removed (or that would be removed in a dry run).
+    /// </summary>
+    public List<Guid> RemovedJobIds { get; set; } = new();
+}
 
 /// <summary>
 /// Result of bulk queue operations
@@ -347,6 +485,27 @@ public class QueueStatsDto
     public int AverageWaitTimeMinutes { get; set; }
 
     public List<QueuePrinterModelStatsDto> ByModel { get; set; } = new();
+
+    public DateTime? EstimatedQueueCompletionUtc { get; set; }
+
+    public DateTime? StaffedCompletionUtc { get; set; }
+
+    public QueuePlanningAssumptionsDto Assumptions { get; set; } = new();
+}
+
+public class QueuePlanningAssumptionsDto
+{
+    public int WorkdayStartHourUtc { get; set; }
+
+    public int WorkdayEndHourUtc { get; set; }
+
+    public int BedClearMinutes { get; set; }
+
+    public int? DefaultDeadlineHours { get; set; }
+
+    public bool RequireDeadline { get; set; }
+
+    public int MinimumLeadHours { get; set; }
 }
 
 // ============= HISTORY DTOs (Phase 2) =============
@@ -407,6 +566,11 @@ public class QueueHistoryEntryDto
 
     public DateTime? CompletedAtUtc { get; set; }
 
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
+
     public int ActualPrintTimeSeconds { get; set; }
 
     public string? FailureReason { get; set; }
@@ -433,9 +597,58 @@ public class QueueHistoryEntryDto
     public double? ActualFilamentUsageGrams { get; set; }
 
     /// <summary>
+    /// Estimated filament weight in grams (from slicer metadata). Display fallback
+    /// so the filament basis for an estimated cost is always visible, even when no
+    /// actual usage was reported (e.g. history-seeded jobs).
+    /// </summary>
+    public double? EstimatedFilamentUsageGrams { get; set; }
+
+    /// <summary>
+    /// Material type for the job (e.g. "PLA", "PETG"), for the history Material column.
+    /// </summary>
+    public string? MaterialType { get; set; }
+
+    /// <summary>
     /// Actual cost of the print job (calculated on completion).
     /// </summary>
     public decimal? ActualCost { get; set; }
+
+    /// <summary>
+    /// Material cost in USD (filament usage × price per gram). Used as a display
+    /// fallback for jobs that have no per-toolhead usage records (e.g. history-seeded jobs).
+    /// </summary>
+    public decimal? MaterialCostUsd { get; set; }
+
+    /// <summary>
+    /// Total cost in USD (material + energy + machine time + labor). Provided for
+    /// display context on jobs without per-toolhead usage records.
+    /// </summary>
+    public decimal? TotalCostUsd { get; set; }
+
+    /// <summary>
+    /// True when the cost figures are an estimate rather than backed by real
+    /// associated Spoolman spools. Cost is treated as actual only when every
+    /// contributing material usage has an associated spool: for jobs with
+    /// per-toolhead usages, all usages must be spool-backed; otherwise the job
+    /// itself must have an associated spool. Any missing spool means at least
+    /// part of the cost was derived from filament-level or default/material
+    /// pricing, so the figure is flagged as an estimate. History-seeded jobs
+    /// (filament weight only, no spool) are always estimated.
+    /// </summary>
+    public bool CostIsEstimated { get; set; }
+
+    /// <summary>
+    /// Tags associated with the print job (auto-generated and manual).
+    /// </summary>
+    public List<TagDto> Tags { get; set; } = [];
+
+    /// <summary>
+    /// UTC timestamp when the completed print job was harvested into
+    /// printed-part stock (#722/#741). Null when the job has not been
+    /// harvested. Used by the web UI to gate the Harvest action and
+    /// show an "already harvested" indicator without a follow-up call.
+    /// </summary>
+    public DateTime? HarvestedAt { get; set; }
 }
 
 // ============= REQUEST DTOs (Phase 3) =============
@@ -472,6 +685,11 @@ public class UpdateJobDetailsRequest
     /// Number of copies to print. Must be >= CompletedCopies.
     /// </summary>
     public int? Copies { get; set; }
+
+    /// <summary>
+    /// Optional UTC deadline for this job.
+    /// </summary>
+    public DateTime? DeadlineAtUtc { get; set; }
 }
 
 /// <summary>

@@ -1,4 +1,6 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -14,6 +16,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 [ApiController]
 [Route("api/workers")]
 [Authorize]
+[RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
 public class WorkersController(
     IWorkerRepository workerRepository,
     ISliceJobRepository jobRepository,
@@ -31,6 +34,8 @@ public class WorkersController(
     [HttpGet]
     public async Task<IActionResult> ListAsync([FromQuery] string? serviceId, CancellationToken ct)
     {
+        _ = ct;
+
         IReadOnlyList<Worker> workers;
         if (!string.IsNullOrEmpty(serviceId))
         {
@@ -47,7 +52,6 @@ public class WorkersController(
             Id = w.Id,
             ServiceId = w.ServiceId,
             Name = w.Name,
-            EndpointUrl = w.EndpointUrl,
             Capabilities = ParseCapabilities(w.CapabilitiesJson),
             Status = w.Status,
             FreeSlots = w.FreeSlots,
@@ -76,6 +80,8 @@ public class WorkersController(
     [HttpGet("{id}")]
     public async Task<IActionResult> GetAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -87,7 +93,6 @@ public class WorkersController(
             Id = worker.Id,
             ServiceId = worker.ServiceId,
             Name = worker.Name,
-            EndpointUrl = worker.EndpointUrl,
             Capabilities = JsonSerializer.Deserialize<string[]>(worker.CapabilitiesJson) ?? [],
             Status = worker.Status,
             FreeSlots = worker.FreeSlots,
@@ -146,6 +151,8 @@ public class WorkersController(
     [HttpPost("{id}/disable")]
     public async Task<IActionResult> DisableAsync(Guid id, [FromBody] DisableWorkerRequest request, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -166,6 +173,8 @@ public class WorkersController(
     [HttpPost("{id}/enable")]
     public async Task<IActionResult> EnableAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {
@@ -187,6 +196,8 @@ public class WorkersController(
     [HttpPatch("{id}/slots")]
     public async Task<IActionResult> UpdateSlotsAsync(Guid id, [FromBody] UpdateWorkerSlotsRequest request, CancellationToken ct)
     {
+        _ = ct;
+
         if (request.TotalSlots < 0)
         {
             return BadRequest(new { error = "TotalSlots must be non-negative." });
@@ -205,6 +216,46 @@ public class WorkersController(
     }
 
     /// <summary>
+    /// Resets a worker by clearing its active job count and releasing any stuck jobs
+    /// back to the queue. Use this when a worker has ghost jobs blocking its slots.
+    /// </summary>
+    /// <param name="id">The worker ID.</param>
+    /// <param name="ct">Cancellation token.</param>
+    [HttpPost("{id}/reset")]
+    [Authorize(Roles = "farm_admin")]
+    public async Task<IActionResult> ResetAsync(Guid id, CancellationToken ct)
+    {
+        Worker? worker = await _workerRepository.GetByIdAsync(id);
+        if (worker is null)
+        {
+            return NotFound();
+        }
+
+        // Release any stuck Processing jobs assigned to this worker back to Queued
+        IReadOnlyList<SliceJob> stuckJobs = await _jobRepository.GetJobsByWorkerIdAsync(id, ct);
+        int releasedJobs = 0;
+        foreach (SliceJob job in stuckJobs)
+        {
+            job.Status = SliceJobStatus.Queued;
+            job.WorkerId = null;
+            job.ProgressPercent = 0;
+            job.ProgressMessage = null;
+            releasedJobs++;
+        }
+
+        // Reset the worker's active job counter
+        bool reset = await _workerRepository.ResetAsync(id);
+        if (!reset)
+        {
+            return NotFound();
+        }
+
+        _logger.LogWarning("Worker {WorkerId} reset by admin — released {ReleasedJobs} stuck job(s)", id, releasedJobs);
+
+        return Ok(new { releasedJobs, status = worker.Status });
+    }
+
+    /// <summary>
     /// Deletes a worker registration.
     /// </summary>
     /// <param name="id">The worker ID.</param>
@@ -212,6 +263,8 @@ public class WorkersController(
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteAsync(Guid id, CancellationToken ct)
     {
+        _ = ct;
+
         Worker? worker = await _workerRepository.GetByIdAsync(id);
         if (worker is null)
         {

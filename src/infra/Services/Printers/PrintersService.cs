@@ -25,7 +25,10 @@ using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
+using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -52,6 +55,7 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Initializes a new instance of the PrintersService with all required dependencies.
 /// </remarks>
 /// <param name="unitOfWork">Unit of Work for database operations</param>
+/// <param name="db">Application DbContext used for snapshot pre-deletion</param>
 /// <param name="backendFactory">Factory for creating backend clients</param>
 /// <param name="capabilityFactory">Factory for checking backend capabilities</param>
 /// <param name="catalogService">Service for manufacturer/model lookups</param>
@@ -64,9 +68,15 @@ namespace Farm.Infrastructure.Services.Printers;
 /// <param name="locationService">Service for location management</param>
 /// <param name="sensitiveDataProtector">Service for encrypting sensitive data</param>
 /// <param name="spoolmanService">Service for Spoolman spool data retrieval</param>
+/// <param name="go2RtcService">Service for go2rtc RTSP stream registration</param>
+/// <param name="storagePathService">Resolves snapshot storage root for file-level cleanup</param>
+/// <param name="spoolResolver">Resolves guided spool ids from each printer's owning source</param>
+/// <param name="coverageBroadcaster">Broadcasts filament coverage invalidations after printer mutations</param>
+/// <param name="activityAccumulator">Optional per-tool active-time accumulator (issue #711, round-14) consulted when wiring the per-tool attribution capability flag and reset on printer removal</param>
 /// <exception cref="ArgumentNullException">Thrown if any dependency is null</exception>
 public class PrintersService(
     IUnitOfWork unitOfWork,
+    AppDbContext db,
     IBackendClientFactory backendFactory,
     IBackendCapabilityFactory capabilityFactory,
     Catalog.ICatalogService catalogService,
@@ -78,9 +88,15 @@ public class PrintersService(
     Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader statusCache,
     Farm.Infrastructure.Services.Locations.ILocationService locationService,
     Farm.Infrastructure.Services.Security.ISensitiveDataProtector sensitiveDataProtector,
-    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService) : IPrintersService
+    Farm.Infrastructure.Services.Interfaces.ISpoolmanService spoolmanService,
+    Farm.Infrastructure.Services.Cameras.IGo2RtcService go2RtcService,
+    IStoragePathService storagePathService,
+    IFilamentCoverageSpoolResolver spoolResolver,
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
+    private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
     private readonly Catalog.ICatalogService _catalogService = catalogService ?? throw new ArgumentNullException(nameof(catalogService));
     private readonly IBackendClientFactory _backendFactory = backendFactory ?? throw new ArgumentNullException(nameof(backendFactory));
     private readonly IBackendCapabilityFactory _capabilityFactory = capabilityFactory ?? throw new ArgumentNullException(nameof(capabilityFactory));
@@ -93,12 +109,25 @@ public class PrintersService(
     private readonly Farm.Infrastructure.Services.Locations.ILocationService _locationService = locationService ?? throw new ArgumentNullException(nameof(locationService));
     private readonly Farm.Infrastructure.Services.Security.ISensitiveDataProtector _sensitiveDataProtector = sensitiveDataProtector ?? throw new ArgumentNullException(nameof(sensitiveDataProtector));
     private readonly Farm.Infrastructure.Services.Interfaces.ISpoolmanService _spoolmanService = spoolmanService ?? throw new ArgumentNullException(nameof(spoolmanService));
+    private readonly Farm.Infrastructure.Services.Cameras.IGo2RtcService _go2RtcService = go2RtcService ?? throw new ArgumentNullException(nameof(go2RtcService));
+    private readonly IStoragePathService _storagePathService = storagePathService ?? throw new ArgumentNullException(nameof(storagePathService));
+
+    // Optional: #709 filament coverage broadcaster. Nullable so unit tests
+    // that build PrintersService directly do not need to supply a mock.
+    private readonly IFilamentCoverageSpoolResolver _spoolResolver = spoolResolver ?? throw new ArgumentNullException(nameof(spoolResolver));
+    private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+
+    // Optional (issue #711, round-14): shared in-memory per-tool activity accumulator. Nullable so
+    // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
+    // accumulated telemetry when it is deleted.
+    private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
     /// Most MMU printers support 4-8 toolheads; 16 is a generous upper bound.
     /// </summary>
     private const int MaxToolheadIndex = 16;
+    private const string ToolheadPrinterIndexUniqueIndexName = "UX_Toolheads_PrinterId_Index";
 
     /// <summary>
     /// Gets the appropriate backend client for a printer based on its backend type.
@@ -107,6 +136,71 @@ public class PrintersService(
     private IBackendClient GetBackendClient(PrinterBackend backend)
     {
         return _backendFactory.GetClient(backend);
+    }
+
+    /// <summary>
+    /// Resolves Snapmaker U1-style Moonraker port and catalog hints during manual onboarding.
+    /// </summary>
+    private async Task ApplyMoonrakerOnboardingHintsAsync(CreatePrinterFromDiscoveryDto dto, CancellationToken ct)
+    {
+        if (dto.Backend != PrinterBackend.Moonraker ||
+            !Uri.TryCreate(dto.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return;
+        }
+
+        using HttpClient client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(5);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            serverUri,
+            dto.BackendPort,
+            ct);
+
+        if (resolution is null)
+        {
+            return;
+        }
+
+        dto.BackendPort = resolution.BackendPort;
+        if (resolution.BackendPort == MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort)
+        {
+            dto.FrontendPort = MoonrakerOnboardingResolver.SnapmakerU1MoonrakerPort;
+        }
+
+        if (resolution.IsSnapmakerU1)
+        {
+            if (string.IsNullOrWhiteSpace(dto.Manufacturer))
+            {
+                dto.Manufacturer = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Model))
+            {
+                dto.Model = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+            {
+                dto.NewManufacturerName = resolution.Manufacturer;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.NewModelName))
+            {
+                dto.NewModelName = resolution.Model;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.Name) && !string.IsNullOrWhiteSpace(resolution.DeviceName))
+            {
+                dto.Name = resolution.DeviceName;
+            }
+        }
+    }
+
+    private static string? FirstNonWhiteSpace(params string?[] values)
+    {
+        return values.FirstOrDefault(static value => !string.IsNullOrWhiteSpace(value));
     }
 
     /// <summary>
@@ -131,42 +225,159 @@ public class PrintersService(
     /// </remarks>
     public async Task<HistoryListResponse> GetHistoryListAsync(Guid printerId, int? limit, int? start, DateTime? since, DateTime? before, string? order, CancellationToken ct)
     {
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryListProbeResult probe = await ProbeHistoryListAsync(
+            printerId,
+            limit,
+            start,
+            since,
+            before,
+            order,
+            ct);
+        if (probe.Status == HistoryProbeStatus.Authoritative &&
+            probe.History is not null)
+        {
+            return probe.History;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history request timed out."),
+            HistoryProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history transport is unavailable."),
+            HistoryProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ when probe.FailureCode == "history_completeness_unproven" =>
+                new HistoryAuthorityException(
+                    "The printer backend could not prove the requested history range."),
+            _ => new InvalidOperationException("Printer history could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryListProbeResult> ProbeHistoryListAsync(
+        Guid printerId,
+        int? limit,
+        int? start,
+        DateTime? since,
+        DateTime? before,
+        string? order,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryListProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            _logger.LogWarning(
+                "[History] Printer {PrinterId} backend {PrinterBackend} does not support history",
+                printerId,
+                backend);
+            return HistoryListProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            // Use factory to get strongly-typed history client
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryListResponse? response = await historyClient!.GetHistoryListAsync(
+                printer.BackendUrl,
+                limit,
+                start,
+                since,
+                before,
+                order,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (response is null)
             {
-                HistoryListResponse? response = await historyClient!.GetHistoryListAsync(printer.BackendUrl, limit, start, since, printer.Credential, ct).ConfigureAwait(false);
-                if (response == null)
-                {
-                    _logger.LogWarning("[History] No response from history API for printer {PrinterId}", printerId);
-                    return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
-                }
-
-                _logger.LogInformation("[History] Got {Count} jobs from {Backend}", response.Count, backend);
-
-                // Set ThumbnailUrl for each job
-                foreach (HistoryJob job in response.Jobs)
-                {
-                    job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-                }
-
-                return response;
+                _logger.LogWarning(
+                    "[History] Backend {Backend} returned no history response for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Unavailable();
             }
-            else
+
+            if (response.AuthorityEvidence?.ProvesRequestedRange != true)
             {
-                _logger.LogWarning("[History] Printer {PrinterId} backend {PrinterBackend} does not support history", printerId, printer.Backend);
-                return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+                _logger.LogWarning(
+                    "[History] Backend {Backend} did not prove complete history coverage for printer {PrinterId}",
+                    backend,
+                    printerId);
+                return HistoryListProbeResult.Error(
+                    "history_completeness_unproven");
             }
+
+            _logger.LogInformation(
+                "[History] Got {Count} authoritative jobs from {Backend}",
+                response.Count,
+                backend);
+            foreach (HistoryJob job in response.Jobs)
+            {
+                job.ThumbnailUrl = ExtractThumbnailUrl(
+                    job.Metadata ?? new Dictionary<string, object>(),
+                    printer.ServerUrl);
+            }
+
+            return HistoryListProbeResult.Authoritative(response);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history transport unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history socket unavailable for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history timed out for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve history for printer {PrinterId}: {Message}", printerId, ex.Message);
-            return new HistoryListResponse { Count = 0, Jobs = Array.Empty<HistoryJob>() };
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history failed for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Error();
         }
     }
 
@@ -186,32 +397,126 @@ public class PrintersService(
             throw new ArgumentException("Job ID is required", nameof(jobId));
         }
 
-        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
+        HistoryJobProbeResult probe = await ProbeHistoryJobAsync(
+            printerId,
+            jobId,
+            ct);
+        if (probe.Status == HistoryDetailProbeStatus.Found &&
+            probe.Job is not null)
+        {
+            return probe.Job;
+        }
+
+        throw probe.Status switch
+        {
+            HistoryDetailProbeStatus.NotFound =>
+                new KeyNotFoundException($"History job {jobId} was not found."),
+            HistoryDetailProbeStatus.Unsupported =>
+                new NotSupportedException("The printer backend does not support history."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.Timeout =>
+                new TimeoutException("Printer history detail request timed out."),
+            HistoryDetailProbeStatus.Unavailable
+                when probe.FailureCode == HistoryProbeFailureCodes.TransportUnavailable =>
+                new HttpRequestException("Printer history detail transport is unavailable."),
+            HistoryDetailProbeStatus.Unavailable =>
+                new InvalidOperationException("Printer history detail is currently unavailable."),
+            _ when probe.FailureCode == "printer_not_found" =>
+                new KeyNotFoundException($"Printer {printerId} was not found."),
+            _ => new InvalidOperationException("Printer history detail could not be queried."),
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryJobProbeResult> ProbeHistoryJobAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            return HistoryJobProbeResult.Error("history_job_id_required");
+        }
+
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return HistoryJobProbeResult.Error("printer_not_found");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetHistoryClientTyped(
+                backend,
+                out ISupportsHistory? historyClient))
+        {
+            return HistoryJobProbeResult.Unsupported();
+        }
 
         try
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            if (!_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryJob? job = await historyClient!.GetHistoryJobAsync(
+                printer.BackendUrl,
+                jobId,
+                printer.Credential,
+                ct).ConfigureAwait(false);
+            if (job is null)
             {
-                throw new InvalidOperationException("History is only available for backends that support it");
+                _logger.LogWarning(
+                    "[History] Backend detail returned null for printer {PrinterId}, job {JobId}; treating as unavailable",
+                    printerId,
+                    jobId);
+                return HistoryJobProbeResult.Unavailable();
             }
 
-            HistoryJob job = await historyClient!.GetHistoryJobAsync(printer!.BackendUrl, jobId, printer.Credential, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException($"History job {jobId} not found");
+            if (string.IsNullOrWhiteSpace(job.JobId))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_missing");
+            }
 
-            // Set ThumbnailUrl
+            if (!string.Equals(job.JobId, jobId, StringComparison.Ordinal))
+            {
+                return HistoryJobProbeResult.Error("history_job_id_mismatch");
+            }
+
             job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
-            return job;
+            return HistoryJobProbeResult.Found(job);
+        }
+        catch (HistoryJobNotFoundException)
+        {
+            return HistoryJobProbeResult.NotFound();
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail transport unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (SocketException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail socket unavailable for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.TransportUnavailable);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "[History] Detail timed out for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Unavailable(
+                HistoryProbeFailureCodes.Timeout);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[History] Failed to retrieve job {JobId} for printer {PrinterId}: {Message}", jobId, printerId, ex.Message);
-            if (ex is KeyNotFoundException || ex is InvalidOperationException)
-            {
-                throw;
-            }
-
-            throw new KeyNotFoundException($"History job {jobId} not found", ex);
+            _logger.LogWarning(ex, "[History] Invalid detail for printer {PrinterId}", printerId);
+            return HistoryJobProbeResult.Error();
         }
     }
 
@@ -244,7 +549,15 @@ public class PrintersService(
                 }
 
                 // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(printer.BackendUrl, 10000, 0, since: null, printer.Credential, ct).ConfigureAwait(false);
+                HistoryListResponse? response = await historyClient.GetHistoryListAsync(
+                    printer.BackendUrl,
+                    limit: 10000,
+                    start: 0,
+                    since: null,
+                    before: null,
+                    order: null,
+                    credential: printer.Credential,
+                    ct: ct).ConfigureAwait(false);
                 if (response != null)
                 {
                     return CalculateOctoPrintHistoryTotals(response.Jobs);
@@ -396,6 +709,10 @@ public class PrintersService(
     public async Task RemoveAsync(Printer p, CancellationToken ct)
     {
         await _unitOfWork.Printers.RemoveAsync(p, ct);
+
+        // Discard any accumulated per-tool activity so a deleted printer's buckets do not linger
+        // (issue #711, round-14). Best-effort: the accumulator is a shared in-memory singleton.
+        _activityAccumulator?.Reset(p.Id);
     }
 
     /// <summary>
@@ -448,8 +765,14 @@ public class PrintersService(
                         throw; // Entity was deleted — cannot retry
                     }
 
-                    // Accept the database's RowVersion (and any other original values)
-                    // while keeping the caller's in-memory changes ("client wins").
+                    // Preserve explicit caller changes, but merge every untouched property
+                    // from the concurrent database row so retrying does not erase background
+                    // telemetry/configuration updates.
+                    foreach (var property in entry.Properties.Where(property => !property.IsModified))
+                    {
+                        property.CurrentValue = databaseValues[property.Metadata];
+                    }
+
                     entry.OriginalValues.SetValues(databaseValues);
                 }
             }
@@ -517,7 +840,13 @@ public class PrintersService(
             dto = CreateOfflinePrinterDto(p);
         }
 
-        return dto;
+        return dto with
+        {
+            RowVersion = p.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(p.RowVersion)
+                : null,
+            ConfigurationRevision = p.ConfigurationRevision,
+        };
     }
 #pragma warning restore CS8603
 
@@ -604,7 +933,14 @@ public class PrintersService(
                 };
             }
 
-            return dto;
+            dto = dto with
+            {
+                RowVersion = p.RowVersion is { Length: > 0 }
+                    ? Convert.ToBase64String(p.RowVersion)
+                    : null,
+                ConfigurationRevision = p.ConfigurationRevision,
+            };
+            return ApplyCameraContract(dto);
         }
         catch (Exception ex)
         {
@@ -627,10 +963,10 @@ public class PrintersService(
     public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
-        PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Select(async p =>
+        PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Where(p => p.IsEnabled).Select(async p =>
         {
             (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
-            return new PrinterCameraUrlsDto(Id: p.Id, Name: p.Name, CameraStreamUrl: streamUrl, CameraSnapshotUrl: snapshotUrl);
+            return PrinterCameraUrlsDto.FromUrls(p.Id, p.Name, streamUrl, snapshotUrl);
         }));
         return dtos;
     }
@@ -850,7 +1186,12 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    EstimatedCompletionTimeUtc: status.PrintTimeLeftSeconds is { } timeLeft ? DateTime.UtcNow.AddSeconds(timeLeft) : null,
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
             catch (Exception ex)
             {
@@ -896,7 +1237,11 @@ public class PrintersService(
                     FrontendUrl: p.FrontendUrl,
                     Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
                     ObicoEnabled: p.ObicoEnabled,
-                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)));
+                    HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+                    BedTypeId: p.BedTypeId,
+                    BedTypeName: p.BedType?.Name,
+                    BedTypeColor: p.BedType?.Color,
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
             }
         }
 
@@ -1251,6 +1596,10 @@ public class PrintersService(
             ["lastUpdated"] = p.ServiceState?.LastCapabilityUpdate ?? DateTime.UtcNow,
             ["maxBedTemp"] = p.MaxBedTemp,
 
+            // Z-offset calibration
+            ["zOffsetMm"] = p.ZOffsetMm,
+            ["lastZOffsetCalibrationAt"] = p.LastZOffsetCalibrationAt,
+
             // All toolheads as array (supports multi-toolhead printers)
             ["toolheads"] = p.Toolheads?.Select(t => new Dictionary<string, object?>
             {
@@ -1281,7 +1630,10 @@ public class PrintersService(
 
     private static PrinterDto CreateOfflinePrinterDto(Printer p, string? cameraStreamUrl = null, string? cameraSnapshotUrl = null)
     {
-        return new PrinterDto(
+        string? rowVersion = p.RowVersion is { Length: > 0 }
+            ? Convert.ToBase64String(p.RowVersion)
+            : null;
+        return ApplyCameraContract(new PrinterDto(
             Id: p.Id,
             Name: p.Name,
             Notes: p.Notes,
@@ -1315,7 +1667,20 @@ public class PrintersService(
             FrontendUrl: p.FrontendUrl,
             Location: p.Location == null ? null : new LocationSummaryDto(p.Location.Id, p.Location.Name, p.Location.Description),
             ObicoEnabled: p.ObicoEnabled,
-            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue));
+            HasCatalogUpdate: p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue),
+            UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+            RowVersion: rowVersion,
+            ConfigurationRevision: p.ConfigurationRevision));
+    }
+
+    private static PrinterDto ApplyCameraContract(PrinterDto dto)
+    {
+        return dto with
+        {
+            CameraAccessMode = CameraContractClassifier.GetAccessMode(dto.CameraStreamUrl, dto.CameraSnapshotUrl),
+            CameraStreamFormat = CameraContractClassifier.GetStreamFormat(dto.CameraStreamUrl),
+            CameraSnapshotStrategy = CameraContractClassifier.GetSnapshotStrategy(dto.CameraSnapshotUrl)
+        };
     }
 
     /// <summary>
@@ -1386,18 +1751,25 @@ public class PrintersService(
 
         if (duplicate != null)
         {
-            _logger.LogWarning("Duplicate printer detected: {DtoName} at {DtoServerUrl} - existing printer: {DuplicateName} ({DuplicateId})", dto.Name, dto.ServerUrl, duplicate.Name, duplicate.Id);
+            _logger.LogWarning(
+                "Duplicate printer detected for {DtoName}; existing printer: {DuplicateName} ({DuplicateId})",
+                dto.Name,
+                duplicate.Name,
+                duplicate.Id);
             throw new InvalidOperationException($"A printer already exists at this address: {duplicate.Name}");
         }
+
+        await ApplyMoonrakerOnboardingHintsAsync(dto, ct);
 
         // resolve manufacturer/model - use Unknown if not found
         // NOTE: We use CatalogService for all catalog lookups, which provides caching
         // to avoid repeated database queries during bulk operations like CSV import.
         // We don't create new manufacturers/models - if not found, we default to "Unknown" instead.
         Guid manufacturerId = dto.ManufacturerId ?? Guid.Empty;
-        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewManufacturerName))
+        string? manufacturerName = FirstNonWhiteSpace(dto.NewManufacturerName, dto.Manufacturer);
+        if (manufacturerId == Guid.Empty && !string.IsNullOrWhiteSpace(manufacturerName))
         {
-            string name = dto.NewManufacturerName!.Trim();
+            string name = manufacturerName.Trim();
 
             // Try to find existing manufacturer from catalog service (with caching), but don't create - use Unknown if not found
             ManufacturerDto? existingMfg = await _catalogService.FindManufacturerByNameAsync(name, ct);
@@ -1415,9 +1787,10 @@ public class PrintersService(
         }
 
         Guid modelId = dto.ModelId ?? Guid.Empty;
-        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(dto.NewModelName) && manufacturerId != Guid.Empty)
+        string? modelName = FirstNonWhiteSpace(dto.NewModelName, dto.Model);
+        if (modelId == Guid.Empty && !string.IsNullOrWhiteSpace(modelName) && manufacturerId != Guid.Empty)
         {
-            string mname = dto.NewModelName!.Trim();
+            string mname = modelName.Trim();
 
             // Try to find existing model from catalog service (with caching), but don't create - use Unknown if not found
             PrinterModelDto? existingModel = await _catalogService.FindModelByNameAsync(mname, manufacturerId, ct);
@@ -1526,10 +1899,20 @@ public class PrintersService(
             HasEnclosure = modelTemplate?.HasEnclosure ?? false,
             MultiMaterial = modelTemplate?.MultiMaterial ?? false,
             SupportsAutoLeveling = modelTemplate?.SupportsAutoLeveling ?? false,
+
+            // SupportsPerToolAttribution is derived after the toolheads are built (see
+            // PerToolAttributionCapability.Refresh before AddAsync below): it is true only for a
+            // Moonraker printer with two or more physical hotends, the case where interval-aware
+            // active-tool telemetry can genuinely differentiate per-head wear (issue #711, round-14).
             MaxPrintSpeed = modelTemplate?.MaxPrintSpeed,
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
-            MachineHourlyRate = dto.MachineHourlyRate
+            MachineHourlyRate = dto.MachineHourlyRate,
+
+            // Inherit auto-dispatch defaults from model template
+            AutoDispatchEnabled = modelTemplate?.DefaultAutoDispatchState != null
+                && modelTemplate.DefaultAutoDispatchState != AutoDispatchState.None,
+            UseModelDispatchDefaults = true
         };
 
         // Get default toolhead values from model's toolhead templates (nozzle diameter, max hotend temp, etc.)
@@ -1616,6 +1999,11 @@ public class PrintersService(
                 _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
             }
         }
+
+        // Derive per-tool attribution capability now that the physical toolheads exist (issue #711,
+        // round-14). True only for a Moonraker printer with ≥2 physical hotends, where interval-aware
+        // active-tool telemetry can genuinely differentiate per-head wear.
+        _ = PerToolAttributionCapability.Refresh(p);
 
         await AddAsync(p, ct);
 
@@ -1764,6 +2152,8 @@ public class PrintersService(
             }
         }
 
+        updated = PerToolAttributionCapability.Refresh(printer) || updated;
+
         // Always mark the sync as complete so HasCatalogUpdate clears,
         // even when the printer already has all template values.
         EnsureServiceState(printer).LastModelSyncAt = DateTime.UtcNow;
@@ -1809,7 +2199,7 @@ public class PrintersService(
     /// </remarks>
     public async Task<byte[]?> GetCameraSnapshotAsync(Guid id, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await FindByIdWithIncludesAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
             return null;
@@ -1831,6 +2221,16 @@ public class PrintersService(
                         : p.BackendUrl;
 
                     snapshotUrl = await cameraClient.GetCameraSnapshotUrlAsync(snapUrl, p.FrontendPort, p.Credential, ct).ConfigureAwait(false);
+                }
+            }
+
+            if (IsSnapmakerU1Printer(p) &&
+                (string.IsNullOrWhiteSpace(snapshotUrl) || CameraContractClassifier.IsSnapmakerU1MonitorSnapshotUrl(snapshotUrl)))
+            {
+                byte[]? u1Snapshot = await TryGetSnapmakerU1CameraSnapshotAsync(p, ct).ConfigureAwait(false);
+                if (u1Snapshot is { Length: > 0 })
+                {
+                    return u1Snapshot;
                 }
             }
 
@@ -1873,7 +2273,7 @@ public class PrintersService(
     public async Task<(string? StreamUrl, string? SnapshotUrl)> GetCameraUrlsForPrinterAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
-        if (p == null)
+        if (p == null || !p.IsEnabled)
         {
             return (null, null);
         }
@@ -2031,12 +2431,12 @@ public class PrintersService(
     /// Pass null for heater to skip temperature change (e.g., hotend=210, bed=null sets only hotend).
     /// Temperatures clamped to safe ranges by backend firmware (typically 0-300°C hotend, 0-120°C bed).
     /// </remarks>
-    public async Task<bool> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
+    public async Task<PrinterControlOutcome> SetTempsAsync(Guid id, double? hotend, double? bed, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2065,25 +2465,31 @@ public class PrintersService(
                         success = success && hotendSuccess;
                     }
 
-                    return success;
+                    return success ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
                 }
 
-                return false;
+                return PrinterControlOutcome.BackendUnsupported;
             }
 
             // Moonraker, PrusaLink, SDCP: use generic temperature control
             if (client is ISupportsTemperatureControl tempControl)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await tempControl.SetTemperaturesAsync(moonrakerUrl, hotend, bed, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused temperature command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to set temperatures on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2103,12 +2509,12 @@ public class PrintersService(
     /// At least one axis parameter should be provided; null values are ignored.
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2119,15 +2525,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                bool ok = await movement.MoveAsync(moonrakerUrl, x, y, z, f, ct: ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused move command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2148,12 +2560,12 @@ public class PrintersService(
     /// Coordinates are typically limited to printer build volume (e.g., 0-250mm for Prusa).
     /// Movement is queued and executed immediately by the printer.
     /// </remarks>
-    public async Task<bool> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
+    public async Task<PrinterControlOutcome> MoveToAsync(Guid id, double? x, double? y, double? z, double? f, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return false;
+            return PrinterControlOutcome.NotFound;
         }
 
         try
@@ -2164,15 +2576,21 @@ public class PrintersService(
             if (client is ISupportsMovement movement)
             {
                 string moonrakerUrl = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
-                return await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                bool ok = await movement.MoveToAsync(moonrakerUrl, x, y, z, f, p.Credential, ct).ConfigureAwait(false);
+                return ok ? PrinterControlOutcome.Ok : PrinterControlOutcome.BackendUnreachable;
             }
 
-            return false;
+            return PrinterControlOutcome.BackendUnsupported;
+        }
+        catch (PrinterBackendBusyException)
+        {
+            _logger.LogInformation("Printer {Id} refused moveto command (backend busy)", id);
+            return PrinterControlOutcome.BackendBusy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to move to position on printer {Id}", id);
-            return false;
+            return PrinterControlOutcome.BackendUnreachable;
         }
     }
 
@@ -2283,6 +2701,75 @@ public class PrintersService(
         {
             _logger.LogWarning(ex, "Failed to cancel print on printer {Id}", id);
             return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<BackendControlOutcome> ExecuteControlAsync(
+        Guid id,
+        BackendControlOperation operation,
+        CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            return BackendControlOutcome.Rejected(
+                "printer_not_found",
+                "The printer was not found.");
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        if (!_capabilityFactory.TryGetControlOperationsClientTyped(
+                backend,
+                out ISupportsControlOperations? controlClient))
+        {
+            return BackendControlOutcome.Rejected(
+                "control_unsupported",
+                "The printer backend does not support lifecycle control.");
+        }
+
+        try
+        {
+            bool accepted = operation switch
+            {
+                BackendControlOperation.Pause =>
+                    await controlClient!.PauseAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Resume =>
+                    await controlClient!.ResumeAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.Cancel or BackendControlOperation.Abort =>
+                    await controlClient!.CancelAsync(
+                        printer.BackendUrl,
+                        printer.Credential,
+                        ct).ConfigureAwait(false),
+                BackendControlOperation.EmergencyStop =>
+                    await EmergencyStopAsync(id, ct).ConfigureAwait(false),
+                _ => false,
+            };
+
+            return accepted
+                ? BackendControlOutcome.Accepted()
+                : BackendControlOutcome.Unknown(
+                    "The provider did not prove whether the lifecycle command was accepted.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Lifecycle command {Operation} produced an unknown outcome on printer {PrinterId}",
+                operation,
+                id);
+            return BackendControlOutcome.Unknown(
+                "The provider response was lost; backend reconciliation is required.");
         }
     }
 
@@ -2448,6 +2935,92 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
+    public async Task<PrintJobObjectListDto?> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
+    {
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return null;
+        }
+
+        var backend = (PrinterBackend)printer.Backend;
+        IBackendClient client = GetBackendClient(backend);
+        if (client is not ISupportsObjectExclusion objectExclusionClient)
+        {
+            return new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>());
+        }
+
+        string url = backend == PrinterBackend.Moonraker
+            ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+            : printer.BackendUrl;
+
+        PrintJobObjectListDto? objects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+        return objects is null
+            ? new PrintJobObjectListDto(id, null, Array.Empty<PrintJobObjectDto>())
+            : objects with { PrinterId = id };
+    }
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> ExcludePrintJobObjectAsync(Guid id, string objectName, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(objectName))
+        {
+            return new CommandResult(false, "Object name is required.");
+        }
+
+        Printer? printer = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        if (printer == null)
+        {
+            return new CommandResult(false, $"Printer {id} not found");
+        }
+
+        try
+        {
+            var backend = (PrinterBackend)printer.Backend;
+            IBackendClient client = GetBackendClient(backend);
+            if (client is not ISupportsObjectExclusion objectExclusionClient)
+            {
+                return new CommandResult(false, $"Backend '{backend}' does not support object exclusion");
+            }
+
+            string url = backend == PrinterBackend.Moonraker
+                ? BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort)
+                : printer.BackendUrl;
+
+            PrintJobObjectListDto? currentObjects = await objectExclusionClient.GetCurrentJobObjectsAsync(url, printer.Credential, ct).ConfigureAwait(false);
+            if (currentObjects is null || string.IsNullOrWhiteSpace(currentObjects.JobName))
+            {
+                return new CommandResult(false, "No active printing job is available for object exclusion.");
+            }
+
+            PrintJobObjectDto? objectToExclude = currentObjects.Objects.FirstOrDefault(o => string.Equals(o.Name, objectName, StringComparison.Ordinal));
+            if (objectToExclude is null)
+            {
+                return new CommandResult(false, $"Object '{objectName}' was not found in the current print job.");
+            }
+
+            if (objectToExclude.IsExcluded)
+            {
+                return new CommandResult(false, $"Object '{objectName}' is already excluded.");
+            }
+
+            bool result = await objectExclusionClient.ExcludeObjectAsync(url, objectName, ct).ConfigureAwait(false);
+            return result
+                ? new CommandResult(true, $"Object '{objectName}' skipped")
+                : new CommandResult(false, "Printer rejected the object exclusion command");
+        }
+        catch (ArgumentException ex)
+        {
+            return new CommandResult(false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to exclude object on printer {PName} ({Id})", printer.Name, id);
+            return new CommandResult(false, $"Failed to exclude object: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<CommandResult> LoadFilamentAsync(Guid id, CancellationToken ct)
     {
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
@@ -2480,12 +3053,113 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> UnloadFilamentAsync(Guid id, CancellationToken ct)
+    public async Task<FilamentUnloadResult> UnloadFilamentAsync(Guid id, int? toolheadIndex, CancellationToken ct)
     {
-        Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
+        Printer? p = await _unitOfWork.Printers.FindByIdWithToolheadsAsync(id, ct).ConfigureAwait(false);
         if (p == null)
         {
-            return new CommandResult(false, $"Printer {id} not found");
+            return new FilamentUnloadResult(
+                false,
+                $"Printer {id} not found",
+                FailureKind: FilamentUnloadFailureKind.PrinterNotFound);
+        }
+
+        // Capture outgoing spool details BEFORE unload so we can return residual weight
+        // even if the printer command later fails partway.
+        //
+        // Source of truth for the outgoing spool (in order):
+        //   1. Explicit toolheadIndex → that lane's CurrentSpoolId (guided swap on
+        //      multi-slot / MMU printers targets a specific gate; do NOT infer from
+        //      the physical primary).
+        //   2. Otherwise: Printer.CurrentSpoolId (legacy single-tool source of truth),
+        //      falling back to primaryToolhead.CurrentSpoolId when the Printer scalar
+        //      is unset.
+        int? outgoingSpoolId;
+        string? outgoingMaterial;
+
+        if (toolheadIndex.HasValue)
+        {
+            Toolhead? targetLane = p.Toolheads?.FirstOrDefault(t => t.Index == toolheadIndex.Value);
+            if (targetLane is null)
+            {
+                // B3: legacy single-tool T0 with no materialized Toolhead row → resolve the
+                // outgoing spool from the Printer scalar, never from a fabricated gate.
+                if (toolheadIndex.Value == 0)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    // An explicit, non-zero lane that does not exist is an invalid toolhead
+                    // request → documented HTTP 400 (not a 404 "printer not found").
+                    return new FilamentUnloadResult(
+                        false,
+                        $"Toolhead index {toolheadIndex.Value} not found on printer {p.Name}",
+                        SpoolId: null,
+                        Material: null,
+                        ResidualWeightG: null,
+                        FailureKind: FilamentUnloadFailureKind.InvalidToolhead);
+                }
+            }
+            else if (toolheadIndex.Value == 0)
+            {
+                // B3: when a physical row exists at T0, preserve the read precedence
+                // Printer.CurrentSpoolId ?? primaryToolhead.CurrentSpoolId.
+                if (p.CurrentSpoolId is not null)
+                {
+                    outgoingSpoolId = p.CurrentSpoolId;
+                    outgoingMaterial = p.CurrentMaterial;
+                }
+                else
+                {
+                    outgoingSpoolId = targetLane.CurrentSpoolId;
+                    outgoingMaterial = targetLane.CurrentMaterial;
+                }
+            }
+            else
+            {
+                outgoingSpoolId = targetLane.CurrentSpoolId;
+                outgoingMaterial = targetLane.CurrentMaterial;
+            }
+        }
+        else
+        {
+            outgoingSpoolId = p.CurrentSpoolId;
+            outgoingMaterial = null;
+            if (outgoingSpoolId is null)
+            {
+                Toolhead? primary = p.Toolheads?
+                    .OrderByDescending(t => t.IsPrimary)
+                    .ThenBy(t => t.Index)
+                    .FirstOrDefault();
+                outgoingSpoolId = primary?.CurrentSpoolId;
+                outgoingMaterial = primary?.CurrentMaterial;
+            }
+        }
+
+        double? residualWeightG = null;
+
+        if (outgoingSpoolId is int spoolId)
+        {
+            try
+            {
+                SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+                if (spool is not null)
+                {
+                    residualWeightG = spool.RemainingWeightG;
+                    outgoingMaterial ??= spool.Material;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "UnloadFilamentAsync: Spoolman lookup for outgoing spool {SpoolId} on printer {PName} ({Id}) failed",
+                    spoolId,
+                    p.Name,
+                    id);
+            }
         }
 
         try
@@ -2495,19 +3169,32 @@ public class PrintersService(
 
             if (client is not ISupportsFilamentControl filamentClient)
             {
-                return new CommandResult(false, $"Backend '{backend}' does not support filament control");
+                return new FilamentUnloadResult(
+                    false,
+                    $"Backend '{backend}' does not support filament control",
+                    outgoingSpoolId,
+                    outgoingMaterial,
+                    residualWeightG);
             }
 
             string url = BuildMoonrakerUrl(p.ServerUrl, p.FrontendPort);
             bool result = await filamentClient.UnloadFilamentAsync(url, ct).ConfigureAwait(false);
-            return result
-                ? new CommandResult(true, "Filament unload initiated")
-                : new CommandResult(false, "Printer rejected the filament unload command");
+            return new FilamentUnloadResult(
+                result,
+                result ? "Filament unload initiated" : "Printer rejected the filament unload command",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to unload filament on printer {PName} ({Id})", p.Name, id);
-            return new CommandResult(false, $"Failed to unload filament: {ex.Message}");
+            return new FilamentUnloadResult(
+                false,
+                $"Failed to unload filament: {ex.Message}",
+                outgoingSpoolId,
+                outgoingMaterial,
+                residualWeightG);
         }
     }
 
@@ -2610,6 +3297,16 @@ public class PrintersService(
                 : null;
             await _broadcaster.BroadcastSpoolChangeAsync(id, spoolInfo, ct).ConfigureAwait(false);
 
+            // #709 item 5: coverage may have changed (bound spool differs, so
+            // remaining / classification changes).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
+
             return new CommandResult(true, spoolId.HasValue ? $"Active spool set to {spoolId}" : "Active spool cleared");
         }
         catch (Exception ex)
@@ -2650,7 +3347,17 @@ public class PrintersService(
     }
 
     /// <inheritdoc/>
-    public async Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct)
+    public Task<CommandResult> SetToolheadSpoolAsync(Guid id, int toolheadIndex, int spoolId, CancellationToken ct) =>
+        SetToolheadSpoolAsync(id, toolheadIndex, spoolId, null, SpoolBindPolicy.Direct, ct);
+
+    /// <inheritdoc/>
+    public async Task<CommandResult> SetToolheadSpoolAsync(
+        Guid id,
+        int toolheadIndex,
+        int spoolId,
+        FilamentSwapOverrideContext? overrideAudit,
+        SpoolBindPolicy policy,
+        CancellationToken ct)
     {
         // Load printer with toolheads collection
         Printer? p = await _unitOfWork.Printers
@@ -2674,66 +3381,406 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
-        // Auto-create MMU gates when the toolhead doesn't exist.
-        // If the printer reports MMU gates via SignalR but MultiMaterial isn't set yet,
-        // promote it and create the virtual gate rows so spool assignment works.
-        if (toolhead is null)
-        {
-            if (!p.MultiMaterial && toolheadIndex > 0)
-            {
-                _logger.LogInformation(
-                    "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
-                    p.Name, id, toolheadIndex);
-                p.MultiMaterial = true;
-            }
+        // H-3: natural idempotency backstop. Re-binding the SAME spool to the SAME
+        // (printer, toolhead) slot is a no-op, so short-circuit BEFORE any spool
+        // re-resolution, UpdatedAt churn, override-audit staging, SaveChanges, or
+        // coverage broadcast. This gives spool-bind the same durable natural-idempotency
+        // backstop that adjust (OperationKey) and harvest (HarvestedAt + snapshot) already
+        // own, so a re-delivered bind — an Idempotency-Key retry while the replay flag is
+        // off or transitioning, or a staleness-reclaimed retry — cannot produce a duplicate
+        // FilamentSwapOverride audit row or a spurious state change. Returns 200
+        // (CommandResult success) with the existing binding unchanged.
+        bool alreadyBoundToRequestedSpool = toolhead is null && toolheadIndex == 0
+            ? p.CurrentSpoolId == spoolId
+            : toolhead is not null && toolhead.CurrentSpoolId == spoolId;
 
-            if (p.MultiMaterial)
+        if (alreadyBoundToRequestedSpool)
+        {
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: spool {SpoolId} already bound to toolhead T{Index} on printer {PName} ({Id}); returning existing binding unchanged (idempotent no-op re-bind)",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(true, $"Spool {spoolId} already assigned to toolhead T{toolheadIndex}");
+        }
+
+        // B3: legacy single-tool T0 with no materialized Toolhead row → bind via the Printer
+        // scalar (Printer.CurrentSpoolId). Never fabricate a fake MMU gate at index 0.
+        if (toolhead is null && toolheadIndex == 0)
+        {
+            int? previousSpoolId = p.CurrentSpoolId;
+            string? previousMaterial = p.CurrentMaterial;
+            FilamentSwapOverride? stagedAudit = null;
+
+            try
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
-                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
-                if (gates.Count > 0)
+                SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                    p,
+                    spoolId,
+                    policy,
+                    ct).ConfigureAwait(false);
+                SpoolmanSpoolDto? spool = resolution.Spool;
+
+                if (policy == SpoolBindPolicy.Guided && spool is null)
                 {
-                    _unitOfWork.Printers.AddToolheads(gates);
-                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    _logger.LogWarning(
+                        "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for legacy T0 on printer {PName} ({Id})",
+                        spoolId, p.Name, id);
+                    return new CommandResult(
+                        false,
+                        BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
                 }
 
-                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
-                           ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+                p.CurrentSpoolId = spoolId;
+                p.CurrentMaterial = spool?.Material ?? null;
+
+                stagedAudit = StageOverrideAudit(
+                    overrideAudit,
+                    id,
+                    toolheadIndex,
+                    spoolId,
+                    spool?.Material);
+                await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
             }
+            catch (Exception ex)
+            {
+                RestoreLegacySpoolBinding(p, previousSpoolId, previousMaterial, stagedAudit);
+                _logger.LogError(
+                    ex,
+                    "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to legacy T0 on printer {PName} ({Id})",
+                    spoolId, p.Name, id);
+                return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
+            }
+
+            _logger.LogInformation(
+                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to legacy T0 (Printer scalar) on printer {PName} ({Id})",
+                spoolId, p.Name, id);
+
+            await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T0");
         }
 
-        if (toolhead is null)
-        {
-            return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
-        }
-
+        bool previousMultiMaterial = p.MultiMaterial;
+        List<Toolhead> stagedGates = [];
+        Toolhead? existingToolhead = toolhead;
+        int? previousToolheadSpoolId = existingToolhead?.CurrentSpoolId;
+        string? previousToolheadMaterial = existingToolhead?.CurrentMaterial;
+        string? previousToolheadColor = existingToolhead?.CurrentFilamentColor;
+        DateTime? previousToolheadUpdatedAt = existingToolhead?.UpdatedAt;
+        FilamentSwapOverride? stagedOverride = null;
         try
         {
-            // Fetch spool details from Spoolman to populate material and color
-            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            // C1/C3: resolve before mutating tracked topology. A guided null or lookup
+            // exception therefore cannot leave a promotion or newly tracked gates behind.
+            SpoolBindingResolution resolution = await ResolveToolheadSpoolAsync(
+                p,
+                spoolId,
+                policy,
+                ct).ConfigureAwait(false);
+            SpoolmanSpoolDto? spool = resolution.Spool;
 
-            // Assign spool ID and denormalized info
+            if (policy == SpoolBindPolicy.Guided && spool is null)
+            {
+                _logger.LogWarning(
+                    "SetToolheadSpoolAsync: guided bind aborted — spool {SpoolId} unresolved at commit time for toolhead T{Index} on printer {PName} ({Id}); no gate/bind/audit persisted",
+                    spoolId, toolheadIndex, p.Name, id);
+                return new CommandResult(
+                    false,
+                    BuildGuidedResolutionFailureMessage(spoolId, resolution.FailureReason));
+            }
+
+            if (toolhead is null)
+            {
+                if (!p.MultiMaterial && toolheadIndex > 0)
+                {
+                    _logger.LogInformation(
+                        "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
+                        p.Name, id, toolheadIndex);
+                    p.MultiMaterial = true;
+                    _ = PerToolAttributionCapability.Refresh(p);
+                }
+
+                if (p.MultiMaterial)
+                {
+                    int gateCount = Math.Max(4, toolheadIndex);
+                    stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                    if (stagedGates.Count > 0)
+                    {
+                        _unitOfWork.Printers.AddToolheads(stagedGates);
+                    }
+
+                    toolhead = stagedGates.FirstOrDefault(t => t.Index == toolheadIndex)
+                               ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
+                }
+            }
+
+            if (toolhead is null)
+            {
+                RestoreStagedToolheadBinding(
+                    p,
+                    previousMultiMaterial,
+                    stagedGates,
+                    existingToolhead,
+                    previousToolheadSpoolId,
+                    previousToolheadMaterial,
+                    previousToolheadColor,
+                    previousToolheadUpdatedAt,
+                    stagedOverride);
+                return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
+            }
+
             toolhead.CurrentSpoolId = spoolId;
             toolhead.CurrentMaterial = spool?.Material ?? null;
             toolhead.CurrentFilamentColor = spool?.ColorHex ?? null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
+            stagedOverride = StageOverrideAudit(
+                overrideAudit,
+                id,
+                toolheadIndex,
+                spoolId,
+                spool?.Material);
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
-                spoolId, toolheadIndex, p.Name, id);
-
-            return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
+        }
+        catch (DbUpdateConcurrencyException ex) when (stagedGates.Count > 0)
+        {
+            // A concurrent request already won the race to create the same gate and advanced
+            // the printer's RowVersion. Treat this as a topology conflict identical to a
+            // unique-constraint violation: the losing request must retry.
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict (concurrency) for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
+        }
+        catch (DbUpdateException ex) when (
+            stagedGates.Count > 0
+            && IsToolheadPrinterIndexUniqueViolation(ex))
+        {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: concurrent gate materialization conflict for printer {Id} toolhead T{Index}",
+                id,
+                toolheadIndex);
+            return new ToolheadSpoolBindResult(
+                false,
+                $"Toolhead T{toolheadIndex} was created by another request; retry the spool assignment",
+                ToolheadSpoolBindFailureKind.TopologyConflict);
         }
         catch (Exception ex)
         {
+            RestoreStagedToolheadBinding(
+                p,
+                previousMultiMaterial,
+                stagedGates,
+                existingToolhead,
+                previousToolheadSpoolId,
+                previousToolheadMaterial,
+                previousToolheadColor,
+                previousToolheadUpdatedAt,
+                stagedOverride);
             _logger.LogError(
                 ex,
                 "SetToolheadSpoolAsync: Exception assigning spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
                 spoolId, toolheadIndex, p.Name, id);
             return new CommandResult(false, $"Failed to assign spool: {ex.Message}");
         }
+
+        _logger.LogInformation(
+            "SetToolheadSpoolAsync: Assigned spool {SpoolId} to toolhead T{Index} on printer {PName} ({Id})",
+            spoolId, toolheadIndex, p.Name, id);
+
+        await BroadcastSpoolBindingCoverageAsync(id, ct).ConfigureAwait(false);
+        return new CommandResult(true, $"Spool {spoolId} assigned to toolhead T{toolheadIndex}");
+    }
+
+    /// <summary>
+    /// Stages a durable guided-swap override audit record on the shared unit of work so it
+    /// commits atomically with the pending spool binding. No-op when no override context is
+    /// supplied (issue #710, B6).
+    /// </summary>
+    private FilamentSwapOverride? StageOverrideAudit(
+        FilamentSwapOverrideContext? ctx,
+        Guid printerId,
+        int toolheadIndex,
+        int spoolId,
+        string? commitTimeScannedMaterial)
+    {
+        if (ctx is null)
+        {
+            return null;
+        }
+
+        var audit = new FilamentSwapOverride
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = printerId,
+            ToolheadIndex = toolheadIndex,
+            SpoolId = spoolId,
+            UserId = ctx.UserId,
+            UserName = ctx.UserName,
+            Reason = ctx.Reason,
+            ExpectedMaterial = ctx.ExpectedMaterial,
+            ScannedMaterial = commitTimeScannedMaterial,
+            AffectedJobIdsJson = JsonSerializer.Serialize(ctx.AffectedJobIds ?? Array.Empty<Guid>()),
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+        _unitOfWork.FilamentSwapOverrides.Add(audit);
+        return audit;
+    }
+
+    private void RestoreLegacySpoolBinding(
+        Printer printer,
+        int? previousSpoolId,
+        string? previousMaterial,
+        FilamentSwapOverride? stagedAudit)
+    {
+        printer.CurrentSpoolId = previousSpoolId;
+        printer.CurrentMaterial = previousMaterial;
+        _db.Entry(printer).Property(p => p.CurrentSpoolId).IsModified = false;
+        _db.Entry(printer).Property(p => p.CurrentMaterial).IsModified = false;
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void RestoreStagedToolheadBinding(
+        Printer printer,
+        bool previousMultiMaterial,
+        IReadOnlyCollection<Toolhead> stagedGates,
+        Toolhead? existingToolhead,
+        int? previousSpoolId,
+        string? previousMaterial,
+        string? previousColor,
+        DateTime? previousUpdatedAt,
+        FilamentSwapOverride? stagedAudit)
+    {
+        foreach (Toolhead gate in stagedGates)
+        {
+            printer.Toolheads.Remove(gate);
+            _db.Entry(gate).State = EntityState.Detached;
+        }
+
+        printer.MultiMaterial = previousMultiMaterial;
+        _ = PerToolAttributionCapability.Refresh(printer);
+        _db.Entry(printer).Property(p => p.MultiMaterial).IsModified = false;
+
+        if (existingToolhead is not null && previousUpdatedAt.HasValue)
+        {
+            existingToolhead.CurrentSpoolId = previousSpoolId;
+            existingToolhead.CurrentMaterial = previousMaterial;
+            existingToolhead.CurrentFilamentColor = previousColor;
+            existingToolhead.UpdatedAt = previousUpdatedAt.Value;
+
+            _db.Entry(existingToolhead).Property(t => t.CurrentSpoolId).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentMaterial).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.CurrentFilamentColor).IsModified = false;
+            _db.Entry(existingToolhead).Property(t => t.UpdatedAt).IsModified = false;
+        }
+
+        DetachStagedAudit(stagedAudit);
+    }
+
+    private void DetachStagedAudit(FilamentSwapOverride? stagedAudit)
+    {
+        if (stagedAudit is not null)
+        {
+            _db.Entry(stagedAudit).State = EntityState.Detached;
+        }
+    }
+
+    private async Task BroadcastSpoolBindingCoverageAsync(Guid printerId, CancellationToken ct)
+    {
+        if (_coverageBroadcaster is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                printerId,
+                Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "SetToolheadSpoolAsync: spool binding committed for printer {PrinterId}, but coverage notification failed",
+                printerId);
+        }
+    }
+
+    private async Task<SpoolBindingResolution> ResolveToolheadSpoolAsync(
+        Printer printer,
+        int spoolId,
+        SpoolBindPolicy policy,
+        CancellationToken ct)
+    {
+        if (policy == SpoolBindPolicy.Direct)
+        {
+            SpoolmanSpoolDto? directSpool = await _spoolmanService
+                .GetSpoolByIdAsync(spoolId, ct)
+                .ConfigureAwait(false);
+            return new SpoolBindingResolution(directSpool, null);
+        }
+
+        FilamentCoverageSpoolSnapshot snapshot = await _spoolResolver
+            .ResolveSpoolAsync(printer, spoolId, ct)
+            .ConfigureAwait(false);
+        return new SpoolBindingResolution(snapshot.Spool, snapshot.ErrorReason);
+    }
+
+    private static string BuildGuidedResolutionFailureMessage(int spoolId, string? failureReason) =>
+        failureReason is null
+            ? $"Spool {spoolId} could not be resolved at commit time"
+            : $"Spool {spoolId} could not be resolved at commit time ({failureReason})";
+
+    private sealed record SpoolBindingResolution(
+        SpoolmanSpoolDto? Spool,
+        string? FailureReason);
+
+    private static bool IsToolheadPrinterIndexUniqueViolation(DbUpdateException ex)
+    {
+        string fullMessage = ex.ToString();
+        bool identifiesCanonicalIndex =
+            fullMessage.Contains(ToolheadPrinterIndexUniqueIndexName, StringComparison.OrdinalIgnoreCase)
+            || (fullMessage.Contains("Toolheads.PrinterId", StringComparison.OrdinalIgnoreCase)
+                && fullMessage.Contains("Toolheads.Index", StringComparison.OrdinalIgnoreCase));
+        if (!identifiesCanonicalIndex)
+        {
+            return false;
+        }
+
+        return fullMessage.Contains("unique", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+            || fullMessage.Contains("23505", StringComparison.Ordinal)
+            || fullMessage.Contains("2601", StringComparison.Ordinal)
+            || fullMessage.Contains("2627", StringComparison.Ordinal)
+            || fullMessage.Contains("SQLite Error 19", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <inheritdoc/>
@@ -2770,11 +3817,12 @@ public class PrintersService(
                     "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
                     p.Name, id, toolheadIndex);
                 p.MultiMaterial = true;
+                _ = PerToolAttributionCapability.Refresh(p);
             }
 
             if (p.MultiMaterial)
             {
-                int gateCount = Math.Max(4, toolheadIndex + 1);
+                int gateCount = Math.Max(4, toolheadIndex);
                 List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
                 if (gates.Count > 0)
                 {
@@ -2799,12 +3847,24 @@ public class PrintersService(
             toolhead.CurrentMaterial = null;
             toolhead.CurrentFilamentColor = null;
             toolhead.UpdatedAt = DateTime.UtcNow;
+            p.ConfigurationRevision = Math.Max(1, p.ConfigurationRevision) + 1;
+            p.CalibrationConfigurationUpdatedAtUtc = toolhead.UpdatedAt;
 
             await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
             _logger.LogInformation(
                 "ClearToolheadSpoolAsync: Cleared spool from toolhead T{Index} on printer {PName} ({Id})",
                 toolheadIndex, p.Name, id);
+
+            // #709 item 5: clearing a toolhead spool changes coverage
+            // (previously covered slot may now be Unknown/no-spool-assigned).
+            if (_coverageBroadcaster is not null)
+            {
+                await _coverageBroadcaster.BroadcastPrinterChangedAsync(
+                    id,
+                    Farm.Infrastructure.Services.Spoolman.FilamentCoverageChangeReasons.SpoolBinding,
+                    ct).ConfigureAwait(false);
+            }
 
             return new CommandResult(true, $"Spool cleared from toolhead T{toolheadIndex}");
         }
@@ -2852,7 +3912,11 @@ public class PrintersService(
     }
 
     /// <inheritdoc />
-    public void SyncMmuToolheadsOnEntity(Printer printer, bool wasMultiMaterial, int mmuGateCount = 4)
+    public async Task SyncMmuToolheadsOnEntityAsync(
+        Printer printer,
+        bool wasMultiMaterial,
+        int mmuGateCount = 4,
+        CancellationToken ct = default)
     {
         if (!wasMultiMaterial && printer.MultiMaterial)
         {
@@ -2866,18 +3930,61 @@ public class PrintersService(
                 .Where(t => t.ToolheadType == ToolheadType.MmuGate)
                 .ToList();
 
+            HashSet<Guid> gateIds = [.. gatesToRemove.Select(gate => gate.Id)];
+            List<FilamentFallbackGroup> affectedGroups = gateIds.Count == 0
+                ? []
+                : await _db.FilamentFallbackGroups
+                    .Include(group => group.Members)
+                    .Where(group => group.Members.Any(member => gateIds.Contains(member.ToolheadId)))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+
+            int removedMemberships = 0;
+            int removedGroups = 0;
+            foreach (FilamentFallbackGroup group in affectedGroups)
+            {
+                List<FilamentFallbackGroupMember> membershipsToRemove = group.Members
+                    .Where(member => gateIds.Contains(member.ToolheadId))
+                    .ToList();
+
+                _db.FilamentFallbackGroupMembers.RemoveRange(membershipsToRemove);
+                foreach (FilamentFallbackGroupMember membership in membershipsToRemove)
+                {
+                    _ = group.Members.Remove(membership);
+                }
+
+                removedMemberships += membershipsToRemove.Count;
+                if (group.Members.Count < 2)
+                {
+                    _ = _db.FilamentFallbackGroups.Remove(group);
+                    removedGroups++;
+                }
+            }
+
             foreach (Toolhead gate in gatesToRemove)
             {
-                printer.Toolheads.Remove(gate);
+                _ = printer.Toolheads.Remove(gate);
+            }
+
+            if (removedMemberships > 0)
+            {
+                _logger.LogInformation(
+                    "SyncMmuToolheadsOnEntityAsync: Removed {MembershipCount} fallback membership(s) and {GroupCount} under-populated group(s) for printer {PName} ({Id})",
+                    removedMemberships,
+                    removedGroups,
+                    printer.Name,
+                    printer.Id);
             }
 
             if (gatesToRemove.Count > 0)
             {
                 _logger.LogInformation(
-                    "SyncMmuToolheadsOnEntity: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
+                    "SyncMmuToolheadsOnEntityAsync: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
                     gatesToRemove.Count, printer.Name, printer.Id);
             }
         }
+
+        _ = PerToolAttributionCapability.Refresh(printer);
     }
 
     /// <summary>
@@ -2931,7 +4038,9 @@ public class PrintersService(
             mmuGateCount, printer.Name, printer.Id);
 
         var gates = new List<Toolhead>();
-        for (int i = 1; i < mmuGateCount; i++)
+
+        // Indices 1..mmuGateCount: T0 is the physical hotend, T1..Tn are AMS gates.
+        for (int i = 1; i <= mmuGateCount; i++)
         {
             gates.Add(new Toolhead
             {
@@ -3010,19 +4119,16 @@ public class PrintersService(
             return false;
         }
 
-        try
-        {
-            var backend = (PrinterBackend)p.Backend;
-
-            return _capabilityFactory.TryGetFileDeleteClientTyped(backend, out ISupportsFileDelete? deleteClient)
-                ? await deleteClient!.DeleteFileAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
+        var backend = (PrinterBackend)p.Backend;
+        return _capabilityFactory.TryGetFileDeleteClientTyped(
+            backend,
+            out ISupportsFileDelete? deleteClient)
+                ? await deleteClient!.DeleteFileAsync(
+                    p.BackendUrl,
+                    filename,
+                    p.Credential,
+                    ct).ConfigureAwait(false)
                 : false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to delete file {Filename} on printer {PrinterId}", filename, id);
-            return false;
-        }
     }
 
     /// <summary>
@@ -3111,7 +4217,9 @@ public class PrintersService(
         Printer? p = await FindByIdAsync(id, ct).ConfigureAwait(false);
         if (p is null)
         {
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Printer not found");
+            return UploadAndPrintResult.FailedBeforeStart(
+                UploadAndPrintStage.Uploading,
+                "Printer not found");
         }
 
         try
@@ -3119,15 +4227,22 @@ public class PrintersService(
             var backend = (PrinterBackend)p.Backend;
             if (!_capabilityFactory.TryGetUploadAndPrintClientTyped(backend, out ISupportsUploadAndPrint? client))
             {
-                return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, "Backend does not support upload and print");
+                return UploadAndPrintResult.FailedBeforeStart(
+                    UploadAndPrintStage.Uploading,
+                    "Backend does not support upload and print");
             }
 
             return await client!.UploadAndStartPrintAsync(p.BackendUrl, filename, stream, p.Credential, progress, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to upload and start print on printer {Id}", id);
-            return UploadAndPrintResult.Fail(UploadAndPrintStage.Uploading, ex.Message);
+            _logger.LogWarning(
+                "Failed to upload and start print on printer {Id}; exception type {ExceptionType}",
+                id,
+                ex.GetType().Name);
+            return UploadAndPrintResult.Unknown(
+                UploadAndPrintStage.Uploading,
+                "The printer could not start the dispatched job.");
         }
     }
 
@@ -3413,14 +4528,20 @@ public class PrintersService(
                 {
                     if ((duplicateHandling ?? "skip") == "skip")
                     {
-                        _logger.LogInformation("[BulkCreate] Skipping duplicate printer: {PrinterDtoName} (ServerUrl: {ExistingByIpServerUrl})", printerDto.Name, existingByIp.ServerUrl);
+                        _logger.LogInformation(
+                            "[BulkCreate] Skipping duplicate printer: {PrinterDtoName} ({ExistingPrinterId})",
+                            printerDto.Name,
+                            existingByIp.Id);
                         skippedCount++;
                         status = "Skipped";
                         reason = $"Printer with ServerUrl {existingByIp.ServerUrl} already exists";
                     }
                     else if ((duplicateHandling ?? "skip") == "overwrite")
                     {
-                        _logger.LogInformation("[BulkCreate] Removing duplicate printer: {ExistingByIpName} (ServerUrl: {ExistingByIpServerUrl})", existingByIp.Name, existingByIp.ServerUrl);
+                        _logger.LogInformation(
+                            "[BulkCreate] Removing duplicate printer: {ExistingByIpName} ({ExistingPrinterId})",
+                            existingByIp.Name,
+                            existingByIp.Id);
                         await RemoveAsync(existingByIp, ct);
                         await SaveChangesAsync(ct);
 
@@ -3931,11 +5052,16 @@ public class PrintersService(
             return null;
         }
 
-        _logger.LogInformation("RefreshCameraUrlsAsync: Found printer {PrinterName}, Backend={PrinterBackend}, ServerUrl={PrinterServerUrl}, FrontendPort={PrinterFrontendPort}", printer.Name, printer.Backend, printer.ServerUrl, printer.FrontendPort);
+        _logger.LogInformation(
+            "RefreshCameraUrlsAsync: Found printer {PrinterName} ({PrinterId}), Backend={PrinterBackend}",
+            printer.Name,
+            printer.Id,
+            printer.Backend);
 
         var backend = (PrinterBackend)printer.Backend;
         string? streamUrl = null;
         string? snapshotUrl = null;
+        bool isSnapmakerU1 = IsSnapmakerU1Printer(printer);
 
         try
         {
@@ -3959,6 +5085,12 @@ public class PrintersService(
                     ct).ConfigureAwait(false);
 
                 _logger.LogInformation("RefreshCameraUrlsAsync: Got URLs from detection - stream={StreamUrl}, snapshot={SnapshotUrl}", streamUrl, snapshotUrl);
+
+                if (isSnapmakerU1 && string.IsNullOrWhiteSpace(streamUrl) && string.IsNullOrWhiteSpace(snapshotUrl))
+                {
+                    (streamUrl, snapshotUrl) = GetSnapmakerU1CameraUrls(printer);
+                    _logger.LogInformation("RefreshCameraUrlsAsync: Using Snapmaker U1 snapshot-only camera strategy - snapshot={SnapshotUrl}", snapshotUrl);
+                }
             }
             else
             {
@@ -4060,6 +5192,134 @@ public class PrintersService(
         _ => CameraSource.Standalone,
     };
 
+    private async Task<byte[]?> TryGetSnapmakerU1CameraSnapshotAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            IBackendClient client = _backendFactory.GetClient(PrinterBackend.Moonraker);
+            if (client is not ISupportsTriggeredCameraSnapshot triggeredSnapshotClient)
+            {
+                return null;
+            }
+
+            string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+            return await triggeredSnapshotClient.GetTriggeredCameraSnapshotAsync(moonrakerUrl, printer.Credential, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug("Snapmaker U1 camera snapshot failed for printer {PrinterId}: {Message}", printer.Id, ex.Message);
+            return null;
+        }
+    }
+
+    private static (string? StreamUrl, string? SnapshotUrl) GetSnapmakerU1CameraUrls(Printer printer)
+    {
+        string moonrakerUrl = BuildMoonrakerUrl(printer.ServerUrl, printer.FrontendPort);
+        Uri baseUri = new(moonrakerUrl);
+        UriBuilder builder = new(baseUri)
+        {
+            Path = "server/files/camera/monitor.jpg",
+            Query = string.Empty
+        };
+
+        return (null, builder.Uri.ToString());
+    }
+
+    private static bool IsSnapmakerU1Printer(Printer printer)
+    {
+        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+        {
+            return false;
+        }
+
+        return printer.Manufacturer?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerManufacturerName, StringComparison.OrdinalIgnoreCase) == true &&
+               printer.Model?.Name.Equals(MoonrakerOnboardingResolver.SnapmakerU1ModelName, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    /// <inheritdoc/>
+    public async Task SyncBuddyCameraAsync(Printer printer, string buddyCameraIp, CancellationToken ct)
+    {
+        string trimmedIp = buddyCameraIp.Trim();
+
+        // Find existing Buddy camera (PrusaLink source with RTSP stream URL)
+        Domain.Camera? existing = printer.Cameras?.FirstOrDefault(c => c.Source == CameraSource.PrusaLink
+            && !string.IsNullOrEmpty(c.StreamUrl) && c.StreamUrl.StartsWith("rtsp://", StringComparison.OrdinalIgnoreCase));
+
+        if (string.IsNullOrEmpty(trimmedIp))
+        {
+            // Clear: remove BuddyCameraIp and delete the camera entity
+            printer.BuddyCameraIp = null;
+            if (existing != null)
+            {
+                await _go2RtcService.RemoveStreamAsync(existing.Id, ct);
+
+                // Pre-delete snapshot files and DB rows before removing the camera entity.
+                // Camera→CameraSnapshot FK is Restrict, so SaveChanges would throw
+                // if any snapshot rows still reference this camera when it is removed.
+                await Farm.Infrastructure.Services.Cameras.SnapshotCleanupHelper.DeleteSnapshotsForCameraAsync(
+                    existing.Id, _db, _storagePathService, _logger, ct);
+
+                _unitOfWork.Cameras.Remove(existing);
+                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+            }
+
+            return;
+        }
+
+        string rtspUrl = $"rtsp://{FormatRtspHost(trimmedIp)}:554/live/";
+        printer.BuddyCameraIp = trimmedIp;
+
+        if (existing != null)
+        {
+            // Update existing camera's stream URL if IP changed
+            if (existing.StreamUrl != rtspUrl)
+            {
+                existing.StreamUrl = rtspUrl;
+                existing.IsEnabled = true;
+                existing.HealthStatus = CameraHealthStatus.Unknown;
+                existing.ConsecutiveFailures = 0;
+                existing.HealthMessage = null;
+
+                // Re-register stream in go2rtc with updated URL
+                string? snapshotUrl = await _go2RtcService.AddStreamAsync(existing.Id, rtspUrl, ct);
+                if (snapshotUrl != null)
+                {
+                    existing.SnapshotUrl = snapshotUrl;
+                }
+
+                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
+            }
+        }
+        else
+        {
+            // Create new Buddy camera
+            var camera = new Domain.Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"{printer.Name} Buddy Camera",
+                StreamUrl = rtspUrl,
+                SnapshotUrl = null,
+                IsEnabled = true,
+                SortOrder = 0,
+                Source = CameraSource.PrusaLink,
+                CameraType = CameraType.General,
+                HealthStatus = CameraHealthStatus.Unknown,
+                CreatedAt = DateTime.UtcNow,
+            };
+
+            // Register stream in go2rtc and derive snapshot URL
+            string? snapshot = await _go2RtcService.AddStreamAsync(camera.Id, rtspUrl, ct);
+            if (snapshot != null)
+            {
+                camera.SnapshotUrl = snapshot;
+            }
+
+            _unitOfWork.Cameras.Add(camera);
+            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
+        }
+    }
+
     /// <summary>
     /// Resolves camera URLs from the Cameras table for a given printer.
     /// Returns the first enabled camera ordered by SortOrder, preferring General type.
@@ -4081,6 +5341,28 @@ public class PrintersService(
         return camera is not null
             ? (camera.StreamUrl, camera.SnapshotUrl)
             : (null, null);
+    }
+
+    /// <summary>
+    /// Formats a host string for use in an RTSP URL, bracketing bare IPv6 addresses
+    /// as required by RFC 2732 / RFC 3986 (e.g. <c>2001:db8::1</c> → <c>[2001:db8::1]</c>).
+    /// Already-bracketed values and IPv4/hostname values are returned unchanged.
+    /// </summary>
+    internal static string FormatRtspHost(string host)
+    {
+        // Already bracketed — pass through as-is (bracketed IPv4 is rejected at the controller level).
+        if (host.StartsWith('[') && host.EndsWith(']'))
+        {
+            return host;
+        }
+
+        // Bare IPv6 must be wrapped in brackets for URL construction.
+        if (IPAddress.TryParse(host, out IPAddress? ip) && ip.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            return $"[{host}]";
+        }
+
+        return host;
     }
 
     /// <summary>

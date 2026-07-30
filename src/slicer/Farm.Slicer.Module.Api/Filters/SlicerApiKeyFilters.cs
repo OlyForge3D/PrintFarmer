@@ -1,4 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 namespace Farm.Slicer.Module.Api.Filters;
@@ -12,7 +15,10 @@ namespace Farm.Slicer.Module.Api.Filters;
 public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
 {
     /// <summary>The header name for the slicer API key.</summary>
-    public const string HeaderName = "X-Slicer-Api-Key";
+    public const string HeaderName = "X-Slicer-ApiKey";
+
+    /// <summary>Alternate dashed header name accepted for compatibility.</summary>
+    public const string AlternateHeaderName = "X-Slicer-Api-Key";
 
     /// <inheritdoc />
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
@@ -20,15 +26,14 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            // No validator registered — pass through (development mode)
-            await next();
+            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
             return;
         }
 
-        string? apiKey = context.HttpContext.Request.Headers[HeaderName].FirstOrDefault();
+        string? apiKey = SlicerApiKeyFilterHelpers.ReadHeader(context, HeaderName, AlternateHeaderName);
         if (!await validator.ValidateSharedKeyAsync(apiKey, context.HttpContext.RequestAborted))
         {
-            context.Result = new UnauthorizedObjectResult(new { error = "Invalid or missing slicer API key." });
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 
@@ -45,7 +50,10 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
 public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActionFilter
 {
     /// <summary>The header name for the per-service API key.</summary>
-    public const string HeaderName = "X-Slicer-Service-Api-Key";
+    public const string HeaderName = "X-Slicer-ApiKey";
+
+    /// <summary>Alternate service-specific header name accepted for compatibility.</summary>
+    public const string AlternateHeaderName = "X-Slicer-Service-Api-Key";
 
     /// <inheritdoc />
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
@@ -53,19 +61,58 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            await next();
+            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
             return;
         }
 
-        string? apiKey = context.HttpContext.Request.Headers[HeaderName].FirstOrDefault();
-        if (!await validator.ValidateServiceKeyAsync(apiKey, context.HttpContext.RequestAborted))
+        string? apiKey = SlicerApiKeyFilterHelpers.ReadHeader(context, HeaderName, AlternateHeaderName, RequireSlicerApiKeyAttribute.AlternateHeaderName);
+        Guid? serviceId = TryGetServiceId(context);
+        if (serviceId is null ||
+            !await validator.ValidateServiceKeyAsync(serviceId.Value, apiKey, context.HttpContext.RequestAborted))
         {
-            context.Result = new UnauthorizedObjectResult(new { error = "Invalid or missing service API key." });
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 
         await next();
     }
+
+    private static Guid? TryGetServiceId(ActionExecutingContext context)
+    {
+        if (context.RouteData.Values.TryGetValue("id", out object? routeId)
+            && Guid.TryParse(routeId?.ToString(), out Guid serviceId))
+        {
+            return serviceId;
+        }
+
+        return null;
+    }
+}
+
+internal static class SlicerApiKeyFilterHelpers
+{
+    public static string? ReadHeader(ActionExecutingContext context, params string[] headerNames)
+    {
+        foreach (string headerName in headerNames)
+        {
+            string? value = context.HttpContext.Request.Headers[headerName].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+
+        return null;
+    }
+}
+
+/// <summary>
+/// Marks worker endpoints that require both the worker key and registry-issued service identity.
+/// Authentication remains in <see cref="IWorkerAuthService"/> so actions can use the resolved worker.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class WorkerApiKeySecurityAttribute : Attribute, IAllowAnonymous
+{
 }
 
 /// <summary>
@@ -77,6 +124,9 @@ public interface ISlicerApiKeyValidator
     /// <summary>Validate a shared slicer API key.</summary>
     Task<bool> ValidateSharedKeyAsync(string? apiKey, CancellationToken ct = default);
 
-    /// <summary>Validate a per-service slicer API key.</summary>
-    Task<bool> ValidateServiceKeyAsync(string? apiKey, CancellationToken ct = default);
+    /// <summary>Validate a per-service slicer API key for the addressed service.</summary>
+    Task<bool> ValidateServiceKeyAsync(
+        Guid serviceId,
+        string? apiKey,
+        CancellationToken ct = default);
 }

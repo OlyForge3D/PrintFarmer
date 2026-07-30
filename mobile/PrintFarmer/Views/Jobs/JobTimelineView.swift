@@ -3,10 +3,11 @@ import SwiftUI
 struct JobTimelineView: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = JobHistoryViewModel()
+    @State private var activationToken: UUID?
 
     var body: some View {
         Group {
-            if viewModel.isLoading && viewModel.timeline.isEmpty {
+            if viewModel.isTimelineLoading && viewModel.timeline.isEmpty {
                 ProgressView("Loading timeline…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.timeline.isEmpty {
@@ -24,14 +25,26 @@ struct JobTimelineView: View {
         .navigationBarTitleDisplayMode(.large)
         #endif
         .refreshable {
-            await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
+            guard let activationToken else { return }
+            await viewModel.loadTimeline(
+                dateFrom: nil,
+                dateTo: nil,
+                activationToken: activationToken
+            )
         }
         .task {
-            viewModel.configure(jobAnalyticsService: services.jobAnalyticsService)
-            await viewModel.loadTimeline(dateFrom: nil, dateTo: nil)
-        }
-        .onDisappear {
-            viewModel.isViewActive = false
+            await JobAnalyticsMountLifecycle.runTimeline(
+                viewModel: viewModel,
+                service: services.jobAnalyticsService,
+                onAcquire: { token in
+                    activationToken = token
+                },
+                onRelease: { token in
+                    if activationToken == token {
+                        activationToken = nil
+                    }
+                }
+            )
         }
     }
 

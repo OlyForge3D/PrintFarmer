@@ -35,6 +35,7 @@ using Farm.Web.Api.Services.Discovery;
 using Farm.Web.Api.Services.Gcode;
 using Farm.Web.Api.Services.Startup;
 using Farm.Web.Api.Services.StorageManagement;
+using Fido2NetLib;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -98,8 +99,9 @@ public static class ServiceCollectionExtensions
         }
         else
         {
-            // SQLite: Development only - uses EnsureCreated, no migrations
-            _ = options.UseSqlite(dbConfig.ConnectionString);
+            _ = options.UseSqlite(
+                dbConfig.ConnectionString,
+                x => x.MigrationsAssembly("Farm.Migrations.Sqlite"));
         }
     }
 
@@ -145,8 +147,10 @@ public static class ServiceCollectionExtensions
     /// <param name="environment">The host environment.</param>
     public static IServiceCollection AddPrintFarmerServices(this IServiceCollection services, IConfiguration configuration, IHostEnvironment environment)
     {
+        _ = environment;
+
         // Check if background services should be disabled (for testing)
-        bool disableBackgroundServices = ShouldDisableBackgroundServices();
+        bool disableBackgroundServices = ShouldDisableBackgroundServices(configuration);
 
         // Register services by category
         RegisterCoreInfrastructure(services);
@@ -155,11 +159,13 @@ public static class ServiceCollectionExtensions
         RegisterTelemetryAndLogging(services);
         RegisterCachingServices(services);
         RegisterAuthenticationServices(services);
+        RegisterPasskeyServices(services, configuration);
         RegisterEmailServices(services);
         RegisterRateLimitingServices(services);
         RegisterCatalogServices(services);
 
         // Cost tracking
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IFilamentCostProvider, Farm.Infrastructure.Services.Cost.SpoolmanFilamentCostProvider>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cost.IJobCostCalculationService, Farm.Infrastructure.Services.Cost.JobCostCalculationService>();
 
         // Statistics services (depends on database)
@@ -177,8 +183,36 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IJobDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.JobDispatchService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IBatchDispatchService, Farm.Infrastructure.Services.Queue.Dispatch.BatchDispatchService>();
 
+        // Issue #900: Durable dispatch claim and bed-clear acknowledgement services.
+        // IDispatchClaimService is the single shared atomic claim path used by every start path.
+        // IDbOutboxSequenceAllocator is a scoped DB-backed cross-process monotonic allocator:
+        // it increments the OutboxSequenceState counter row in the same transaction as each
+        // outbox event write, ensuring no two API instances can produce the same sequence value.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IDbOutboxSequenceAllocator, Farm.Infrastructure.Services.Queue.DbOutboxSequenceAllocator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueuePositionAllocator, Farm.Infrastructure.Services.Queue.QueuePositionAllocator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IStoredGcodeIntegrityVerifier, Farm.Infrastructure.Services.Queue.StoredGcodeIntegrityVerifier>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService, Farm.Infrastructure.Services.Queue.QueueResourceAuthorizationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
+
+        // Material equivalence clusters
+        _ = services.AddScoped<Farm.Infrastructure.Services.MaterialClusters.IMaterialClusterService, Farm.Infrastructure.Services.MaterialClusters.MaterialClusterService>();
+
         // Printer group service
         _ = services.AddScoped<Farm.Infrastructure.Services.PrinterGroups.IPrinterGroupService, Farm.Infrastructure.Services.PrinterGroups.PrinterGroupService>();
+
+        // Bed type service
+        _ = services.AddScoped<Farm.Infrastructure.Services.BedTypes.IBedTypeService, Farm.Infrastructure.Services.BedTypes.BedTypeService>();
+
+        // Custom field service
+        _ = services.AddScoped<Farm.Infrastructure.Services.CustomFields.ICustomFieldService, Farm.Infrastructure.Services.CustomFields.CustomFieldService>();
+
+        // Farm settings service (consolidates farm-wide config access)
+        _ = services.AddScoped<Farm.Infrastructure.Services.IFarmSettingsService, Farm.Infrastructure.Services.FarmSettingsService>();
+
+        // Optional barcode scan diagnostics
+        _ = services.AddScoped<IBarcodeScanLogService, Farm.Infrastructure.Services.Spoolman.BarcodeScanLogService>();
 
         // Auto-dispatch trigger (singleton event bus between scoped services and background service)
         var autoDispatchTrigger = new Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchTrigger();
@@ -193,6 +227,7 @@ public static class ServiceCollectionExtensions
         RegisterModelAndGcodeServices(services, configuration, disableBackgroundServices);
         RegisterSetupAndSchemaServices(services);
         RegisterBackgroundServices(services, disableBackgroundServices);
+        RegisterSmartPlugProviders(services);
 
         return services;
     }
@@ -248,6 +283,8 @@ public static class ServiceCollectionExtensions
 
         // Discovery progress cache for real-time updates
         _ = services.AddSingleton<IDiscoveryProgressCache, DiscoveryProgressCache>();
+        _ = services.AddSingleton<IDiscoverySessionRegistry, DiscoverySessionRegistry>();
+        _ = services.AddSingleton<DiscoveryServiceAuthenticator>();
 
         // Discovery proxy service for streaming discovery with SignalR progress updates
         _ = services.AddScoped<Farm.Infrastructure.Services.Discovery.IDiscoveryProxyService, DiscoveryProxyService>();
@@ -284,6 +321,12 @@ public static class ServiceCollectionExtensions
         // Tag repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tags.ITagRepository, Farm.Infrastructure.Repositories.Tags.EfTagRepository>();
 
+        // Model collection repository
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Collections.IModelCollectionRepository, Farm.Infrastructure.Repositories.Collections.EfModelCollectionRepository>();
+
+        // Library sync journal (change journal + tombstones, issue #844)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncJournal, Farm.Infrastructure.Services.Sync.LibrarySyncJournal>();
+
         // Queue repositories
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Queue.IQueueRepository, Farm.Infrastructure.Repositories.Queue.EfQueueRepository>();
 
@@ -303,6 +346,8 @@ public static class ServiceCollectionExtensions
 
         // Task repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Tasks.IUserTaskRepository, Farm.Infrastructure.Repositories.Tasks.EfUserTaskRepository>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Mutations.IMutationWatermarkReader,
+            Farm.Infrastructure.Services.Mutations.MutationWatermarkReader>();
 
         // Settings repository
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository, Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository>();
@@ -328,6 +373,15 @@ public static class ServiceCollectionExtensions
     {
         // Register SettingsService AFTER repositories - requires IAppSettingsRepository
         _ = services.AddScoped<ISettingsService, SettingsService>();
+
+        // Operator feature gate (#725) - scoped so it observes DB updates on the next request.
+        // Depends on IAppSettingsRepository (NOT ISettingsService) so that
+        // (a) OperatorFeatures configuration/env values are never bound as the base value
+        //     — only explicit-false can hard-disable — and
+        // (b) DI activation is DB-independent: capability lookups never fail because the
+        //     wider SettingsService constructor performs eager DB I/O.
+        _ = services.AddScoped<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate,
+            Farm.Infrastructure.Services.OperatorFeatures.OperatorFeatureGate>();
     }
 
     #endregion
@@ -353,6 +407,7 @@ public static class ServiceCollectionExtensions
     private static void RegisterCachingServices(IServiceCollection services)
     {
         _ = services.AddMemoryCache();
+        _ = services.AddDistributedMemoryCache();
         _ = services.AddOptions<Farm.Infrastructure.Services.Catalog.Caching.CatalogCacheOptions>();
         _ = services.AddOptions<Farm.Infrastructure.Services.Printers.PrinterVersionCacheOptions>();
 
@@ -376,9 +431,24 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService, Farm.Infrastructure.Services.PasswordPolicy.PasswordPolicyService>();
         _ = services.AddScoped<IAccountLockoutService, Farm.Infrastructure.Services.Authentication.AccountLockoutService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ILoginAuditService, Farm.Infrastructure.Services.Authentication.LoginAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasskeyService, Farm.Infrastructure.Services.Authentication.PasskeyService>();
+    }
+
+    private static void RegisterPasskeyServices(IServiceCollection services, IConfiguration configuration)
+    {
+        Fido2Configuration fido2Config = new()
+        {
+            ServerDomain = configuration["WebAuthn:RelyingPartyId"] ?? "localhost",
+            ServerName = configuration["WebAuthn:RelyingPartyName"] ?? "PrintFarmer",
+            Origins = new HashSet<string> { configuration["WebAuthn:Origin"] ?? "http://localhost:3000" },
+            TimestampDriftTolerance = 300_000,
+        };
+
+        _ = services.AddSingleton(new Fido2(fido2Config));
     }
 
     #endregion
@@ -502,7 +572,14 @@ public static class ServiceCollectionExtensions
         // Register the printer status cache (singleton in Infrastructure - shared across all layers)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.PrinterStatusCache>();
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusSnapshotReader>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
         _ = services.AddSingleton<Farm.Infrastructure.Services.Printers.IPrinterStatusCacheWriter>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.Printers.PrinterStatusCache>());
+        _ = services.AddSingleton(TimeProvider.System);
+
+        // Register the per-tool activity accumulator (issue #711, round-14). Singleton so the
+        // backend plugin that samples active-tool telemetry and the statistics sync service that
+        // drains it share one in-memory rolling window.
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator, Farm.Infrastructure.Services.Maintenance.ToolheadActivityAccumulator>();
 
         // Register runtime diagnostic channel service (singleton - toggleable verbose logging per subsystem)
         _ = services.AddSingleton<Farm.Infrastructure.Services.Diagnostics.IDiagnosticChannelService, Farm.Infrastructure.Services.Diagnostics.DiagnosticChannelService>();
@@ -526,7 +603,19 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Locations.ILocationService, Farm.Infrastructure.Services.Locations.LocationService>();
 
         // Register CameraService from Infrastructure layer - standalone camera management service
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Cameras.ICameraRepository, Farm.Infrastructure.Repositories.Cameras.EfCameraRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraService, Farm.Infrastructure.Services.Cameras.CameraService>();
+        _ = services.AddScoped<Farm.Infrastructure.Discovery.IPrinterCameraEndpointDetectionService, Farm.Infrastructure.Discovery.PrinterCameraEndpointDetectionService>();
+
+        // Register go2rtc service - RTSP-to-WebRTC/HLS/MSE transcoding integration
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.IGo2RtcService, Farm.Infrastructure.Services.Cameras.Go2RtcService>();
+
+        // Register camera snapshot service - captures snapshots on print events
+        _ = services.AddScoped<Farm.Infrastructure.Services.Cameras.ICameraSnapshotService, Farm.Infrastructure.Services.Cameras.CameraSnapshotService>();
+        _ = services.AddHttpClient("CameraSnapshot", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
 
         // Register Obico failure detection service - AI-powered print failure detection
         _ = services.AddScoped<Farm.Infrastructure.Services.FailureDetection.IObicoFailureDetectionService, Farm.Infrastructure.Services.FailureDetection.ObicoFailureDetectionService>();
@@ -541,8 +630,16 @@ public static class ServiceCollectionExtensions
         // Register NfcDeviceService from Infrastructure layer - NFC reader device management
         _ = services.AddScoped<Farm.Infrastructure.Services.NfcDevices.INfcDeviceService, Farm.Infrastructure.Services.NfcDevices.NfcDeviceService>();
 
+        // Register NfcTagService as singleton so per-device in-memory offline queues persist across requests
+        _ = services.AddSingleton<Farm.Infrastructure.Services.NfcDevices.INfcTagService, Farm.Infrastructure.Services.NfcDevices.NfcTagService>();
+
         // Register PrintersService from Infrastructure layer - core business logic for any UI implementation
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrintersService, Farm.Infrastructure.Services.Printers.PrintersService>();
+
+        // Guided filament swap validation (per-tool material requirement check against a scanned spool).
+        _ = services.AddScoped<
+            Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator,
+            Farm.Infrastructure.Services.Printers.PrinterToolheadSwapValidator>();
     }
 
     #endregion
@@ -554,9 +651,25 @@ public static class ServiceCollectionExtensions
         // Tag services
         _ = services.AddScoped<Farm.Infrastructure.Services.Tags.ITagService, Farm.Infrastructure.Services.Tags.TagService>();
 
+        // Model collection services
+        _ = services.AddScoped<Farm.Infrastructure.Services.Collections.IModelCollectionService, Farm.Infrastructure.Services.Collections.ModelCollectionService>();
+
+        // Library sync service (cursor-based pull + transactional apply, issue #845)
+        _ = services.AddScoped<Farm.Infrastructure.Services.Sync.ILibrarySyncService, Farm.Infrastructure.Services.Sync.LibrarySyncService>();
+
         // Task services (user task management)
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.ITaskBroadcaster, Services.Tasks.SignalRTaskBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Tasks.IUserTaskService, Farm.Infrastructure.Services.Tasks.UserTaskService>();
+
+        // Shift-plan compiler (issue #713): materializes attention, maintenance,
+        // coverage, spool restock, and printed-part reorder signals into anchored UserTask rows.
+        // Sources are additive: register additional IShiftPlanTaskSource impls to extend coverage.
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IIdleWindowService, Farm.Infrastructure.Services.ShiftPlan.IdleWindowService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.AttentionShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.MaintenanceIdleWindowShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.PrintedPartReorderShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanTaskSource, Farm.Infrastructure.Services.ShiftPlan.Sources.SpoolRestockShiftPlanTaskSource>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.ShiftPlan.IShiftPlanCompiler, Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompiler>();
 
         // SystemLogs service
         _ = services.AddScoped<Farm.Infrastructure.Services.SystemLogs.ISystemLogService, Farm.Infrastructure.Services.SystemLogs.SystemLogService>();
@@ -582,6 +695,7 @@ public static class ServiceCollectionExtensions
             (Farm.Infrastructure.Services.Gcode.IGcodeFileProcessingService)sp.GetRequiredService<Services.Gcode.IGcodeFilesService>());
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IHarvestEventBroadcaster, Services.Gcode.SignalRHarvestEventBroadcaster>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.IGcodeHarvestService, Farm.Infrastructure.Services.Gcode.GcodeHarvestService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Gcode.ISliceGcodeImportService, Farm.Infrastructure.Services.Gcode.SliceGcodeImportService>();
 
         // Gcode harvest queue (async processing)
         _ = services.AddScoped<Farm.Infrastructure.Services.GcodeHarvest.IGcodeHarvestQueue, Farm.Infrastructure.Services.GcodeHarvest.EfGcodeHarvestQueue>();
@@ -593,6 +707,9 @@ public static class ServiceCollectionExtensions
         // Gcode upload settings and quota - use persisted settings from ISettingsService
         _ = services.AddScoped<IGcodeUploadSettings, PersistedGcodeUploadSettingsAdapter>();
         _ = services.AddScoped<IGcodeUploadQuotaService, InMemoryGcodeUploadQuotaService>();
+
+        // Print quotas and user balances
+        _ = services.AddScoped<Farm.Infrastructure.Services.PrintQuotas.IPrintQuotaService, Farm.Infrastructure.Services.PrintQuotas.PrintQuotaService>();
     }
 
     #endregion
@@ -634,10 +751,37 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // Source-aware spool resolution plus filament coverage / runout prediction (issue #709).
+        // The scoped resolver is also shared by #710 guided validation and commit-time binding.
+        // Registered as
+        // both IFilamentCoverageService (per-printer + fleet endpoints) and
+        // IFilamentCoverageAttentionSource (narrow input to the #707 adapter). The
+        // broadcaster is a singleton so services that emit invalidations
+        // (spool binding changes, job progress ticks) can inject it without
+        // a scope hop.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver, Farm.Infrastructure.Services.Spoolman.FilamentCoverageSpoolResolver>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.ISpoolBurnRateProjectionService, Farm.Infrastructure.Services.Spoolman.SpoolBurnRateProjectionService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageService>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageAttentionSource>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.Spoolman.FilamentCoverageService>());
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.Sources.IFilamentRunoutSwitchEvaluator,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutSwitchEvaluator>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Attention.IAttentionSource,
+            Farm.Infrastructure.Services.Attention.Sources.FilamentRunoutAttentionSource>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster, Farm.Infrastructure.Services.Spoolman.FilamentCoverageBroadcaster>();
+
         // Obico ML API HTTP client (15s timeout for image analysis)
         _ = services.AddHttpClient("ObicoML", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
+        // Smart plug HTTP client shared by Tasmota, Shelly, and HomeAssistant providers (5s timeout for LAN devices)
+        _ = services.AddHttpClient("SmartPlug", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(5);
         });
     }
 
@@ -662,6 +806,24 @@ public static class ServiceCollectionExtensions
             // Auto-dispatch background service (event-driven, reacts to printer-idle triggers)
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.AutoDispatchBackgroundService>();
 
+            // Shift-plan compiler (issue #713): periodic materialization of operational tasks.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.ShiftPlan.ShiftPlanCompilerHostedService>();
+
+            // Durable queue outbox publisher for calibration queue-dispatch events (SignalR hints only).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueOutboxPublisherService>();
+
+            // Dedicated durable consumer for BackendStartCommand.v1 outbox events.
+            // Drives atomic claim, awaited backend execution, crash recovery, and retry.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendStartCommandConsumerService>();
+
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BedClearAcknowledgementExpiryService>();
+
+            // Durable attempt-fenced cancel/abort hardware command consumer.
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.BackendControlCommandConsumerService>();
+
+            // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();
+
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();
 
@@ -683,19 +845,25 @@ public static class ServiceCollectionExtensions
 
     #endregion
 
+    #region Smart Plug Providers
+
+    private static void RegisterSmartPlugProviders(IServiceCollection services)
+    {
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.KasaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.TasmotaSmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.ShellySmartPlugProvider>();
+        _ = services.AddSingleton<Farm.Web.Api.Services.SmartPlug.ISmartPlugProvider, Farm.Web.Api.Services.SmartPlug.HomeAssistantSmartPlugProvider>();
+    }
+
+    #endregion
+
     #region Helpers
 
-    private static bool ShouldDisableBackgroundServices()
+    private static bool ShouldDisableBackgroundServices(IConfiguration configuration)
     {
-        try
-        {
-            string? env = Environment.GetEnvironmentVariable("TEST_DISABLE_BACKGROUND_SERVICES");
-            return !string.IsNullOrEmpty(env) && (string.Equals(env, "true", StringComparison.OrdinalIgnoreCase) || env == "1");
-        }
-        catch
-        {
-            return false;
-        }
+        string? value = configuration["TEST_DISABLE_BACKGROUND_SERVICES"];
+        return !string.IsNullOrEmpty(value)
+            && (string.Equals(value, "true", StringComparison.OrdinalIgnoreCase) || value == "1");
     }
 
     #endregion

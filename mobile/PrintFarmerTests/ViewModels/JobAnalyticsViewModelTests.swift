@@ -9,17 +9,17 @@ final class JobAnalyticsViewModelTests: XCTestCase {
     private var mockJobAnalyticsService: MockJobAnalyticsService!
     private var viewModel: JobAnalyticsViewModel!
     
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         mockJobAnalyticsService = MockJobAnalyticsService()
         viewModel = JobAnalyticsViewModel()
         viewModel.configure(jobAnalyticsService: mockJobAnalyticsService)
     }
     
-    override func tearDown() {
+    override func tearDown() async throws {
         viewModel = nil
         mockJobAnalyticsService = nil
-        super.tearDown()
+        try await super.tearDown()
     }
     
     // MARK: - Initial State
@@ -92,8 +92,10 @@ final class JobAnalyticsViewModelTests: XCTestCase {
         XCTAssertEqual(called?.filterStatus, "printing")
         XCTAssertEqual(called?.filterModel, "Prusa MK3S")
         XCTAssertEqual(called?.filterMaterial, "PLA")
-        XCTAssertNil(called?.limit)
-        XCTAssertNil(called?.offset)
+        // JobAnalyticsViewModel.loadJobs paginates with a fixed page size (limit: 50, offset: 0).
+        // See ViewModels/JobAnalyticsViewModel.swift.
+        XCTAssertEqual(called?.limit, 50)
+        XCTAssertEqual(called?.offset, 0)
     }
     
     func testLoadJobsHandlesError() async {
@@ -153,13 +155,39 @@ final class JobAnalyticsViewModelTests: XCTestCase {
     }
     
     func testLoadStatsHandlesError() async {
+        viewModel.stats = QueueStats(
+            totalQueued: 7,
+            totalPrinting: 2,
+            totalPaused: 1,
+            averageWaitTimeMinutes: 15,
+            byModel: []
+        )
+        viewModel.modelStats = [
+            QueuePrinterModelStats(
+                modelName: "Previously Loaded Model",
+                totalQueued: 4,
+                currentlyPrinting: 1,
+                oldestQueuedAtUtc: nil,
+                averageQueueWaitMinutes: 12
+            )
+        ]
+        viewModel.error = "prior-analytics-error-sentinel"
         mockJobAnalyticsService.errorToThrow = TestError.generic
-        
+
         await viewModel.loadStats()
-        
-        XCTAssertNil(viewModel.stats)
-        XCTAssertTrue(viewModel.modelStats.isEmpty)
-        XCTAssertNotNil(viewModel.error)
+
+        // loadStats() is a secondary load: it logs the failure via `logger.warning`
+        // and leaves `viewModel.error` untouched so a stats hiccup never blocks the
+        // primary jobs list or clears the last successful statistics. Seeding a
+        // nonnil sentinel proves the secondary path preserves both prior data
+        // and the primary error channel.
+        XCTAssertTrue(mockJobAnalyticsService.getStatsCalled)
+        XCTAssertTrue(mockJobAnalyticsService.getModelStatsCalled)
+        XCTAssertEqual(viewModel.stats?.totalQueued, 7)
+        XCTAssertEqual(viewModel.stats?.totalPrinting, 2)
+        XCTAssertEqual(viewModel.modelStats.count, 1)
+        XCTAssertEqual(viewModel.modelStats.first?.modelName, "Previously Loaded Model")
+        XCTAssertEqual(viewModel.error, "prior-analytics-error-sentinel")
         XCTAssertFalse(viewModel.isLoading)
     }
     
@@ -197,7 +225,7 @@ final class JobAnalyticsViewModelTests: XCTestCase {
         viewModel.selectedModel = "Prusa MK3S"
         viewModel.selectedMaterial = "PLA"
         
-        await viewModel.clearFilters()
+        viewModel.clearFilters()
         
         XCTAssertNil(viewModel.selectedStatus)
         XCTAssertNil(viewModel.selectedModel)

@@ -1,0 +1,1476 @@
+{
+  "$schema": "./calibration-provenance.schema.json",
+  "schemaVersion": 1,
+  "policyVersion": "1.0.1",
+  "lastReviewed": "2026-07-25",
+  "allowedSourceLicenseExpressions": [
+    "0BSD",
+    "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unlicense",
+    "Zlib"
+  ],
+  "governedPathPatterns": [
+    "src/**/calibration/**",
+    "src/**/CalibrationDerived/**",
+    "src/**/calibration/derived/**",
+    "src/calibration-derived/**"
+  ],
+  "approvedSources": [],
+  "entries": [],
+  "referenceRecords": [
+    {
+      "id": "calibration-api-contract-filter",
+      "destinationPath": "src/api/Infrastructure/CalibrationApiContractAttribute.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation applying the established API contract negotiation to issue #898 routes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-blob-store",
+      "destinationPath": "src/api/Services/Calibration/CalibrationBlobStore.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 private authenticated photo storage contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-blob-store-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationBlobStoreTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 private photo storage requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-capabilities-controller",
+      "destinationPath": "src/api/Controllers/CalibrationCapabilitiesController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #895 API contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-capabilities-service",
+      "destinationPath": "src/api/Services/Capabilities/CalibrationCapabilityService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #895 capability contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-capabilities-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Capabilities/CalibrationCapabilitiesTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/895"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #895 acceptance contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-configuration-revision-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Infrastructure/CalibrationConfigurationRevisionTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #896 configuration revision contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-context-contracts",
+      "destinationPath": "src/infra/Calibration/CalibrationContracts.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 calibration candidate and immutable context contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-context-service",
+      "destinationPath": "src/api/Services/Calibration/PrinterCalibrationContextService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896",
+        "https://github.com/SoftFever/OrcaSlicer/wiki/Calibration"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 eligibility and immutable context builder; the upstream OrcaSlicer wiki was used only as behavioral reference and no external source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-context-service-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/PrinterCalibrationContextServiceTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #896 eligibility, safety, redaction, freshness, and snapshot contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-api-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationApiTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration generation API endpoints; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-body-geometry-factory",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationBodyGeometryFactory.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation building calibration test body geometry for issue #899 generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-capability-probe",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationCapabilityProbe.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation probing calibration generation capability for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-capability-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationCapabilityTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering issue #899 calibration generation capability probing; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-context",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationContext.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #899 calibration generation execution context; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-context-factory",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationContextFactory.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation constructing the issue #899 calibration generation execution context; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-contracts",
+      "destinationPath": "src/api/Contracts/CalibrationGenerationContracts.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation defining the issue #899 calibration generation API contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-controller",
+      "destinationPath": "src/api/Controllers/CalibrationGenerationController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #899 calibration generation HTTP controller; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-fixture",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationFixture.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test fixture implementation supporting issue #899 calibration generation test coverage; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-gcode-annotator",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGcodeAnnotator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation annotating generated calibration G-code for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-gcode-safety-validator",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGcodeSafetyValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation validating generated calibration G-code safety for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-gcode-safety-validator-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGcodeSafetyValidatorTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration G-code safety validator; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-geometry",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGeometry.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of issue #899 calibration generation geometry primitives; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-golden-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGoldenGenerationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering golden-file coverage for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-harness",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationHarness.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test harness supporting issue #899 calibration generation test coverage; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-integration-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationIntegrationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering issue #899 calibration generation end-to-end integration; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-kestrel-api-host",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/KestrelCalibrationApiHost.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation hosting a Kestrel server for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-klipper-gcode-generator",
+      "destinationPath": "src/api/Services/Calibration/Generation/KlipperCalibrationGcodeGenerator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generating Klipper calibration G-code for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-klipper-gcode-generator-interface",
+      "destinationPath": "src/api/Services/Calibration/Generation/IKlipperCalibrationGcodeGenerator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation declaring the issue #899 Klipper calibration G-code generator interface; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-mesh-reader",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationMeshReader.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation reading mesh data for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-method-options",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationMethodOptions.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of issue #899 calibration generation method options; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-method-options-binder",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationMethodOptionsBinder.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation binding issue #899 calibration generation method options; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-model-validator",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationModelValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation validating models for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-model-validator-interface",
+      "destinationPath": "src/api/Services/Calibration/Generation/ICalibrationModelValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation declaring the issue #899 calibration model validator interface; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-model-validator-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationModelValidatorTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration model validator; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orca-plan-compiler",
+      "destinationPath": "src/api/Services/Calibration/Generation/OrcaCalibrationPlanCompiler.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation compiling OrcaSlicer calibration plans for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orca-plan-compiler-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/OrcaCalibrationPlanCompilerTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 OrcaSlicer calibration plan compiler; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-postgresql",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725204540_AddCalibrationGenerationOrchestration.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (PostgreSQL); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725204540_AddCalibrationGenerationOrchestration.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (PostgreSQL); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-sqlite",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725204532_AddCalibrationGenerationOrchestration.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (SQLite); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725204532_AddCalibrationGenerationOrchestration.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (SQLite); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-sqlserver",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725204549_AddCalibrationGenerationOrchestration.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (SQL Server); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-orchestration-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725204549_AddCalibrationGenerationOrchestration.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 calibration generation orchestration schema (SQL Server); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-profile-catalog",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaProfileCatalog.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation cataloging pinned OrcaSlicer profiles for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-profile-catalog-tests",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaProfileCatalogTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 pinned OrcaSlicer profile catalog for calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-publication",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/PinnedOrcaPublication.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation publishing pinned OrcaSlicer calibration artifacts for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-publication-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/PinnedOrcaPublicationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 pinned OrcaSlicer calibration publication workflow; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-smoke-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationPinnedOrcaSmokeTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation smoke-testing pinned OrcaSlicer calibration generation for issue #899; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-orca-worker-container",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/PinnedOrcaWorkerContainer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation managing a pinned OrcaSlicer worker container for issue #899 calibration generation integration tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pinned-worker-smoke-tests",
+      "destinationPath": "src/tests/Farm.Web.IntegrationTests/Calibration/CalibrationPinnedWorkerSmokeTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation smoke-testing the pinned OrcaSlicer worker container for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-pipeline",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGenerationPipeline.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test support implementation of the issue #899 calibration generation pipeline; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-primitives",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationPrimitives.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of shared issue #899 calibration generation primitives; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-problem-codes",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationProblemCodes.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation defining issue #899 calibration generation problem codes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-profile-patch-exporter",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationProfilePatchExporter.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation exporting profile patches for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-profile-patch-exporter-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationProfilePatchExporterTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration profile patch exporter; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-recovery-service",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationRecoveryService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation recovering failed issue #899 calibration generation runs; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-saga",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationSaga.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation orchestrating the issue #899 calibration generation saga; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-saga-interface",
+      "destinationPath": "src/api/Services/Calibration/Generation/ICalibrationGenerationSaga.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation declaring the issue #899 calibration generation saga interface; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-saga-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSagaTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration generation saga; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-seed",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationGenerationSeed.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test data seeding implementation supporting issue #899 calibration generation tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-service-collection-extensions",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationServiceCollectionExtensions.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation registering issue #899 calibration generation services; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-slicer-attestation",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationSlicerAttestation.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation attesting slicer state for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-specification",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationSpecification.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #899 calibration generation specification model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-specification-compiler",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationSpecificationCompiler.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation compiling issue #899 calibration generation specifications; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-specification-compiler-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationSpecificationCompilerTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #899 calibration specification compiler; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-steps",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationGenerationSteps.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation defining the issue #899 calibration generation saga steps; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-supported-tuple-validator",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationSupportedTupleValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation validating supported printer and nozzle tuples for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-sweep-resolver",
+      "destinationPath": "src/api/Services/Calibration/Generation/CalibrationSweepResolver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation resolving parameter sweeps for issue #899 calibration generation; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-test-data",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/Generation/CalibrationGenerationTestData.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test data implementation supporting issue #899 calibration generation tests; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-generation-uploaded-model-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationUploadedModelGenerationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering issue #899 calibration generation from uploaded models; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-26",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-authorization-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Security/CalibrationPersistenceAuthorizationTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 authorization and contract-version requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-configuration",
+      "destinationPath": "src/infra/Data/Configurations/CalibrationConfiguration.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework configuration for the issue #898 aggregate and synchronization model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-contracts",
+      "destinationPath": "src/api/Contracts/CalibrationProjectContracts.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 persistence and synchronization contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-controllers",
+      "destinationPath": "src/api/Controllers/CalibrationProjectsController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 authenticated persistence, history, photo, profile, sync, and import endpoints; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-entities",
+      "destinationPath": "src/infra/Domain/CalibrationEntities.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer domain model implementation of issue #898; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-postgresql",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725203620_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 PostgreSQL persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725203620_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 PostgreSQL persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlite",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725203646_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 SQLite persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725203646_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 SQLite persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlserver",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725203637_AddCalibrationPersistenceSync.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #898 SQL Server persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-persistence-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725203637_AddCalibrationPersistenceSync.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer Entity Framework metadata for the issue #898 SQL Server persistence model; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-photo-reconciliation",
+      "destinationPath": "src/api/Services/Calibration/CalibrationPhotoDeleteReconciliationService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 durable photo-delete reconciliation workflow; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-controller",
+      "destinationPath": "src/api/Controllers/PrinterCalibrationController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 authenticated calibration candidate and context endpoints; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-controller-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Controllers/PrinterCalibrationControllerTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #896 HTTP, authorization, redaction, topology, and error contracts; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-postgresql",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725085406_AddCalibrationPrinterContext.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 PostgreSQL model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.PostgreSQL/Migrations/20260725085406_AddCalibrationPrinterContext.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 PostgreSQL model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-sqlite",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725085243_AddCalibrationPrinterContext.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 SQLite model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.Sqlite/Migrations/20260725085243_AddCalibrationPrinterContext.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 SQLite model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-sqlserver",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725085414_AddCalibrationPrinterContext.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 SQL Server model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-context-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Migrations.SqlServer/Migrations/20260725085414_AddCalibrationPrinterContext.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 SQL Server model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-metadata",
+      "destinationPath": "src/infra/Domain/CalibrationPrinterMetadata.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 explicit firmware, slicer, geometry, and safety metadata types; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-printer-update-mapper",
+      "destinationPath": "src/api/Services/Calibration/CalibrationPrinterUpdateMapper.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 explicit metadata update mapping; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-resolver",
+      "destinationPath": "src/slicer/Farm.Slicer.Module/Services/CalibrationProfileResolver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 caller-scoped profile resolver; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-safety-validator",
+      "destinationPath": "src/api/Services/Calibration/CalibrationProfileSafetyValidator.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 profile redaction and safety policy; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-project-service",
+      "destinationPath": "src/api/Services/Calibration/CalibrationProjectService.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #898 aggregate persistence, concurrency, idempotency, history, and synchronization rules; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-project-service-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectServiceTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 persistence, ownership, idempotency, conflict, and redaction requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-project-toolhead-selection-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectServiceToolheadSelectionTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 immutable toolhead snapshot selection requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-postgresql",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725140247_AddSliceJobLeaseAndCalibrationProvenance.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (PostgreSQL); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725140247_AddSliceJobLeaseAndCalibrationProvenance.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (PostgreSQL); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-sqlite",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.Sqlite/Migrations/20260725140244_AddSliceJobLeaseAndCalibrationProvenance.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (SQLite); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.Sqlite/Migrations/20260725140244_AddSliceJobLeaseAndCalibrationProvenance.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (SQLite); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-sqlserver",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.SqlServer/Migrations/20260725140250_AddSliceJobLeaseAndCalibrationProvenance.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (SQL Server); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-lease-provenance-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.SqlServer/Migrations/20260725140250_AddSliceJobLeaseAndCalibrationProvenance.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/899"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #899 slice job lease and calibration provenance schema (SQL Server); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-postgresql",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725095116_AddCalibrationProfileIdentity.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 PostgreSQL slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-postgresql-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260725095116_AddCalibrationProfileIdentity.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 PostgreSQL slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-sqlite",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.Sqlite/Migrations/20260725095108_AddCalibrationProfileIdentity.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 SQLite slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-sqlite-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.Sqlite/Migrations/20260725095108_AddCalibrationProfileIdentity.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 SQLite slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-sqlserver",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.SqlServer/Migrations/20260725095116_AddCalibrationProfileIdentity.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation generated by Entity Framework for the issue #896 SQL Server slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-profile-identity-sqlserver-designer",
+      "destinationPath": "src/migrations/Farm.Slicer.Migrations.SqlServer/Migrations/20260725095116_AddCalibrationProfileIdentity.Designer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation metadata generated by Entity Framework for the issue #896 SQL Server slicer-profile model changes; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-snapshot-builder",
+      "destinationPath": "src/api/Services/Calibration/CalibrationSnapshotBuilder.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/896"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #896 credential-free canonical snapshot and SHA-256 contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-sqlite-concurrency-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectSqliteConcurrencyTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/898"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #898 provider-backed concurrency, cursor, and tombstone requirements; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    }
+  ],
+  "exceptions": []
+}

@@ -1,10 +1,12 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Contracts.Libraries;
-using Farm.Slicers.OrcaSlicer.v2_3_1;
+using Farm.Slicers.OrcaSlicer.v2_4_0;
 using FluentAssertions;
 using Xunit;
 
@@ -65,7 +67,7 @@ public class OrcaSlicerProfilesProviderTests
 
         string version = provider.GetProfilesVersion();
 
-        version.Should().Be("2.3.1");
+        version.Should().Be("2.4.0");
     }
 
     [Fact]
@@ -199,13 +201,14 @@ public class OrcaSlicerProfilesProviderTests
 
         int filamentCount = filaments.GetArrayLength();
 
-        // Expected: ~28 filament profiles (what's in the OrcaFilamentLibrary bundle)
-        // Note: The provider loads only profiles listed in the bundle metadata,
-        // not all individual .json files in the directory.
-        // The sample directory has 259 usable profiles (272 total - 13 with instantiation="false"),
-        // but only a subset are included in the bundle file.
-        filamentCount.Should().BeGreaterThan(0, "Should load at least some filament profiles");
-        filamentCount.Should().BeGreaterThanOrEqualTo(25, "Should load filament profiles from OrcaFilamentLibrary bundle");
+        int expectedFilamentCount = CountExistingUniversalFilamentsFromBundle(sampleProfilesPath);
+        int topLevelFilamentCount = Directory.GetFiles(
+            Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary", "filament"),
+            "*.json",
+            SearchOption.TopDirectoryOnly).Length;
+
+        expectedFilamentCount.Should().BeGreaterThan(topLevelFilamentCount, "the assertion should catch non-recursive top-level-only loading");
+        filamentCount.Should().Be(expectedFilamentCount, "Should load every filament profile referenced by OrcaFilamentLibrary.json");
     }
 
     [Fact]
@@ -388,12 +391,140 @@ public class OrcaSlicerProfilesProviderTests
             machineProfiles.Should().NotBeEmpty("Should have at least some machine profiles");
         }
     }
+
+    private static int CountExistingUniversalFilamentsFromBundle(string sampleProfilesPath)
+    {
+        string bundlePath = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary.json");
+        string bundleJson = File.ReadAllText(bundlePath);
+        using JsonDocument bundleDoc = JsonDocument.Parse(bundleJson);
+        JsonElement filamentList = bundleDoc.RootElement.GetProperty("filament_list");
+        string universalFilamentsDir = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary");
+
+        return filamentList
+            .EnumerateArray()
+            .Select(entry => entry.GetProperty("sub_path").GetString())
+            .Where(subPath => !string.IsNullOrWhiteSpace(subPath))
+            .Count(subPath => File.Exists(Path.Combine(universalFilamentsDir, subPath!)));
+    }
 }
 
 public class OrcaSlicerAssetRegistryTests
 {
     [Fact]
-    public async Task AssetsAndStreams_ReturnNullWhenNotEmbedded()
+    public async Task GetBedModelStream_NestedAssetEmbedded_ReturnsExpectedBytes()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+
+        using Stream? stream = registry.GetBedModelStream("Prusa", "MK4");
+
+        stream.Should().NotBeNull();
+        using var reader = new StreamReader(stream!);
+        string contents = await reader.ReadToEndAsync();
+        contents.Should().Be("PFARM-ORCA-NESTED-MK4-STL\n");
+    }
+
+    [Fact]
+    public async Task GetCoverImageStream_NestedAssetEmbedded_ReturnsExpectedBytes()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+
+        using Stream? stream = registry.GetCoverImageStream("Prusa", "MK4");
+
+        stream.Should().NotBeNull();
+        using var reader = new StreamReader(stream!);
+        string contents = await reader.ReadToEndAsync();
+        contents.Should().Be("PFARM-MK4-COVER\n");
+    }
+
+    [Fact]
+    public void EmbeddedResourceNames_NestedAsset_UsesLowerDottedRelativePath()
+    {
+        Assembly assembly = typeof(OrcaSlicerLibrary_v2_4_0).Assembly;
+        string[] resourceNames = assembly.GetManifestResourceNames();
+
+        resourceNames
+            .Should()
+            .Contain("orcaslicer_v2_4_0_assets_bed-models.prusa.mk4.stl");
+
+        using Stream? stream = new OrcaSlicerAssetRegistry().GetBedModelStream("Prusa", "MK4");
+        stream.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_EmbeddedManifest_PopulatesAssetCache()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+
+        SlicerAsset[] assets = (await registry.ListAssetsAsync()).ToArray();
+
+        assets.Should().ContainSingle(asset =>
+            asset.ManufacturerName == "Prusa" &&
+            asset.ModelName == "MK4" &&
+            asset.HasBedModel &&
+            asset.HasBedTexture &&
+            asset.BedTextureFormat == "svg" &&
+            asset.HasCoverImage);
+    }
+
+    [Fact]
+    public async Task ListAssetsAsync_ConcurrentColdRegistry_AllCallersSeeFullAssetSet()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+        using var start = new ManualResetEventSlim(false);
+
+        Task<int>[] tasks = Enumerable.Range(0, 64)
+            .Select(index => Task.Run(async () =>
+            {
+                start.Wait();
+
+                if (index % 2 == 0)
+                {
+                    return (await registry.ListAssetsAsync()).Count();
+                }
+
+                SlicerAsset? asset = await registry.GetAssetAsync("Prusa", "MK4");
+                return asset is not null ? (await registry.ListAssetsAsync()).Count() : 0;
+            }))
+            .ToArray();
+
+        start.Set();
+        int[] assetCounts = await Task.WhenAll(tasks);
+
+        assetCounts.Should().OnlyContain(count => count == 2);
+    }
+
+    [Fact]
+    public async Task GetAssetAsync_KnownLogicalId_ReturnsManifestAsset()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+
+        SlicerAsset? asset = await registry.GetAssetAsync("Prusa", "MK4");
+
+        asset.Should().NotBeNull();
+        asset!.ManufacturerName.Should().Be("Prusa");
+        asset.ModelName.Should().Be("MK4");
+        asset.HasBedModel.Should().BeTrue();
+        asset.HasBedTexture.Should().BeTrue();
+        asset.HasCoverImage.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetBedModelStream_CaseMismatchBetweenManifestAndFolder_ReturnsExpectedBytes()
+    {
+        var registry = new OrcaSlicerAssetRegistry();
+
+        SlicerAsset? asset = await registry.GetAssetAsync("CaseMaker", "CaseBot");
+        asset.Should().NotBeNull();
+        using Stream? stream = registry.GetBedModelStream(asset!.ManufacturerName, asset.ModelName);
+
+        stream.Should().NotBeNull();
+        using var reader = new StreamReader(stream!);
+        string contents = await reader.ReadToEndAsync();
+        contents.Should().Be("PFARM-ORCA-CASE-MISMATCH-STL\n");
+    }
+
+    [Fact]
+    public async Task AssetsAndStreams_UnknownAsset_ReturnNull()
     {
         var registry = new OrcaSlicerAssetRegistry();
 
@@ -401,7 +532,7 @@ public class OrcaSlicerAssetRegistryTests
         IEnumerable<SlicerAsset> assets = await registry.ListAssetsAsync();
 
         asset.Should().BeNull();
-        assets.Should().BeEmpty();
+        assets.Should().NotBeEmpty();
         registry.GetBedModelStream("unknown", "model").Should().BeNull();
         registry.GetBedTextureStream("unknown", "model").Should().BeNull();
         registry.GetCoverImageStream("unknown", "model").Should().BeNull();
@@ -413,10 +544,10 @@ public class OrcaSlicerLibraryTests
     [Fact]
     public async Task LibraryExposesProvidersAndValidatesConfig()
     {
-        var library = new OrcaSlicerLibrary_v2_3_1();
+        var library = new OrcaSlicerLibrary_v2_4_0();
 
         library.SlicerName.Should().Be("OrcaSlicer");
-        library.SlicerVersion.Should().Be("2.3.1");
+        library.SlicerVersion.Should().Be("2.4.1");
         library.SlicerType.Should().Be("OrcaSlicer");
 
         library.ProfilesProvider.Should().NotBeNull();
@@ -432,13 +563,13 @@ public class OrcaSlicerUiProviderTests
     [Fact]
     public void UiProviderExposesMetadata()
     {
-        var ui = new OrcaSlicerUIProvider_v2_3_1();
+        var ui = new OrcaSlicerUIProvider_v2_4_0();
 
         ui.SlicerName.Should().Be("OrcaSlicer");
-        ui.SlicerVersion.Should().Be("2.3.1");
+        ui.SlicerVersion.Should().Be("2.4.1");
         ui.HasBundleSupport.Should().BeTrue();
         ui.HasAssetCustomization.Should().BeTrue();
         ui.HasEngineSpecificSettings.Should().BeTrue();
-        ui.GetDescription().Should().Contain("OrcaSlicer v2.3.1");
+        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.0");
     }
 }

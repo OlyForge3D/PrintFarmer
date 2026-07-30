@@ -3,9 +3,12 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
+using Fido2NetLib;
+using Fido2NetLib.Objects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Primitives;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
 using ConfirmEmailRequest = Farm.Infrastructure.ConfirmEmailRequest;
 using ForgotPasswordRequest = Farm.Infrastructure.Contracts.Auth.ForgotPasswordRequest;
@@ -19,12 +22,21 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/auth")]
 [Tags("Authentication")]
-public class AuthController(IAuthenticationService authService, ILogger<AuthController> logger) : ControllerBase
+public class AuthController(
+    IAuthenticationService authService,
+    ILoginAuditService loginAuditService,
+    IPasskeyService passkeyService,
+    ILogger<AuthController> logger,
+    Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService apiKeyExchangeService) : ControllerBase
 {
     private readonly IAuthenticationService _authService = authService;
+    private readonly ILoginAuditService _loginAuditService = loginAuditService;
+    private readonly IPasskeyService _passkeyService = passkeyService;
     private readonly ILogger<AuthController> _logger = logger;
+    private readonly Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService _apiKeyExchangeService = apiKeyExchangeService;
 
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -33,12 +45,21 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
             return BadRequest(new AuthenticationResult(false, Error: "Username/Email and password are required"));
         }
 
+        string ipAddress = ResolveClientIp(HttpContext);
+        string? rawUa = HttpContext.Request.Headers.UserAgent.ToString();
+        string? userAgent = string.IsNullOrEmpty(rawUa) ? null : rawUa;
+        string? usernameSubmitted = request.UsernameOrEmail;
+
         AuthenticationResult result = await _authService.AuthenticateAsync(request.UsernameOrEmail, request.Password);
+
+        string? failureReason = result.Success ? null : MapFailureReason(result.Error);
+        await _loginAuditService.RecordAsync(usernameSubmitted, result.Success, ipAddress, userAgent, failureReason, HttpContext.RequestAborted);
 
         return result.Success ? Ok(result) : Unauthorized(result);
     }
 
     [HttpPost("register")]
+    [AllowAnonymous]
     public async Task<ActionResult<AuthenticationResult>> RegisterAsync([FromBody] RegisterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -81,6 +102,39 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
         }
 
         return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("api-key/exchange")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiKeyExchangeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ApiKeyExchangeResponse>> ExchangeApiKeyAsync([FromBody] ApiKeyExchangeRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.IsNullOrWhiteSpace(request.ApiKey))
+        {
+            // Same generic response as any other invalid key - never distinguish
+            // "missing" from "wrong"/"expired"/"revoked" to resist enumeration.
+            return Unauthorized(new { error = "Invalid API key" });
+        }
+
+        string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        string? userAgent = Request.Headers.UserAgent.ToString();
+
+        ApiKeyExchangeResult result = await _apiKeyExchangeService.ExchangeApiKeyAsync(request.ApiKey, ipAddress, userAgent, cancellationToken);
+
+        if (!result.Success || result.Token is null)
+        {
+            return Unauthorized(new { error = result.Error ?? "Invalid API key" });
+        }
+
+        return Ok(new ApiKeyExchangeResponse
+        {
+            Token = result.Token,
+            ExpiresAt = result.ExpiresAt ?? DateTime.UtcNow,
+            Scopes = result.Scopes?.ToList() ?? new List<string>()
+        });
     }
 
     [HttpPost("logout")]
@@ -341,8 +395,265 @@ public class AuthController(IAuthenticationService authService, ILogger<AuthCont
             return BadRequest(new ResendConfirmationResponse(false, "An error occurred while sending the confirmation email"));
         }
     }
+
+    // ─── passkey / WebAuthn ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Begins a passkey registration ceremony. Returns <c>PublicKeyCredentialCreationOptions</c>
+    /// for the browser's <c>navigator.credentials.create()</c> call.
+    /// </summary>
+    [HttpPost("passkey/register/begin")]
+    [Authorize]
+    [ProducesResponseType(typeof(CredentialCreateOptions), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PasskeyRegisterBeginAsync(CancellationToken ct)
+    {
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        string? username = User.FindFirstValue(ClaimTypes.Name);
+
+        if (!Guid.TryParse(userIdClaim, out Guid userId) || string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            CredentialCreateOptions options = await _passkeyService.BeginRegistrationAsync(userId, username, ct);
+            return Ok(options);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Passkey register/begin failed for {Username}", username);
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Completes the passkey registration ceremony by verifying the authenticator attestation.
+    /// Credential persistence is deferred to #354.
+    /// </summary>
+    [HttpPost("passkey/register/complete")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> PasskeyRegisterCompleteAsync(
+        [FromBody] AuthenticatorAttestationRawResponse attestationResponse,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(attestationResponse);
+
+        string? username = User.FindFirstValue(ClaimTypes.Name);
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            (RegisteredPublicKeyCredential fidoCred, int newCredentialId) = await _passkeyService.CompleteRegistrationAsync(username, attestationResponse, ct);
+            return Ok(new { message = "Passkey registered successfully", credentialId = Convert.ToBase64String(fidoCred.Id), newCredentialId });
+        }
+        catch (PasskeyChallengeNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Passkey register/complete replay or expired challenge for {Username}", username);
+            return BadRequest(new { error = "Challenge not found or expired. Please restart the registration." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Passkey register/complete attestation failure for {Username}", username);
+            return UnprocessableEntity(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Begins a passkey login ceremony. Returns <c>PublicKeyCredentialRequestOptions</c>
+    /// for the browser's <c>navigator.credentials.get()</c> call.
+    /// </summary>
+    [HttpPost("passkey/login/begin")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AssertionOptions), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> PasskeyLoginBeginAsync(
+        [FromBody] PasskeyLoginBeginRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Username))
+        {
+            return BadRequest(new { error = "Username is required" });
+        }
+
+        try
+        {
+            AssertionOptions options = await _passkeyService.BeginLoginAsync(request.Username, ct);
+            return Ok(options);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Passkey login/begin failed for {Username}", request.Username);
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Completes the passkey login ceremony. Returns a JWT on successful assertion.
+    /// Full assertion verification against stored credentials is deferred to #354.
+    /// </summary>
+    [HttpPost("passkey/login/complete")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> PasskeyLoginCompleteAsync(
+        [FromBody] PasskeyLoginCompleteRequest request,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Username) || request.AssertionResponse is null)
+        {
+            return BadRequest(new { error = "Username and assertionResponse are required" });
+        }
+
+        try
+        {
+            AuthenticationResult result = await _passkeyService.CompleteLoginAsync(request.Username, request.AssertionResponse, ct);
+            return result.Success ? Ok(result) : Unauthorized(result);
+        }
+        catch (PasskeyChallengeNotFoundException ex)
+        {
+            _logger.LogWarning(ex, "Passkey login/complete replay or expired challenge for {Username}", request.Username);
+            return BadRequest(new { error = "Challenge not found or expired. Please restart the login." });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Passkey login/complete assertion failure for {Username}", request.Username);
+            return UnprocessableEntity(new { error = ex.Message });
+        }
+    }
+
+    // ─── passkey credential management ──────────────────────────────────────
+
+    /// <summary>Lists all registered passkey credentials for the current user.</summary>
+    [HttpGet("passkey/credentials")]
+    [Authorize]
+    [ProducesResponseType(typeof(IEnumerable<PasskeyCredentialDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> ListPasskeyCredentialsAsync(CancellationToken ct)
+    {
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        var credentials = await _passkeyService.ListCredentialsAsync(userId, ct);
+        var dtos = credentials.Select(c => new PasskeyCredentialDto(
+            c.Id,
+            c.DeviceName,
+            c.AaguidDescription,
+            c.CreatedAt,
+            c.LastUsedAt));
+
+        return Ok(dtos);
+    }
+
+    /// <summary>Deletes a passkey credential owned by the current user.</summary>
+    [HttpDelete("passkey/credentials/{id:int}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeletePasskeyCredentialAsync(int id, CancellationToken ct)
+    {
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        bool deleted = await _passkeyService.DeleteCredentialAsync(userId, id, ct);
+        return deleted ? NoContent() : NotFound(new { error = "Credential not found." });
+    }
+
+    /// <summary>Renames a passkey credential owned by the current user.</summary>
+    [HttpPatch("passkey/credentials/{id:int}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RenamePasskeyCredentialAsync(int id, [FromBody] RenamePasskeyRequest request, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.DeviceName))
+        {
+            return BadRequest(new { error = "DeviceName is required." });
+        }
+
+        string? userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (!Guid.TryParse(userIdClaim, out Guid userId))
+        {
+            return Unauthorized();
+        }
+
+        bool renamed = await _passkeyService.RenameCredentialAsync(userId, id, request.DeviceName.Trim(), ct);
+        return renamed ? NoContent() : NotFound(new { error = "Credential not found." });
+    }
+
+    // ─── helpers ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolve the real client IP. Checks X-Forwarded-For first (nginx proxy), falls back to connection IP.
+    /// Takes only the first (leftmost) value from a comma-delimited XFF list — that is the original client.
+    /// </summary>
+    private static string ResolveClientIp(HttpContext context)
+    {
+        try
+        {
+#pragma warning disable S6932 // Reading X-Forwarded-For directly is intentional — nginx sets it, model binding doesn't cover arbitrary headers
+            if (context.Request.Headers.TryGetValue("X-Forwarded-For", out StringValues xff) &&
+                !StringValues.IsNullOrEmpty(xff))
+            {
+                string first = xff.ToString().Split(',')[0].Trim();
+                if (!string.IsNullOrEmpty(first))
+                {
+                    return first;
+                }
+            }
+#pragma warning restore S6932
+        }
+        catch
+        {
+            // Ignore malformed header; fall through to connection IP
+        }
+
+        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
+
+    /// <summary>
+    /// Map an <see cref="AuthenticationResult.Error"/> string to a short, normalised failure-reason code.
+    /// </summary>
+    private static string? MapFailureReason(string? error) =>
+        error switch
+        {
+            null => null,
+            _ when error.Contains("locked", StringComparison.OrdinalIgnoreCase) => "account_locked",
+            _ when error.Contains("disabled", StringComparison.OrdinalIgnoreCase) => "account_disabled",
+            _ => "invalid_credentials",
+        };
 }
 
 public record ConfirmEmailResponse(bool Success, string Message);
 
 public record ResendConfirmationResponse(bool Success, string Message);
+
+/// <summary>Request body for <c>POST /api/auth/passkey/login/begin</c>.</summary>
+public record PasskeyLoginBeginRequest(string Username);
+
+/// <summary>Request body for <c>POST /api/auth/passkey/login/complete</c>.</summary>
+public record PasskeyLoginCompleteRequest(string Username, AuthenticatorAssertionRawResponse? AssertionResponse);
+
+/// <summary>DTO for listing registered passkey credentials.</summary>
+public record PasskeyCredentialDto(int Id, string? DeviceName, string? AaguidDescription, DateTime CreatedAt, DateTime? LastUsedAt);
+
+/// <summary>Request body for <c>PATCH /api/auth/passkey/credentials/{id}</c>.</summary>
+public record RenamePasskeyRequest(string? DeviceName);

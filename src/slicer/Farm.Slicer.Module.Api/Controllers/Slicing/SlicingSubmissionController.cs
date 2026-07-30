@@ -1,21 +1,40 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Security;
+using Farm.Slicer.Module.Api.Authorization;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Slicer.Module.Api.Controllers.Slicing;
 
 /// <summary>
-/// Endpoints for submitting slicing jobs via the new submission service.
+/// Endpoints for submitting slicing jobs via the legacy submission service.
 /// </summary>
+/// <remarks>
+/// Superseded by <c>POST /api/slice</c>, which is the canonical production contract. These routes
+/// remain available for existing non-calibration callers and advertise their replacement, but they
+/// must not be used for calibration work: they do not carry model identity, resolved profile
+/// snapshots or lease fencing.
+/// </remarks>
 [ApiController]
 [Route("api/slicer")]
 [Tags("Slicer Submission")]
+[DeprecatedSliceRoute(CanonicalSliceRoute, CanonicalSliceRouteSunset)]
 public class SlicingSubmissionController(
-    ISlicingSubmissionService submissionService) : ControllerBase
+    ISlicingSubmissionService submissionService,
+    IPrinterAccessValidator? printerAccess = null) : ControllerBase
 {
+    /// <summary>The canonical replacement route advertised to callers.</summary>
+    internal const string CanonicalSliceRoute = "/api/slice";
+
+    /// <summary>Advertised sunset date for the superseded submission routes.</summary>
+    internal const string CanonicalSliceRouteSunset = "Wed, 01 Jul 2026 00:00:00 GMT";
+
     private readonly ISlicingSubmissionService _submissionService = submissionService;
+    private readonly IPrinterAccessValidator? _printerAccess = printerAccess;
 
     /// <summary>
     /// Submits a new file for slicing.
@@ -26,6 +45,8 @@ public class SlicingSubmissionController(
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("slice")]
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitFileAsync(
         IFormFile file,
         [FromForm] string? slicerEngine,
@@ -39,6 +60,13 @@ public class SlicingSubmissionController(
         }
 
         Guid userId = GetUserId();
+        if (userId == Guid.Empty ||
+            (_printerAccess is not null &&
+             !await _printerAccess.IsEnabledAsync(printerId, ct)))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobAsync(
@@ -66,6 +94,8 @@ public class SlicingSubmissionController(
     /// <param name="profileJson">Slicer profile JSON.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("slice-model/{modelId}")]
+    [Authorize]
+    [RequirePermission(PrintFarmerPermissions.Slicing.Submit)]
     public async Task<IActionResult> SubmitModelAsync(
         Guid modelId,
         [FromForm] string? slicerEngine,
@@ -74,6 +104,13 @@ public class SlicingSubmissionController(
         CancellationToken ct)
     {
         Guid userId = GetUserId();
+        if (userId == Guid.Empty ||
+            (_printerAccess is not null &&
+             !await _printerAccess.IsEnabledAsync(printerId, ct)))
+        {
+            return SlicerApiProblems.ResourceForbidden(this);
+        }
+
         SlicerProfileDto profile = DeserializeProfile(profileJson);
 
         SlicingSubmissionResult result = await _submissionService.SubmitSlicingJobFromModelAsync(

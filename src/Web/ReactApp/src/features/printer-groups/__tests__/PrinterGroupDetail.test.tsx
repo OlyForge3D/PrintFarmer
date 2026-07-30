@@ -25,11 +25,20 @@ vi.mock('@/common/components/ui', () => ({
     },
   ),
   Spinner: ({ size }: { size?: string }) => <div data-testid="spinner" data-size={size}>Loading...</div>,
-  Button: ({ children, onClick, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; iconLeft?: React.ReactNode }) => (
-    <button onClick={onClick} {...rest}>{rest.iconLeft}{children}</button>
+  Button: ({ children, onClick, iconLeft, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; iconLeft?: React.ReactNode }) => (
+    <button onClick={onClick} {...rest}>{iconLeft}{children}</button>
   ),
   Badge: ({ children }: { children: React.ReactNode; variant?: string }) => (
     <span data-testid="badge">{children}</span>
+  ),
+  Tabs: Object.assign(
+    ({ children }: { children: React.ReactNode }) => <div data-testid="tabs">{children}</div>,
+    {
+      List: ({ children }: { children: React.ReactNode }) => <div data-testid="tabs-list">{children}</div>,
+      Tab: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+      Panels: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+      Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+    },
   ),
 }));
 
@@ -46,6 +55,12 @@ vi.mock('date-fns', () => ({
 vi.mock('../components/PrinterAssignment', () => ({
   PrinterAssignment: ({ groupId }: { groupId: string; assignedPrinters: unknown[] }) => (
     <div data-testid="printer-assignment" data-group-id={groupId}>Assignment Section</div>
+  ),
+}));
+
+vi.mock('../components/AccessControlTab', () => ({
+  AccessControlTab: ({ groupId }: { groupId: string }) => (
+    <div data-testid="access-control-tab" data-group-id={groupId}>Access Control</div>
   ),
 }));
 

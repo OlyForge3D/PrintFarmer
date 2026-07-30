@@ -1,23 +1,25 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import { useState, useCallback, useMemo } from 'react';
-import styles from './PrinterTableView.module.css';
+import { PanelRightOpen } from 'lucide-react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { getBackendIcon } from '@/common/utils/printerBackendIcon';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import type { AutoDispatchStatus, Printer } from '@/types/api';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
-import { CloseIcon, DeleteIcon, EditIcon } from '@/common/components/icons/MdiIcons';
+import { CloseIcon, DeleteIcon, EditIcon, HelpCircleIcon } from '@/common/components/icons/MdiIcons';
 import { CheckIcon, CheckCircleIcon, CircleIcon, AlertIcon, ToolsIcon } from '@/common/components/icons/MdiIcons';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { renderUnknown } from '@/common/utils/renderUnknown';
-import { Button } from '@/common/components/ui';
+import { Button, ProgressBar } from '@/common/components/ui';
+import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 
 interface PrinterTableViewProps {
   printers: Printer[];
   onEdit: (printer: Printer) => void;
   onDelete: (printers: Printer[]) => void;
   onBulkSetMaintenance: (printers: Printer[], inMaintenance: boolean) => void;
+  onOpenDetails?: (printer: Printer) => void;
   onOpenMaintenance: (printer: Printer) => void;
   showEnableColumn?: boolean;
   onToggleEnabled?: (printer: Printer) => void;
@@ -29,6 +31,7 @@ export function PrinterTableView({
   onEdit,
   onDelete,
   onBulkSetMaintenance,
+  onOpenDetails,
   onOpenMaintenance,
   showEnableColumn = false,
   onToggleEnabled,
@@ -39,10 +42,24 @@ export function PrinterTableView({
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
   const [selectedPrinters, setSelectedPrinters] = useState<Set<string>>(new Set());
   const [bulkAction, setBulkAction] = useState<'none' | 'delete' | 'maintenance-on' | 'maintenance-off'>('none');
+  const [troubleshootPrinterId, setTroubleshootPrinterId] = useState<string | null>(null);
+  const troubleshootRef = useRef<HTMLDivElement>(null);
   const autoDispatchStatusByPrinterId = useMemo(
     () => new Map((allAutoDispatchStatuses ?? []).map((status) => [status.printerId, status])),
     [allAutoDispatchStatuses],
   );
+
+  // Close troubleshooting popover on outside click
+  useEffect(() => {
+    if (!troubleshootPrinterId) return;
+    const handleClick = (e: MouseEvent) => {
+      if (troubleshootRef.current && !troubleshootRef.current.contains(e.target as Node)) {
+        setTroubleshootPrinterId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [troubleshootPrinterId]);
 
   const toggleSelectAll = useCallback(() => {
     if (selectedPrinters.size === printers.length) {
@@ -287,8 +304,36 @@ export function PrinterTableView({
 
                   {/* Status */}
                   <td className="px-4 py-4">
-                    <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
-                      {statusLabel}
+                    <div className="flex items-center gap-1">
+                      <div className={`text-sm font-medium ${getStatusColor(displayPrinter.isOnline ?? false, displayPrinter.state, autoDispatchStatus)}`}>
+                        {statusLabel}
+                      </div>
+                      {!(displayPrinter.isOnline ?? false) && (
+                        <div className="relative" ref={troubleshootPrinterId === printer.id ? troubleshootRef : undefined}>
+                          <Button
+                            type="button"
+                            variant="unstyled"
+                            onClick={() => setTroubleshootPrinterId(prev => prev === printer.id ? null : printer.id)}
+                            className="text-pf-warning hover:text-pf-text-primary transition-colors"
+                            title="Troubleshoot offline printer"
+                            aria-label={`Troubleshoot ${printer.name}`}
+                          >
+                            <HelpCircleIcon className="h-4 w-4" />
+                          </Button>
+                          {troubleshootPrinterId === printer.id && (
+                            <div className="absolute z-50 top-full left-0 mt-1">
+                              <OfflineTroubleshootingGuide
+                                printerBackend={printer.backend}
+                                printerIp={printer.ipAddress}
+                                serverUrl={printer.serverUrl ?? printer.backendUrl}
+                                frontendUrl={printer.frontendUrl}
+                                variant="popover"
+                                onDismiss={() => setTroubleshootPrinterId(null)}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     {isPendingReady ? (
                       <div className="text-xs text-pf-warning truncate max-w-40">
@@ -307,11 +352,12 @@ export function PrinterTableView({
                   <td className="px-4 py-4">
                     {displayPrinter.progress !== undefined && displayPrinter.progress > 0 ? (
                       <div className="flex items-center space-x-2">
-                        <div className="w-12 bg-pf-border-dark rounded-full h-2">
-                          <div
-                            className={`bg-pf-success-bg ${styles['pf-progress-bar']} ${styles[`w-${Math.min(100, Math.max(0, Math.round(displayPrinter.progress / 5) * 5))}`]}`}
-                          />
-                        </div>
+                        <ProgressBar
+                          value={displayPrinter.progress}
+                          ariaLabel="Print progress"
+                          showPercent={false}
+                          className="w-12"
+                        />
                         <span className="text-sm text-pf-text-primary">
                           {Math.round(displayPrinter.progress)}%
                         </span>
@@ -358,6 +404,19 @@ export function PrinterTableView({
                   {/* Actions */}
                   <td className="px-4 py-4">
                     <div className="flex items-center justify-center space-x-1">
+                      {onOpenDetails && (
+                        <Button
+                          type="button"
+                          onClick={() => onOpenDetails(printer)}
+                          variant="subtle"
+                          size="sm"
+                          className="p-2! h-auto!"
+                          title="Open details sidebar"
+                          aria-label={`Open details for ${printer.name}`}
+                          iconCenter={<PanelRightOpen className="w-4 h-4" />}
+                        ></Button>
+                      )}
+
                       <Button
                         type="button"
                         onClick={() => onOpenMaintenance(printer)}

@@ -1,7 +1,7 @@
 /* Progress bar dynamic width using a CSS custom property.
 	 The component sets --pf-progress: <0-100>%. Updates happen in real-time via SignalR. */
 .pf-progress-bar { --pf-progress: 0; }
-.pf-progress-fill { 
+.pf-progress-fill {
   width: var(--pf-progress, 0%);
   /* No transition - updates should be instant for real-time progress */
 }
@@ -17,4 +17,3 @@
 	/* If custom properties unsupported, rely on nearest step class added in TS */
 	.pf-progress-fill { transition: width .3s ease; }
 }
-

@@ -4,6 +4,7 @@
 // ============================================================================
 
 import * as signalR from '@microsoft/signalr';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
 import { getHubUrl } from '@/common/utils/apiUrlHelpers';
 import type {
   AlertCreatedEvent,
@@ -26,6 +27,8 @@ export class MaintenanceSignalRService {
   private connection: signalR.HubConnection | null = null;
   private readonly hubUrl: string;
   private isConnecting = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private lifecycleGeneration = 0;
 
   // Event handler registries
   private alertCreatedHandlers = new Set<AlertCreatedHandler>();
@@ -41,6 +44,11 @@ export class MaintenanceSignalRService {
    * Auto-reconnects on disconnection.
    */
   async start(): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.connection?.state === signalR.HubConnectionState.Connected || this.isConnecting) {
       return;
     }
@@ -51,8 +59,8 @@ export class MaintenanceSignalRService {
       this.connection = new signalR.HubConnectionBuilder()
         .withUrl(this.hubUrl, {
           accessTokenFactory: () => {
-            // Get auth token from localStorage (matches apiClient behavior)
-            return localStorage.getItem('authToken') || '';
+            // Get auth token from localStorage (matches apiClient behavior).
+            return localStorage.getItem('auth-token') || '';
           }
         })
         .withAutomaticReconnect({
@@ -92,16 +100,22 @@ export class MaintenanceSignalRService {
 
       this.connection.onclose(error => {
         console.error('[MaintenanceSignalR] Connection closed', error);
-        // Attempt to reconnect after a delay
-        setTimeout(() => this.start(), 5000);
+        if (generation === this.lifecycleGeneration) {
+          this.scheduleReconnect(generation);
+        }
       });
 
       await this.connection.start();
+      if (generation !== this.lifecycleGeneration) {
+        await this.connection.stop();
+        return;
+      }
       if (window.PrintFarmerDebug?.maintenance) console.info('[MaintenanceSignalR] Connected successfully');
     } catch (error) {
       console.error('[MaintenanceSignalR] Error starting connection:', error);
-      // Retry after a delay
-      setTimeout(() => this.start(), 5000);
+      if (generation === this.lifecycleGeneration) {
+        this.scheduleReconnect(generation);
+      }
     } finally {
       this.isConnecting = false;
     }
@@ -111,14 +125,34 @@ export class MaintenanceSignalRService {
    * Stops the SignalR connection to the MaintenanceHub.
    */
   async stop(): Promise<void> {
-    if (this.connection) {
+    this.lifecycleGeneration++;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.isConnecting = false;
+    const connection = this.connection;
+    this.connection = null;
+    if (connection) {
       try {
-        await this.connection.stop();
+        await connection.stop();
         if (window.PrintFarmerDebug?.maintenance) console.info('[MaintenanceSignalR] Connection stopped');
       } catch (error) {
         console.error('[MaintenanceSignalR] Error stopping connection:', error);
       }
     }
+  }
+
+  private scheduleReconnect(generation: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (generation === this.lifecycleGeneration) {
+        void this.start();
+      }
+    }, 5000);
   }
 
   /**
@@ -202,3 +236,7 @@ export class MaintenanceSignalRService {
 
 // Export singleton instance
 export const maintenanceSignalRService = new MaintenanceSignalRService();
+registerAuthenticatedSignalRTransport(
+  'maintenance',
+  () => maintenanceSignalRService.stop(),
+);

@@ -1,5 +1,7 @@
-﻿using Farm.Slicer.Module.Domain;
+﻿using Farm.Slicer.Module.Data.Configurations;
+using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Farm.Slicer.Module.Data;
 
@@ -64,5 +66,47 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
 
         // Discover all IEntityTypeConfiguration<T> implementations in this assembly.
         _ = modelBuilder.ApplyConfigurationsFromAssembly(typeof(SlicerDbContext).Assembly);
+
+        ApplyProviderSpecificIdempotencyFilters(modelBuilder);
+    }
+
+    /// <summary>
+    /// Slice-job idempotency is calibration/project scoped. Standard jobs use
+    /// <see cref="Guid.Empty"/> and must remain repeatable even when their content checksum
+    /// matches an earlier standard slice.
+    /// </summary>
+    private void ApplyProviderSpecificIdempotencyFilters(ModelBuilder modelBuilder)
+    {
+        IMutableEntityType? sliceJob = modelBuilder.Model.FindEntityType(typeof(SliceJob));
+        if (sliceJob is null)
+        {
+            return;
+        }
+
+        foreach (IMutableIndex index in sliceJob.GetIndexes())
+        {
+            string scopeColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.IdempotencyScopeId)}]"
+                : $"\"{nameof(SliceJob.IdempotencyScopeId)}\"";
+            string correlationColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.CorrelationId)}]"
+                : $"\"{nameof(SliceJob.CorrelationId)}\"";
+            string checksumColumn = Database.IsSqlServer()
+                ? $"[{nameof(SliceJob.Checksum)}]"
+                : $"\"{nameof(SliceJob.Checksum)}\"";
+            string nonEmptyScope =
+                $"{scopeColumn} <> '00000000-0000-0000-0000-000000000000'";
+            switch (index.GetDatabaseName())
+            {
+                case SliceJobConfiguration.CorrelationUniqueIndexName:
+                    index.SetFilter($"{correlationColumn} IS NOT NULL AND {nonEmptyScope}");
+                    break;
+                case SliceJobConfiguration.ChecksumUniqueIndexName:
+                    index.SetFilter($"{checksumColumn} IS NOT NULL AND {nonEmptyScope}");
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 }

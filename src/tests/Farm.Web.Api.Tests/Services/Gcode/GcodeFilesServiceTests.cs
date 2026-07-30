@@ -2,12 +2,14 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
+using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.FileManagement;
@@ -108,7 +110,12 @@ public class GcodeFilesServiceTests
             Material = "PLA",
             EstimatedPrintTimeMinutes = 42,
             FilamentLengthMm = 1234,
-            FilamentWeightGrams = 56
+            FilamentWeightGrams = 56,
+            FilamentPerExtruderWeightG = [10.3, 3.8],
+            FilamentPerExtruderLengthMm = [3432.2, 1208.1],
+            FilamentPerExtruderColorHex = ["#F2AB1F", "#FFFFFF"],
+            FilamentPerExtruderType = ["PLA", "PETG"],
+            ExtruderCount = 2
         };
 
         GcodeFile? added = null;
@@ -153,6 +160,11 @@ public class GcodeFilesServiceTests
         added.EstimatedPrintTimeMinutes.Should().Be(42);
         added.EstimatedFilamentLengthMm.Should().Be(1234);
         added.EstimatedFilamentWeightG.Should().Be(56);
+        JsonSerializer.Deserialize<double[]>(added.FilamentPerExtruderWeightG!).Should().Equal(10.3, 3.8);
+        JsonSerializer.Deserialize<double[]>(added.FilamentPerExtruderLengthMm!).Should().Equal(3432.2, 1208.1);
+        JsonSerializer.Deserialize<string[]>(added.FilamentPerExtruderColorHex!).Should().Equal("#F2AB1F", "#FFFFFF");
+        JsonSerializer.Deserialize<string[]>(added.FilamentPerExtruderType!).Should().Equal("PLA", "PETG");
+        added.ExtruderCount.Should().Be(2);
 
         // FilePath should be the storage directory, construct full path with FileName
         string fullPath = Path.Combine(added.FilePath, added.FileName);
@@ -317,10 +329,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
@@ -388,10 +404,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(fileId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);
@@ -476,10 +496,14 @@ public class GcodeFilesServiceTests
         var harvestRepo = new Mock<IHarvestRepository>(MockBehavior.Loose);
         harvestRepo.Setup(x => x.DeleteFileImportMappingsForGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(() => Task.CompletedTask);
 
+        var partOutputMappingRepo = new Mock<IPartOutputMappingRepository>(MockBehavior.Loose);
+        partOutputMappingRepo.Setup(x => x.DeleteDirectMappingsForGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
         var mockUnitOfWork = new Mock<IUnitOfWork>(MockBehavior.Loose);
         mockUnitOfWork.SetupGet(x => x.GcodeFiles).Returns(repo.Object);
         mockUnitOfWork.SetupGet(x => x.Queue).Returns(queueRepo.Object);
         mockUnitOfWork.SetupGet(x => x.HarvestOperations).Returns(harvestRepo.Object);
+        mockUnitOfWork.SetupGet(x => x.PartOutputMappings).Returns(partOutputMappingRepo.Object);
         mockUnitOfWork.Setup(x => x.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
         var service = new GcodeFilesService(repo.Object, mockUnitOfWork.Object, logger.Object, storagePath.Object, metadataExtractor.Object,
             thumbnailExtractor.Object, folderService.Object, CreateStoredFileOperationsServiceMock().Object, new Mock<IPrintFarmerTelemetryService>(MockBehavior.Loose).Object);

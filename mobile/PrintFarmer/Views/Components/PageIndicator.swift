@@ -4,6 +4,7 @@ struct PageIndicator: View {
     @Binding var currentPage: Int
     let pageCount: Int
     let labels: [String]
+    var accessibilityIdentifierPrefix = "pageIndicator.page"
     
     var body: some View {
         VStack(spacing: 8) {
@@ -20,6 +21,7 @@ struct PageIndicator: View {
                         }
                 }
             }
+            .accessibilityHidden(true)
             
             // Labels
             HStack(spacing: 0) {
@@ -32,12 +34,24 @@ struct PageIndicator: View {
                         Text(labels[index])
                             .font(.caption2)
                             .foregroundStyle(index == currentPage ? Color.pfAccent : Color.pfTextSecondary)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(labels[index])
+                    .accessibilityValue(index == currentPage ? "Selected" : "Not selected")
+                    .accessibilityHint("Shows the \(labels[index]) page.")
+                    .accessibilityAddTraits(index == currentPage ? .isSelected : [])
+                    .accessibilityIdentifier(
+                        "\(accessibilityIdentifierPrefix).\(identifierComponent(labels[index]))"
+                    )
                 }
             }
         }
         .padding(.vertical, 8)
+    }
+
+    private func identifierComponent(_ label: String) -> String {
+        label.lowercased().replacingOccurrences(of: " ", with: "-")
     }
 }

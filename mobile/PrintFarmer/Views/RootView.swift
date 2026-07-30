@@ -8,12 +8,15 @@ import SwiftUI
 struct RootView: View {
     @Environment(AuthViewModel.self) private var authViewModel
     @Environment(AppRouter.self) private var router
+    @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
     @State private var pendingReadyMonitor = PendingReadyMonitor()
+    @State private var connectionMonitor = ConnectionMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("hasCompletedNetworkPermission") private var hasCompletedNetworkPermission = false
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
+    @State private var staleRegistrySignOutTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,31 +24,57 @@ struct RootView: View {
                 DemoModeBanner()
             }
 
+            if authViewModel.isAuthenticated && !DemoMode.shared.isActive && isShowingMainContent {
+                ConnectionStatusBar(monitor: connectionMonitor)
+            }
+
             Group {
-                if authViewModel.isAuthenticated {
-                    ContentView()
-                        .task {
-                            pendingReadyMonitor.configure(
-                                autoPrintService: services.autoPrintService,
-                                printerService: services.printerService
-                            )
-                            await pendingReadyMonitor.requestNotificationPermission()
-                            pendingReadyMonitor.startMonitoring()
-                            do {
-                                try await services.signalRService.connect()
-                            } catch {
-                                // SignalR will auto-reconnect; log silently
-                            }
-                        }
-                        .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
-                            router.pendingReadyCount = newValue
-                        }
-                } else if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
+                if !authViewModel.hasCheckedAuth || !minimumSplashElapsed {
                     launchScreen
                         .task {
                             try? await Task.sleep(for: .seconds(1.5))
                             minimumSplashElapsed = true
                         }
+                } else if serverRegistry.servers.isEmpty || serverRegistry.activeServerID == nil {
+                    AddFirstServerView()
+                        .task {
+                            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+                        }
+                } else if authViewModel.isAuthenticated {
+                    // D (issue #816 reject): the root MUST consume `snapshotActivationPending`
+                    // and visibly gate/offer retry rather than silently entering
+                    // ContentView on `isAuthenticated` alone. If the snapshot did not
+                    // activate (e.g. startup preparation failed), show an accessible
+                    // retry-or-sign-out surface instead of the main app shell.
+                    if authViewModel.snapshotActivationPending {
+                        SnapshotActivationPendingView()
+                    } else {
+                        ContentView()
+                            .id(services.activeServerGeneration)
+                            .task(id: services.activeServerGeneration) {
+                                if !UITestBootstrap.isEnabled {
+                                    pendingReadyMonitor.configure(
+                                        autoPrintService: services.autoPrintService,
+                                        printerService: services.printerService
+                                    )
+                                    await pendingReadyMonitor.requestNotificationPermission()
+                                    pendingReadyMonitor.startMonitoring()
+                                }
+                                do {
+                                    try await services.signalRService.connect()
+                                } catch {
+                                    // SignalR will auto-reconnect; log silently
+                                }
+                                connectionMonitor.configure(
+                                    apiClient: services.apiClient,
+                                    signalRService: services.signalRService
+                                )
+                                connectionMonitor.start()
+                            }
+                            .onChange(of: pendingReadyMonitor.pendingReadyCount) { _, newValue in
+                                router.pendingReadyCount = newValue
+                            }
+                    }
                 } else if !hasSeenOnboarding {
                     OnboardingView(hasSeenOnboarding: $hasSeenOnboarding)
                 } else if !hasCompletedNetworkPermission {
@@ -58,11 +87,42 @@ struct RootView: View {
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
+                connectionMonitor.stop()
                 router.pendingReadyCount = 0
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
-        .onDisappear { disconnectTask?.cancel() }
+        .onChange(of: services.activeServerGeneration) {
+            pendingReadyMonitor.stopMonitoring()
+            connectionMonitor.stop()
+            router.pendingReadyCount = 0
+        }
+        .onChange(of: serverRegistry.servers.isEmpty) { _, isEmpty in
+            guard isEmpty else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onChange(of: serverRegistry.activeServerID) { _, activeServerID in
+            guard activeServerID == nil else { return }
+            signOutIfServerRegistryUnavailable()
+        }
+        .onDisappear {
+            connectionMonitor.stop()
+            disconnectTask?.cancel()
+            staleRegistrySignOutTask?.cancel()
+        }
+    }
+
+    /// True only when the authenticated `ContentView` shell is actually on
+    /// screen — i.e. auth checked, splash elapsed, a server is selected, AND
+    /// the farm-snapshot activation completed (D: the pending-retry screen must
+    /// NOT show the connection bar because ContentView isn't mounted).
+    private var isShowingMainContent: Bool {
+        authViewModel.hasCheckedAuth
+            && minimumSplashElapsed
+            && !serverRegistry.servers.isEmpty
+            && serverRegistry.activeServerID != nil
+            && authViewModel.isAuthenticated
+            && !authViewModel.snapshotActivationPending
     }
 
     /// Shown briefly while `restoreSession()` checks for a saved token.
@@ -83,5 +143,12 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color("LaunchBackground"))
+    }
+
+    private func signOutIfServerRegistryUnavailable() {
+        staleRegistrySignOutTask?.cancel()
+        staleRegistrySignOutTask = Task {
+            await authViewModel.logoutIfServerRegistryUnavailable(serverRegistry)
+        }
     }
 }

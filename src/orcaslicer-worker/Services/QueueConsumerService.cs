@@ -2,6 +2,7 @@
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -17,13 +18,16 @@ public class QueueConsumerService(
     ILogger<QueueConsumerService> logger,
     IWorkerStateService state,
     IConfiguration config,
-    ISlicingPipelineService pipeline) : HttpJobPollerService(httpClientFactory, services, logger, state, config)
+    WorkerCapabilityProvider capabilityProvider) : HttpJobPollerService(httpClientFactory, services, logger, state, config)
 {
-    private readonly ISlicingPipelineService _pipeline = pipeline ?? throw new ArgumentNullException(nameof(pipeline));
+    private readonly WorkerCapabilityProvider _capabilityProvider = capabilityProvider ?? throw new ArgumentNullException(nameof(capabilityProvider));
 
     protected override Task<SlicingResult> ExecutePipelineAsync(DistributedSlicingJob job, IServiceProvider scopeServices, CancellationToken ct)
-        => _pipeline.ProcessJobAsync(job, ct);
+    {
+        ISlicingPipelineService pipeline = scopeServices.GetRequiredService<ISlicingPipelineService>();
+        return pipeline.ProcessJobAsync(job, ct);
+    }
 
     protected override string[] GetWorkerCapabilities()
-        => ["orcaslicer", "stl-processing", "gcode-generation"];
+        => _capabilityProvider.GetCapabilities();
 }

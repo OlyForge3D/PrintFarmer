@@ -1,9 +1,15 @@
-﻿using Farm.Infrastructure.Dtos.PrintQueue;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
-using Farm.Infrastructure.Services.Webhooks;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Api.Controllers;
 
@@ -18,12 +24,12 @@ public class JobQueueAnalyticsController(
     IPrintJobManagementService printJobManagementService,
     IJobCostCalculationService jobCostCalculationService,
     ILogger<JobQueueAnalyticsController> logger,
-    IWebhookService webhookService) : ControllerBase
+    AppDbContext? db = null,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     private readonly IPrintJobManagementService _printJobManagementService = printJobManagementService ?? throw new ArgumentNullException(nameof(printJobManagementService));
     private readonly IJobCostCalculationService _jobCostCalculationService = jobCostCalculationService ?? throw new ArgumentNullException(nameof(jobCostCalculationService));
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly IWebhookService _webhookService = webhookService;
 
     /// <summary>
     /// Get all queued and printing jobs with file metadata
@@ -31,10 +37,16 @@ public class JobQueueAnalyticsController(
     /// <param name="filterStatus">Filter by job status (Queued, Printing, Paused, etc.)</param>
     /// <param name="filterModel">Filter by printer model name</param>
     /// <param name="filterMaterial">Filter by material type</param>
+    /// <param name="deadlineStart">Filter jobs with deadline at or after this UTC timestamp</param>
+    /// <param name="deadlineEnd">Filter jobs with deadline at or before this UTC timestamp</param>
+    /// <param name="queuedFrom">Filter jobs queued at or after this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="queuedTo">Filter jobs queued at or before this UTC timestamp. Only honored for terminal (History-style) views; ignored for the active queue, which reflects current state and is never date-windowed.</param>
+    /// <param name="sortBy">Sort mode (priority, deadline, deadline_desc)</param>
     /// <param name="limit">Maximum number of results (default 100, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuedPrintJobWithFileMetaDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -43,6 +55,11 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? filterStatus,
         [FromQuery] string? filterModel,
         [FromQuery] string? filterMaterial,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
+        [FromQuery] DateTime? queuedFrom = null,
+        [FromQuery] DateTime? queuedTo = null,
+        [FromQuery] string sortBy = "priority",
         [FromQuery] int limit = 100,
         [FromQuery] int offset = 0,
         CancellationToken cancellationToken = default)
@@ -60,9 +77,28 @@ public class JobQueueAnalyticsController(
             }
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
-                filterStatus, filterModel, filterMaterial, limit, offset, cancellationToken);
+                filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
 
-            return Ok(jobs);
+            if (resourceAuthorization is null)
+            {
+                return Ok(jobs);
+            }
+
+            var authorized = new List<QueuedPrintJobWithFileMetaDto>(jobs.Count);
+            foreach (QueuedPrintJobWithFileMetaDto job in jobs)
+            {
+                if (Guid.TryParse(job.Job.Id, out Guid id) &&
+                    await resourceAuthorization.CanAccessJobAsync(
+                        User,
+                        id,
+                        PrinterGroupAccessLevel.View,
+                        cancellationToken))
+                {
+                    authorized.Add(job);
+                }
+            }
+
+            return Ok(authorized);
         }
         catch (Exception ex)
         {
@@ -78,6 +114,7 @@ public class JobQueueAnalyticsController(
     /// <param name="limit">Maximum number of jobs to return (default 50)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("printer/{printerId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuedPrintJobDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -88,6 +125,17 @@ public class JobQueueAnalyticsController(
     {
         try
         {
+            if (Guid.TryParse(printerId, out Guid parsedPrinterId) &&
+                resourceAuthorization is not null &&
+                !await resourceAuthorization.CanAccessPrinterAsync(
+                    User,
+                    parsedPrinterId,
+                    PrinterGroupAccessLevel.View,
+                    cancellationToken))
+            {
+                return NotFound();
+            }
+
             if (string.IsNullOrEmpty(printerId))
             {
                 return BadRequest(new { error = "Printer ID is required" });
@@ -108,6 +156,7 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("stats")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueueStatsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -130,6 +179,7 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("stats/models")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<QueuePrinterModelStatsDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -152,12 +202,15 @@ public class JobQueueAnalyticsController(
     /// </summary>
     /// <param name="limit">Maximum number of results (default 50, max 1000)</param>
     /// <param name="offset">Number of results to skip (default 0)</param>
-    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status)</param>
+    /// <param name="sortBy">Field to sort by (default completedAt, options: newest, oldest, duration, name, status, deadline, deadline_desc)</param>
     /// <param name="statuses">Comma-separated list of statuses to filter by (completed, failed, cancelled)</param>
     /// <param name="dateStart">Start date filter (ISO 8601 format, inclusive)</param>
     /// <param name="dateEnd">End date filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineStart">Deadline start filter (ISO 8601 format, inclusive)</param>
+    /// <param name="deadlineEnd">Deadline end filter (ISO 8601 format, inclusive)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("history")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueueHistoryPageDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -168,6 +221,8 @@ public class JobQueueAnalyticsController(
         [FromQuery] string? statuses = null,
         [FromQuery] DateTime? dateStart = null,
         [FromQuery] DateTime? dateEnd = null,
+        [FromQuery] DateTime? deadlineStart = null,
+        [FromQuery] DateTime? deadlineEnd = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -185,7 +240,7 @@ public class JobQueueAnalyticsController(
             }
 
             QueueHistoryPageDto history = await _printJobManagementService.GetQueueHistoryAsync(
-                limit, offset, sortBy, statusList, dateStart, dateEnd, cancellationToken);
+                limit, offset, sortBy, statusList, dateStart, dateEnd, deadlineStart, deadlineEnd, cancellationToken);
             return Ok(history);
         }
         catch (Exception ex)
@@ -203,6 +258,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The job enqueue request containing G-code file ID and options</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -211,38 +267,12 @@ public class JobQueueAnalyticsController(
         [FromBody] EnqueueQueueJobRequest request,
         CancellationToken cancellationToken = default)
     {
-        try
+        await Task.CompletedTask;
+        return UnprocessableEntity(new
         {
-            if (request == null)
-            {
-                return BadRequest(new { error = "Request body is required" });
-            }
-
-            if (string.IsNullOrEmpty(request.GcodeFileId))
-            {
-                return BadRequest(new { error = "G-code file ID is required" });
-            }
-
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.EnqueueJobAsync(request, userId, cancellationToken);
-
-            _webhookService.Enqueue("job.queued", new { jobId = job.Id, jobName = job.Name, priority = job.Priority });
-
-            return CreatedAtAction("GetAllQueue", new { id = job.Id }, job);
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error enqueueing print job");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to enqueue job" });
-        }
+            error = "queue_creation_endpoint_moved",
+            detail = "Create queue jobs through POST /api/job-queue.",
+        });
     }
 
     /// <summary>
@@ -252,6 +282,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The priority update request containing the new priority value</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}/priority")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -269,10 +300,31 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.UpdateJobPriorityAsync(jobId, request.NewPriority, userId, cancellationToken);
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
+            string userId = QueueActorIdentity.Resolve(User);
+            QueuedPrintJobDto job = await _printJobManagementService.UpdateJobPriorityAsync(
+                jobId,
+                request.NewPriority,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
 
             return Ok(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -291,6 +343,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to pause</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/pause")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -307,10 +360,26 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.PauseJobAsync(jobId, userId, cancellationToken);
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
 
-            return Ok(job);
+            string userId = QueueActorIdentity.Resolve(User);
+            QueuedPrintJobDto job = await _printJobManagementService.PauseJobAsync(
+                jobId,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
+
+            return Accepted(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -329,6 +398,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to resume</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/resume")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -345,10 +415,26 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.ResumeJobAsync(jobId, userId, cancellationToken);
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
 
-            return Ok(job);
+            string userId = QueueActorIdentity.Resolve(User);
+            QueuedPrintJobDto job = await _printJobManagementService.ResumeJobAsync(
+                jobId,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
+
+            return Accepted(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -367,6 +453,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job to cancel</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpDelete("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -383,10 +470,26 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            await _printJobManagementService.CancelJobAsync(jobId, userId, cancellationToken);
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
+            string userId = QueueActorIdentity.Resolve(User);
+            await _printJobManagementService.CancelJobAsync(
+                jobId,
+                userId,
+                ReadIfMatch(),
+                cancellationToken);
 
             return NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       QueueSemanticConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -405,6 +508,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the completed job to rerun</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("jobs/{jobId}/rerun")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -421,10 +525,26 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueuedPrintJobDto job = await _printJobManagementService.RerunJobAsync(jobId, userId, cancellationToken);
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
+            string userId = QueueActorIdentity.Resolve(User);
+            string etag = ReadIfMatch()!;
+            QueuedPrintJobDto job = await _printJobManagementService.RerunJobAsync(
+                jobId,
+                userId,
+                etag,
+                cancellationToken);
 
             return Ok(job);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (InvalidOperationException ex)
         {
@@ -445,6 +565,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The bulk cancel request containing job IDs to cancel</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("bulk/cancel")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Cancel)]
     [ProducesResponseType(typeof(QueueBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -460,10 +581,33 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job IDs list is required and cannot be empty" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
-            QueueBulkOperationResultDto result = await _printJobManagementService.BulkCancelJobsAsync(request.JobIds, userId, cancellationToken);
+            foreach (string jobId in request.JobIds)
+            {
+                request.JobETags.TryGetValue(jobId, out string? etag);
+                if (await CheckJobPreconditionAsync(
+                        jobId,
+                        cancellationToken,
+                        etag) is { } precondition)
+                {
+                    return precondition;
+                }
+            }
+
+            string userId = QueueActorIdentity.Resolve(User);
+            QueueBulkOperationResultDto result =
+                await _printJobManagementService.BulkCancelJobsAsync(
+                    request.JobIds,
+                    userId,
+                    request.JobETags,
+                    cancellationToken);
 
             return Ok(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -478,6 +622,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The bulk reorder request containing job moves</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("bulk/reorder")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueueBulkOperationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -493,10 +638,37 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Moves list is required and cannot be empty" });
             }
 
-            string userId = User.FindFirst("sub")?.Value ?? "system";
+            if (request.Moves.Any(move => move.NewPosition < 1) ||
+                request.Moves.GroupBy(move => move.JobId).Any(group => group.Count() > 1) ||
+                request.Moves.GroupBy(move => move.NewPosition).Any(group => group.Count() > 1))
+            {
+                return BadRequest(new
+                {
+                    error = "Each job and target position may appear once, and every queue position must be positive.",
+                });
+            }
+
+            foreach (QueueJobReorderMove move in request.Moves)
+            {
+                if (await CheckJobPreconditionAsync(
+                        move.JobId,
+                        cancellationToken,
+                        move.IfMatch) is { } precondition)
+                {
+                    return precondition;
+                }
+            }
+
+            string userId = QueueActorIdentity.Resolve(User);
             QueueBulkOperationResultDto result = await _printJobManagementService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
 
             return Ok(result);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -511,6 +683,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The ID of the job to retrieve</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -524,6 +697,12 @@ public class JobQueueAnalyticsController(
             if (string.IsNullOrWhiteSpace(jobId))
             {
                 return BadRequest(new { error = "Job ID is required" });
+            }
+
+            if (!Guid.TryParse(jobId, out Guid id) ||
+                !await CanReadJobAsync(id, cancellationToken))
+            {
+                return NotFound(new { error = "job_not_found" });
             }
 
             QueuedPrintJobDto? job = await _printJobManagementService.GetJobByIdAsync(jobId, cancellationToken);
@@ -544,6 +723,7 @@ public class JobQueueAnalyticsController(
     /// <param name="updates">The job fields to update</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(QueuedPrintJobDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -561,12 +741,23 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
             if (updates == null)
             {
                 return BadRequest(new { error = "Update data is required" });
             }
 
-            QueuedPrintJobDto? updatedJob = await _printJobManagementService.UpdateJobDetailsAsync(jobId, updates, cancellationToken);
+            QueuedPrintJobDto? updatedJob =
+                await _printJobManagementService.UpdateJobDetailsAsync(
+                    jobId,
+                    updates,
+                    QueueActorIdentity.Resolve(User),
+                    ReadIfMatch(),
+                    cancellationToken);
 
             if (updatedJob == null)
             {
@@ -576,9 +767,20 @@ public class JobQueueAnalyticsController(
             _logger.LogInformation("Job {JobId} details updated", jobId);
             return Ok(updatedJob);
         }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
+        }
         catch (ArgumentException ex)
         {
             _logger.LogWarning(ex, "Invalid update request for job {JobId}", jobId);
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (ValidationException ex)
+        {
+            _logger.LogWarning(ex, "Deadline policy validation failed for job {JobId}", jobId);
             return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
@@ -595,6 +797,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">The notes update request</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPut("jobs/{jobId}/notes")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -612,6 +815,11 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Job ID is required" });
             }
 
+            if (await CheckJobPreconditionAsync(jobId, cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
             if (request == null)
             {
                 return BadRequest(new { error = "Notes request is required" });
@@ -622,7 +830,12 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Notes must be 500 characters or less" });
             }
 
-            bool success = await _printJobManagementService.UpdateJobNotesAsync(jobId, request.Notes, cancellationToken);
+            bool success = await _printJobManagementService.UpdateJobNotesAsync(
+                jobId,
+                request.Notes,
+                QueueActorIdentity.Resolve(User),
+                ReadIfMatch(),
+                cancellationToken);
 
             if (!success)
             {
@@ -631,6 +844,12 @@ public class JobQueueAnalyticsController(
 
             _logger.LogInformation("Notes updated for job {JobId}", jobId);
             return NoContent();
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -647,6 +866,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">Optional request specifying printer IDs to seed from</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("history/seed")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Reconcile)]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -670,6 +890,44 @@ public class JobQueueAnalyticsController(
         }
     }
 
+    /// <summary>
+    /// Remove existing duplicate history jobs created before the harvest-time dedup guard.
+    /// Duplicates are seeded history jobs that share the same printer and the same whole-second
+    /// actual start time. Native (non-seeded) jobs are always retained. Defaults to a dry run
+    /// that only reports what would be removed; pass <c>dryRun=false</c> to actually delete.
+    /// </summary>
+    /// <param name="dryRun">When true (default), reports duplicates without deleting them.</param>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpPost("history/deduplicate")]
+    [Authorize(Roles = "farm_admin")]
+    [ProducesResponseType(typeof(DeduplicateHistoryResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> DeduplicateHistoryAsync(
+        [FromQuery] bool dryRun = true,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            DeduplicateHistoryResultDto result =
+                await _printJobManagementService.DeduplicateSeededHistoryAsync(dryRun, cancellationToken);
+
+            _logger.LogInformation(
+                "History deduplication {Mode} completed: {Groups} group(s), {Jobs} job(s)",
+                dryRun ? "dry-run" : "cleanup",
+                result.DuplicateGroups,
+                result.JobsRemoved);
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deduplicating queue history");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to deduplicate history" });
+        }
+    }
+
     // ============= TIMELINE & ANALYTICS ENDPOINTS (Phase 3C) =============
 
     /// <summary>
@@ -682,6 +940,7 @@ public class JobQueueAnalyticsController(
     /// <param name="limit">Maximum number of events to return (default 100, max 1000)</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("timeline")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(List<TimelineEventDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -726,6 +985,7 @@ public class JobQueueAnalyticsController(
     /// <param name="jobId">The unique identifier of the job</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("jobs/{jobId}/state-history")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(JobStateHistoryDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -740,6 +1000,12 @@ public class JobQueueAnalyticsController(
             if (string.IsNullOrWhiteSpace(jobId))
             {
                 return BadRequest(new { error = "Job ID is required" });
+            }
+
+            if (!Guid.TryParse(jobId, out Guid id) ||
+                !await CanReadJobAsync(id, cancellationToken))
+            {
+                return NotFound(new { error = "job_not_found" });
             }
 
             JobStateHistoryDto history = await _printJobManagementService.GetJobStateHistoryAsync(jobId, cancellationToken);
@@ -767,6 +1033,7 @@ public class JobQueueAnalyticsController(
     /// <param name="dateTo">Optional end date for filtering</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpGet("duration-analytics")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(DurationAnalyticsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -804,6 +1071,7 @@ public class JobQueueAnalyticsController(
     /// <param name="id">Job ID</param>
     /// <param name="cancellationToken">Cancellation token</param>
     [HttpGet("jobs/{id}/cost")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
@@ -813,6 +1081,11 @@ public class JobQueueAnalyticsController(
     {
         try
         {
+            if (!await CanReadJobAsync(id, cancellationToken))
+            {
+                return NotFound(new { error = "job_not_found" });
+            }
+
             var job = await _printJobManagementService.GetJobCostBreakdownAsync(id, cancellationToken);
 
             if (job == null)
@@ -836,6 +1109,7 @@ public class JobQueueAnalyticsController(
     /// <param name="request">Cost override values</param>
     /// <param name="cancellationToken">Cancellation token</param>
     [HttpPut("jobs/{id}/cost")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(JobCostBreakdownDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -852,12 +1126,19 @@ public class JobQueueAnalyticsController(
                 return BadRequest(new { error = "Request body is required" });
             }
 
+            if (await CheckJobPreconditionAsync(id.ToString(), cancellationToken) is { } precondition)
+            {
+                return precondition;
+            }
+
             var updated = await _printJobManagementService.UpdateJobCostAsync(
                 id,
                 request.MaterialCostUsd,
                 request.EnergyCostUsd,
                 request.MachineTimeCostUsd,
                 request.LaborCostUsd,
+                QueueActorIdentity.Resolve(User),
+                ReadIfMatch(),
                 cancellationToken);
 
             if (updated == null)
@@ -866,6 +1147,12 @@ public class JobQueueAnalyticsController(
             }
 
             return Ok(updated);
+        }
+        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
+                                       QueueRevisionConflictException or
+                                       DbUpdateConcurrencyException)
+        {
+            return MapRevisionException(ex);
         }
         catch (Exception ex)
         {
@@ -881,6 +1168,7 @@ public class JobQueueAnalyticsController(
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The number of jobs that were successfully recalculated.</returns>
     [HttpPost("recalculate-costs")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> RecalculateAllCostsAsync(CancellationToken cancellationToken = default)
@@ -896,5 +1184,100 @@ public class JobQueueAnalyticsController(
             _logger.LogError(ex, "Error during bulk cost recalculation.");
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to recalculate costs." });
         }
+    }
+
+    private async Task<IActionResult?> CheckJobPreconditionAsync(
+        string jobId,
+        CancellationToken cancellationToken,
+        string? explicitEtag = null)
+    {
+        string? supplied = explicitEtag ?? ReadIfMatch();
+        if (string.IsNullOrWhiteSpace(supplied))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new { error = "precondition_required", detail = "If-Match is required." });
+        }
+
+        if (db is null || !Guid.TryParse(jobId, out Guid id))
+        {
+            return BadRequest(new { error = "Invalid job ID." });
+        }
+
+        if (resourceAuthorization is not null &&
+            !await resourceAuthorization.CanAccessJobAsync(
+                User,
+                id,
+                PrinterGroupAccessLevel.Submit,
+                cancellationToken))
+        {
+            return NotFound(new { error = "job_not_found" });
+        }
+
+        byte[]? actual = await db.PrintJobs
+            .AsNoTracking()
+            .Where(job => job.Id == id)
+            .Select(job => job.RowVersion)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (actual is null)
+        {
+            return NotFound(new { error = "job_not_found" });
+        }
+
+        byte[] expected;
+        try
+        {
+            expected = Convert.FromBase64String(supplied);
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new { error = "If-Match must be a base-64 encoded ETag." });
+        }
+
+        return expected.SequenceEqual(actual)
+            ? null
+            : StatusCode(
+                StatusCodes.Status412PreconditionFailed,
+                new { error = "revision_conflict", detail = "The job changed; re-fetch and retry." });
+    }
+
+    private Task<bool> CanReadJobAsync(Guid jobId, CancellationToken cancellationToken) =>
+        resourceAuthorization is null
+            ? Task.FromResult(true)
+            : resourceAuthorization.CanAccessJobAsync(
+                User,
+                jobId,
+                PrinterGroupAccessLevel.View,
+                cancellationToken);
+
+    private ObjectResult MapRevisionException(Exception exception) => exception switch
+    {
+        QueuePreconditionRequiredException precondition => StatusCode(
+            StatusCodes.Status428PreconditionRequired,
+            new { error = "precondition_required", detail = precondition.Message }),
+        QueueRevisionConflictException conflict => StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new { error = "revision_conflict", detail = conflict.Message }),
+        QueueSemanticConflictException conflict => StatusCode(
+            StatusCodes.Status409Conflict,
+            new { error = "semantic_conflict", detail = conflict.Message }),
+        DbUpdateConcurrencyException => StatusCode(
+            StatusCodes.Status412PreconditionFailed,
+            new
+            {
+                error = "revision_conflict",
+                detail = "The resource changed during the update. Re-fetch the ETag and retry.",
+            }),
+        _ => StatusCode(
+            StatusCodes.Status500InternalServerError,
+            new { error = "unexpected_error" }),
+    };
+
+    private string? ReadIfMatch()
+    {
+        string? value = Request.Headers.IfMatch.FirstOrDefault();
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim().TrimStart('W', '/').Trim('"');
     }
 }

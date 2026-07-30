@@ -13,7 +13,14 @@ x-orcaslicer-build: &orcaslicer-build
     NODE_TAG: ${NODE_TAG}
     NGINX_TAG: ${NGINX_TAG}
     UBUNTU_TAG: ${UBUNTU_TAG}
-    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.3.1}
+    GIT_SHA: ${GIT_SHA:-unknown}
+    BUILD_VERSION: ${BUILD_VERSION:-development}
+    VCS_REF: ${VCS_REF:-unknown}
+    SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+    SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+    SBOM_URL: ${SBOM_URL:-}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.1}
+    ORCASLICER_SHA256: ${ORCASLICER_SHA256}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
     _SKIP_ORCA_BINARY_BUILD: ${_SKIP_ORCA_BINARY_BUILD:-0}
@@ -56,11 +63,16 @@ services:
       - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
+      - Worker__SharedKey=${WORKER_SHARED_API_KEY:-}
+      # Inject the immutable image digest after build/pull. It cannot be embedded while
+      # constructing the image because doing so would change the digest itself.
+      - Worker__ContainerDigest=${ORCASLICER_CONTAINER_DIGEST:-}
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
+      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
     volumes: *worker-volumes
     depends_on:
       api:
@@ -71,4 +83,3 @@ services:
     restart: unless-stopped
     <<: *worker-security
     deploy: *worker-deployment
-

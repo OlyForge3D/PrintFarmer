@@ -15,7 +15,7 @@ namespace Farm.Web.Api.Tests.Integration;
 /// <summary>
 /// Ensures slicer-disabled tests run serially (env var side-effect).
 /// </summary>
-[CollectionDefinition("SlicerDisabled")]
+[CollectionDefinition("SlicerDisabled", DisableParallelization = true)]
 public class SlicerDisabledCollection { }
 
 /// <summary>
@@ -29,12 +29,13 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
 {
     private SlicerDisabledWebApplicationFactory? _factory;
     private HttpClient? _client;
+    private HttpClient? _adminClient;
 
-    public Task InitializeAsync()
+    public async Task InitializeAsync()
     {
         _factory = new SlicerDisabledWebApplicationFactory();
         _client = _factory.CreateClient();
-        return Task.CompletedTask;
+        _adminClient = await _factory.CreateAdminClientAsync();
     }
 
     public async Task DisposeAsync()
@@ -56,7 +57,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Get3DModels_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/3d-models");
 
@@ -69,7 +70,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task Get3DModelsFolders_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/3d-models/folders");
 
@@ -82,7 +83,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task PostModelsQuery_WhenSlicerDisabled_ReturnsEmptyArray()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.PostAsync("/api/3d-models/query", null);
 
@@ -95,7 +96,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SlicerApiRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/slicer/profiles/hierarchy");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/slicer/profiles/hierarchy");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -105,7 +106,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SlicersRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/slicers");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/slicers");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -115,7 +116,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task WorkersRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/workers");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/workers");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -125,7 +126,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task SliceRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/slice/jobs");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/slice/jobs");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -135,7 +136,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task AdminSlicerRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/admin/slicer/system/cleanup");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/admin/slicer/system/cleanup");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -145,7 +146,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task ArtifactsRoute_WhenSlicerDisabled_Returns404WithStructuredError()
     {
-        HttpResponseMessage response = await _client!.GetAsync("/api/artifacts");
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/artifacts");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         string content = await response.Content.ReadAsStringAsync();
@@ -155,7 +156,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
     [Fact]
     public async Task NonSlicerEndpoints_WhenSlicerDisabled_StillWork()
     {
-        HttpClient authClient = await _factory!.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory!.CreateAdminClientAsync();
 
         HttpResponseMessage response = await authClient.GetAsync("/api/printers");
 
@@ -191,7 +192,7 @@ public class SlicerDisabledIntegrationTests : IAsyncLifetime
         db.Printers.Add(printer);
         await db.SaveChangesAsync();
 
-        HttpClient authClient = await _factory.CreateAuthenticatedClientAsync();
+        HttpClient authClient = await _factory.CreateAdminClientAsync();
         HttpResponseMessage response = await authClient.GetAsync("/api/printers");
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

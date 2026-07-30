@@ -6,8 +6,10 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+readonly REPO_ROOT
 readonly HOOKS_DIR="$SCRIPT_DIR"
 
 # ---------------------------------------------------------------------------
@@ -45,6 +47,13 @@ fi
 chmod +x "$HOOKS_DIR/pre-commit"
 info "pre-commit hook is executable"
 
+if [[ -f "$HOOKS_DIR/pre-push" ]]; then
+  chmod +x "$HOOKS_DIR/pre-push"
+  info "pre-push hook is executable"
+else
+  warn "pre-push hook missing from $HOOKS_DIR"
+fi
+
 # ---------------------------------------------------------------------------
 # 3. Check for optional tools
 # ---------------------------------------------------------------------------
@@ -65,4 +74,4 @@ check_tool node       "install Node.js 24+ from https://nodejs.org"
 check_tool dotnet     "install .NET 10 SDK from https://dot.net"
 
 echo ""
-info "Done — pre-commit hook is active for this repo."
+info "Done — pre-commit and pre-push hooks are active for this repo."

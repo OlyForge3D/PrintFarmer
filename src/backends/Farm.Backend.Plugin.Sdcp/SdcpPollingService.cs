@@ -3,8 +3,10 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Mutations;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -21,12 +23,15 @@ public sealed class SdcpPollingService(
     IHubContext<PrinterHub> hub,
     IServiceScopeFactory scopeFactory,
     ILogger<SdcpPollingService> logger,
-    IPrinterStatusCacheWriter statusCacheWriter) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
+    IPrinterStatusCacheWriter statusCacheWriter,
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IMutationWatermarkReader? watermarkReader = null) : IHostedService, IDisposable, IPrinterConnectionHealthProvider
 {
     private readonly ILogger<SdcpPollingService> _logger = logger;
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly IHubContext<PrinterHub> _hub = hub;
     private readonly IPrinterStatusCacheWriter _statusCacheWriter = statusCacheWriter;
+    private readonly IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<Guid, PrinterPollingState> _printerStates = new();
     private readonly ConcurrentDictionary<Guid, Task> _pollingLoops = new();
@@ -198,6 +203,9 @@ public sealed class SdcpPollingService(
 
                     // SDCP uses BackendUrl which combines ServerUrl with BackendPort
                     // The GetCompositeStatusAsync expects the base URL (which it converts to WebSocket URL internally)
+                    long? originWatermark = await OriginWatermark
+                        .CaptureAsync(watermarkReader, _logger, "SDCP status", ct)
+                        .ConfigureAwait(false);
                     PrinterCompositeStatus status = await sdcpClient.GetCompositeStatusAsync(
                         printer.BackendUrl,
                         ct);
@@ -231,6 +239,7 @@ public sealed class SdcpPollingService(
 
                     // Check for state transition from printing to idle for job completion sync
                     string? previousState = state.LastKnownState;
+                    string? previousJobName = state.LastKnownJobName;
                     bool stateChanged = status.State != previousState;
 
                     // Update state tracking (including PreviousState for transition detection)
@@ -250,11 +259,16 @@ public sealed class SdcpPollingService(
                     // Check for print completion/failure transitions
                     if (stateChanged && previousState != null && status.State != null)
                     {
-                        await CheckAndSyncJobCompletionAsync(printerId, previousState, status.State, ct);
+                        await CheckAndSyncJobCompletionAsync(
+                            printerId,
+                            previousState,
+                            status.State,
+                            previousJobName,
+                            ct);
                     }
 
-                    // Broadcast update via SignalR using PrinterStatusDto
-                    var update = new PrinterStatusDto(
+                    // Update cache before broadcasting to clients
+                    var cacheUpdate = new PrinterStatusDto(
                         Id: printerId,
                         IsOnline: status.IsOnline,
                         State: PrinterStateNormalizer.NormalizeState(status.State),
@@ -271,11 +285,33 @@ public sealed class SdcpPollingService(
                         HotendTarget: status.HotendTarget,
                         BedTarget: status.BedTarget,
                         SpoolInfo: null);
+                    _statusCacheWriter.UpdateStatus(cacheUpdate, originWatermark);
 
-                    // Update cache before broadcasting to clients
-                    _statusCacheWriter.UpdateStatus(update);
+                    var signalRUpdate = new PrinterStatusUpdate(
+                        Id: printerId,
+                        IsOnline: status.IsOnline,
+                        State: PrinterStateNormalizer.NormalizeState(status.State),
+                        Progress: status.Progress,
+                        JobName: status.JobName,
+                        ThumbnailUrl: status.ThumbnailUrl,
+                        CameraStreamUrl: status.CameraStreamUrl,
+                        X: status.X,
+                        Y: status.Y,
+                        Z: status.Z,
+                        HotendTemp: status.HotendTemp,
+                        BedTemp: status.BedTemp,
+                        HotendTarget: status.HotendTarget,
+                        BedTarget: status.BedTarget,
+                        HomedAxes: null,
+                        SpoolInfo: null,
+                        FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.All.SendAsync("printerupdated", update.WithNormalizedFileName(), ct);
+                    await _hub.Clients.Group(
+                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                        .SendAsync("printerupdated", signalRUpdate, ct);
+                    await _coverageBroadcaster
+                        .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
+                        .ConfigureAwait(false);
 
                     state.LastPollTime = DateTime.UtcNow;
                 }
@@ -305,7 +341,7 @@ public sealed class SdcpPollingService(
 
                         RecordHealthTransition(printerId, printer?.Name ?? printerId.ToString(), PrinterConnectionState.Offline, $"Failed {state.ConsecutiveFailures} consecutive times");
 
-                        var offlineUpdate = new PrinterStatusDto(
+                        var offlineCacheUpdate = new PrinterStatusDto(
                             Id: printerId,
                             IsOnline: false,
                             State: null,
@@ -322,11 +358,30 @@ public sealed class SdcpPollingService(
                             HotendTarget: null,
                             BedTarget: null,
                             SpoolInfo: null);
+                        _statusCacheWriter.UpdateStatus(offlineCacheUpdate, originWatermark: null);
 
-                        // Update cache before broadcasting to clients
-                        _statusCacheWriter.UpdateStatus(offlineUpdate);
+                        var offlineSignalRUpdate = new PrinterStatusUpdate(
+                            Id: printerId,
+                            IsOnline: false,
+                            State: null,
+                            Progress: null,
+                            JobName: null,
+                            ThumbnailUrl: null,
+                            CameraStreamUrl: null,
+                            X: null,
+                            Y: null,
+                            Z: null,
+                            HotendTemp: null,
+                            BedTemp: null,
+                            HotendTarget: null,
+                            BedTarget: null,
+                            HomedAxes: null,
+                            SpoolInfo: null,
+                            FileName: null);
 
-                        await _hub.Clients.All.SendAsync("printerupdated", offlineUpdate, ct);
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
                     }
                 }
 
@@ -370,7 +425,12 @@ public sealed class SdcpPollingService(
     /// Checks for print completion/failure state transitions and synchronizes job status in database.
     /// Called when printer state changes from "printing" to idle (completion) or error state.
     /// </summary>
-    private async Task CheckAndSyncJobCompletionAsync(Guid printerId, string previousState, string newState, CancellationToken ct)
+    private async Task CheckAndSyncJobCompletionAsync(
+        Guid printerId,
+        string previousState,
+        string newState,
+        string? previousJobName,
+        CancellationToken ct)
     {
         try
         {
@@ -389,7 +449,11 @@ public sealed class SdcpPollingService(
             if (PrintJobCompletionService.IsCompletionState(newState))
             {
                 // Print completed successfully
-                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(printerId, newState, ct);
+                bool marked = await completionService.MarkCurrentJobAsCompletedAsync(
+                    printerId,
+                    newState,
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogInformation("[SdcpPollingService] Print job marked as completed for printer {PrinterId}", printerId);
@@ -398,7 +462,11 @@ public sealed class SdcpPollingService(
             else if (PrintJobCompletionService.IsFailureState(newState))
             {
                 // Print failed
-                bool marked = await completionService.MarkCurrentJobAsFailedAsync(printerId, $"Printer state changed to {newState}", ct);
+                bool marked = await completionService.MarkCurrentJobAsFailedAsync(
+                    printerId,
+                    $"Printer state changed to {newState}",
+                    new PrinterTerminalObservation(previousJobName),
+                    ct);
                 if (marked)
                 {
                     _logger.LogWarning("[SdcpPollingService] Print job marked as failed for printer {PrinterId} (state: {NewState})", printerId, newState);

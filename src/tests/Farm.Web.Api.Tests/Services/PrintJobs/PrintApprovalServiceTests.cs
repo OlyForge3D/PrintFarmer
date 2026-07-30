@@ -260,7 +260,7 @@ public class PrintApprovalServiceTests : IDisposable
         public List<QueuePrintJobDto> EnqueuedJobs { get; } = new();
         public bool ShouldFailEnqueue { get; set; }
 
-        public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, CancellationToken ct)
+        public Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
         {
             if (ShouldFailEnqueue)
             {
@@ -290,6 +290,9 @@ public class PrintApprovalServiceTests : IDisposable
             => Task.FromResult<JobQueuePrintJobDto?>(null);
 
         public Task<bool> RemoveJobAsync(Guid id, CancellationToken ct)
+            => Task.FromResult(true);
+
+        public Task<bool> RemoveJobAsync(Guid id, string? ifMatchJobRowVersion, CancellationToken ct)
             => Task.FromResult(true);
 
         public Task<JobQueuePrintJobDto?> UpdateJobPriorityAsync(Guid id, UpdateJobPriorityDto request, CancellationToken ct)
