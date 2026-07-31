@@ -54,12 +54,6 @@ const LazyWorkerManagementPage = lazy(() =>
   import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage })),
 );
 
-const SETTINGS_FRAME_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
-const SETTINGS_FRAME_GRID = [
-  'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
-  'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
-].join(', ');
-
 function scrollBehavior(): ScrollBehavior {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'smooth';
@@ -84,7 +78,7 @@ function UserPreferencesPanel() {
   return (
     <SettingsSection>
       <div className="space-y-6">
-        <section className="rounded-2xl border border-pf-border bg-pf-bg-0 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <section className="rounded-md border border-pf-border bg-pf-card px-5 py-5">
           <h3 className="text-lg font-semibold text-pf-text-primary">Appearance</h3>
           <p className="mt-1 text-sm text-pf-text-secondary">
             Choose a theme and preview the dashboard surface in real time.
@@ -620,7 +614,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
   const toolbar = (
-    <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
+    <div className="sticky top-0 z-20 border-b border-pf-border bg-pf-panel px-4 py-4 md:px-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:mr-72">
         <Button
           type="button"
@@ -628,7 +622,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           size="md"
           onClick={openCommandPalette}
           iconLeft={<SearchIcon className="h-4 w-4" ariaLabel="Open command palette" />}
-          className="h-11 justify-between rounded-2xl border border-pf-border/70 bg-pf-bg-0/70 px-4 text-sm text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm sm:min-w-[12rem]"
+          className="h-11 justify-between rounded-md border border-pf-border bg-pf-bg-1 px-4 text-sm text-pf-text-primary sm:min-w-[12rem]"
         >
           <span className="inline-flex items-center gap-3">
             <span>Command palette</span>
@@ -661,21 +655,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         padding="px-0"
         showHeader
       >
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 pt-4 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
-          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
-            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.08]" style={{ backgroundImage: SETTINGS_FRAME_GRID, backgroundSize: '24px 24px' }} />
-            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.05]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} />
-          </div>
-
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel pt-4">
           <div className="relative flex min-h-0 flex-1 flex-col">
           {hasNoMatches ? (
             <div className="relative flex flex-1 min-h-0 flex-col">
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                 {toolbar}
                 <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
-                  <div className="mx-auto max-w-md rounded-3xl border border-dashed border-pf-border bg-pf-bg-0/80 px-6 py-10 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                  <div className="mx-auto max-w-md rounded-md border border-dashed border-pf-border bg-pf-bg-1 px-6 py-10 text-center">
                     <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
                     <p className="mt-2 text-sm text-pf-text-secondary">
                       We couldn&apos;t find anything for &ldquo;{query}&rdquo;. Try a broader term like hardware, theme, or users.
@@ -698,10 +685,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 searchQuery={query}
               />
 
-              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
-                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-
+              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
                 <p className="sr-only" aria-live="polite">
                   {sectionAnnouncement}
                 </p>
