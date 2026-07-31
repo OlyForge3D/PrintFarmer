@@ -209,7 +209,7 @@ function InfillPatternDropdown({
           id={listboxId}
           role="listbox"
           aria-label="Infill pattern options"
-          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0 p-2 shadow-2xl shadow-black/30"
+          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-lg border border-pf-border bg-pf-bg-0 p-2 shadow-2xl shadow-black/30"
         >
           {patterns.map((pattern, index) => {
             const active = pattern.value === selectedPattern.value;

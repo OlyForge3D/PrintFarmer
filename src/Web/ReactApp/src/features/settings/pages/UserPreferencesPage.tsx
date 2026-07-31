@@ -36,7 +36,7 @@ export function UserPreferencesPage() {
       icon={SettingsIcon}
     >
       <div className="max-w-6xl space-y-6">
-        <section className="rounded-2xl border border-pf-border bg-pf-card p-5 shadow-sm">
+        <section className="rounded-lg border border-pf-border bg-pf-card p-5 shadow-sm">
           <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.18em] text-pf-text-secondary">
             Appearance
           </h2>
@@ -46,7 +46,7 @@ export function UserPreferencesPage() {
           <ThemeSwitcher />
         </section>
 
-        <section className="rounded-2xl border border-pf-border bg-pf-card p-5 shadow-sm">
+        <section className="rounded-lg border border-pf-border bg-pf-card p-5 shadow-sm">
           <h2 className="mb-1 text-sm font-semibold uppercase tracking-[0.18em] text-pf-text-secondary">
             Profile & security
           </h2>
@@ -59,7 +59,7 @@ export function UserPreferencesPage() {
                 key={link.href}
                 type="button"
                 variant="subtle"
-                className="h-auto min-w-0 w-full items-start justify-start rounded-xl border border-pf-border px-4 py-3 text-left whitespace-normal"
+                className="h-auto min-w-0 w-full items-start justify-start rounded-lg border border-pf-border px-4 py-3 text-left whitespace-normal"
                 iconLeft={link.icon}
                 onClick={() => navigate(link.href)}
               >

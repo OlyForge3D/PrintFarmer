@@ -1,0 +1,235 @@
+import { RuleTester } from 'eslint'
+import { describe, it } from 'vitest'
+import rule from '../../../eslint-rules/pf-no-oversized-radius.js'
+
+// RuleTester drives describe/it itself; vitest supplies them.
+RuleTester.describe = describe
+RuleTester.it = it
+
+const ruleTester = new RuleTester({
+  languageOptions: {
+    ecmaVersion: 2022,
+    sourceType: 'module',
+    parserOptions: { ecmaFeatures: { jsx: true } },
+  },
+})
+
+ruleTester.run('pf-no-oversized-radius', rule, {
+  valid: [
+    // Radii at or below --pf-radius-lg.
+    { code: '<div className="rounded-md border" />' },
+    { code: '<div className="rounded-lg p-4" />' },
+    { code: '<div className="rounded-sm" />' },
+    { code: '<div className="rounded" />' },
+    // Side segments carry the default radius and must not be read as sizes.
+    { code: '<div className="rounded-l" />' },
+    { code: '<div className="rounded-t-md" />' },
+    // An unrecognised size is never guessed at.
+    { code: '<div className="rounded-bananas" />' },
+    // Arbitrary values within the ceiling.
+    { code: '<div className="rounded-[4px]" />' },
+    { code: '<div className="rounded-[0.5rem]" />' },
+    // Unresolvable arbitrary values are never guessed at.
+    { code: '<div className="rounded-[var(--pf-radius-md)]" />' },
+    { code: '<div className="rounded-[calc(2px+2px)]" />' },
+
+    // Provably circular elements keep rounded-full with no annotation.
+    { code: '<span className="w-2 h-2 rounded-full bg-pf-error" />' },
+    { code: '<span className="h-2.5 w-2.5 rounded-full" />' },
+    { code: '<div className="size-8 rounded-full" />' },
+    { code: '<div className="aspect-square rounded-full" />' },
+    { code: '<div className="animate-spin rounded-full h-5 w-5 border-b-2" />' },
+    { code: '<div className="pf-animate-spin rounded-full h-12 w-12" />' },
+    { code: '<span className="animate-ping absolute h-full w-full rounded-full" />' },
+
+    // Shape evidence in a sibling fragment of the same clsx() call still counts.
+    { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
+
+    // Explicit, greppable waiver at the call site.
+    { code: '<span data-pf-radius="full" className="px-3 py-1 rounded-full">tag</span>' },
+    // The pre-existing progress markers are honoured without a second annotation.
+    { code: '<div data-pf-progress-track className="w-full h-2 rounded-full" />' },
+
+    // rounded-full checking can be switched off for the repo-wide pass.
+    {
+      code: '<div className="px-4 py-2 rounded-full" />',
+      options: [{ checkFullRound: false }],
+    },
+    // A raised ceiling is honoured.
+    {
+      code: '<div className="rounded-[12px]" />',
+      options: [{ maxPx: 16 }],
+    },
+
+    // Attributes other than className are untouched.
+    { code: '<div title="rounded-2xl" />' },
+  ],
+
+  invalid: [
+    // rounded-xl is 12px in Tailwind's stock scale, which the project does not
+    // remap -- so it is over the 8px ceiling too.
+    {
+      code: '<div className="rounded-xl border" />',
+      output: '<div className="rounded-lg border" />',
+      errors: [{ messageId: 'oversized', data: { token: 'rounded-xl', px: 12 } }],
+    },
+    // ...but it is legal under a raised ceiling, which is how the repo-wide
+    // registration grandfathers the existing rounded-xl usage.
+    {
+      code: '<div className="rounded-2xl" />',
+      options: [{ maxPx: 12 }],
+      output: '<div className="rounded-lg" />',
+      errors: [{ messageId: 'oversized', data: { token: 'rounded-2xl', px: 16 } }],
+    },
+    {
+      code: '<div className="rounded-2xl border p-4" />',
+      output: '<div className="rounded-lg border p-4" />',
+      errors: [{ messageId: 'oversized', data: { token: 'rounded-2xl', px: 16 } }],
+    },
+    {
+      code: '<div className="rounded-3xl" />',
+      output: '<div className="rounded-lg" />',
+      errors: [{ messageId: 'oversized', data: { token: 'rounded-3xl', px: 24 } }],
+    },
+    // A side segment plus an oversized size: both parts survive the rewrite.
+    {
+      code: '<div className="rounded-tl-3xl" />',
+      output: '<div className="rounded-tl-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    // Side-scoped and variant-prefixed tokens are matched on their base.
+    {
+      code: '<div className="rounded-t-2xl" />',
+      output: '<div className="rounded-t-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="md:rounded-2xl" />',
+      output: '<div className="md:rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    // Arbitrary values above the ceiling: suggestion, not silent rewrite,
+    // because rounded-md may be the better answer and only a human knows.
+    {
+      code: '<div className="rounded-[1.75rem]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[1.75rem]', px: 28 },
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="rounded-[20px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[20px]', px: 20 },
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    // A content box with no shape evidence is the "bubble button" case.
+    {
+      code: '<button className="px-4 py-2 rounded-full text-white" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          data: { token: 'rounded-full' },
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<button className="px-4 py-2 rounded-lg text-white" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="px-2 py-0.5 text-xs rounded-full bg-pf-bg-2" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="px-2 py-0.5 text-xs rounded-lg bg-pf-bg-2" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Mismatched width and height is not a circle.
+    {
+      code: '<div className="w-full h-2 rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="w-full h-2 rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    // 9999px is rounded-full spelled differently.
+    {
+      code: '<div className="px-3 rounded-[9999px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="px-3 rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    // Inside clsx(), reported at the offending fragment.
+    {
+      code: '<div className={clsx("flex gap-3 rounded-2xl border", isActive && "bg-pf-bg-1")} />',
+      output: '<div className={clsx("flex gap-3 rounded-lg border", isActive && "bg-pf-bg-1")} />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    // Inside a template literal.
+    {
+      code: '<div className={`rounded-2xl ${extra}`} />',
+      output: '<div className={`rounded-lg ${extra}`} />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    // Two violations in one attribute are both reported.
+    {
+      code: '<div className="rounded-2xl md:rounded-3xl" />',
+      output: '<div className="rounded-lg md:rounded-lg" />',
+      errors: [{ messageId: 'oversized' }, { messageId: 'oversized' }],
+    },
+    // An unrelated data attribute is not a waiver.
+    {
+      code: '<div data-testid="chip" className="px-3 py-1 rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div data-testid="chip" className="px-3 py-1 rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+  ],
+})

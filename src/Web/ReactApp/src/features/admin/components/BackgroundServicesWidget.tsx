@@ -131,7 +131,7 @@ function ServiceStatusRow({ service }: { service: BackgroundServiceStatus }) {
             </span>
           )}
           {service.category && (
-            <span className="px-2 py-0.5 text-xs rounded-full bg-pf-bg-2 text-pf-text-secondary">
+            <span className="px-2 py-0.5 text-xs rounded-xs bg-pf-bg-2 text-pf-text-secondary">
               {service.category}
             </span>
           )}

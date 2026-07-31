@@ -698,7 +698,7 @@ export function Layout() {
           onClick={handleClick}
           onKeyDown={handleKeyDown}
           className={clsx(
-            'flex h-9 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+            'flex h-9 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
             isActive
               ? 'bg-pf-accent-bg/18 text-pf-accent'
               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'

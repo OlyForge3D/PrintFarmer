@@ -689,6 +689,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                     {/* Tag Preview */}
                     <div className="flex flex-col items-center py-4 bg-pf-bg-2 rounded-lg">
                         <div
+                            data-pf-radius="full"
                             className="px-4 py-2 rounded-full text-white font-medium shadow-md transition-all duration-200"
                             style={{ backgroundColor: newTagColor }}
                         >

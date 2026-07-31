@@ -349,7 +349,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                       {user.roles.map((role) => (
                         <span
                           key={role}
-                          className={`inline-flex px-2 py-1 text-xs rounded-full border ${getRoleBadgeColor(role)}`}
+                          className={`inline-flex px-2 py-1 text-xs rounded-xs border ${getRoleBadgeColor(role)}`}
                         >
                           {roles.find(r => r.name === role)?.displayName || role}
                         </span>

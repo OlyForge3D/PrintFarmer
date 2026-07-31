@@ -444,7 +444,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         onKeyDown={handleDialogKeyDown}
         onClick={(event) => event.stopPropagation()}
         className={clsx(
-          'relative w-full max-w-[32rem] overflow-hidden rounded-[1.75rem] border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
+          'relative w-full max-w-[32rem] overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-0/92 shadow-[0_24px_80px_-40px_rgba(0,0,0,0.9)] backdrop-blur-xl transition-[transform,opacity] motion-reduce:transition-none',
           isVisible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.985] opacity-0',
         )}
         style={transitionStyle}
@@ -467,7 +467,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
               size="sm"
               onClick={handleDismiss}
               aria-label="Close command palette"
-              className="rounded-full p-2 text-pf-text-secondary transition-colors hover:bg-pf-bg-1 hover:text-pf-text-primary focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset motion-reduce:transition-none"
+              className="size-8 rounded-full p-2 text-pf-text-secondary transition-colors hover:bg-pf-bg-1 hover:text-pf-text-primary focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset motion-reduce:transition-none"
               style={transitionStyle}
               iconCenter={<span aria-hidden="true"><CloseIcon className="h-4 w-4" ariaLabel="Close" /></span>}
             />
@@ -539,7 +539,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                           onMouseDown={(event) => event.preventDefault()}
                           onClick={() => handleSelect(result.item)}
                           className={clsx(
-                            'group flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
+                            'group flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 text-left transition-[transform,background-color,color,border-color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
                             isActive
                               ? 'border-pf-accent/60 bg-pf-accent-bg/22 text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
                               : 'border-transparent bg-pf-bg-1/55 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/75 hover:text-pf-text-primary',
@@ -548,7 +548,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                         >
                           <span
                             className={clsx(
-                              'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-pf-border/70 bg-pf-bg-0/80',
+                              'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-pf-border/70 bg-pf-bg-0/80',
                               isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
                             )}
                             aria-hidden="true"
@@ -589,7 +589,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
               })}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-pf-border/80 bg-pf-bg-1/45 px-5 py-8 text-center">
+            <div className="rounded-lg border border-dashed border-pf-border/80 bg-pf-bg-1/45 px-5 py-8 text-center">
               <p className="text-sm font-medium text-pf-text-primary">Nothing matched</p>
               <p className="mt-2 text-sm text-pf-text-secondary">Try a broader term like printers, theme, audit, or sign out.</p>
             </div>

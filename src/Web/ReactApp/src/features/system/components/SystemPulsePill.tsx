@@ -398,7 +398,7 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
           aria-labelledby={dialogTitleId}
           tabIndex={-1}
           className={clsx(
-            'absolute right-0 top-full z-50 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-pf-border/80 bg-pf-bg-1/95 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md',
+            'absolute right-0 top-full z-50 mt-2 w-[22rem] overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-1/95 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-md',
             SYSTEM_PULSE_PANEL_MAX_WIDTH_CLASS,
           )}
         >
