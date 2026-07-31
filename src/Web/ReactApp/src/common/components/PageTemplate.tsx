@@ -52,6 +52,20 @@ interface PageTemplateProps {
   backgroundColor?: string;
   /** Hide the header region while retaining layout chrome */
   showHeader?: boolean;
+  /**
+   * Make the page fill exactly the viewport slot rather than growing with its
+   * content, so a descendant marked `flex-1 min-h-0` becomes a real scrollport.
+   *
+   * Off by default: a page that simply flows down the document must keep
+   * growing, and `min-h-full` is right for it. Opt in when the page owns an
+   * internal scroll region — the settings shell does, because its save bar has
+   * to stay docked below the fold-line while the cards above it scroll.
+   *
+   * Marks the root with `data-page-fill`, which `Layout` keys its `:has()`
+   * variants off so the height chain above this component is only bounded for
+   * pages that asked for it.
+   */
+  fill?: boolean;
 }
 
 /**
@@ -94,7 +108,8 @@ export function PageTemplate({
   padding = 'px-4',
   includeTopPadding = true,
   backgroundColor = 'bg-pf-bg-2',
-  showHeader = true
+  showHeader = true,
+  fill = false
 }: PageTemplateProps) {
   // Only a header-rendering instance can collide with another one, so only those
   // register. See pageHeaderGuard for what this catches.
@@ -121,11 +136,12 @@ export function PageTemplate({
 
   return (
     <div
-      className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
+      className={`${fill ? 'flex min-h-0 flex-1 flex-col' : 'min-h-full'} ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
       data-header-visible={showHeader ? 'true' : 'false'}
+      data-page-fill={fill ? 'true' : undefined}
       aria-label={showHeader ? undefined : title}
     >
-      <div className={`min-w-0 ${maxWidth} ${padding}`}>
+      <div className={`min-w-0 ${maxWidth} ${padding}${fill ? ' flex min-h-0 flex-1 flex-col' : ''}`}>
         {/* Page Header */}
         {showHeader && (
           <div className="mb-4 lg:mr-[var(--pf-floating-bar-inset,0px)]">

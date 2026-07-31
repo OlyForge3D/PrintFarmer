@@ -1,4 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
+import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
@@ -29,6 +31,7 @@ import {
 import {
   deriveSettingsIssues,
   countIssuesBySection,
+  severityBySection,
   focusSettingProperty,
   validateSection,
   type SettingsIssue,
@@ -352,6 +355,20 @@ function GroupSaveBlock({
   }, [state]);
 
   const handleSave = useCallback(async (): Promise<GroupSaveOutcome> => {
+    // Not a "Save All" button, despite saving more than one section.
+    //
+    // The banned pattern is a button that posts the whole settings tree through
+    // the batch `POST /api/settings` endpoint — one opaque write the user
+    // cannot reason about and the server cannot partially reject. This does the
+    // opposite: one `POST /api/settings/{keyName}` per section the user
+    // actually edited, each independently validated, each able to fail on its
+    // own, with the outcome named per section. `saveAllSettings` is never
+    // called from anywhere in the frontend.
+    //
+    // The alternative — a save control per card — is what #1013 replaced. With
+    // the density-aware band flow a single screen can show a dozen cards, and a
+    // dozen Save buttons left users unsure which one covered the field they had
+    // just touched.
     const labelFor = (sectionKey: string) => {
       const meta = metadataItems.find((m) => m.key === sectionKey);
       return meta?.displayName || meta?.className || sectionKey;
@@ -377,6 +394,7 @@ function GroupSaveBlock({
 
     const changedSectionKeys = state.changedKeys.map((k) => String(k));
     const failed: string[] = [];
+    const saved: string[] = [];
     const perSectionErrors: Record<string, Record<string, string>> = {};
     const perSectionMessages: Record<string, string> = {};
     let firstMessage: string | undefined;
@@ -386,6 +404,7 @@ function GroupSaveBlock({
       if (!meta) continue;
       try {
         await saveSettingsValues(sectionKey, state.values[sectionKey] ?? {});
+        saved.push(sectionKey);
       } catch (err) {
         failed.push(meta.displayName || meta.className);
         const extracted = extractFieldErrors(err, sectionKey);
@@ -396,6 +415,11 @@ function GroupSaveBlock({
     }
 
     if (failed.length > 0) {
+      // Settle the groups that did save. Each group is its own request, so a
+      // partial failure is normal — leaving the successes dirty would show the
+      // user unsaved work that is already on the server, and re-POST it on the
+      // next attempt. Only the groups that actually failed stay dirty.
+      state.acceptKeys(saved);
       // Only errors produced by *this* attempt may remain for the sections we
       // just tried. Dropping the attempted keys first (rather than spreading
       // over `prev`) means a section that succeeded this round clears its stale
@@ -497,6 +521,11 @@ function GroupSaveBlock({
     [groupIssues],
   );
 
+  const issueSeverityBySection = useMemo(
+    () => severityBySection(groupIssues),
+    [groupIssues],
+  );
+
   // Registering the callbacks is not a render concern, so it must not re-run on
   // every edit — `handleSave` closes over `state.values` and so changes identity
   // on every keystroke. A ref indirection keeps the registration itself stable
@@ -559,6 +588,7 @@ function GroupSaveBlock({
             const sectionValues = (state.values[meta.key] ?? {}) as SectionValues;
             const cardTitle = displayMeta.displayName || displayMeta.className;
             const cardIssueCount = issueCountBySection[meta.key] ?? 0;
+            const cardIsError = issueSeverityBySection[meta.key] === 'Error';
 
             return (
               <Card
@@ -568,11 +598,13 @@ function GroupSaveBlock({
                   fullWidth && '[column-span:all]',
                   // A left rule reads as "this one" at a glance across a
                   // multi-column flow, where a badge alone gets lost.
-                  cardIssueCount > 0 && 'border-l-2 border-l-pf-error',
+                  cardIssueCount > 0 && 'border-l-2',
+                  cardIssueCount > 0 && (cardIsError ? 'border-l-pf-error' : 'border-l-pf-warning'),
                 )}
                 dataAttributes={{
                   'data-section-key': meta.key,
                   'data-section-issues': cardIssueCount ? String(cardIssueCount) : undefined,
+                  'data-section-severity': cardIssueCount ? (cardIsError ? 'Error' : 'Warning') : undefined,
                 }}
               >
                 <Card.Header className="pb-2">
@@ -581,8 +613,8 @@ function GroupSaveBlock({
                       {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
                     </h4>
                     {cardIssueCount > 0 && (
-                      <Badge variant="error" size="sm">
-                        Action needed
+                      <Badge variant={cardIsError ? 'error' : 'warning'} size="sm">
+                        {cardIsError ? 'Save failed' : 'Action needed'}
                       </Badge>
                     )}
                   </div>
@@ -644,6 +676,7 @@ export function SettingsPage({
   const groupActionsRef = useRef(new Map<string, GroupSaveActions>());
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [saveAllError, setSaveAllError] = useState<string | null>(null);
+  const footerSlot = useSettingsFooterSlot();
 
   const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
     setDirtyByGroup((prev) => {
@@ -1039,6 +1072,12 @@ export function SettingsPage({
     [attentionIssues],
   );
 
+  // Red only when something actually failed; unfinished config stays amber.
+  const attentionVariant = useMemo(
+    () => (attentionIssues.some((issue) => issue.severity === 'Error') ? 'error' : 'warning'),
+    [attentionIssues],
+  );
+
   const issueCountByGroup = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const group of sortedGroups) {
@@ -1048,6 +1087,17 @@ export function SettingsPage({
     }
     return counts;
   }, [sortedGroups, metadataByGroup, issueCountBySection]);
+
+  /** Same red-means-failed rule as the attention band, scoped to one group. */
+  const errorGroups = useMemo(() => {
+    const worst = severityBySection(attentionIssues);
+    const flagged = new Set<string>();
+    for (const group of sortedGroups) {
+      const hasError = (metadataByGroup[group] ?? []).some((meta) => worst[meta.key] === 'Error');
+      if (hasError) flagged.add(group);
+    }
+    return flagged;
+  }, [sortedGroups, metadataByGroup, attentionIssues]);
 
   const toggleHelperText = useMemo(() => {
     if (trimmedQuery) {
@@ -1081,6 +1131,21 @@ export function SettingsPage({
 
   const searchActive = trimmedQuery.length > 0;
   const noMatchingResults = searchActive && visibleSettingsCount === 0;
+
+  // One bar for the whole page. Every group saves through its own endpoint
+  // underneath, but the user sees a single place to commit and a message that
+  // names what is about to be written.
+  const saveBar = (
+    <AdminSaveBar
+      isDirty={dirtyGroupKeys.length > 0}
+      summary={dirtySummary.text}
+      summaryTitle={dirtySummary.title}
+      onDiscard={handleDiscardAll}
+      onSave={handleSaveAll}
+      isSaving={isSavingAll}
+      error={saveAllError}
+    />
+  );
 
   return (
     <SettingsSaveRegistryContext value={saveRegistry}>
@@ -1165,7 +1230,7 @@ export function SettingsPage({
               caption="Needs attention"
               captionId="settings-attention"
               count={attentionIssues.length}
-              countVariant="error"
+              countVariant={attentionVariant}
               headingLevel={3}
               className="mb-6"
             >
@@ -1235,7 +1300,7 @@ export function SettingsPage({
               className="mb-6 break-inside-avoid"
               captionAside={
                 groupIssueCount > 0 ? (
-                  <Badge variant="error" size="sm">
+                  <Badge variant={errorGroups.has(group) ? 'error' : 'warning'} size="sm">
                     {groupIssueCount} {groupIssueCount === 1 ? 'issue' : 'issues'}
                   </Badge>
                 ) : undefined
@@ -1259,19 +1324,15 @@ export function SettingsPage({
 
         {afterContent}
 
-        {/* One bar for the whole page. Every group saves through its own
-            endpoint underneath, but the user sees a single place to commit and
-            a message that names what is about to be written. */}
-        <AdminSaveBar
-          isDirty={dirtyGroupKeys.length > 0}
-          summary={dirtySummary.text}
-          summaryTitle={dirtySummary.title}
-          onDiscard={handleDiscardAll}
-          onSave={handleSaveAll}
-          isSaving={isSavingAll}
-          error={saveAllError}
-        />
+        {/* Fallback for standalone mounts. `SettingsPage` is normally drawn by
+            `SettingsShell`, which supplies a footer slot below its scrollport;
+            rendered on its own (tests, or any future embed without the shell)
+            there is nothing to portal into, and the bar has to stay in flow or
+            it would vanish entirely. */}
+        {!footerSlot ? saveBar : null}
       </div>
+
+      {footerSlot ? createPortal(saveBar, footerSlot) : null}
     </SettingsSaveRegistryContext>
   );
 }

@@ -19,52 +19,57 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const saveSettingsMock = vi.fn();
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
+const fetchMetadataMock = vi.fn();
+const fetchUnifiedMock = vi.fn();
+
+/** The shipped fixture: two essential properties, one advanced. */
+function baseMetadata() {
+  return [
+    {
+      // Two of three properties are marked essential in the manifest.
+      key: 'SystemLog',
+      className: 'SystemLogSettings',
+      displayName: 'System Log',
+      description: 'Application-wide log retention.',
+      group: 'System',
+      order: 1,
+      properties: [
+        {
+          name: 'enabled',
+          type: 'Boolean',
+          attributes: [],
+          display: { name: 'Log Enabled', inputType: 'Boolean' },
+        },
+        {
+          name: 'retentionDays',
+          type: 'number',
+          attributes: [],
+          display: {
+            name: 'Retention Days',
+            inputType: 'Number',
+            minValue: 1,
+            maxValue: 365,
+          },
+        },
+        {
+          // Advanced — not in the essential manifest for SystemLog.
+          name: 'verboseTracing',
+          type: 'Boolean',
+          attributes: [],
+          display: { name: 'Verbose Tracing', inputType: 'Boolean' },
+        },
+      ],
+    },
+  ];
+}
 
 vi.mock('@/services/settingsApi', async () => {
   return {
-    fetchSettingsMetadata: vi.fn().mockResolvedValue([
-      {
-        // Two of three properties are marked essential in the manifest.
-        key: 'SystemLog',
-        className: 'SystemLogSettings',
-        displayName: 'System Log',
-        description: 'Application-wide log retention.',
-        group: 'System',
-        order: 1,
-        properties: [
-          {
-            name: 'enabled',
-            type: 'Boolean',
-            attributes: [],
-            display: { name: 'Log Enabled', inputType: 'Boolean' },
-          },
-          {
-            name: 'retentionDays',
-            type: 'number',
-            attributes: [],
-            display: {
-              name: 'Retention Days',
-              inputType: 'Number',
-              minValue: 1,
-              maxValue: 365,
-            },
-          },
-          {
-            // Advanced — not in the essential manifest for SystemLog.
-            name: 'verboseTracing',
-            type: 'Boolean',
-            attributes: [],
-            display: { name: 'Verbose Tracing', inputType: 'Boolean' },
-          },
-        ],
-      },
-    ]),
+    fetchSettingsMetadata: (...args: unknown[]) => fetchMetadataMock(...args),
     fetchSettingsGroups: vi.fn().mockResolvedValue([
       { key: 'System', displayName: 'System', order: 1 },
     ]),
-    fetchSettingsUnified: vi.fn().mockResolvedValue({
-      SystemLog: { enabled: true, retentionDays: 30, verboseTracing: true },
-    }),
+    fetchSettingsUnified: (...args: unknown[]) => fetchUnifiedMock(...args),
     saveSettingsValues: (...args: unknown[]) => saveSettingsMock(...args),
   };
 });
@@ -119,6 +124,10 @@ async function renderPage() {
 
 describe('SettingsPage — hidden advanced fields survive save round-trip (#939)', () => {
   beforeEach(() => {
+    fetchMetadataMock.mockReset().mockResolvedValue(baseMetadata());
+    fetchUnifiedMock.mockReset().mockResolvedValue({
+      SystemLog: { enabled: true, retentionDays: 30, verboseTracing: true },
+    });
     saveSettingsMock.mockReset().mockResolvedValue(undefined);
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
@@ -203,14 +212,52 @@ describe('SettingsPage — hidden advanced fields survive save round-trip (#939)
     expect(Object.keys(payload).sort()).toEqual(['enabled', 'retentionDays', 'verboseTracing']);
   });
 
-  it('validates the full section on save, not just visible properties', async () => {
-    // If validation ever gets scoped to displayed properties only, a
-    // required-but-hidden field could silently be persisted as invalid.
-    // We can't cheaply seed a required-hidden violation here without a
-    // second mock fixture, so this test asserts the contract by monkey-
-    // patching the fixture: even a value we never touched should show up in
-    // the validation path (indirectly proved by the save succeeding on the
-    // whole section, not just the visible one).
+  it('blocks the save when a hidden required field is empty', async () => {
+    // The previous version of this test asserted a *successful* save and
+    // called that proof that hidden fields are validated. It was vacuous: it
+    // passed identically with hidden-field validation deleted, because the
+    // only hidden property in the fixture was a valid optional boolean.
+    //
+    // This seeds the violation the contract exists to catch — an advanced
+    // property that is required and empty. Essential mode does not render it,
+    // so if validation ever narrows to displayed properties the page will
+    // happily persist an invalid section and this fails.
+    fetchMetadataMock.mockReset().mockResolvedValue([
+      {
+        ...baseMetadata()[0],
+        properties: [
+          ...baseMetadata()[0].properties,
+          {
+            name: 'archivePath',
+            type: 'String',
+            attributes: [],
+            display: { name: 'Archive Path', inputType: 'Text', required: true },
+          },
+        ],
+      },
+    ]);
+    fetchUnifiedMock.mockReset().mockResolvedValue({
+      SystemLog: { enabled: true, retentionDays: 30, verboseTracing: true, archivePath: '' },
+    });
+
+    await renderPage();
+
+    // Precondition: the offending field really is off-screen in Essential mode.
+    // Without this the test could pass for the wrong reason.
+    expect(screen.queryByLabelText('Archive Path')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
+    });
+
+    expect(saveSettingsMock).not.toHaveBeenCalled();
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalled());
+  });
+
+  it('still saves when every hidden field is valid', async () => {
+    // The other half of the pair: validation must not be so eager that a
+    // legitimately-optional hidden field blocks the save.
     await renderPage();
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
 
@@ -219,8 +266,6 @@ describe('SettingsPage — hidden advanced fields survive save round-trip (#939)
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
-    // Success toast implies validation ran cleanly across the entire section
-    // (all three properties, including the hidden verboseTracing).
     await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Saved System Log'));
   });
 });

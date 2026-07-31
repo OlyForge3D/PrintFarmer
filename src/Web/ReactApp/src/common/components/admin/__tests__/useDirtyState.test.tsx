@@ -153,3 +153,87 @@ describe('useDirtyState — beforeunload guard', () => {
     expect(event.returnValue).toBe('');
   });
 });
+
+describe('acceptKeys — settling a partial save (Hicks #2)', () => {
+  /**
+   * A settings band can hold several cards, and each card is saved with its own
+   * request. When one 400s and the others go through, `markPristine` is the
+   * wrong tool: all-or-nothing either claims the failure saved or reports the
+   * successes as still pending — and then re-POSTs them on retry, writing data
+   * the user asked to write once.
+   */
+  it('adopts the current value as baseline for only the named keys', () => {
+    const { result } = renderHook(() =>
+      useDirtyState<Record<string, unknown>>({ a: 1, b: 2, c: 3 }),
+    );
+
+    act(() => {
+      result.current.setValues({ a: 10, b: 20, c: 30 });
+    });
+    expect([...result.current.changedKeys].sort()).toEqual(['a', 'b', 'c']);
+
+    // 'a' and 'c' saved; 'b' failed.
+    act(() => result.current.acceptKeys(['a', 'c']));
+
+    expect(result.current.changedKeys).toEqual(['b']);
+    expect(result.current.isDirty).toBe(true);
+  });
+
+  it('leaves working values untouched so an in-flight edit is not yanked', () => {
+    const { result } = renderHook(() =>
+      useDirtyState<Record<string, unknown>>({ a: 1, b: 2 }),
+    );
+
+    act(() => result.current.setValues({ a: 10, b: 20 }));
+    act(() => result.current.acceptKeys(['a']));
+
+    expect(result.current.values).toEqual({ a: 10, b: 20 });
+  });
+
+  it('goes fully clean when every changed key is accepted', () => {
+    const { result } = renderHook(() =>
+      useDirtyState<Record<string, unknown>>({ a: 1, b: 2 }),
+    );
+
+    act(() => result.current.setValues({ a: 10, b: 20 }));
+    act(() => result.current.acceptKeys(['a', 'b']));
+
+    expect(result.current.isDirty).toBe(false);
+    expect(result.current.changedKeys).toEqual([]);
+  });
+
+  it('is a no-op for an empty list', () => {
+    const { result } = renderHook(() =>
+      useDirtyState<Record<string, unknown>>({ a: 1 }),
+    );
+
+    act(() => result.current.setValue('a', 10));
+    act(() => result.current.acceptKeys([]));
+
+    expect(result.current.changedKeys).toEqual(['a']);
+  });
+
+  // The baseline must move to the value the *server* accepted, which is the one
+  // captured when the request was built — not whatever is on screen once it
+  // returns. Reading through a ref would adopt the newer value and silently
+  // swallow an edit the user made while the save was in flight.
+  it('does not swallow an edit made while the save was in flight', () => {
+    const { result } = renderHook(() =>
+      useDirtyState<Record<string, unknown>>({ a: 1 }),
+    );
+
+    // The value the request carries.
+    act(() => result.current.setValue('a', 2));
+    const inFlight = result.current;
+
+    // User keeps typing before the response lands.
+    act(() => result.current.setValue('a', 3));
+
+    // Response settles the value that was actually sent.
+    act(() => inFlight.acceptKeys(['a']));
+
+    expect(result.current.original.a).toBe(2);
+    expect(result.current.values.a).toBe(3);
+    expect(result.current.changedKeys).toEqual(['a']);
+  });
+});

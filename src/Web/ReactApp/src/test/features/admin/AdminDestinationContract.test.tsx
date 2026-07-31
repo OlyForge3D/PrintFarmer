@@ -9,6 +9,7 @@ import {
   ADMIN_DESTINATIONS,
   ADMIN_HUB_PARENT,
 } from '@/features/admin/registry/adminDestinations';
+import { PowerMonitorSettingsPage } from '@/features/power-monitors/components/PowerMonitorSettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
@@ -64,6 +65,17 @@ const ADMIN_OWNED = ADMIN_DESTINATIONS.filter((d) => d.path.startsWith('/admin')
 // unless the shell passes `embedded`, which is exactly the contract under test.
 // Each factory builds its own component: `vi.mock` is hoisted above any shared
 // module-scope helper.
+//
+// These stubs encode the *expected* embedded behaviour rather than importing
+// the real pages, which is a deliberate tradeoff. Rendering seven real feature
+// pages would drag their whole data layer into a suite that exists to measure
+// the shell, and a network stub failing would look like a contract violation.
+// The cost is that this suite proves the shell passes `embedded` correctly, not
+// that each page honours it. That second half is covered where it belongs:
+// `EmbeddedPageContract.test.ts` reads `SettingsShell.tsx` and fails if a page
+// the shell embeds does not receive the prop, and `EmbeddedPageRendering.test.tsx`
+// mounts the *real* pages both ways to prove they suppress their own header
+// when embedded and keep it when standalone.
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
   ThemeSwitcher: () => <div data-testid="theme-switcher">Theme Switcher</div>,
@@ -101,6 +113,24 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
 }));
 vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
   FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings</div>,
+}));
+
+// Power Monitors is a standalone admin page, not a shell tab. Only its data
+// layer is faked — it renders its own real PageTemplate, which is what the
+// back-link assertion measures.
+vi.mock('@/features/power-monitors/hooks/usePowerMonitors', () => {
+  const idle = { mutateAsync: vi.fn(), isPending: false, mutate: vi.fn() };
+  return {
+    usePowerMonitors: () => ({ data: [], isLoading: false, isError: false }),
+    useCreatePowerMonitor: () => idle,
+    useUpdatePowerMonitor: () => idle,
+    useDeletePowerMonitor: () => idle,
+    useTestPowerMonitorConnection: () => idle,
+  };
+});
+vi.mock('@/common/hooks/useApi', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/common/hooks/useApi')>()),
+  usePrintersFast: () => ({ data: [] }),
 }));
 
 vi.mock('@/features/auth/hooks/useAuth', () => {
@@ -147,6 +177,25 @@ function renderShellAt(path: string) {
     </QueryClientProvider>,
   );
 }
+
+/**
+ * Real renders for the admin destinations the shell does not own. Keyed by
+ * path so the registry walk below can prove every such destination is covered
+ * rather than silently skipped — the omission that let `/admin/power-monitors`
+ * ship with no way back to the hub.
+ */
+const STANDALONE_RENDERERS: Record<string, () => void> = {
+  '/admin/power-monitors': () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/admin/power-monitors']}>
+          <PowerMonitorSettingsPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  },
+};
 
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
@@ -211,6 +260,13 @@ describe('admin destination contract (#1016)', () => {
       const routeScope = scope ?? (pathname === '/admin/manage' ? 'admin' : 'system');
       const resolved = resolveSettingsNavigationTarget(tab, sub, routeScope);
 
+      // Deliberately an identity check, not "resolves to *something*".
+      // `resolveSettingsNavigationTarget` remaps legacy aliases (`system` →
+      // `operations`, `notifications` → `profile`) and the with-subpage table,
+      // so a registry entry written against an alias would land somewhere other
+      // than the tab it names — reachable, but not where the tile says. That
+      // fails here, which is the intent: registry paths must use canonical
+      // category ids and let the alias table serve only external bookmarks.
       expect(resolved.categoryId).toBe(tab);
       if (sub) {
         expect(resolved.subPageId).toBe(sub);
@@ -266,3 +322,48 @@ describe('admin destination contract (#1016)', () => {
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
   });
 });
+
+/**
+ * The two admin destinations the settings shell does *not* draw.
+ *
+ * `/admin` is the hub itself — a link back to where you already are would be
+ * noise. `/admin/power-monitors` is a standalone page that renders its own
+ * `PageTemplate`, so the shell's back link never applied to it. That is exactly
+ * how it shipped without one: the suite above only walks shell-owned paths, so
+ * the hub had a tile that led to a dead end.
+ *
+ * This block closes the registry. Every admin-owned destination is either drawn
+ * by the shell, exempt for a stated reason, or covered here by a real render —
+ * and a new one that is none of those fails the first test in the block.
+ */
+describe('admin destinations the shell does not draw (Hicks #5)', () => {
+  const NOT_SHELL_DRAWN = ADMIN_OWNED.filter(
+    (d) => !d.path.startsWith('/admin/settings') && !d.path.startsWith('/admin/manage'),
+  );
+
+  /** Paths that legitimately have no back link, each with the reason. */
+  const EXEMPT: Record<string, string> = {
+    '/admin': 'the hub itself — it cannot link back to itself',
+  };
+
+  it('has an owner for every destination outside the shell', () => {
+    const unaccounted = NOT_SHELL_DRAWN.map((d) => d.path).filter(
+      (p) => !(p in EXEMPT) && !(p in STANDALONE_RENDERERS),
+    );
+    expect(unaccounted).toEqual([]);
+  });
+
+  it.each(Object.keys(STANDALONE_RENDERERS))('%s links back to the Control Center', (path) => {
+    STANDALONE_RENDERERS[path]();
+    expect(screen.getByRole('link', { name: ADMIN_HUB_PARENT.label })).toHaveAttribute(
+      'href',
+      ADMIN_HUB_PARENT.to,
+    );
+  });
+
+  it.each(Object.keys(STANDALONE_RENDERERS))('%s renders exactly one h1', (path) => {
+    STANDALONE_RENDERERS[path]();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+});
+

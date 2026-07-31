@@ -63,6 +63,10 @@ ruleTester.run('pf-no-oversized-radius', rule, {
 
     // Attributes other than className are untouched.
     { code: '<div title="rounded-2xl" />' },
+
+    // A computed waiver cannot be judged statically; honour it rather than
+    // reporting a line the author may already have reasoned about.
+    { code: '<span data-pf-radius={shape} className="px-3 rounded-full">tag</span>' },
   ],
 
   invalid: [
@@ -231,5 +235,49 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
+    // A waiver that says "not a pill" must not read as permission to be one.
+    // `data-pf-radius="sm"` is the clearest way an author can state the
+    // opposite; treating its presence as consent inverted its meaning.
+    {
+      code: '<div data-pf-radius="sm" className="px-3 py-1 rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [{ messageId: 'replaceWithLg', output: '<div data-pf-radius="sm" className="px-3 py-1 rounded-lg" />' }],
+        },
+      ],
+    },
+    {
+      code: '<div data-pf-radius={false} className="px-3 py-1 rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [{ messageId: 'replaceWithLg', output: '<div data-pf-radius={false} className="px-3 py-1 rounded-lg" />' }],
+        },
+      ],
+    },
+
+    // Circularity has to be unconditional. `md:aspect-square` is a rectangle
+    // below the breakpoint, so `rounded-full` is wrong there.
+    {
+      code: '<div className="md:aspect-square rounded-full px-4" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [{ messageId: 'replaceWithLg', output: '<div className="md:aspect-square rounded-lg px-4" />' }],
+        },
+      ],
+    },
+    {
+      code: '<div className="w-6 md:h-6 rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [{ messageId: 'replaceWithLg', output: '<div className="w-6 md:h-6 rounded-lg" />' }],
+        },
+      ],
+    },
   ],
 })
+
+

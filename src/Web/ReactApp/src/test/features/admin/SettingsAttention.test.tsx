@@ -177,8 +177,23 @@ describe('deriveSettingsIssues', () => {
       sectionLabel: 'Network Discovery',
       field: 'subnets',
       fieldLabel: 'Subnets',
-      severity: 'Error',
+      severity: 'Warning',
     });
+  });
+
+  // Red has to keep meaning "something failed", or it stops carrying that
+  // signal. The Control Center already separates Degraded from Unhealthy;
+  // these two paths are the settings page's version of the same split.
+  it('separates a rejected save (Error) from unfinished config (Warning)', () => {
+    const issues = deriveSettingsIssues(
+      [section],
+      { NetworkDiscovery: { enabled: true, subnets: [] } },
+      { NetworkDiscovery: 'The server refused this section.' },
+    );
+
+    const bySeverity = Object.fromEntries(issues.map((issue) => [issue.severity, issue]));
+    expect(bySeverity.Error?.detail).toBe('The server refused this section.');
+    expect(bySeverity.Warning?.field).toBe('subnets');
   });
 
   it('writes banner copy that names the switch which made the field required', () => {
@@ -396,6 +411,11 @@ describe('settings attention band', () => {
     expect(healthy).not.toHaveAttribute('data-section-issues');
     expect(flagged?.textContent).toContain('Action needed');
     expect(healthy?.textContent).not.toContain('Action needed');
+
+    // Unfinished config is amber, not red — see the severity split above.
+    expect(flagged).toHaveAttribute('data-section-severity', 'Warning');
+    expect(flagged?.className).toContain('border-l-pf-warning');
+    expect(flagged?.className).not.toContain('border-l-pf-error');
   });
 
   it('clears the item once the user supplies a value', async () => {
@@ -440,8 +460,56 @@ describe('settings attention band', () => {
     // These come from AttentionRow's own markup: the severity badge and the
     // screen-reader prefix. If the settings page ever forks its own row, the
     // fork will not reproduce both by accident.
-    expect(item.textContent).toContain('Error');
-    expect(item.querySelector('.sr-only')?.textContent).toBe('Error: ');
-    expect(item.className).toContain('border-pf-error/40');
+    expect(item.textContent).toContain('Warning');
+    expect(item.querySelector('.sr-only')?.textContent).toBe('Warning: ');
+    expect(item.className).toContain('border-pf-warning/40');
   });
 });
+
+/**
+ * The client's block must never be more permissive than the server's, or the
+ * page tells the user a save is safe and the server answers 400. Each case here
+ * mirrors a specific throw in the C# validators.
+ */
+describe('validateSection agrees with the server (Hicks #3)', () => {
+  const unconditionallyRequired: Prop = {
+    name: 'subnets',
+    type: 'Array',
+    attributes: [],
+    // Mirrors NetworkDiscoverySettings after the RequiredWhen gate was dropped:
+    // `Validate()` there demands subnets whether or not discovery is enabled.
+    display: { name: 'Discovery Subnets', inputType: 'Array', required: true },
+  };
+  const section = {
+    key: 'NetworkDiscovery',
+    className: 'NetworkDiscoverySettings',
+    properties: [gate, unconditionallyRequired],
+  } as never;
+
+  it('still requires subnets when discovery is off', () => {
+    // NetworkDiscoverySettings.Validate() has no `if (!EnableDiscovery) return;`
+    // short-circuit, unlike Telegram and Home Assistant. Turning discovery off
+    // does not make an empty section saveable.
+    expect(validateSection(section, { enabled: false, subnets: [] })).toEqual({
+      subnets: 'This field is required.',
+    });
+  });
+
+  it('rejects a list that contains a blank row', () => {
+    // Server: `DiscoverySubnets.Any(string.IsNullOrWhiteSpace)` throws. The
+    // list is not *empty*, so the required check alone lets it through.
+    expect(validateSection(section, { enabled: true, subnets: ['', '10.0.0.0/24'] })).toEqual({
+      subnets: 'Entry 1 is blank. Remove it or fill it in.',
+    });
+    expect(validateSection(section, { enabled: true, subnets: ['10.0.0.0/24', '   '] })).toEqual({
+      subnets: 'Entry 2 is blank. Remove it or fill it in.',
+    });
+  });
+
+  it('accepts a list with no blank rows', () => {
+    expect(
+      validateSection(section, { enabled: true, subnets: ['10.0.0.0/24', '192.168.1.0/24'] }),
+    ).toEqual({});
+  });
+});
+

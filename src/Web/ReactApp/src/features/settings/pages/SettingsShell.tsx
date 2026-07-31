@@ -11,6 +11,7 @@ import { Button } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
 import { SettingsHeaderSlotContext } from '@/features/settings/components/settingsHeaderSlotContext';
+import { SettingsFooterSlotContext } from '@/features/settings/components/settingsFooterSlotContext';
 import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
@@ -210,6 +211,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   // the context re-renders its consumers once the node exists. A ref mutation
   // would not trigger that, and the portal would never find its target.
   const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null);
   const commandPaletteShortcut = useMemo(() => commandPaletteShortcutLabel(), []);
 
   const requestedScope = searchParams.get('scope');
@@ -597,7 +599,16 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     );
   }, [currentCategory, renderedContentKey]);
 
-  const pageTitle = effectiveScope === 'admin' ? 'Admin Console' : 'Settings';
+  // The scope registry already names every scope, and the document title (above)
+  // reads from it. The H1 used to hardcode its own strings, so the browser tab
+  // said "System Settings" while the heading said "Settings" — and `/settings`
+  // and `/admin/settings` shared one indistinguishable H1. Read the registry so
+  // there is a single source of truth. The one exception is `admin`, whose
+  // registry label is the short nav chip "Admin"; the page has been called the
+  // Admin Console since the redirect map was written, so keep that name here.
+  const pageTitle = effectiveScope === 'admin'
+    ? 'Admin Console'
+    : currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
@@ -644,11 +655,13 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   return (
     <SettingsHeaderSlotContext.Provider value={headerSlot}>
+      <SettingsFooterSlotContext.Provider value={footerSlot}>
       <PageTemplate
         title={pageTitle}
         subtitle={pageDescription}
         padding="px-0"
         showHeader
+        fill
         parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
         actions={headerActions}
       >
@@ -715,12 +728,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     </SettingsContentTransition>
                   </div>
                 </div>
+
+                {/* Docked below the scrollport, not inside it. See
+                    settingsFooterSlotContext for why sticky could never work
+                    here: the pane above is the scrollport, so a bar inside it
+                    is bound by the scrolled content, not the viewport.
+                    `shrink-0` keeps the bar at its natural height while the
+                    pane absorbs the remaining space. */}
+                <div ref={setFooterSlot} className="shrink-0 empty:hidden" />
               </div>
             </div>
           )}
           </div>
         </div>
       </PageTemplate>
+      </SettingsFooterSlotContext.Provider>
     </SettingsHeaderSlotContext.Provider>
   );
 };

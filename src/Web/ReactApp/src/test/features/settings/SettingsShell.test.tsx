@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { SETTINGS_SCOPES } from '@/features/settings/types';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
@@ -171,7 +172,7 @@ describe('SettingsShell', () => {
     setAuthRoles(['farm_admin']);
     renderSettings();
 
-    const h1s = screen.getAllByRole('heading', { level: 1, name: 'Settings' });
+    const h1s = screen.getAllByRole('heading', { level: 1, name: 'User Settings' });
     expect(h1s.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
@@ -378,9 +379,25 @@ describe('SettingsShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
     });
-    expect(screen.getAllByRole('heading', { level: 1, name: 'Settings' }).length).toBeGreaterThan(0);
+    // The H1 names the scope, so this also proves the redirect landed on `user`
+    // rather than merely rendering some settings page.
+    expect(screen.getAllByRole('heading', { level: 1, name: 'User Settings' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
     expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
+  });
+
+  // The H1, the document title, and the sidebar's accessible name must all name
+  // the same scope. They used to come from three places; one hardcoded string
+  // drifted and shipped a page whose tab and heading disagreed.
+  it.each([
+    ['/settings?scope=user', 'User Settings'],
+    ['/admin/settings?scope=system&tab=general', 'System Settings'],
+  ])('titles %s from the scope registry, not a hardcoded string', (route, expected) => {
+    setAuthRoles(['farm_admin']);
+    renderSettings(route);
+
+    expect(screen.getAllByRole('heading', { level: 1, name: expected }).length).toBeGreaterThan(0);
+    expect(SETTINGS_SCOPES.some(scope => scope.label === expected)).toBe(true);
   });
 
   it('keeps API Keys reachable under User Settings through legacy links', () => {
@@ -435,5 +452,41 @@ describe('SettingsShell', () => {
     });
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
+  });
+});
+
+describe('SettingsShell — footer slot sits below the scrollport (Vasquez #1)', () => {
+  /**
+   * The save bar has to be reachable while the cards above it scroll. It used
+   * to try to achieve that with `position: sticky` from inside the scroll pane,
+   * which cannot work: a sticky box is bound by the scrolled content, so it
+   * flowed off the bottom of the page instead of pinning. The shell now exposes
+   * a slot *below* the pane and the content page portals its bar into it.
+   *
+   * If the slot ever moves back inside `.pf-settings-scroll-pane`, the bar goes
+   * back under the fold and this fails.
+   */
+  it('renders the footer slot outside the scroll pane', () => {
+    const { container } = renderSettings('/settings');
+
+    const pane = container.querySelector('.pf-settings-scroll-pane');
+    expect(pane).not.toBeNull();
+
+    const slot = container.querySelector('.shrink-0.empty\\:hidden');
+    expect(slot).not.toBeNull();
+    expect(pane!.contains(slot!)).toBe(false);
+  });
+
+  /** The pane must stay the scrollport, and the slot must follow it. */
+  it('orders the slot after the pane inside the same column', () => {
+    const { container } = renderSettings('/settings');
+
+    const pane = container.querySelector('.pf-settings-scroll-pane')!;
+    const slot = container.querySelector('.shrink-0.empty\\:hidden')!;
+
+    expect(slot.parentElement).toBe(pane.parentElement);
+    expect(
+      pane.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

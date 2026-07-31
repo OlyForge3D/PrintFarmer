@@ -134,7 +134,10 @@ function looksCircular(classText) {
 
   for (const raw of classText.split(/\s+/)) {
     if (!raw) continue
-    const token = stripVariants(raw)
+    // Deliberately NOT `stripVariants`. A circle has to be unconditional to
+    // justify `rounded-full`: `md:aspect-square` is a rectangle below `md`, and
+    // exempting it there is exactly the bug this rule exists to catch.
+    const token = raw
 
     if (token === 'aspect-square') return true
     if (/^size-\S+$/.test(token)) return true
@@ -182,11 +185,35 @@ function collectStringNodes(node, found = []) {
   return found
 }
 
+/**
+ * True when the element carries a real waiver.
+ *
+ * The attribute's *presence* is not enough. `data-pf-radius="sm"` and
+ * `data-pf-radius={false}` read as "this element is deliberately not full
+ * radius", yet a name-only check treated both as permission to be full — so the
+ * clearest way to say no was also the way to opt out of the rule. A waiver has
+ * to actually assert the pill shape.
+ */
 function hasWaiverAttribute(openingElement) {
   return Boolean(
-    openingElement?.attributes?.some(
-      attr => attr.type === 'JSXAttribute' && WAIVER_ATTRIBUTES.has(attr.name?.name),
-    ),
+    openingElement?.attributes?.some(attr => {
+      if (attr.type !== 'JSXAttribute') return false
+      if (!WAIVER_ATTRIBUTES.has(attr.name?.name)) return false
+
+      const value = attr.value
+      // Bare `data-pf-progress-track` — a boolean-ish marker, and the only
+      // sensible reading of it is "yes".
+      if (value === null || value === undefined) return true
+      if (value.type === 'Literal') return value.value === 'full' || value.value === true
+      if (value.type === 'JSXExpressionContainer') {
+        const inner = value.expression
+        if (inner?.type === 'Literal') return inner.value === 'full' || inner.value === true
+        // A computed waiver cannot be judged statically. Honour it rather than
+        // reporting a line the author may have already reasoned about.
+        return true
+      }
+      return false
+    }),
   )
 }
 

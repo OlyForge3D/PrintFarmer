@@ -47,7 +47,7 @@ export interface AdminSaveBarProps {
   saveLabel?: string;
   /** Optional discard label. Defaults to `Discard`. */
   discardLabel?: string;
-  /** Optional extra classes on the outer sticky container. */
+  /** Optional extra classes on the outer container. */
   className?: string;
 }
 
@@ -106,9 +106,18 @@ export function AdminSaveBar({
       role="region"
       aria-label="Unsaved changes"
       className={clsx(
-        'sticky bottom-0 z-40 mt-4',
+        // Docked by the shell below its scroll pane, not floating inside it.
+        // `sticky bottom-0` used to live here and never once pinned — the pane
+        // it sat in could not scroll, so the bar simply flowed 249px below the
+        // fold. The shell now owns placement; this is just the bar's skin.
+        //
+        // Full-bleed with a top hairline is the right treatment now that it is
+        // a panel footer rather than a floating slab: it reads as the bottom
+        // edge of the settings panel, and the panel's own rounded border clips
+        // it. The lift shadow it used to carry was a hardcoded
+        // `rgba(0,0,0,0.35)`, which both broke the no-literal-colour rule and
+        // made no sense on an element that is no longer floating above content.
         'border-t border-pf-border bg-pf-bg-0/95 backdrop-blur-sm',
-        'shadow-[0_-8px_16px_-8px_rgba(0,0,0,0.35)]',
         className,
       )}
       data-testid="admin-save-bar"

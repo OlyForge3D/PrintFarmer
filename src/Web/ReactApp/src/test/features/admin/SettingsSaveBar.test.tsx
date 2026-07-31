@@ -113,6 +113,7 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 }));
 
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { SettingsFooterSlotContext } from '@/features/settings/components/settingsFooterSlotContext';
 
 async function renderPage() {
   const result = render(
@@ -361,5 +362,169 @@ describe('SettingsPage — single page-level save bar (#1013)', () => {
     expect(screen.getAllByTestId('admin-save-bar')).toHaveLength(1);
     // The bar stays up: the change is still unsaved and still needs a decision.
     expect(barSummary()).toBe('1 change in System Log');
+  });
+});
+
+describe('SettingsPage — the save bar is docked outside the scrollport (Vasquez #1)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('pf.settings.mode', 'everything');
+    saveSettingsMock.mockReset();
+    saveSettingsMock.mockResolvedValue(undefined);
+  });
+
+  /**
+   * The bar used to be `position: sticky; bottom: 0` inside the settings scroll
+   * pane, and it never once pinned. The pane could not scroll — its `flex-1
+   * min-h-0` chain bottomed out in `PageTemplate`'s `min-h-full`, a minimum
+   * rather than a bound — so the bar simply flowed to the end of the content,
+   * measured 249px below the fold on a 1440x900 System Config. Dirty edits
+   * offered a Save the user could not see.
+   *
+   * jsdom has no layout, so this cannot assert geometry. What it can assert is
+   * the structural property that made the bug possible and that the fix
+   * removes: the bar must not live inside the scrolled content. Placement is
+   * now the shell's, delivered through a portal.
+   */
+  it('portals the bar into the shell footer slot, out of the page content', async () => {
+    const slot = document.createElement('div');
+    slot.setAttribute('data-test-footer-slot', '');
+    document.body.appendChild(slot);
+
+    const { container } = render(
+      <MemoryRouter>
+        <SettingsFooterSlotContext.Provider value={slot}>
+          <SettingsPage />
+        </SettingsFooterSlotContext.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText('Retention Days')).toBeInTheDocument();
+    });
+    edit('Retention Days', '45');
+
+    const bar = await screen.findByTestId('admin-save-bar');
+    expect(slot.contains(bar)).toBe(true);
+    // The decisive half: it is *not* in the page's own flow, which is what the
+    // shell puts inside the scrollport.
+    expect(container.contains(bar)).toBe(false);
+
+    slot.remove();
+  });
+
+  /**
+   * Standalone mounts have no shell and therefore no slot. Falling through to
+   * nothing would delete the only way to commit a change, so the bar has to
+   * stay in flow when there is nowhere to dock it.
+   */
+  it('keeps the bar in flow when no footer slot is provided', async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText('Retention Days')).toBeInTheDocument();
+    });
+    edit('Retention Days', '45');
+
+    const bar = await screen.findByTestId('admin-save-bar');
+    expect(container.contains(bar)).toBe(true);
+  });
+
+  /** Exactly one bar either way — never one in flow *and* one docked. */
+  it('never renders two bars when a slot is present', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    render(
+      <MemoryRouter>
+        <SettingsFooterSlotContext.Provider value={slot}>
+          <SettingsPage />
+        </SettingsFooterSlotContext.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText('Retention Days')).toBeInTheDocument();
+    });
+    edit('Retention Days', '45');
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('admin-save-bar')).toHaveLength(1);
+    });
+    slot.remove();
+  });
+});
+
+describe('SettingsPage — a partial failure settles only what saved (Hicks #2)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('pf.settings.mode', 'everything');
+    saveSettingsMock.mockReset();
+    toastSuccessMock.mockReset();
+    toastErrorMock.mockReset();
+  });
+
+  /**
+   * Cross-group: each band keeps its own dirty state, so a band that 400s
+   * cannot hold a sibling hostage. That was already true — this pins it, since
+   * nothing proved it before.
+   *
+   * The *intra*-group case (one band holding several cards, some saving and
+   * some not) cannot be staged here: this fixture gives every group exactly one
+   * section. `useDirtyState.acceptKeys` owns that half and is tested directly
+   * in `useDirtyState.test.tsx`.
+   */
+  it('re-sends only the group that failed', async () => {
+    saveSettingsMock.mockImplementation((key: string) =>
+      key === 'DiscoverySettings'
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve(undefined),
+    );
+
+    await renderPage();
+    edit('Retention Days', '45');
+    edit('Scan Timeout Seconds', '9');
+    edit('Backup Interval Hours', '12');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    });
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(3));
+    saveSettingsMock.mockClear();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    });
+
+    // Assert after `act` has flushed the whole sequential loop. A `waitFor` on
+    // "has been called" would resolve on the *first* request and pass even if
+    // two more followed it.
+    expect(saveSettingsMock.mock.calls.map((c) => c[0])).toEqual(['DiscoverySettings']);
+  });
+
+  /** And once it succeeds, nothing is left over. */
+  it('clears the bar when the retry succeeds', async () => {
+    let failing = true;
+    saveSettingsMock.mockImplementation((key: string) =>
+      failing && key === 'DiscoverySettings'
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve(undefined),
+    );
+
+    await renderPage();
+    edit('Retention Days', '45');
+    edit('Scan Timeout Seconds', '9');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    });
+    await waitFor(() => expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument());
+
+    failing = false;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
+    });
   });
 });

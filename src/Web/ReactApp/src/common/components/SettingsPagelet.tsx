@@ -4,6 +4,7 @@ import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
 import { HighlightedText } from '@/features/admin/settings/HighlightedText';
+import { isPropertyRequired } from '@/features/admin/settings/settingsAttention';
 
 export type SettingValue = string | number | boolean | string[] | number[] | (string | number)[] | Record<string, unknown> | undefined;
 
@@ -155,9 +156,15 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   const content = (
     <div className="@container max-w-[64rem] divide-y divide-pf-border-divider">
       {metadata.properties.map((prop0: SettingPropertyMetadata) => {
-        const prop = prop0 as SettingPropertyMetadata & { displayName?: string; required?: boolean };
+        const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
-        const isRequired = (prop.attributes && prop.attributes.includes('RequiredAttribute')) || Boolean(prop.required);
+        // `isPropertyRequired` is the one predicate that knows about `RequiredWhen`.
+        // Reading `prop.required` here instead would be wrong twice over: the
+        // metadata lives at `display.required`, so the flag never arrives, and a
+        // conditionally-required field would claim to be required even while its
+        // gate is off. The attention banner already uses this predicate, so
+        // sharing it is what stops the asterisk and the banner disagreeing.
+        const isRequired = isPropertyRequired(prop0, values);
         const err = fieldErrors?.[prop.name];
         const hasDescription = Boolean(prop.display?.description);
         const invalid = Boolean(err);
@@ -205,7 +212,15 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         if (isArray) {
           const arr = values[prop.name] as (string | number)[];
           control = (
-            <div className={FIELD_CONTROL_CLASS}>
+            // The requirement is "at least one entry", which is a property of the
+            // collection rather than of any one row. Marking each row required
+            // would tell a screen reader every existing row must stay filled.
+            <div
+              className={FIELD_CONTROL_CLASS}
+              role="group"
+              aria-label={displayName}
+              aria-required={isRequired || undefined}
+            >
               {arr.map((val, idx) => (
                 <div key={idx} className="flex items-center mb-1.5 gap-1.5">
                   <Input
@@ -286,6 +301,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
+                aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
               />
@@ -307,6 +323,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
+                aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={MONO_FIELD_CLASS}
               />
@@ -322,6 +339,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 aria-label={displayName}
+                aria-required={isRequired || undefined}
                 invalid={invalid}
               >
                 <option value="">Select...</option>
@@ -344,6 +362,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
+                aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
               />

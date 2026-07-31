@@ -125,6 +125,21 @@ export function validateSection(
       continue;
     }
 
+    // A required list with a blank row in it is not empty, so the check above
+    // lets it through — but the server does not. NetworkDiscoverySettings
+    // rejects `DiscoverySubnets.Any(string.IsNullOrWhiteSpace)` outright, so
+    // `['', '10.0.0.0/24']` saves clean here and 400s there. Catch it while the
+    // user can still see which row is blank.
+    if (isPropertyRequired(prop, valuesObj) && Array.isArray(val)) {
+      const blankAt = val.findIndex(
+        (entry) => entry === null || entry === undefined || (typeof entry === 'string' && entry.trim() === ''),
+      );
+      if (blankAt >= 0) {
+        errs[prop.name] = `Entry ${blankAt + 1} is blank. Remove it or fill it in.`;
+        continue;
+      }
+    }
+
     const num = numericValue(prop, val);
     if (!Number.isNaN(num)) {
       if (typeof prop.display?.minValue === 'number' && num < prop.display.minValue) {
@@ -236,7 +251,12 @@ export function deriveSettingsIssues(
         title,
         detail,
         message,
-        severity: 'Error',
+        // Unfinished, not broken. The farm is running on its saved config; this
+        // is work the admin still has to do. The Control Center already draws
+        // that line as Degraded (amber) vs Unhealthy (red) — matching it keeps
+        // red meaning "something failed", which is what a rejected save above
+        // actually is.
+        severity: 'Warning',
       });
     }
   }
@@ -253,6 +273,21 @@ export function countIssuesBySection(
     counts[issue.sectionKey] = (counts[issue.sectionKey] ?? 0) + 1;
   }
   return counts;
+}
+
+/**
+ * Worst severity per section, so a card can badge itself honestly: a section
+ * whose save the server rejected is an error, one the admin simply hasn't
+ * finished filling in is a warning.
+ */
+export function severityBySection(
+  issues: readonly SettingsIssue[],
+): Record<string, SettingsIssue['severity']> {
+  const worst: Record<string, SettingsIssue['severity']> = {};
+  for (const issue of issues) {
+    if (worst[issue.sectionKey] !== 'Error') worst[issue.sectionKey] = issue.severity;
+  }
+  return worst;
 }
 
 /** How long the "look here" highlight stays on a focused row. */
