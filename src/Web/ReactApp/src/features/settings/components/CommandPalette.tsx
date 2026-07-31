@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import clsx from 'clsx';
 import { ArrowRightIcon, CloseIcon, SearchIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input } from '@/common/components/ui';
+import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
 import {
   getSettingsCategoryIcon,
   type SettingsCommandItem,
@@ -495,8 +496,8 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
               aria-activedescendant={activeOptionId}
               className="h-12 pl-9 pr-24 text-sm"
             />
-            <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary sm:inline-flex">
-              {typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K'}
+            <span className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 rounded-xs border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary sm:inline-flex">
+              {commandPaletteShortcutLabel()}
             </span>
           </div>
         </div>

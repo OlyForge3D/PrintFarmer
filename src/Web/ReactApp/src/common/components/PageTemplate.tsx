@@ -128,7 +128,7 @@ export function PageTemplate({
       <div className={`min-w-0 ${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
-          <div className="mb-4 lg:mr-72">
+          <div className="mb-4 lg:mr-[var(--pf-floating-bar-inset,0px)]">
             {parent && (
               <Link
                 to={parent.to}

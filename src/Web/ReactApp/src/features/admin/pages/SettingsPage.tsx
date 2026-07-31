@@ -27,6 +27,7 @@ import {
 import { getSectionRenderer } from '@/features/admin/settings/section-renderers';
 import { isEssentialProperty } from '@/features/admin/settings/essential-manifest';
 import { SettingsModeToggle } from '@/features/admin/settings/SettingsModeToggle';
+import { SettingsHeaderPortal } from '@/features/settings/components/SettingsHeaderPortal';
 import { useSettingsMode } from '@/features/admin/settings/useSettingsMode';
 import { HighlightedText } from '@/features/admin/settings/HighlightedText';
 import {
@@ -689,51 +690,51 @@ export function SettingsPage({
           settings at all. Showing a filter toggle and a search box there would give the
           user two controls that visibly do nothing. */}
       {totalSettingsCount > 0 && (
-      <div
-        className="flex flex-wrap items-center gap-3 rounded-lg border border-pf-border bg-pf-bg-0 p-3"
-        data-testid="settings-mode-controls"
-      >
-        <SettingsModeToggle
-          mode={mode}
-          onModeChange={setMode}
-          helperText={searchActive ? undefined : toggleHelperText}
-        />
-        <div className="ml-auto flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
-          <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
-          <Input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder="Filter fields on this page…"
-            aria-label="Filter setting fields on this page"
-            className="flex-1"
-          />
-          {searchActive && (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
-              onClick={() => setQuery('')}
-              aria-label="Clear field filter"
-            >
-              Clear
-            </Button>
-          )}
-        </div>
-        {searchActive && (
+        <>
+          {/* The mode is a global, persisted preference, so it belongs with the page's
+              other global actions rather than in a box above the content. The filter
+              below is ephemeral and page-local, so it stays with what it filters. */}
+          <SettingsHeaderPortal>
+            <SettingsModeToggle mode={mode} onModeChange={setMode} />
+          </SettingsHeaderPortal>
+
           <div
-            className="basis-full text-xs text-pf-text-secondary"
-            aria-live="polite"
-            role="status"
+            className="flex flex-wrap items-center gap-3"
+            data-testid="settings-mode-controls"
           >
-            {toggleHelperText}
-            <span className="ml-2 text-pf-text-tertiary">
-              This filter covers every field on this page, including advanced ones.
-            </span>
+            <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
+              <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
+              <Input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder="Filter fields on this page…"
+                aria-label="Filter setting fields on this page"
+                className="flex-1"
+              />
+              {searchActive && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
+                  onClick={() => setQuery('')}
+                  aria-label="Clear field filter"
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-pf-text-secondary" aria-live="polite" role="status">
+              {toggleHelperText}
+              {searchActive && (
+                <span className="ml-2 text-pf-text-tertiary">
+                  This filter covers every field on this page, including advanced ones.
+                </span>
+              )}
+            </p>
           </div>
-        )}
-      </div>
+        </>
       )}
 
       {noMatchingResults && (

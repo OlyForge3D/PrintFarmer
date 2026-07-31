@@ -175,7 +175,7 @@ describe('SettingsShell', () => {
     expect(h1s.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search settings/i })).toBeInTheDocument();
 
     // Scope is a property of a category, not a mode to enter first: no radiogroup,
     // no separate Admin pill, one control idiom for the whole nav.
@@ -405,7 +405,7 @@ describe('SettingsShell', () => {
   it('opens the command palette from the header button and returns focus on escape', async () => {
     renderSettings();
 
-    const launcher = screen.getByRole('button', { name: /Command palette/i });
+    const launcher = screen.getByRole('button', { name: /Search settings/i });
     launcher.focus();
     fireEvent.click(launcher);
 
@@ -413,7 +413,7 @@ describe('SettingsShell', () => {
     expect(paletteSearch).toHaveFocus();
 
     fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
-    expect(await screen.findByRole('button', { name: /Command palette/i })).toHaveFocus();
+    expect(await screen.findByRole('button', { name: /Search settings/i })).toHaveFocus();
   });
 
   it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin destination', async () => {

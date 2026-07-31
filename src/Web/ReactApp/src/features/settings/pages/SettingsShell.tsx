@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
@@ -9,6 +9,8 @@ import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { Button } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
+import { SettingsHeaderSlotContext } from '@/features/settings/components/settingsHeaderSlotContext';
+import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
@@ -202,6 +204,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const isFarmAdmin = hasRole('farm_admin');
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
+
+  // Callback ref, not useRef: the slot's DOM node has to be a *rendered* value so
+  // the context re-renders its consumers once the node exists. A ref mutation
+  // would not trigger that, and the portal would never find its target.
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  const commandPaletteShortcut = useMemo(() => commandPaletteShortcutLabel(), []);
 
   const requestedScope = searchParams.get('scope');
   const requestedCategory = searchParams.get('tab');
@@ -587,27 +595,35 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
-  const toolbar = (
-    <div className="sticky top-0 z-20 border-b border-pf-border bg-pf-panel px-4 py-4 md:px-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:mr-72">
-        <Button
-          type="button"
-          variant="subtle"
-          size="md"
-          onClick={openCommandPalette}
-          iconLeft={<SearchIcon className="h-4 w-4" ariaLabel="Open command palette" />}
-          className="h-11 justify-between rounded-md border border-pf-border bg-pf-bg-1 px-4 text-sm text-pf-text-primary sm:min-w-[12rem]"
-        >
-          <span className="inline-flex items-center gap-3">
-            <span>Command palette</span>
-            <span className="rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
-              {typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K'}
-            </span>
-          </span>
-        </Button>
-      </div>
 
-      {!hasNoMatches ? (
+  // Page-level actions. The mode toggle arrives by portal from whichever content
+  // page owns it (see SettingsHeaderPortal); the palette is always available, so
+  // the shell renders it directly. Slot first so the page's own control sits to
+  // the left of the shell-wide one.
+  const headerActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <div ref={setHeaderSlot} className="contents" />
+      <Button
+        type="button"
+        variant="subtle"
+        size="sm"
+        onClick={openCommandPalette}
+        iconLeft={<SearchIcon className="h-4 w-4" />}
+        className="rounded-md border border-pf-border bg-pf-bg-0 text-pf-text-secondary hover:text-pf-text-primary"
+      >
+        <span className="inline-flex items-center gap-2">
+          <span>Search settings</span>
+          <kbd className="rounded-xs border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
+            {commandPaletteShortcut}
+          </kbd>
+        </span>
+      </Button>
+    </div>
+  );
+
+  const subTabs =
+    !hasNoMatches && currentCategory.subPages.length > 0 ? (
+      <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={currentCategory.subPages}
           activeSubPage={activeSubPage}
@@ -617,24 +633,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           ariaLabel={`${currentCategory.label} ${effectiveScope === 'admin' ? 'admin' : 'settings'}`}
           searchQuery={query}
         />
-      ) : null}
-    </div>
-  );
+      </div>
+    ) : null;
 
   return (
-    <>
+    <SettingsHeaderSlotContext.Provider value={headerSlot}>
       <PageTemplate
         title={pageTitle}
         subtitle={pageDescription}
         padding="px-0"
         showHeader
+        actions={headerActions}
       >
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel pt-4">
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
           <div className="relative flex min-h-0 flex-1 flex-col">
           {hasNoMatches ? (
             <div className="relative flex flex-1 min-h-0 flex-col">
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                {toolbar}
                 <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
                   <div className="mx-auto max-w-md rounded-md border border-dashed border-pf-border bg-pf-bg-1 px-6 py-10 text-center">
                     <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
@@ -664,7 +679,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 </p>
 
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {toolbar}
+                  {subTabs}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
                     <h2
                       id="settings-content-heading"
@@ -692,6 +707,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           </div>
         </div>
       </PageTemplate>
-    </>
+    </SettingsHeaderSlotContext.Provider>
   );
 };
