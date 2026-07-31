@@ -247,32 +247,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const shouldFocusSectionRef = useRef(false);
   const previousRenderedKeyRef = useRef<string | null>(null);
 
-  const handleScopeChange = useCallback(
-    (scopeId: string) => {
-      if (!availableScopes.some((scope) => scope.id === scopeId)) {
-        return;
-      }
-
-      const defaultCategoryId = getDefaultCategoryForScope(scopeId as typeof activeScope);
-      const defaultSubPageId = getDefaultSubPage(defaultCategoryId);
-      shouldFocusSectionRef.current = true;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', scopeId);
-        next.set('tab', defaultCategoryId);
-        if (defaultSubPageId) {
-          next.set('sub', defaultSubPageId);
-        } else {
-          next.delete('sub');
-        }
-        next.delete('q');
-        next.delete('workerTab');
-        return next;
-      });
-    },
-    [availableScopes, setSearchParams],
-  );
-
   const handleCategoryChange = useCallback(
     (categoryId: string) => {
       const target = resolveSettingsNavigationTarget(categoryId, undefined, activeScope);
@@ -674,12 +648,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           ) : (
             <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
               <SettingsSidebar
-                categories={scopeCategories}
+                categories={accessibleCategories}
                 activeScope={effectiveScope}
                 activeCategory={effectiveCategory}
                 availableScopes={availableScopes}
                 onCategoryChange={handleCategoryChange}
-                onScopeChange={handleScopeChange}
                 matchingCategoryIds={matchingCategoryIds}
                 isFiltering={isFiltering}
                 searchQuery={query}

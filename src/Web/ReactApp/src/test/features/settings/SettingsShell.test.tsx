@@ -167,7 +167,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
   });
 
-  it('renders the new scoped settings shell and admin-visible scope switcher', () => {
+  it('renders one flat nav listing every reachable category, with no scope switcher', () => {
     setAuthRoles(['farm_admin']);
     renderSettings();
 
@@ -176,11 +176,20 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('radiogroup', { name: 'Settings scopes' })[0]).toBeInTheDocument();
-    expect(screen.getAllByRole('radio', { name: 'User' })[0]).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getAllByRole('radio', { name: 'System' })[0]).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getAllByRole('button', { name: /Admin/i })[0]).toBeInTheDocument();
-    expect(getCategoryButton('Profile')).toBeInTheDocument();
+
+    // Scope is a property of a category, not a mode to enter first: no radiogroup,
+    // no separate Admin pill, one control idiom for the whole nav.
+    expect(screen.queryByRole('radiogroup', { name: 'Settings scopes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+
+    // Every destination an admin can reach is visible at once, grouped by scope.
+    for (const label of ['User', 'System', 'Admin']) {
+      expect(screen.getAllByRole('heading', { level: 2, name: label }).length).toBeGreaterThanOrEqual(1);
+    }
+    for (const label of ['Profile', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Operations', 'Users', 'Data']) {
+      expect(getCategoryButton(label)).toBeInTheDocument();
+    }
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
   });
 
   it('defaults to the User Settings profile category and preferences sub-page', () => {
@@ -190,10 +199,11 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('switches to System Settings from the scope switcher', () => {
+  it('switches scope in one click by picking a category from another scope', () => {
     renderSettings();
 
-    fireEvent.click(screen.getAllByRole('radio', { name: 'System' })[0]);
+    // Used to take two clicks: pick the System scope, then pick General.
+    fireEvent.click(getCategoryButton('General'));
 
     expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
@@ -290,7 +300,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
-  it('shows only farm-wide categories in the System scope sidebar', () => {
+  it('scopes the nav to farm-wide categories when the route locks the scope', () => {
     renderSettings('/settings?scope=system');
 
     expect(getCategoryButton('General')).toBeInTheDocument();
@@ -298,9 +308,23 @@ describe('SettingsShell', () => {
     expect(getCategoryButton('Hardware')).toBeInTheDocument();
     expect(getCategoryButton('Integrations')).toBeInTheDocument();
     expect(getCategoryButton('Quotas')).toBeInTheDocument();
+
+    // `?scope=system` on /settings is a soft preference, not a route lock — an
+    // admin can still reach the other scopes from the same nav.
+    expect(getCategoryButton('Profile')).toBeInTheDocument();
+    expect(getCategoryButton('Operations')).toBeInTheDocument();
+  });
+
+  it('hides scopes the user cannot reach', () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/settings');
+
+    expect(getCategoryButton('Profile')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'General' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Data' })).not.toBeInTheDocument();
+    // A single group needs no caption; the page title already says "Settings".
+    expect(screen.queryByRole('heading', { level: 2, name: 'User' })).not.toBeInTheDocument();
   });
 
   it('opens Slicing on the defaults sub-page inside System Settings', () => {
