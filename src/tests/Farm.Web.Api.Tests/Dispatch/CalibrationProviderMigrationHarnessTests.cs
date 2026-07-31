@@ -54,6 +54,12 @@ public class CalibrationProviderMigrationHarnessTests
     private const string PostgresConnEnvVar = "PFARM_TEST_POSTGRES_CONN";
     private const string SqlServerConnEnvVar = "PFARM_TEST_SQLSERVER_CONN";
 
+    // Provider labels used for assertion messages AND for the provider-specific
+    // RowVersion branch below. Shared constants so a rename cannot silently
+    // desynchronise the call site from the comparison and skip the assertion.
+    private const string PostgresProviderLabel = "PostgreSQL";
+    private const string SqlServerProviderLabel = "SQL Server";
+
     /// <summary>
     /// Creates an AppDbContext backed by the given SQLite connection string with
     /// FK constraints disabled. This matches the test pattern used by
@@ -360,7 +366,7 @@ public class CalibrationProviderMigrationHarnessTests
                 provider => provider.MigrationsAssembly("Farm.Migrations.PostgreSQL"))
             .Options;
 
-        await RunProviderSchemaAssertionsAsync(opts, "PostgreSQL");
+        await RunProviderSchemaAssertionsAsync(opts, PostgresProviderLabel);
     }
 
     // =========================================================================
@@ -387,7 +393,7 @@ public class CalibrationProviderMigrationHarnessTests
                 provider => provider.MigrationsAssembly("Farm.Migrations.SqlServer"))
             .Options;
 
-        await RunProviderSchemaAssertionsAsync(opts, "SQL Server");
+        await RunProviderSchemaAssertionsAsync(opts, SqlServerProviderLabel);
     }
 
     // =========================================================================
@@ -424,7 +430,7 @@ public class CalibrationProviderMigrationHarnessTests
         // SaveChanges, so a row created by migrationBuilder.InsertData stays NULL until the
         // application first writes it. The fence itself is proven behaviourally by
         // AssertProviderNativeConcurrencyAsync below.
-        if (providerName == "SQL Server")
+        if (providerName == SqlServerProviderLabel)
         {
             seqState.RowVersion.Should().NotBeNullOrEmpty(
                 $"[{providerName}] the database-generated ROWVERSION must stamp the seeded fence row");
