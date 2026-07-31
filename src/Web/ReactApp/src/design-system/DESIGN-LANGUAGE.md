@@ -124,6 +124,13 @@ Industrial design rejects soft, rounded "friendly" corners. PrintFarmer's radii 
 
 **Rule**: never exceed `--pf-radius-lg` for rectangular surfaces. The only fully-rounded shapes are avatars and dots.
 
+**Enforcement**: `local/pf-no-oversized-radius` (see `eslint-rules/README.md`) fails the build on
+radii above the ceiling. It runs at the documented 8px ceiling with `checkFullRound` inside
+`features/admin`, `features/settings` and `design-system`; the rest of the app is grandfathered
+at 12px until its `rounded-xl` sites are adjudicated. Genuinely circular shapes are excused
+automatically when their dimensions prove it (`size-*`, matching `w-`/`h-`, `aspect-square`,
+spinner animation); anything else that is truly a pill declares `data-pf-radius="full"`.
+
 ---
 
 ## Elevation & Shadows
@@ -620,6 +627,92 @@ Structural specifications for the canonical components. Visual values come from 
 - Padding: `p-4`.
 - Icon: leading 20×20 in semantic color.
 - Dismissible alerts include a ghost close button at top-right.
+
+---
+
+## Admin Surface
+
+Every admin destination — the Admin Control Center (`/admin`) and the 21 pages it links to —
+obeys one contract. Regression tests in `src/test/features/admin/` enforce the structural half
+of it; this section is the rationale.
+
+### The shell owns the frame
+
+`AdminPageShell` (`features/admin/components/AdminPageShell.tsx`) renders the page frame:
+title, description, back link to the ACC, and a header-actions slot. A page below `/admin`
+never renders its own `PageTemplate`, its own `<h1>`, or its own back navigation.
+
+- **One `h1` per destination.** The shell owns it. A page that also rendered one would give
+  screen readers two competing document titles for one view.
+- **Every ACC destination offers a way back to `/admin`.** This is what makes the hub a hub
+  rather than a launcher you fall out of. `/settings` (user scope) is deliberately excluded —
+  it was never below `/admin`, so a "back to Admin Control Center" link there would be a lie.
+- **`embedded` is the opt-out, not the default.** Pages that also stand alone on their own
+  route accept an `embedded` prop and suppress their own frame when the shell already drew one:
+  `PrinterGroupsPage`, `ApiKeysPage`, `PasskeysPage`, `NfcBindingsPage`,
+  `NotificationPreferencesPage`, `WorkerManagementPage`, and `LocationManagement`. Forgetting
+  to pass it produces a duplicate `h1`, which the destination-contract test catches by name.
+- **Header actions live in a slot.** Page-level actions are passed up to the shell rather than
+  floated inside content, so their position is identical on all 22 destinations.
+
+`ADMIN_DESTINATIONS` in `features/admin/registry/adminDestinations.ts` is the single source of
+truth for what the ACC links to. Adding an entry there is what puts a page under this contract.
+
+### Content structure
+
+- **`AdminSection`** is the grouping primitive: a band with a caption, an optional count, and
+  optional slots beside and opposite the caption. Bands — not cards — carry section identity.
+  Two rules are load-bearing. The caption sets its own face, case and size rather than
+  inheriting them, because `index.css` force-uppercases `h1`/`h2` in the display face but
+  leaves `h3` alone — so an inheriting component would render as an uppercase display band in
+  one place and an indistinguishable sentence-case line in another. And a `count` of zero is
+  omitted entirely: a badge reading "0" is noise where an empty state says it better.
+- **`AdminStatTile`** is the metric primitive. Status reaches the user three ways — badge word,
+  icon, and border tint — so it survives without colour vision. `value` (a measurement) takes
+  `--pf-font-mono` with `tabular-nums` so digits align down a column; `detail` (a sentence)
+  takes the body face. They are separate props precisely so prose never lands in monospace.
+- **Attention comes first**, in a dedicated band above healthy content with direct fix actions.
+  The governing rule is detectability: an attention item must correspond to a condition the
+  system can actually observe — a required field left empty, a value outside its declared
+  range, or a section the server rejected. No curated list of "important" fields, no "these
+  usually matter" heuristic. The page's banner and its save-time validation share the same
+  predicates, because if they disagreed the page would flag problems that saving accepts, or
+  accept values the banner calls broken.
+
+### Density and flow
+
+Admin pages have to work on a 768px tablet in a workshop and on a 2560px desk monitor. The
+layout resolves that with container queries, not viewport breakpoints, because the settings
+nav changes the content width independently of the window.
+
+- **The band is the column unit.** Bands flow into 1–3 columns against the content container's
+  own width. Cards then flow inside their band against *that* band's width. Deciding column
+  count per card instead collapses to a single column on any page whose bands hold one card
+  each — which is most settings pages.
+- **Field rows go side-by-side above a `23rem` (368px) container** and stack below it, with the
+  label/control split held at `0.36fr / 0.64fr` so the control keeps ~64% of the card at every
+  size. The threshold is set by the narrowest card the flow actually produces — 401px inner, at
+  a 1440px window — not by taste. A `26rem` threshold would collapse exactly those rows back to
+  stacked, which is the layout the ratio exists to prevent. Past `52rem` the label track caps at
+  `16rem`, because 36% of a 1000px card puts 360px of dead space between a label and its control.
+- **Type scale descends 24 → 20 → 18 → 14** across page title, category, band, and card. A
+  category heading larger than the page title inverts the hierarchy.
+
+### Saving
+
+Settings pages save **per group**, through one page-level save bar. The bar appears only when
+something is dirty, names how many groups changed, blocks on validation errors, survives partial
+failure with a per-group retry, and guards unload. There is no "Save All" control. The API does
+expose a batch `POST /api/settings`, but `settingsApi.ts` deliberately wraps only the per-key
+`POST /api/settings/{keyName}` — a batch save cannot report which group failed, which is the
+one thing a user needs when four sections save and one does not.
+
+### Colour
+
+The admin surface has no hardcoded colours. No hex, no `rgba()`, no Tailwind palette classes
+(`bg-gray-500` and friends) — only `--pf-*` tokens, so all seven themes stay coherent. The
+theme-safety test asserts both halves of this: the scan for literals, and token parity across
+`dark`, `light`, `matrix`, `blueprint`, `ratos`, `voron` and `farm`.
 
 ---
 

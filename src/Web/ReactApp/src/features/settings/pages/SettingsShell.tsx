@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
@@ -216,6 +217,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const requestedSubPage = searchParams.get('sub');
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
+
+  // The shell serves three routes. `/admin/settings` and `/admin/manage` are
+  // destinations reached from the Control Center, so they carry a link back to
+  // it; `/settings` is a personal page that was never below /admin.
+  const isAdminRoute = routeScope === 'system' || routeScope === 'admin';
 
   const availableScopes = useMemo(() => {
     if (routeScope === 'user') {
@@ -643,6 +649,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         subtitle={pageDescription}
         padding="px-0"
         showHeader
+        parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
         actions={headerActions}
       >
         <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
