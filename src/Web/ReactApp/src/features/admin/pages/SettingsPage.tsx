@@ -245,12 +245,54 @@ interface GroupSaveBlockProps {
 const CARD_FLOW_CONTAINER_CLASS = '@container';
 
 /**
+ * Column classes for the page's band flow.
+ *
+ * This is the fix for the defect the per-band flow below could not reach.
+ * Column count was decided *inside* a band, but a band routinely holds exactly
+ * one section — the comment on `cardFlowClass` says so outright — so the flow
+ * resolved to `columns-1` and the page rendered a single stack of full-width
+ * cards at every width. Measured before this change, on `System Config`:
+ *
+ *   1440px window → 814px flow  → 1 column
+ *   1920px window → 1294px flow → 1 column
+ *   2560px window → 1934px flow → 1 column, card capped at 1024px,
+ *                                 910px of the page left blank
+ *
+ * The unit that has to flow is therefore the band, not the card. Each band
+ * keeps its caption glued to its own cards and stays whole across a break.
+ *
+ * Thresholds derive from the `23rem` (368px) card width at which
+ * `SettingsPagelet` puts a field's label beside its control, plus ~36px of
+ * card padding and border, plus the 16px column gap. A column is only opened
+ * when every resulting card still clears it:
+ *
+ *   52rem → 2 cols → cards ≥ 404px  (1440px window: 435px)
+ *   78rem → 3 cols → cards ≥ 405px  (1920px window: 444px)
+ *
+ * so adding a column never collapses a field row back to stacked.
+ */
+function bandFlowClass(bandCount: number): string {
+  return clsx(
+    'columns-1 gap-4',
+    bandCount >= 2 && '@[52rem]:columns-2',
+    bandCount >= 3 && '@[78rem]:columns-3',
+  );
+}
+
+/**
  * Column classes for a flow holding `cardCount` cards.
  *
- * Capped by the card count as well as by width. CSS multi-column fills the
- * first column before the second, so a single card in a two-column flow sits
- * at half width with the remaining half blank. Settings bands frequently hold
- * one section, so this case is the norm, not an edge.
+ * Same thresholds as the band flow, and deliberately so. Each band carries its
+ * own `@container`, so this resolves against the band's width rather than the
+ * page's, and the two cases fall out without either flow having to know about
+ * the other:
+ *
+ *   many bands  → each band is one column wide (~435px) → cards stack
+ *   one band    → the band is the full content width    → its cards flow
+ *
+ * The count cap still matters: CSS multi-column fills column one before column
+ * two, so a lone card in a two-column flow sits at half width with the other
+ * half blank.
  */
 function cardFlowClass(cardCount: number): string {
   return clsx(
@@ -259,8 +301,8 @@ function cardFlowClass(cardCount: number): string {
     // pushes labels away from the controls they name. Cap the measure and let
     // the remainder read as page margin.
     cardCount <= 1 && 'max-w-[64rem]',
-    cardCount >= 2 && '@[58rem]:columns-2',
-    cardCount >= 3 && '@[88rem]:columns-3',
+    cardCount >= 2 && '@[52rem]:columns-2',
+    cardCount >= 3 && '@[78rem]:columns-3',
   );
 }
 
@@ -491,7 +533,7 @@ function GroupSaveBlock({
 
   return (
     <div className={CARD_FLOW_CONTAINER_CLASS}>
-      <div className={cardFlowClass(visibleCardCount)}>
+      <div className={cardFlowClass(visibleCardCount)} data-testid="settings-card-flow">
             {metadataItems.map((meta) => {
             // Filter the section's properties for display without touching the
             // metadata used for save / validation above.
@@ -891,13 +933,31 @@ export function SettingsPage({
     };
   }, [sortedGroups, metadataByGroup, groupMetadata, effectiveMode, trimmedQuery]);
 
+  // Bands that actually render, which is what the column flow has to size for.
+  // A group whose every section is filtered out returns null below, so counting
+  // `sortedGroups` would open columns for bands that never appear and leave the
+  // trailing ones empty.
+  const visibleBandCount = useMemo(
+    () =>
+      sortedGroups.filter((group) =>
+        (metadataByGroup[group] ?? []).some((m) => (visibleByKey[m.key]?.size ?? 0) > 0),
+      ).length,
+    [sortedGroups, metadataByGroup, visibleByKey],
+  );
+
   const toggleHelperText = useMemo(() => {
     if (trimmedQuery) {
       if (visibleSettingsCount === 0) return 'No matching settings';
       return `${visibleSettingsCount} match${visibleSettingsCount === 1 ? '' : 'es'} in ${matchingSectionCount} section${matchingSectionCount === 1 ? '' : 's'}`;
     }
     if (totalSettingsCount === 0) return undefined;
-    return `Showing ${visibleSettingsCount} of ${totalSettingsCount} settings`;
+    // "Showing 7 of 26 settings" sat on the page permanently and stated a fact
+    // the user could not act on. The fact worth surfacing is the *absence*:
+    // Basic mode hides fields, and a user hunting for one needs to know that is
+    // why it is not here. When nothing is hidden there is nothing to say.
+    const hiddenCount = totalSettingsCount - visibleSettingsCount;
+    if (hiddenCount <= 0) return undefined;
+    return `${hiddenCount} advanced field${hiddenCount === 1 ? '' : 's'} hidden`;
   }, [matchingSectionCount, totalSettingsCount, trimmedQuery, visibleSettingsCount]);
 
   if (loading) {
@@ -995,7 +1055,9 @@ export function SettingsPage({
           />
         )}
 
-        {sortedGroups.map((group) => {
+        <div className={CARD_FLOW_CONTAINER_CLASS}>
+          <div className={bandFlowClass(visibleBandCount)} data-testid="settings-band-flow">
+            {sortedGroups.map((group) => {
           const groupMeta = metadataByGroup[group] ?? [];
           if (groupMeta.length === 0) return null;
 
@@ -1026,6 +1088,7 @@ export function SettingsPage({
               captionId={`group-${group}`}
               headingLevel={3}
               gap="loose"
+              className="mb-6 break-inside-avoid"
             >
               <GroupSaveBlock
                 key={group}
@@ -1039,7 +1102,9 @@ export function SettingsPage({
               />
             </AdminSection>
           );
-        })}
+            })}
+          </div>
+        </div>
 
         {afterContent}
 

@@ -157,8 +157,13 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
 
   return (
     <>
+      {/* `h-fit self-start` rather than `h-full`: the nav held 206px of items in
+          a 1386px column, so 85% of it was an empty tinted slab running the
+          length of the page. Ending the panel after its items turns that into
+          page background, and the border makes the edge read as intentional
+          rather than as a truncated fill. */}
       <nav
-        className="hidden h-full min-h-0 flex-col bg-pf-sidebar md:flex"
+        className="hidden h-fit min-h-0 flex-col self-start rounded-md border border-pf-border bg-pf-sidebar md:flex"
         aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">

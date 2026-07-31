@@ -661,7 +661,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
+            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
               <SettingsSidebar
                 categories={accessibleCategories}
                 activeScope={effectiveScope}
@@ -681,11 +681,18 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {subTabs}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
+                    {/* Subordinate to the page's own H1. This rendered at 32px
+                        against a 24px "Settings" H1, so the category name — a
+                        restatement of the highlighted nav item — was the
+                        largest text on the page. The scale now descends:
+                        24 (page) → 20 (category) → 18 (band) → 14 (card).
+                        The element itself stays: `aria-labelledby` and the
+                        section-change focus target both point at it. */}
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
                       tabIndex={-1}
-                      className="mb-5 w-fit text-2xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-6 md:text-[2rem]"
+                      className="mb-4 w-fit text-xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-5"
                     >
                       {currentCategory.label}
                     </h2>

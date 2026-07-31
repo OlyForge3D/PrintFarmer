@@ -95,6 +95,18 @@ describe('SettingsSidebar is a flat grouped nav', () => {
     }
   });
 
+  it('ends after its items instead of stretching down the page', () => {
+    // Measured before this guard: the nav rendered 296px wide and 1386px tall
+    // around a 206px list, so 85% of it was an empty tinted slab running the
+    // full length of the settings page. `h-full` is what did it — as a grid
+    // item the nav would otherwise size to its content.
+    renderSidebar();
+    const nav = desktopNav();
+
+    expect(nav.className).not.toMatch(/(^|\s)h-full(\s|$)/);
+    expect(nav.className).toMatch(/(^|\s)(h-fit|self-start)(\s|$)/);
+  });
+
   it('walks the whole list with arrow keys, across group boundaries', () => {
     renderSidebar();
     const nav = within(desktopNav());

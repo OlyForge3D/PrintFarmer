@@ -5,20 +5,29 @@ import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Layout contract for issue #1011 — density-aware card flow and
- * container-query field rows.
+ * Layout contract for the settings page flow.
+ *
+ * Originally written for #1011 (density-aware card flow, container-query field
+ * rows). Rewritten because #1011's remedy could not fire: it decided the column
+ * count *inside* a band, and a settings band routinely holds exactly one
+ * section, so the flow resolved to `columns-1` at every width. Measured on
+ * `System Config` before the fix — 1440px window: 814px flow, 1 column; 1920px:
+ * 1294px, 1 column; 2560px: 1934px, 1 column with the card capped at 1024px and
+ * 910px of the page blank.
+ *
+ * The unit that flows is therefore the band. Cards keep a flow of their own,
+ * with identical thresholds, which resolves against the band's width — so a
+ * page of many bands stacks its cards inside narrow band columns, and a page
+ * with a single full-width band still flows its cards. Neither flow needs to
+ * know about the other.
  *
  * jsdom does not lay out CSS, so these tests assert the *contract* the CSS
  * hangs off rather than measured geometry: which utilities are emitted, and —
  * the part that is real logic rather than a class-string tautology — that the
- * column count is capped by how many cards actually exist.
+ * column count is capped by how many bands/cards actually exist and that
+ * filtered-out bands do not open columns they will never fill.
  *
- * Geometry was verified separately in Chromium at 430/768/1280/1440/1600/1920/
- * 2560px. Recorded there: 1 column below 58rem of flow width, 2 above, 3 above
- * 88rem; field rows side-by-side above a 26rem card; controls holding 62% of
- * the row at every side-by-side size; no horizontal overflow at 430px; and the
- * flow's own height falling 3744 -> 2312 -> 1779px as columns are added, which
- * is the ragged-bottom whitespace this issue set out to remove.
+ * Geometry was verified separately in Chromium at 430/768/1280/1440/1920/2560px.
  */
 
 type Prop = {
@@ -28,37 +37,55 @@ type Prop = {
   display?: Record<string, unknown>;
 };
 
-let sections: Array<{
+type Section = {
   key: string;
   className: string;
   displayName: string;
   group: string;
   order: number;
   properties: Prop[];
-}> = [];
+};
 
-function makeSections(count: number) {
-  return Array.from({ length: count }, (_, i) => ({
-    key: `Section${i}`,
-    className: `Section${i}`,
-    displayName: `Section ${i}`,
-    group: 'System',
-    order: i + 1,
+let sections: Section[] = [];
+
+function makeSection(index: number, group: string): Section {
+  return {
+    key: `Section${index}`,
+    className: `Section${index}`,
+    displayName: `Section ${index}`,
+    group,
+    order: index + 1,
     properties: [
       {
         name: 'retentionDays',
         type: 'number',
         attributes: [],
-        display: { name: `Retention ${i}`, inputType: 'Number' },
+        display: { name: `Retention ${index}`, inputType: 'Number' },
       },
     ],
-  }));
+  };
+}
+
+/** One section per band — the shape that broke #1011's remedy. */
+function makeBands(count: number) {
+  return Array.from({ length: count }, (_, i) => makeSection(i, `Group${i}`));
+}
+
+/** All sections in a single band. */
+function makeCardsInOneBand(count: number) {
+  return Array.from({ length: count }, (_, i) => makeSection(i, 'System'));
 }
 
 vi.mock('@/services/settingsApi', () => ({
   fetchSettingsMetadata: vi.fn(() => Promise.resolve(sections)),
   fetchSettingsGroups: vi.fn(() =>
-    Promise.resolve([{ key: 'System', displayName: 'System', order: 1 }]),
+    Promise.resolve(
+      Array.from(new Set(sections.map((s) => s.group))).map((key, i) => ({
+        key,
+        displayName: key,
+        order: i + 1,
+      })),
+    ),
   ),
   fetchSettingsUnified: vi.fn(() =>
     Promise.resolve(
@@ -85,8 +112,8 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { SettingsPagelet, type SettingMetadata } from '@/common/components/SettingsPagelet';
 
-async function renderFlow(cardCount: number) {
-  sections = makeSections(cardCount);
+async function renderPage(fixture: Section[]) {
+  sections = fixture;
   const { container } = render(
     <MemoryRouter>
       <SettingsPage />
@@ -95,56 +122,96 @@ async function renderFlow(cardCount: number) {
   await waitFor(() => {
     expect(screen.getByLabelText('Retention 0')).toBeInTheDocument();
   });
-  const flow = container.querySelector('[class*="columns-1"]');
-  expect(flow).not.toBeNull();
-  return flow as HTMLElement;
+  return container;
 }
 
-describe('#1011 — card flow density', () => {
+async function renderBands(bandCount: number) {
+  await renderPage(makeBands(bandCount));
+  return screen.getByTestId('settings-band-flow');
+}
+
+async function renderCardsInOneBand(cardCount: number) {
+  await renderPage(makeCardsInOneBand(cardCount));
+  return screen.getByTestId('settings-card-flow');
+}
+
+describe('settings band flow density', () => {
   beforeEach(() => {
     window.localStorage.setItem('pf.settings.mode', 'everything');
   });
 
-  it('never opens a second column for a single card', async () => {
-    // CSS multicol fills column one first, so a lone card in a two-column flow
-    // renders at half width with the other half blank. Settings bands very
-    // often hold exactly one section, so this is the common case.
-    const flow = await renderFlow(1);
+  it('never opens a second column for a single band', async () => {
+    const flow = await renderBands(1);
     expect(flow.className).not.toContain('columns-2');
     expect(flow.className).not.toContain('columns-3');
   });
 
-  it('caps the measure of a single-card flow', async () => {
-    const flow = await renderFlow(1);
-    expect(flow.className).toContain('max-w-[64rem]');
-  });
-
-  it('opens a second column — but not a third — for two cards', async () => {
-    const flow = await renderFlow(2);
-    expect(flow.className).toContain('@[58rem]:columns-2');
+  it('opens a second column — but not a third — for two bands', async () => {
+    const flow = await renderBands(2);
+    expect(flow.className).toContain('@[52rem]:columns-2');
     expect(flow.className).not.toContain('columns-3');
-    expect(flow.className).not.toContain('max-w-[64rem]');
   });
 
-  it('opens up to three columns once there are three cards', async () => {
-    const flow = await renderFlow(3);
-    expect(flow.className).toContain('@[58rem]:columns-2');
-    expect(flow.className).toContain('@[88rem]:columns-3');
+  it('opens up to three columns once there are three bands', async () => {
+    const flow = await renderBands(3);
+    expect(flow.className).toContain('@[52rem]:columns-2');
+    expect(flow.className).toContain('@[78rem]:columns-3');
   });
 
-  it('keeps cards whole across a column break', async () => {
-    const flow = await renderFlow(3);
-    for (const card of Array.from(flow.children)) {
-      expect(card.className).toContain('break-inside-avoid');
+  it('flows bands rather than only the cards inside one band', async () => {
+    // The regression this file exists for. Every band on a real settings page
+    // holds one section, so a flow that only ever subdivided *within* a band
+    // resolved to one full-width column at every viewport width.
+    const flow = await renderBands(3);
+    expect(flow.className).toContain('columns-');
+    const bands = Array.from(flow.children);
+    expect(bands).toHaveLength(3);
+  });
+
+  it('keeps a band whole across a column break', async () => {
+    // A band split across columns would strand its caption above one card and
+    // its remaining cards in the next column.
+    const flow = await renderBands(3);
+    for (const band of Array.from(flow.children)) {
+      expect(band.className).toContain('break-inside-avoid');
     }
   });
 
   it('sizes columns from the content width, not the viewport', async () => {
-    // The space available to cards depends on the app rail and the settings
-    // sidebar. A viewport breakpoint would be wrong the moment either changes.
-    const flow = await renderFlow(3);
+    // The space available depends on the app rail and the settings sidebar. A
+    // viewport breakpoint would be wrong the moment either changes.
+    const flow = await renderBands(3);
     expect(flow.parentElement?.className).toContain('@container');
     expect(flow.className).not.toMatch(/\b(sm|md|lg|xl|2xl):columns-/);
+  });
+});
+
+describe('settings card flow density', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('pf.settings.mode', 'everything');
+  });
+
+  it('caps the measure of a single-card band', async () => {
+    const flow = await renderCardsInOneBand(1);
+    expect(flow.className).toContain('max-w-[64rem]');
+    expect(flow.className).not.toContain('columns-2');
+  });
+
+  it('lets a lone band flow its own cards', async () => {
+    // A page with one band gives that band the full content width, so its
+    // cards are the thing with room to flow. The shared thresholds resolve
+    // against the band's `@container`, so this needs no extra coordination.
+    const flow = await renderCardsInOneBand(3);
+    expect(flow.className).toContain('@[52rem]:columns-2');
+    expect(flow.className).toContain('@[78rem]:columns-3');
+    expect(flow.className).not.toContain('max-w-[64rem]');
+  });
+
+  it('keeps cards whole across a column break', async () => {
+    const flow = await renderCardsInOneBand(3);
+    for (const card of Array.from(flow.children)) {
+      expect(card.className).toContain('break-inside-avoid');
+    }
   });
 });
 
@@ -170,7 +237,7 @@ function renderPagelet() {
   );
 }
 
-describe('#1011 — field rows', () => {
+describe('field rows', () => {
   it('has no fixed-width label gutter left anywhere', () => {
     // The `w-64` this replaced left roughly 164px for the control inside a
     // 420px card. Any fixed width on the label reintroduces that failure —
@@ -189,8 +256,21 @@ describe('#1011 — field rows', () => {
     const list = container.firstElementChild as HTMLElement;
     expect(list.className).toContain('@container');
     const row = container.querySelector('[data-setting-property]') as HTMLElement;
-    expect(row.className).toContain('@[26rem]:grid-cols-');
+    expect(row.className).toContain('@[23rem]:grid-cols-');
     expect(row.className).not.toMatch(/\b(sm|md|lg|xl|2xl):grid-cols-/);
+  });
+
+  it('keeps rows side-by-side in the narrowest card the flow can produce', () => {
+    // The threshold is set by layout, not taste. Three band columns in a
+    // 1440px window land a card at ~435px outer / ~401px inner. A threshold
+    // above that would collapse every row on the page back to stacked, which
+    // is the exact failure the label/control ratio exists to prevent.
+    const row = renderPagelet().container.querySelector(
+      '[data-setting-property]',
+    ) as HTMLElement;
+    const threshold = /@\[(\d+)rem\]:grid-cols-\[minmax\(9rem/.exec(row.className);
+    expect(threshold).not.toBeNull();
+    expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(401);
   });
 
   it('gives the control the majority of the row', () => {

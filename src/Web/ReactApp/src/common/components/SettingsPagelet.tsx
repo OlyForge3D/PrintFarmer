@@ -87,15 +87,20 @@ const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
 /**
  * Label / control split for a field row.
  *
- * The threshold and the ratio are two halves of one decision. `26rem` (416px)
- * is the narrowest card that was measured to still read as two columns; below
- * it the row stacks. The `0.36fr / 0.64fr` ratio — rather than the fixed
- * `w-64` (256px) this replaced — is what guarantees the control keeps ~64% of
- * the card's inner width at *every* card size. A fixed label gutter cannot:
- * inside a 420px card it left roughly 164px for the actual input.
+ * The threshold and the ratio are two halves of one decision. `23rem` (368px)
+ * is the narrowest card that still reads as two columns; below it the row
+ * stacks. The `0.36fr / 0.64fr` ratio — rather than the fixed `w-64` (256px)
+ * this replaced — is what guarantees the control keeps ~64% of the card's
+ * inner width at *every* card size. A fixed label gutter cannot: inside a
+ * 420px card it left roughly 164px for the actual input.
  *
- * `minmax(9rem, …)` floors the label so short cards do not shred long labels
- * one word per line.
+ * The threshold is set by the narrowest card the page flow can produce, not
+ * by taste. Bands flow into columns on the settings page, and the tightest
+ * case — a 1440px window, three columns' worth of bands — lands a card at
+ * 435px outer, 401px inner. A `26rem` (416px) threshold would collapse every
+ * one of those rows back to stacked, which is the layout this ratio exists to
+ * avoid. `23rem` clears it with 33px to spare while still floring the label
+ * at `9rem` so long labels do not shred one word per line.
  *
  * Past `52rem` the ratio inverts into a problem: 36% of a 1000px card puts
  * 360px of empty space between a label and the control it names, and the pair
@@ -104,7 +109,7 @@ const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
  */
 const FIELD_ROW_CLASS =
   'grid grid-cols-1 items-start gap-x-4 gap-y-1 py-2.5 '
-  + '@[26rem]:grid-cols-[minmax(9rem,0.36fr)_minmax(0,0.64fr)] '
+  + '@[23rem]:grid-cols-[minmax(9rem,0.36fr)_minmax(0,0.64fr)] '
   + '@[52rem]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]';
 
 /**
@@ -114,7 +119,7 @@ const FIELD_ROW_CLASS =
  * set so the control still clears 60% of the card's inner width at the widest
  * card the flow will produce.
  */
-const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[40rem]';
+const FIELD_CONTROL_CLASS = 'min-w-0 @[23rem]:max-w-[40rem]';
 
 const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   <span
@@ -156,7 +161,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
 
         const label = (
           <label
-            className="flex items-start text-sm font-medium text-pf-text-primary @[26rem]:pt-2"
+            className="flex items-start text-sm font-medium text-pf-text-primary @[23rem]:pt-2"
             htmlFor={fieldId}
           >
             <span className="break-words">
@@ -249,7 +254,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isBoolean) {
           control = (
-            <div className={clsx(FIELD_CONTROL_CLASS, "@[26rem]:pt-1.5")}>
+            <div className={clsx(FIELD_CONTROL_CLASS, "@[23rem]:pt-1.5")}>
               <Checkbox
                 id={fieldId}
                 name={fieldId}
