@@ -225,19 +225,22 @@ describe('AdminControlCenterPage', () => {
     );
   });
 
-  it('renders a genuinely reassuring empty state when the attention list is empty', async () => {
+  it('renders a single reassuring line when the attention list is empty', async () => {
     mockedApiGet.mockResolvedValue({ data: makeOverview({ attention: [] }) });
 
     renderHub();
 
     await waitFor(() => {
-      expect(
-        screen.getByRole('heading', { name: 'Nothing needs your attention' }),
-      ).toBeInTheDocument();
+      expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('admin-hub-attention-clear')).toHaveTextContent(
+      'Nothing needs your attention — every subsystem is reporting healthy.',
+    );
+    // An all-clear must not be an illustrated empty state: it used to push the
+    // destination grid down by 206px to report that nothing happened.
     expect(
-      screen.getByText('Every subsystem is reporting healthy.'),
-    ).toBeInTheDocument();
+      screen.queryByRole('heading', { name: /nothing needs your attention/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-hub-attention')).not.toBeInTheDocument();
   });
 

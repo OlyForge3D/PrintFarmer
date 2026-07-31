@@ -21,6 +21,12 @@ export type { AdminErrorProps } from './AdminError';
 export { AdminSaveBar } from './AdminSaveBar';
 export type { AdminSaveBarProps } from './AdminSaveBar';
 
+export { AdminSection } from './AdminSection';
+export type { AdminSectionProps } from './AdminSection';
+
+export { AdminStatTile } from './AdminStatTile';
+export type { AdminStatTileProps } from './AdminStatTile';
+
 export { useDirtyState, isStructurallyEqual } from './useDirtyState';
 export type { UseDirtyStateOptions, UseDirtyStateResult } from './useDirtyState';
 

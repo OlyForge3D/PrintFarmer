@@ -20,6 +20,7 @@ import {
   AdminLoading,
   AdminError,
   AdminSaveBar,
+  AdminSection,
   AdminEmpty,
   useDirtyState,
   isStructurallyEqual,
@@ -1013,20 +1014,19 @@ export function SettingsPage({
           const groupDisplay = getGroupDisplayName(group);
 
           return (
-            <section key={group} aria-labelledby={`group-${group}`}>
-              <h3
-                id={`group-${group}`}
-                className="text-base font-semibold text-pf-text-primary mb-4 flex items-center gap-2"
-              >
-                <span className="h-px flex-1 bg-pf-border" />
-                <span className="px-3 text-pf-text-secondary uppercase tracking-wider text-xs">
-                  {searchActive
-                    ? <HighlightedText text={groupDisplay} query={trimmedQuery} />
-                    : groupDisplay}
-                </span>
-                <span className="h-px flex-1 bg-pf-border" />
-              </h3>
-
+            <AdminSection
+              key={group}
+              caption={
+                searchActive ? (
+                  <HighlightedText text={groupDisplay} query={trimmedQuery} />
+                ) : (
+                  groupDisplay
+                )
+              }
+              captionId={`group-${group}`}
+              headingLevel={3}
+              gap="loose"
+            >
               <GroupSaveBlock
                 key={group}
                 group={group}
@@ -1037,7 +1037,7 @@ export function SettingsPage({
                 suppressExtensions={searchActive}
                 searchQuery={trimmedQuery}
               />
-            </section>
+            </AdminSection>
           );
         })}
 
