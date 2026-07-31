@@ -417,8 +417,18 @@ public class CalibrationProviderMigrationHarnessTests
         OutboxSequenceState seqState = await ctx.OutboxSequenceStates.SingleAsync(s => s.Id == 1);
         seqState.NextSequence.Should().BeGreaterThanOrEqualTo(
             0, $"[{providerName}] NextSequence must be non-negative");
-        seqState.RowVersion.Should().NotBeNullOrEmpty(
-            $"[{providerName}] the provider-native sequence fence must receive a usable ETag");
+        // RowVersion on a migration-seeded row is provider-dependent by design. SQL Server uses a
+        // native ROWVERSION column that the database generates, so the seeded row is stamped on
+        // insert. On PostgreSQL/SQLite the column is application-managed (see
+        // AppDbContext.OnModelCreating) and is only written by StampRowVersions() during
+        // SaveChanges, so a row created by migrationBuilder.InsertData stays NULL until the
+        // application first writes it. The fence itself is proven behaviourally by
+        // AssertProviderNativeConcurrencyAsync below.
+        if (providerName == "SQL Server")
+        {
+            seqState.RowVersion.Should().NotBeNullOrEmpty(
+                $"[{providerName}] the database-generated ROWVERSION must stamp the seeded fence row");
+        }
 
         // All calibration queue tables must be queryable.
         (await ctx.QueueDispatchOutbox.LongCountAsync()).Should()

@@ -40,6 +40,33 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_SeedsOutboxSequenceFenceWithApplicationManagedRowVersion()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+        context.ChangeTracker.Clear();
+
+        OutboxSequenceState seeded = await context.OutboxSequenceStates.SingleAsync(s => s.Id == 1);
+        seeded.NextSequence.Should().Be(0L);
+        seeded.RowVersion.Should().BeNull(
+            "SQLite/PostgreSQL row versions are application-managed, so a migration-seeded row is "
+            + "not stamped until the application first saves it");
+
+        seeded.NextSequence = 1L;
+        _ = await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        OutboxSequenceState stamped = await context.OutboxSequenceStates.SingleAsync(s => s.Id == 1);
+        stamped.RowVersion.Should().NotBeNullOrEmpty(
+            "StampRowVersions() must write a concurrency token once the application saves the row");
+    }
+
+    [Fact]
     public async Task CoreMigration_BaselinesVerifiedEnsureCreatedDatabase()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
