@@ -653,10 +653,16 @@ never renders its own `PageTemplate`, its own `<h1>`, or its own back navigation
   `NotificationPreferencesPage`, `WorkerManagementPage`, and `LocationManagement`. Forgetting
   to pass it produces a duplicate `h1`, which the destination-contract test catches by name.
 - **Header actions live in a slot.** Page-level actions are passed up to the shell rather than
-  floated inside content, so their position is identical on all 22 destinations.
+  floated inside content, so their position is identical across the admin surface.
 
 `ADMIN_DESTINATIONS` in `features/admin/registry/adminDestinations.ts` is the single source of
 truth for what the ACC links to. Adding an entry there is what puts a page under this contract.
+It holds 27 entries: the 22 that live at `/admin` or below are admin-owned and bound by
+everything above, and 20 of those are drawn by `SettingsShell`. The other five —
+`/maintenance`, `/analytics`, `/auto-dispatch`, `/catalog`, `/locations/dashboard` — are
+operational pages the ACC merely links to. They keep their own top-level navigation because
+they are day-to-day destinations in their own right, not admin sub-pages, so the "back to
+Admin Control Center" rule does not apply to them.
 
 ### Content structure
 

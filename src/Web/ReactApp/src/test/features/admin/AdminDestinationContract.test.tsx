@@ -10,6 +10,7 @@ import {
   ADMIN_HUB_PARENT,
 } from '@/features/admin/registry/adminDestinations';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
 /**
@@ -186,6 +187,35 @@ describe('admin destination contract (#1016)', () => {
         expect(declared.has(pathname)).toBe(true);
       },
     );
+  });
+
+  describe('every deep link resolves to the tab it names', () => {
+    // Checking the pathname alone is not enough. `resolveSettingsNavigationTarget`
+    // silently falls back to a scope's default category when it does not recognise
+    // one, so a destination pointing at `?tab=typo` still renders a perfectly good
+    // page — just the wrong one. That is a false pass in the dangerous direction:
+    // the tile looks fine and quietly lands somewhere else. Asserting the resolver
+    // hands back the tab and sub-page the URL actually asked for is what closes it.
+    const deepLinks = ADMIN_DESTINATIONS.filter((d) => d.path.includes('?')).map((d) => {
+      const [pathname, query] = d.path.split('?');
+      const params = new URLSearchParams(query);
+      return [d.id, d.path, pathname, params.get('scope'), params.get('tab'), params.get('sub')] as const;
+    });
+
+    it('has deep links to check', () => {
+      expect(deepLinks.length).toBeGreaterThan(10);
+    });
+
+    it.each(deepLinks)('%s -> %s resolves to its own tab', (_id, _path, pathname, scope, tab, sub) => {
+      // The route itself fixes the scope; `?scope=` is only ever a redundant echo.
+      const routeScope = scope ?? (pathname === '/admin/manage' ? 'admin' : 'system');
+      const resolved = resolveSettingsNavigationTarget(tab, sub, routeScope);
+
+      expect(resolved.categoryId).toBe(tab);
+      if (sub) {
+        expect(resolved.subPageId).toBe(sub);
+      }
+    });
   });
 
   describe('every destination the shell owns keeps one h1 and a way back', () => {
