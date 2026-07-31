@@ -3,8 +3,7 @@ import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
 import { useSlicer } from '@/hooks/useSlicer';
 import { SettingsPagelet, type SettingMetadata, type SettingValue } from '@/common/components/SettingsPagelet';
-import { SettingInputType } from '@/types/SettingInputType';
-import { Button, Card, Input } from '@/common/components/ui';
+import { Badge, Button, Card, Input } from '@/common/components/ui';
 import { CloseIcon, SearchIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { usePageTour } from '@/common/hooks/usePageTour';
 import { settingsTour } from '@/features/admin/tours/settings.tour';
@@ -22,10 +21,18 @@ import {
   AdminSaveBar,
   AdminSection,
   AdminEmpty,
+  AttentionRow,
   useDirtyState,
   isStructurallyEqual,
   adminToast,
 } from '@/common/components/admin';
+import {
+  deriveSettingsIssues,
+  countIssuesBySection,
+  focusSettingProperty,
+  validateSection,
+  type SettingsIssue,
+} from '@/features/admin/settings/settingsAttention';
 import {
   SettingsSaveRegistryContext,
   useSettingsSaveRegistry,
@@ -75,43 +82,10 @@ type GroupValues = Record<string, SectionValues>;
  */
 type PropertyVisibility = Readonly<Record<string, ReadonlySet<string>>>;
 
-function validateSection(
-  metaItem: SettingMetadata,
-  valuesObj: SectionValues,
-): Record<string, string> {
-  const errs: Record<string, string> = {};
-  for (const prop of metaItem.properties) {
-    const val = valuesObj[prop.name];
-    if (prop.attributes.includes('RequiredAttribute')) {
-      const empty = val === undefined
-        || val === null
-        || val === ''
-        || (Array.isArray(val) && val.length === 0);
-      if (empty) {
-        errs[prop.name] = 'This field is required.';
-        continue;
-      }
-    }
-    const isNumberType = prop.display?.inputType === SettingInputType.Number
-      || ['Number', 'int', 'double'].includes(prop.type);
-    if (isNumberType) {
-      const num = typeof val === 'number'
-        ? val
-        : typeof val === 'string' && val !== ''
-          ? Number(val)
-          : NaN;
-      if (!Number.isNaN(num)) {
-        if (typeof prop.display?.minValue === 'number' && num < prop.display.minValue) {
-          errs[prop.name] = `Minimum is ${prop.display.minValue}`;
-        }
-        if (typeof prop.display?.maxValue === 'number' && num > prop.display.maxValue) {
-          errs[prop.name] = `Maximum is ${prop.display.maxValue}`;
-        }
-      }
-    }
-  }
-  return errs;
-}
+/**
+ * Validation lives in `settingsAttention` so the save path and the attention
+ * banner run the identical predicates. See that module for why.
+ */
 
 /**
  * Extract per-section field errors from a save failure. The unified controller
@@ -347,7 +321,7 @@ function GroupSaveBlock({
   // No `isSaving` / `saveError` here any more. Both were only ever read by this
   // block's own save bar, and that bar now lives on the page. Keeping local
   // copies would give the page two sources of truth for one visible state.
-  const { publishSummary, registerActions } = useSettingsSaveRegistry();
+  const { publishSummary, publishIssues, registerActions } = useSettingsSaveRegistry();
 
   const handleFieldChange = useCallback((sectionKey: string, field: string, value: SettingValue) => {
     const nextSection = { ...(state.values[sectionKey] ?? {}), [field]: value };
@@ -497,6 +471,32 @@ function GroupSaveBlock({
     });
   }, [publishSummary, group, groupDisplayName, changedFieldCount, changedLabels]);
 
+  /**
+   * Issues this group's *current* values produce.
+   *
+   * Derived from live values rather than the loaded ones so the attention band
+   * clears the moment the user fixes a field — and stays cleared after a save,
+   * which matters because the page deliberately does not refetch. Server
+   * section-level errors fold in here too, since a rejected save is the most
+   * concrete signal there is.
+   */
+  const groupIssues = useMemo(
+    () => deriveSettingsIssues(metadataItems, state.values, sectionErrors),
+    [metadataItems, state.values, sectionErrors],
+  );
+
+  useEffect(() => {
+    publishIssues(group, groupIssues);
+  }, [publishIssues, group, groupIssues]);
+
+  useEffect(() => () => publishIssues(group, []), [publishIssues, group]);
+
+  /** Per-card issue counts, so a card can flag itself without a page prop. */
+  const issueCountBySection = useMemo(
+    () => countIssuesBySection(groupIssues),
+    [groupIssues],
+  );
+
   // Registering the callbacks is not a render concern, so it must not re-run on
   // every edit — `handleSave` closes over `state.values` and so changes identity
   // on every keystroke. A ref indirection keeps the registration itself stable
@@ -558,6 +558,7 @@ function GroupSaveBlock({
             const extensionRender = suppressExtensions ? undefined : renderer?.extension;
             const sectionValues = (state.values[meta.key] ?? {}) as SectionValues;
             const cardTitle = displayMeta.displayName || displayMeta.className;
+            const cardIssueCount = issueCountBySection[meta.key] ?? 0;
 
             return (
               <Card
@@ -565,12 +566,26 @@ function GroupSaveBlock({
                 className={clsx(
                   'mb-4 break-inside-avoid',
                   fullWidth && '[column-span:all]',
+                  // A left rule reads as "this one" at a glance across a
+                  // multi-column flow, where a badge alone gets lost.
+                  cardIssueCount > 0 && 'border-l-2 border-l-pf-error',
                 )}
+                dataAttributes={{
+                  'data-section-key': meta.key,
+                  'data-section-issues': cardIssueCount ? String(cardIssueCount) : undefined,
+                }}
               >
                 <Card.Header className="pb-2">
-                  <h4 className="text-sm font-semibold text-pf-text-primary">
-                    {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
-                  </h4>
+                  <div className="flex items-start justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-pf-text-primary">
+                      {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
+                    </h4>
+                    {cardIssueCount > 0 && (
+                      <Badge variant="error" size="sm">
+                        Action needed
+                      </Badge>
+                    )}
+                  </div>
                   {meta.description && (
                     <p className="text-xs text-pf-text-secondary mt-0.5">
                       {query
@@ -625,6 +640,7 @@ export function SettingsPage({
   // other. Only the summary comes up here, and only so one bar can describe all
   // of them. See settingsSaveRegistry.ts.
   const [dirtyByGroup, setDirtyByGroup] = useState<Record<string, GroupDirtySummary>>({});
+  const [issuesByGroup, setIssuesByGroup] = useState<Record<string, SettingsIssue[]>>({});
   const groupActionsRef = useRef(new Map<string, GroupSaveActions>());
   const [isSavingAll, setIsSavingAll] = useState(false);
   const [saveAllError, setSaveAllError] = useState<string | null>(null);
@@ -654,9 +670,34 @@ export function SettingsPage({
     else groupActionsRef.current.delete(group);
   }, []);
 
+  // Same identity-bailout discipline as `publishSummary`: blocks republish on
+  // every keystroke, and only a genuine change of the issue list may re-render
+  // the page. Comparing the flattened messages is enough — two issue lists that
+  // agree field-for-field and message-for-message render identically.
+  const publishIssues = useCallback((group: string, issues: readonly SettingsIssue[]) => {
+    setIssuesByGroup((prev) => {
+      const current = prev[group];
+      if (issues.length === 0) {
+        if (!current) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      }
+      const same = current
+        && current.length === issues.length
+        && current.every((issue, i) => (
+          issue.sectionKey === issues[i].sectionKey
+          && issue.field === issues[i].field
+          && issue.message === issues[i].message
+          && issue.severity === issues[i].severity
+        ));
+      return same ? prev : { ...prev, [group]: [...issues] };
+    });
+  }, []);
+
   const saveRegistry = useMemo(
-    () => ({ publishSummary, registerActions }),
-    [publishSummary, registerActions],
+    () => ({ publishSummary, publishIssues, registerActions }),
+    [publishSummary, publishIssues, registerActions],
   );
 
   // When the command palette deep-links to a specific setting the URL carries
@@ -756,6 +797,25 @@ export function SettingsPage({
     [allowedGroups],
   );
 
+  /**
+   * Which bands were flagged *at load time*.
+   *
+   * Ordering deliberately uses the loaded values, not the live ones. If the sort
+   * key tracked live edits, the band a user is actively fixing would jump out
+   * from under their cursor the instant the field validated — the page
+   * rearranging itself mid-keystroke. Freezing the order per load means a
+   * flagged band rises to the top once and stays put until the next load, while
+   * the attention band's *contents* stay live.
+   */
+  const attentionGroups = useMemo(() => {
+    const flagged = new Set<string>();
+    for (const issue of deriveSettingsIssues(metadata, values)) {
+      const meta = metadata.find((m) => m.key === issue.sectionKey);
+      if (meta) flagged.add(meta.group || 'Other');
+    }
+    return flagged;
+  }, [metadata, values]);
+
   const { sortedGroups, metadataByGroup } = useMemo(() => {
     const visibleMetadata = metadata.filter(
       (item) => !allowedGroupSet || allowedGroupSet.has(item.group || 'Other'),
@@ -784,6 +844,13 @@ export function SettingsPage({
     const sorted = Object.keys(byGroup)
       .filter((group) => isSlicerAvailable || group !== 'Slicing')
       .sort((a, b) => {
+        // Bands needing attention lead. With nothing flagged this term is
+        // constant and the declared backend order below is untouched, so a
+        // healthy page renders exactly as it did before attention existed.
+        const flaggedA = attentionGroups.has(a) ? 0 : 1;
+        const flaggedB = attentionGroups.has(b) ? 0 : 1;
+        if (flaggedA !== flaggedB) return flaggedA - flaggedB;
+
         const orderA = orderMap[a] ?? 999;
         const orderB = orderMap[b] ?? 999;
         if (orderA !== orderB) return orderA - orderB;
@@ -804,7 +871,7 @@ export function SettingsPage({
       sortedGroups: sorted,
       metadataByGroup: metaByGroup,
     };
-  }, [allowedGroupSet, groupMetadata, isSlicerAvailable, metadata]);
+  }, [allowedGroupSet, attentionGroups, groupMetadata, isSlicerAvailable, metadata]);
 
   const getGroupDisplayName = useCallback((groupKey: string): string => {
     const group = groupMetadata.find((g) => g.key === groupKey);
@@ -945,6 +1012,43 @@ export function SettingsPage({
     [sortedGroups, metadataByGroup, visibleByKey],
   );
 
+  /**
+   * Every live issue on the page, ordered the way the bands render so the banner
+   * reads top-to-bottom in the same order as the page beneath it.
+   *
+   * Only issues in bands that are currently *visible* count. A field hidden by
+   * the Essential filter or an active search is not something the user can act
+   * on from here, and a "Fix" button that scrolls to nothing is worse than no
+   * button at all.
+   */
+  const attentionIssues = useMemo(() => {
+    const ordered: SettingsIssue[] = [];
+    for (const group of sortedGroups) {
+      for (const issue of issuesByGroup[group] ?? []) {
+        const visible = visibleByKey[issue.sectionKey];
+        if (!visible || visible.size === 0) continue;
+        if (issue.field && !visible.has(issue.field)) continue;
+        ordered.push(issue);
+      }
+    }
+    return ordered;
+  }, [sortedGroups, issuesByGroup, visibleByKey]);
+
+  const issueCountBySection = useMemo(
+    () => countIssuesBySection(attentionIssues),
+    [attentionIssues],
+  );
+
+  const issueCountByGroup = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const group of sortedGroups) {
+      const total = (metadataByGroup[group] ?? [])
+        .reduce((sum, meta) => sum + (issueCountBySection[meta.key] ?? 0), 0);
+      if (total > 0) counts[group] = total;
+    }
+    return counts;
+  }, [sortedGroups, metadataByGroup, issueCountBySection]);
+
   const toggleHelperText = useMemo(() => {
     if (trimmedQuery) {
       if (visibleSettingsCount === 0) return 'No matching settings';
@@ -1056,6 +1160,45 @@ export function SettingsPage({
         )}
 
         <div className={CARD_FLOW_CONTAINER_CLASS}>
+          {attentionIssues.length > 0 && (
+            <AdminSection
+              caption="Needs attention"
+              captionId="settings-attention"
+              count={attentionIssues.length}
+              countVariant="error"
+              headingLevel={3}
+              className="mb-6"
+            >
+              <ul
+                className="flex flex-col gap-3"
+                data-testid="settings-attention-list"
+              >
+                {attentionIssues.map((issue) => (
+                  <AttentionRow
+                    key={`${issue.sectionKey}.${issue.field}`}
+                    severity={issue.severity}
+                    showSeverity={false}
+                    title={issue.title}
+                    detail={issue.detail}
+                    action={
+                      issue.field
+                        ? {
+                          label: 'Fix',
+                          onClick: () => focusSettingProperty(issue.sectionKey, issue.field),
+                        }
+                        : undefined
+                    }
+                    dataAttributes={{
+                      'data-testid': 'settings-attention-item',
+                      'data-attention-section': issue.sectionKey,
+                      'data-attention-field': issue.field || undefined,
+                    }}
+                  />
+                ))}
+              </ul>
+            </AdminSection>
+          )}
+
           <div className={bandFlowClass(visibleBandCount)} data-testid="settings-band-flow">
             {sortedGroups.map((group) => {
           const groupMeta = metadataByGroup[group] ?? [];
@@ -1074,6 +1217,7 @@ export function SettingsPage({
             initialGroupValues[m.key] = (values[m.key] ?? {}) as SectionValues;
           }
           const groupDisplay = getGroupDisplayName(group);
+          const groupIssueCount = issueCountByGroup[group] ?? 0;
 
           return (
             <AdminSection
@@ -1089,6 +1233,13 @@ export function SettingsPage({
               headingLevel={3}
               gap="loose"
               className="mb-6 break-inside-avoid"
+              captionAside={
+                groupIssueCount > 0 ? (
+                  <Badge variant="error" size="sm">
+                    {groupIssueCount} {groupIssueCount === 1 ? 'issue' : 'issues'}
+                  </Badge>
+                ) : undefined
+              }
             >
               <GroupSaveBlock
                 key={group}

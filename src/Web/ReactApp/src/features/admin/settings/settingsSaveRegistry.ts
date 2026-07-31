@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react';
+import type { SettingsIssue } from './settingsAttention';
 
 /**
  * Result of asking one settings group to persist its dirty sections.
@@ -34,6 +35,16 @@ export interface SettingsSaveRegistry {
    * bar *shows*, so it lives in React state.
    */
   publishSummary: (group: string, summary: GroupDirtySummary | null) => void;
+  /**
+   * Publish (or with an empty array, clear) the validation issues a group's
+   * *live* values currently produce. Drives the page's "needs attention" band.
+   *
+   * This travels the same summary-up path and for the same reason: the page owns
+   * the band, but only the group knows its edited values. Publishing keeps the
+   * band honest while the user types and after a save, without hoisting the
+   * values themselves — which would undo the isolation the blocks exist for.
+   */
+  publishIssues: (group: string, issues: readonly SettingsIssue[]) => void;
   /**
    * Register (or with `null`, unregister) a group's save/discard callbacks.
    * Drives what the bar *does*. Held in a ref, because a change of callback

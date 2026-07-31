@@ -62,4 +62,21 @@ public sealed class SettingDisplayAttribute : Attribute
     /// Indicates if the setting property is required in the UI.
     /// </summary>
     public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Name of a boolean property in the same section that gates <see cref="Required"/>.
+    /// When set, the property is only required while that property is <c>true</c>.
+    /// <para>
+    /// This exists because settings sections routinely enforce invariants in
+    /// <c>Validate()</c> that the UI cannot see — a subnet list that must be
+    /// non-empty whenever discovery is enabled, for example. Without this the
+    /// requirement is invisible until a save fails, which is the wrong moment
+    /// to learn about it.
+    /// </para>
+    /// <para>
+    /// Use the serialized (JSON) property name, since that is the name the
+    /// client sees.
+    /// </para>
+    /// </summary>
+    public string? RequiredWhen { get; set; }
 }

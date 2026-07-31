@@ -27,6 +27,23 @@ export type { AdminSectionProps } from './AdminSection';
 export { AdminStatTile } from './AdminStatTile';
 export type { AdminStatTileProps } from './AdminStatTile';
 
+export { AttentionRow } from './AttentionRow';
+export type {
+  AttentionRowProps,
+  AttentionAction,
+  AttentionRouteAction,
+  AttentionCallbackAction,
+} from './AttentionRow';
+
+export {
+  ATTENTION_PRESENTATION,
+  presentationForAttentionSeverity,
+} from './attentionPresentation';
+export type {
+  AttentionPresentation,
+  AttentionSeverity,
+} from './attentionPresentation';
+
 export { useDirtyState, isStructurallyEqual } from './useDirtyState';
 export type { UseDirtyStateOptions, UseDirtyStateResult } from './useDirtyState';
 

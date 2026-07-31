@@ -15,6 +15,14 @@ export interface SettingPropertyDisplayMetadata {
   order?: number;
   inputType?: SettingInputType;
   isMulti?: boolean;
+  /** Declared on the backend settings class; the field must have a value. */
+  required?: boolean;
+  /**
+   * JSON name of a boolean property in the same section that gates `required`.
+   * When set, the field is only required while that property is `true` — e.g.
+   * discovery subnets are required only while discovery is enabled.
+   */
+  requiredWhen?: string;
   allowedValues?: unknown[];
   minValue?: number;
   maxValue?: number;

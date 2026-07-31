@@ -1,8 +1,14 @@
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import { Link } from 'react-router';
-import { Badge, Button, Card } from '@/common/components/ui';
-import { AdminEmpty, AdminError, AdminLoading, AdminSection, AdminStatTile } from '@/common/components/admin';
+import { Button, Card } from '@/common/components/ui';
+import {
+  AdminEmpty,
+  AdminError,
+  AdminLoading,
+  AdminSection,
+  AdminStatTile,
+  AttentionRow,
+} from '@/common/components/admin';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   AlertCircleIcon,
@@ -11,7 +17,6 @@ import {
   CheckCircleIcon,
   HelpCircleIcon,
   HomeIcon,
-  InfoIcon,
   RefreshIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -22,10 +27,8 @@ import {
 } from '@/features/admin/registry';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
 import {
-  isKnownAttentionSeverity,
   isKnownSubsystemStatus,
   type AttentionItemDto,
-  type KnownAttentionSeverity,
   type KnownSubsystemStatus,
   type SubsystemHealthDto,
 } from '@/types/adminOverview';
@@ -89,56 +92,9 @@ function presentationForSubsystemStatus(raw: string): StatusPresentation {
   };
 }
 
-interface AttentionPresentation {
-  label: string;
-  Icon: (props: { className?: string; ariaLabel?: string }) => JSX.Element;
-  iconClass: string;
-  badgeVariant: 'error' | 'warning' | 'info' | 'default';
-  rowBorderClass: string;
-  rowBgClass: string;
-  srPrefix: string;
-}
-
-const ATTENTION_PRESENTATION: Record<KnownAttentionSeverity, AttentionPresentation> = {
-  Error: {
-    label: 'Error',
-    Icon: AlertCircleIcon,
-    iconClass: 'text-pf-error',
-    badgeVariant: 'error',
-    rowBorderClass: 'border-pf-error/40',
-    rowBgClass: 'bg-pf-error-bg/40',
-    srPrefix: 'Error',
-  },
-  Warning: {
-    label: 'Warning',
-    Icon: AlertIcon,
-    iconClass: 'text-pf-warning',
-    badgeVariant: 'warning',
-    rowBorderClass: 'border-pf-warning/40',
-    rowBgClass: 'bg-pf-bg-1',
-    srPrefix: 'Warning',
-  },
-  Info: {
-    label: 'Info',
-    Icon: InfoIcon,
-    iconClass: 'text-pf-accent',
-    badgeVariant: 'info',
-    rowBorderClass: 'border-pf-border',
-    rowBgClass: 'bg-pf-bg-1',
-    srPrefix: 'Info',
-  },
-};
-
-function presentationForAttentionSeverity(raw: string): AttentionPresentation {
-  if (isKnownAttentionSeverity(raw)) {
-    return ATTENTION_PRESENTATION[raw];
-  }
-  return {
-    ...ATTENTION_PRESENTATION.Info,
-    label: raw || 'Notice',
-    srPrefix: `Unknown severity "${raw || 'unspecified'}"`,
-  };
-}
+// Attention severity presentation now lives in the shared AttentionRow so the
+// hub and the settings page cannot drift apart. See
+// `common/components/admin/AttentionRow.tsx`.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -203,50 +159,24 @@ function resolveAttentionActionRoute(item: AttentionItemDto): string | null {
   return item.actionRoute ?? null;
 }
 
-function AttentionRow({ item }: { item: AttentionItemDto }) {
-  const presentation = presentationForAttentionSeverity(item.severity);
-  const { Icon } = presentation;
+function AttentionRowFromDto({ item }: { item: AttentionItemDto }) {
   const actionRoute = resolveAttentionActionRoute(item);
-  const hasAction = Boolean(item.actionLabel && actionRoute);
   return (
-    <li
-      className={clsx(
-        'flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-start',
-        presentation.rowBorderClass,
-        presentation.rowBgClass,
-      )}
-      data-testid="admin-hub-attention-item"
-      data-attention-key={item.key}
-      data-attention-severity={item.severity}
-    >
-      <span
-        className={clsx('mt-0.5 shrink-0', presentation.iconClass)}
-        aria-hidden="true"
-      >
-        <Icon className="h-5 w-5" ariaLabel="" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="sr-only">{presentation.srPrefix}: </span>
-          <p className="text-sm font-semibold text-pf-text-primary">{item.title}</p>
-          <Badge variant={presentation.badgeVariant} size="sm">
-            {presentation.label}
-          </Badge>
-        </div>
-        <p className="mt-1 text-sm text-pf-text-secondary">{item.detail}</p>
-      </div>
-      {hasAction && actionRoute && (
-        <div className="shrink-0 sm:ml-auto sm:self-center">
-          <Link
-            to={actionRoute}
-            className="inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-3 py-1.5 text-sm font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
-          >
-            {item.actionLabel}
-            <ArrowRightIcon className="h-3.5 w-3.5" ariaLabel="" />
-          </Link>
-        </div>
-      )}
-    </li>
+    <AttentionRow
+      severity={item.severity}
+      title={item.title}
+      detail={item.detail}
+      action={
+        item.actionLabel && actionRoute
+          ? { label: item.actionLabel, to: actionRoute }
+          : undefined
+      }
+      dataAttributes={{
+        'data-testid': 'admin-hub-attention-item',
+        'data-attention-key': item.key,
+        'data-attention-severity': item.severity,
+      }}
+    />
   );
 }
 
@@ -416,7 +346,7 @@ export function AdminControlCenterPage() {
               data-testid="admin-hub-attention"
             >
               {data.attention.map((item) => (
-                <AttentionRow key={item.key} item={item} />
+                <AttentionRowFromDto key={item.key} item={item} />
               ))}
             </ul>
           )}

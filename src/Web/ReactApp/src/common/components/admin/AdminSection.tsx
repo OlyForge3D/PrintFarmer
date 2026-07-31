@@ -16,6 +16,12 @@ export interface AdminSectionProps {
   countVariant?: BadgeVariant;
   /** Right-aligned slot on the caption line: a timestamp, a filter, an action. */
   headerAside?: ReactNode;
+  /**
+   * Slot immediately after the caption, next to `count`. For labels that
+   * qualify the section itself ("2 issues") and read as nonsense once they
+   * drift to the far edge of a wide column.
+   */
+  captionAside?: ReactNode;
   /** Gap between the caption line and the body. */
   gap?: 'tight' | 'default' | 'loose';
   /**
@@ -57,6 +63,7 @@ export function AdminSection({
   count,
   countVariant = 'default',
   headerAside,
+  captionAside,
   gap = 'default',
   headingLevel = 2,
   className,
@@ -81,6 +88,7 @@ export function AdminSection({
               {count}
             </Badge>
           )}
+          {captionAside}
         </div>
         {headerAside}
       </header>
