@@ -1562,8 +1562,30 @@
     cursor: not-allowed;
   }
 
-  /* Direct button element styling */
+  /* Baseline ergonomics for any button that is not a design-system Button. */
   button:not([data-pf-button]) {
+    cursor: pointer;
+  }
+
+  /*
+   * Primary-action skin, for genuinely unstyled buttons only.
+   *
+   * `:not([class])` is doing the real work here. `background` and `box-shadow`
+   * are shorthand declarations on an element selector, so a Tailwind `bg-*`
+   * utility — which sets only `background-color` — cannot displace the
+   * gradient, and no utility clears the glow at all. Without the guard this
+   * block silently repaints author-styled buttons as primary actions.
+   *
+   * Measured before the guard was added: 35 buttons across 9 routes, every one
+   * carrying explicit classes, none of them an action. Navigation took the
+   * worst of it — the settings sidebar (`rounded-md border`), the settings sub
+   * tabs (`rounded-none`) and the mobile category selector (`bg-pf-bg-1`) each
+   * declare their own surface and were all overridden into glowing 8px pills.
+   * Overriding a stated `rounded-none` is the clearest sign the rule is wrong.
+   *
+   * A button that carries a class has already decided how it looks.
+   */
+  button:not([data-pf-button]):not([class]) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1571,7 +1593,6 @@
     font-weight: 500;
     border-radius: 0.5rem;
     transition: all 0.2s ease-in-out;
-    cursor: pointer;
     background: linear-gradient(to bottom, var(--pf-gradient-primary-start), var(--pf-gradient-primary-end));
     color: var(--pf-text-primary);
     border: 1px solid var(--pf-border-light);
@@ -1586,13 +1607,14 @@
     box-shadow: 0 0 0 3px var(--pf-focus-ring);
   }
 
-  button:not([data-pf-button]):hover:not(:disabled) {
+  button:not([data-pf-button]):not([class]):hover:not(:disabled) {
     background: linear-gradient(to bottom, var(--pf-gradient-secondary-start), var(--pf-gradient-secondary-end));
     border-color: var(--pf-accent-2);
     box-shadow: var(--pf-btn-glow, 0 4px 6px -1px rgba(0, 0, 0, 0.1));
   }
 
-  button:not([data-pf-button]):active:not(:disabled) {
+  /* Press feedback belongs to the skin; a classed button owns its own. */
+  button:not([data-pf-button]):not([class]):active:not(:disabled) {
     transform: translateY(1px);
   }
 
