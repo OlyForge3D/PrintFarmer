@@ -91,11 +91,8 @@ public class CalibrationProviderMigrationHarnessTests
 
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
         applied.Should().Contain(
-            m => m.EndsWith("AddCalibrationQueueDispatch", StringComparison.Ordinal),
-            "the calibration queue dispatch migration must be applied");
-        applied.Should().Contain(
-            m => m.EndsWith("AddQueueAuditAndBackendIdentity", StringComparison.Ordinal),
-            "the queue audit / backend identity migration must be applied");
+            m => m.EndsWith("InitialV2", StringComparison.Ordinal),
+            "the squashed baseline migration must be applied");
 
         (await ctx.Database.GetPendingMigrationsAsync()).Should().BeEmpty(
             "no pending migrations may remain after MigrateAsync");
@@ -336,25 +333,6 @@ public class CalibrationProviderMigrationHarnessTests
             "regardless of terminal status; application-level replay logic prevents reaching this path in production");
     }
 
-    [Fact]
-    [Trait("Category", "DbHeavy")]
-    public async Task SQLite_GenuinePredecessorUpgrade_BackfillsAndFencesConcurrentProducers()
-    {
-        string dbName = $"pfarm_predecessor_{Guid.NewGuid():N}";
-        string connectionString =
-            $"Data Source=file:{dbName}?mode=memory&cache=shared;Foreign Keys=False";
-        using var keepAlive = new SqliteConnection(connectionString);
-        keepAlive.Open();
-        DbContextOptions<AppDbContext> options =
-            new DbContextOptionsBuilder<AppDbContext>()
-                .UseSqlite(
-                    connectionString,
-                    provider => provider.MigrationsAssembly("Farm.Migrations.Sqlite"))
-                .Options;
-
-        await RunProviderSchemaAssertionsAsync(options, "SQLite");
-    }
-
     // =========================================================================
     // PostgreSQL — skipped unless PFARM_TEST_POSTGRES_CONN env var is set
     // =========================================================================
@@ -424,45 +402,13 @@ public class CalibrationProviderMigrationHarnessTests
 
         await ctx.Database.EnsureDeletedAsync();
         IMigrator migrator = ctx.Database.GetService<IMigrator>();
-        string predecessor = ctx.Database.GetMigrations()
-            .Single(migration => migration.EndsWith(
-                "AddCalibrationGenerationOrchestration",
-                StringComparison.Ordinal));
-        string frozenParent = ctx.Database.GetMigrations()
-            .Single(migration => migration.EndsWith(
-                "CompleteCalibrationDispatchFencing",
-                StringComparison.Ordinal));
-        await migrator.MigrateAsync(predecessor);
-        Guid legacyJobId = Guid.NewGuid();
-        Guid legacyScheduleId = Guid.NewGuid();
-        await SeedLegacyPrintJobAsync(ctx, legacyJobId);
-        await SeedLegacyScheduleAsync(ctx, legacyScheduleId, legacyJobId);
-        await migrator.MigrateAsync(frozenParent);
-        Guid legacyExecutionId = Guid.NewGuid();
-        await SeedLegacyExecutionAsync(
-            ctx,
-            legacyExecutionId,
-            legacyScheduleId);
-        if (!string.Equals(providerName, "SQLite", StringComparison.Ordinal))
-        {
-            await SetLegacyScheduleActorAsync(
-                ctx,
-                legacyScheduleId,
-                Guid.NewGuid());
-        }
         await migrator.MigrateAsync();
         ctx.ChangeTracker.Clear();
 
         IEnumerable<string> applied = await ctx.Database.GetAppliedMigrationsAsync();
         applied.Should().Contain(
-            m => m.EndsWith("AddCalibrationQueueDispatch", StringComparison.Ordinal),
-            $"[{providerName}] the calibration queue dispatch migration must be applied");
-        applied.Should().Contain(
-            m => m.EndsWith("AddQueueAuditAndBackendIdentity", StringComparison.Ordinal),
-            $"[{providerName}] the queue audit / backend identity migration must be applied");
-        applied.Should().Contain(
-            m => m.EndsWith("AddScheduledOccurrenceIdentity", StringComparison.Ordinal),
-            $"[{providerName}] the scheduled occurrence identity migration must be applied");
+            m => m.EndsWith("InitialV2", StringComparison.Ordinal),
+            $"[{providerName}] the squashed baseline migration must be applied");
 
         // OutboxSequenceState seed row must exist.
         bool seedExists = await ctx.OutboxSequenceStates.AnyAsync(s => s.Id == 1);
@@ -471,6 +417,8 @@ public class CalibrationProviderMigrationHarnessTests
         OutboxSequenceState seqState = await ctx.OutboxSequenceStates.SingleAsync(s => s.Id == 1);
         seqState.NextSequence.Should().BeGreaterThanOrEqualTo(
             0, $"[{providerName}] NextSequence must be non-negative");
+        seqState.RowVersion.Should().NotBeNullOrEmpty(
+            $"[{providerName}] the provider-native sequence fence must receive a usable ETag");
 
         // All calibration queue tables must be queryable.
         (await ctx.QueueDispatchOutbox.LongCountAsync()).Should()
@@ -481,63 +429,6 @@ public class CalibrationProviderMigrationHarnessTests
             .BeGreaterThanOrEqualTo(0, $"[{providerName}] PrinterDispatchStates must be queryable");
         (await ctx.QueueOperationAudits.LongCountAsync()).Should()
             .BeGreaterThanOrEqualTo(0, $"[{providerName}] QueueOperationAudits must be queryable");
-
-        // Backfill: every pre-existing PrintJob row must be Standard with null calibration
-        // fields — an ambiguous legacy row must never become a valid ack or lease.
-        int ambiguousLegacyRows = await ctx.PrintJobs
-            .CountAsync(j => j.JobKind == null ||
-                             (j.JobKind == JobKind.Standard &&
-                              (j.IdempotencyKey != null || j.CalibrationAttemptId != null)));
-        ambiguousLegacyRows.Should().Be(
-            0, $"[{providerName}] backfilled rows must be unambiguously Standard with null calibration fields");
-        PrintJob legacy = await ctx.PrintJobs.SingleAsync(job => job.Id == legacyJobId);
-        legacy.JobKind.Should().Be(JobKind.Standard);
-        legacy.CalibrationAttemptId.Should().BeNull();
-        legacy.PinnedSpoolId.Should().BeNull();
-        legacy.Revision.Should().Be(1);
-        legacy.RowVersion.Should().NotBeNullOrEmpty(
-            $"[{providerName}] legacy queue rows must receive a usable ETag");
-        seqState.RowVersion.Should().NotBeNullOrEmpty(
-            $"[{providerName}] the provider-native sequence fence must receive a usable ETag");
-
-        var management = new Mock<IPrintJobManagementService>(MockBehavior.Strict);
-        var scheduler = new JobSchedulingService(
-            ctx,
-            NullLogger<JobSchedulingService>.Instance,
-            management.Object,
-            new QueueResourceAuthorizationService(ctx));
-
-        await scheduler.TriggerScheduledJobsAsync();
-        ctx.ChangeTracker.Clear();
-
-        management.Verify(service => service.DispatchJobAsync(
-                It.IsAny<string>(),
-                It.IsAny<string>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()),
-            Times.Never,
-            $"[{providerName}] migration-disabled legacy schedules must produce zero adapter effects");
-        JobSchedule legacySchedule = await ctx.JobSchedules
-            .SingleAsync(schedule => schedule.Id == legacyScheduleId);
-        legacySchedule.IsActive.Should().BeFalse(
-            $"[{providerName}] a legacy schedule without current job/printer/project ACL must be disabled");
-        legacySchedule.IsPaused.Should().BeTrue();
-        legacySchedule.RequiresOperatorReauthorization.Should().BeTrue();
-        legacySchedule.RecurrenceInterval.Should().Be(1);
-        legacySchedule.RootPrintJobId.Should().Be(
-            legacyJobId,
-            $"[{providerName}] legacy schedules must retain their original stable job identity");
-        JobExecution legacyExecution = await ctx.JobExecutions
-            .SingleAsync(execution => execution.Id == legacyExecutionId);
-        legacyExecution.OccurrencePrintJobId.Should().Be(
-            legacyJobId,
-            $"[{providerName}] legacy history must identify its original occurrence");
-        (await ctx.JobExecutions.CountAsync(execution =>
-            execution.JobScheduleId == legacyScheduleId &&
-            execution.Status == "ReauthorizationRequired")).Should().Be(
-            string.Equals(providerName, "SQLite", StringComparison.Ordinal)
-                ? 0
-                : 1);
 
         // Fencing: the outbox sequence must be unique at the database level.
         bool duplicateSequences = await ctx.QueueDispatchOutbox
@@ -556,136 +447,6 @@ public class CalibrationProviderMigrationHarnessTests
         IEnumerable<string> pending = await ctx.Database.GetPendingMigrationsAsync();
         pending.Should().BeEmpty(
             $"[{providerName}] no pending migrations must remain after MigrateAsync");
-    }
-
-    private static async Task SeedLegacyPrintJobAsync(
-        AppDbContext context,
-        Guid jobId)
-    {
-        DateTime now = DateTime.UtcNow.AddDays(-1);
-        if (context.Database.IsSqlServer())
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO [PrintJobs]
-                    ([Id], [Name], [Status], [Priority], [QueuePosition],
-                     [CreatedAt], [UpdatedAt], [QueuedAt],
-                     [WasSeededFromHistory], [IsExternalPrint], [Copies], [CompletedCopies])
-                VALUES
-                    ({jobId}, {"legacy-predecessor"}, {(int)PrintJobStatus.Queued},
-                     {(int)PrintJobPriority.Normal}, {0},
-                     {now}, {now}, {now}, {false}, {false}, {1}, {0})
-                """);
-        }
-        else
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO "PrintJobs"
-                    ("Id", "Name", "Status", "Priority", "QueuePosition",
-                     "CreatedAt", "UpdatedAt", "QueuedAt",
-                     "WasSeededFromHistory", "IsExternalPrint", "Copies", "CompletedCopies")
-                VALUES
-                    ({jobId}, {"legacy-predecessor"}, {(int)PrintJobStatus.Queued},
-                     {(int)PrintJobPriority.Normal}, {0},
-                     {now}, {now}, {now}, {false}, {false}, {1}, {0})
-                """);
-        }
-    }
-
-    private static async Task SeedLegacyScheduleAsync(
-        AppDbContext context,
-        Guid scheduleId,
-        Guid jobId)
-    {
-        DateTime due = DateTime.UtcNow.AddHours(-1);
-        DateTime created = DateTime.UtcNow.AddDays(-1);
-        if (context.Database.IsSqlServer())
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO [JobSchedules]
-                    ([Id], [PrintJobId], [ScheduledStartTime], [TimeZone],
-                     [RecurrencePattern], [RecurrenceEndDate], [IsActive], [IsPaused],
-                     [ScheduledAt], [CreatedAt], [UpdatedAt])
-                VALUES
-                    ({scheduleId}, {jobId}, {due}, {"UTC"},
-                     {(string?)null}, {(DateTime?)null}, {true}, {false},
-                     {created}, {created}, {created})
-                """);
-        }
-        else
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO "JobSchedules"
-                    ("Id", "PrintJobId", "ScheduledStartTime", "TimeZone",
-                     "RecurrencePattern", "RecurrenceEndDate", "IsActive", "IsPaused",
-                     "ScheduledAt", "CreatedAt", "UpdatedAt")
-                VALUES
-                    ({scheduleId}, {jobId}, {due}, {"UTC"},
-                     {(string?)null}, {(DateTime?)null}, {true}, {false},
-                     {created}, {created}, {created})
-                """);
-        }
-    }
-
-    private static async Task SetLegacyScheduleActorAsync(
-        AppDbContext context,
-        Guid scheduleId,
-        Guid actorId)
-    {
-        string actor = actorId.ToString();
-        if (context.Database.IsSqlServer())
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                UPDATE [JobSchedules]
-                SET [InitiatingActorSubject] = {actor}
-                WHERE [Id] = {scheduleId}
-                """);
-        }
-        else
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                UPDATE "JobSchedules"
-                SET "InitiatingActorSubject" = {actor}
-                WHERE "Id" = {scheduleId}
-                """);
-        }
-    }
-
-    private static async Task SeedLegacyExecutionAsync(
-        AppDbContext context,
-        Guid executionId,
-        Guid scheduleId)
-    {
-        DateTime created = DateTime.UtcNow.AddMinutes(-30);
-        if (context.Database.IsSqlServer())
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO [JobExecutions]
-                    ([Id], [JobScheduleId], [ScheduledExecutionTime], [ActualStartTime],
-                     [Status], [Message], [CreatedAt], [UpdatedAt])
-                VALUES
-                    ({executionId}, {scheduleId}, {created}, {created},
-                     {"Completed"}, {"Legacy occurrence"}, {created}, {created})
-                """);
-        }
-        else
-        {
-            await context.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                INSERT INTO "JobExecutions"
-                    ("Id", "JobScheduleId", "ScheduledExecutionTime", "ActualStartTime",
-                     "Status", "Message", "CreatedAt", "UpdatedAt")
-                VALUES
-                    ({executionId}, {scheduleId}, {created}, {created},
-                     {"Completed"}, {"Legacy occurrence"}, {created}, {created})
-                """);
-        }
     }
 
     private static async Task AssertProviderNativeConcurrencyAsync(

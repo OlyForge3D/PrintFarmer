@@ -29,7 +29,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void PostgresInitialV1_HasNoSetNullForeignKeyAgainstRequiredColumn()
     {
         AssertInitialV1HasNoSetNullVsRequiredFk(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1),
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2),
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL");
     }
 
@@ -37,7 +37,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void SqlServerInitialV1_HasNoSetNullForeignKeyAgainstRequiredColumn()
     {
         AssertInitialV1HasNoSetNullVsRequiredFk(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1),
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2),
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer");
     }
 
@@ -45,7 +45,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void PostgresInitialV1_ToolheadManufacturerFk_IsRequiredAndNotSetNull()
     {
         AssertNamedFkContract(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1),
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2),
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "ToolheadModelDefinitions",
             fk: "FK_ToolheadModelDefinitions_Manufacturers_ManufacturerId",
@@ -56,7 +56,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void SqlServerInitialV1_ToolheadManufacturerFk_IsRequiredAndNotSetNull()
     {
         AssertNamedFkContract(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1),
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2),
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "ToolheadModelDefinitions",
             fk: "FK_ToolheadModelDefinitions_Manufacturers_ManufacturerId",
@@ -67,7 +67,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void PostgresInitialV1_GcodeFileFolderFk_IsRequiredAndNotSetNull()
     {
         AssertNamedFkContract(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1),
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2),
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "GcodeFiles",
             fk: "FK_GcodeFiles_FolderNode_FolderId",
@@ -78,7 +78,7 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
     public void SqlServerInitialV1_GcodeFileFolderFk_IsRequiredAndNotSetNull()
     {
         AssertNamedFkContract(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1),
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2),
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "GcodeFiles",
             fk: "FK_GcodeFiles_FolderNode_FolderId",

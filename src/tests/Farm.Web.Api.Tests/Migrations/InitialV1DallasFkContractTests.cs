@@ -24,7 +24,7 @@ public sealed class InitialV1DallasFkContractTests
     public void PostgresInitialV1_ScheduleToPrinterFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "PrinterMaintenanceSchedules",
             fkName: "FK_PrinterMaintenanceSchedules_Printers_PrinterId");
@@ -34,7 +34,7 @@ public sealed class InitialV1DallasFkContractTests
     public void SqlServerInitialV1_ScheduleToPrinterFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "PrinterMaintenanceSchedules",
             fkName: "FK_PrinterMaintenanceSchedules_Printers_PrinterId");
@@ -44,7 +44,7 @@ public sealed class InitialV1DallasFkContractTests
     public void PostgresInitialV1_MaintenanceLogResolvedAlertFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "MaintenanceLogs",
             fkName: "FK_MaintenanceLogs_MaintenanceAlerts_ResolvedAlertId");
@@ -54,7 +54,7 @@ public sealed class InitialV1DallasFkContractTests
     public void SqlServerInitialV1_MaintenanceLogResolvedAlertFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "MaintenanceLogs",
             fkName: "FK_MaintenanceLogs_MaintenanceAlerts_ResolvedAlertId");
@@ -64,7 +64,7 @@ public sealed class InitialV1DallasFkContractTests
     public void PostgresAddNozzleDiameterMigration_CameraSnapshotCameraFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "CameraSnapshots",
             fkName: "FK_CameraSnapshots_Cameras_CameraId");
@@ -74,7 +74,7 @@ public sealed class InitialV1DallasFkContractTests
     public void SqlServerAddNozzleDiameterMigration_CameraSnapshotCameraFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "CameraSnapshots",
             fkName: "FK_CameraSnapshots_Cameras_CameraId");
@@ -84,7 +84,7 @@ public sealed class InitialV1DallasFkContractTests
     public void PostgresAddPrintedPartsInventoryMigration_PartOutputMappingGcodeFileFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL",
             table: "PartOutputMappings",
             fkName: "FK_PartOutputMappings_GcodeFiles_GcodeFileId");
@@ -94,7 +94,7 @@ public sealed class InitialV1DallasFkContractTests
     public void SqlServerAddPrintedPartsInventoryMigration_PartOutputMappingGcodeFileFk_IsRestrict()
     {
         AssertMigrationChainFkOnDeleteIsRestrict(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer",
             table: "PartOutputMappings",
             fkName: "FK_PartOutputMappings_GcodeFiles_GcodeFileId");
