@@ -6,16 +6,38 @@
 # ------------------------------------
 # AppDbContext and SlicerDbContext resolve the same connection string and neither
 # customises MigrationsHistoryTable, so they SHARE one database and one default
-# "__EFMigrationsHistory" table. Because both contexts are being squashed together,
-# every existing row is superseded and the table can be replaced wholesale with
-# exactly two baseline rows. If you ever squash only ONE context, this script is
-# the wrong tool -- a blanket delete would strand the other context's history and
-# it would try to re-apply its migrations against tables that already exist.
+# "__EFMigrationsHistory" table in the "public" schema. Because both contexts are
+# being squashed together, every existing row is superseded and the table can be
+# replaced wholesale with exactly two baseline rows. If you ever squash only ONE
+# context, this script is the wrong tool -- a blanket delete would strand the
+# other context's history and it would try to re-apply its migrations against
+# tables that already exist.
+#
+# THE "slicer" SCHEMA DOES NOT GET ITS OWN HISTORY TABLE
+# ------------------------------------------------------
+# SlicerDbContext calls HasDefaultSchema("slicer") on every non-SQLite provider,
+# so its ENTITY tables live in the "slicer" schema. Its history table does NOT.
+# In EF Core the history table's schema comes solely from
+# RelationalOptionsExtension.MigrationsHistoryTableSchema -- i.e. only from an
+# explicit MigrationsHistoryTable(...) call -- and is NOT inherited from the
+# model's HasDefaultSchema. (That inheritance is EF6 behaviour, via
+# System.Data.Entity.Migrations.History.DefaultSchema. It does not apply here.)
+#
+# Verified empirically: `dotnet ef migrations script --idempotent` for
+# SlicerDbContext emits `CREATE SCHEMA slicer;` plus 70+ `slicer.`-qualified entity
+# objects, but an UNQUALIFIED `"__EFMigrationsHistory"` -- byte-identical to the
+# statement AppDbContext emits. Same split on SQL Server ([slicer].[Artifacts] vs
+# unqualified [__EFMigrationsHistory]).
+#
+# That is why this script targets public."__EFMigrationsHistory" only. It still
+# probes for a stray slicer."__EFMigrationsHistory" below and refuses to run if one
+# exists, so a wrong assumption fails loudly instead of producing a false green.
 #
 # PRECONDITIONS (enforced below where possible)
 #   1. The deployment has already applied every migration up to the squash point.
-#      Enforced via --require-applied, which defaults to the harvest backfill so
-#      you cannot collapse history before that data migration has actually run.
+#      Enforced via --require-applied (app tip) and --require-applied-slicer
+#      (slicer tip), gated independently -- the app context being up to date
+#      says nothing about the slicer context's own migration state.
 #   2. The repo-side squash is merged and you know both new baseline migration IDs.
 #   3. The API and slicer-host containers are STOPPED. Both call Database.Migrate()
 #      on startup and would race this surgery.
@@ -43,6 +65,7 @@ BACKUP_DIR="${PF_BACKUP_DIR:-$REPO_ROOT/backups}"
 APP_MIGRATION_ID=""
 SLICER_MIGRATION_ID=""
 REQUIRE_APPLIED="20260730161147_BackfillLegacyHarvestedAt"
+REQUIRE_APPLIED_SLICER="20260728230016_AddArtifactCleanupDeletionState"
 EXPECT_COUNT=""
 APPLY=false
 FORCE=false
@@ -68,6 +91,12 @@ Options:
   --require-applied ID Migration that must already be applied before collapsing.
                        Default: $REQUIRE_APPLIED
                        Pass 'none' to disable this guard.
+  --require-applied-slicer ID
+                       Slicer migration that must already be applied. Gated
+                       separately from the app: the app being up to date says
+                       nothing about the slicer's own migration state.
+                       Default: $REQUIRE_APPLIED_SLICER
+                       Pass 'none' to disable this guard.
   --expect-count N     Fail unless the history table currently has exactly N rows.
   --backup-dir DIR     Where to write the pg_dump (default: $BACKUP_DIR)
   --skip-backup        Skip the pg_dump. Not recommended.
@@ -87,6 +116,7 @@ while [[ $# -gt 0 ]]; do
     --db)                  DB_NAME="$2"; shift 2;;
     --user)                DB_USER="$2"; shift 2;;
     --require-applied)     REQUIRE_APPLIED="$2"; shift 2;;
+    --require-applied-slicer) REQUIRE_APPLIED_SLICER="$2"; shift 2;;
     --expect-count)        EXPECT_COUNT="$2"; shift 2;;
     --backup-dir)          BACKUP_DIR="$2"; shift 2;;
     --skip-backup)         SKIP_BACKUP=true; shift;;
@@ -196,6 +226,25 @@ if [[ "$TABLE_EXISTS" != "t" ]]; then
 fi
 log_success "History table $HISTORY_TABLE found"
 
+# Defensive: EF Core keeps the history table in the provider default schema, NOT in
+# the model's HasDefaultSchema (see header). So SlicerDbContext shares the table
+# above and there should be NO slicer."__EFMigrationsHistory". If one exists, this
+# script's core premise is wrong for this database, and replacing only the public
+# table would silently leave the slicer history stale -- the next deploy would
+# re-run the slicer baseline over existing slicer.* tables and fail to start.
+# Refuse rather than report a false success.
+SLICER_HISTORY_EXISTS="$(psql_value "SELECT to_regclass('slicer.$HISTORY_TABLE') IS NOT NULL;")"
+if [[ "$SLICER_HISTORY_EXISTS" == "t" ]]; then
+  log_error "Found a SECOND history table: slicer.$HISTORY_TABLE"
+  log_info  "This script assumes both DbContexts share public.$HISTORY_TABLE and"
+  log_info  "rewrites only that one. This database does not match that assumption."
+  log_info  "Rewriting only the public table would leave the slicer history stale,"
+  log_info  "and the next deploy would fail with 'relation already exists'."
+  log_info  "Stop and reconcile both tables manually before proceeding."
+  exit 1
+fi
+log_success "No separate slicer history table (both contexts share public.$HISTORY_TABLE)"
+
 # --- inspect -----------------------------------------------------------------
 
 log_header "Current migration history"
@@ -234,6 +283,19 @@ if [[ "$REQUIRE_APPLIED" != "none" ]]; then
     exit 1
   fi
   log_success "Required migration '$REQUIRE_APPLIED' is applied"
+fi
+
+if [[ "$REQUIRE_APPLIED_SLICER" != "none" ]]; then
+  IS_APPLIED_SLICER="$(psql_value "SELECT EXISTS (SELECT 1 FROM $HISTORY_TABLE WHERE \"MigrationId\" = '$REQUIRE_APPLIED_SLICER');")"
+  if [[ "$IS_APPLIED_SLICER" != "t" ]]; then
+    log_error "Required SLICER migration '$REQUIRE_APPLIED_SLICER' has NOT been applied."
+    log_info  "The app context being up to date does not imply the slicer context is."
+    log_info  "Collapsing history now would discard that migration without ever running it,"
+    log_info  "leaving the slicer schema missing objects the new baseline assumes exist."
+    log_info  "Deploy the current build first, let slicer-host migrate, then re-run."
+    exit 1
+  fi
+  log_success "Required slicer migration '$REQUIRE_APPLIED_SLICER' is applied"
 fi
 
 # --- plan --------------------------------------------------------------------
