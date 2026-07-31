@@ -6,7 +6,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
  * These tests cover the per-group save model that replaced the single
- * "Save All Settings" button in issue #935. The important invariants:
+ * "Save All Settings" button in issue #935, as re-presented behind one
+ * page-level save bar in #1013. The important invariants:
  *  - Editing a field flips only that group's block into a dirty state.
  *  - Saving hits the per-section endpoint for each *changed* section (not the
  *    batch endpoint, and not sections that weren't touched).
@@ -153,15 +154,15 @@ describe('SettingsPage — per-group save', () => {
     const retentionInput = screen.getByLabelText('Retention Days');
     fireEvent.change(retentionInput, { target: { value: '45' } });
     expect(await screen.findByTestId('admin-save-bar')).toBeInTheDocument();
-    // AdminSaveBar renders the changed section names when changedLabels is provided.
-    expect(screen.getByText(/system log changed/i)).toBeInTheDocument();
+    // The bar names the section the change lives in, not just a bare count.
+    expect(screen.getByText('1 change in System Log')).toBeInTheDocument();
   });
 
   it('saves only the changed section via the per-section endpoint', async () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
 
-    const saveBtn = await screen.findByRole('button', { name: /save system/i });
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
     await act(async () => {
       fireEvent.click(saveBtn);
     });
@@ -170,8 +171,8 @@ describe('SettingsPage — per-group save', () => {
     expect(saveSettingsMock).toHaveBeenCalledWith('SystemLogSettings', { retentionDays: 45 });
     // Untouched section (NotificationSettings) is not persisted.
     expect(saveSettingsMock.mock.calls.map((c) => c[0])).not.toContain('NotificationSettings');
-    // Success toast fires.
-    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('System settings saved'));
+    // Success toast names what was written.
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Saved System Log'));
     // Bar collapses.
     await waitFor(() => expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument());
   });
@@ -202,7 +203,7 @@ describe('SettingsPage — per-group save', () => {
       });
 
       await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /save system/i }));
+        fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
       });
 
       // Wait for the save to complete and the dirty flag to flip false, at which
@@ -228,7 +229,7 @@ describe('SettingsPage — per-group save', () => {
     // Use a value that passes client-side validation (1..365) so the request
     // actually reaches the mocked API and the server-side rejection path is tested.
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '100' } });
-    const saveBtn = await screen.findByRole('button', { name: /save system/i });
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
 
     await act(async () => {
       fireEvent.click(saveBtn);

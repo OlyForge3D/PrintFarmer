@@ -22,8 +22,18 @@ import {
   AdminSaveBar,
   AdminEmpty,
   useDirtyState,
+  isStructurallyEqual,
   adminToast,
 } from '@/common/components/admin';
+import {
+  SettingsSaveRegistryContext,
+  useSettingsSaveRegistry,
+  formatDirtySummary,
+  formatSaveOutcome,
+  type GroupDirtySummary,
+  type GroupSaveActions,
+  type GroupSaveOutcome,
+} from '@/features/admin/settings/settingsSaveRegistry';
 import { getSectionRenderer } from '@/features/admin/settings/section-renderers';
 import { isEssentialProperty } from '@/features/admin/settings/essential-manifest';
 import { SettingsModeToggle } from '@/features/admin/settings/SettingsModeToggle';
@@ -179,6 +189,8 @@ function extractFieldErrors(
 }
 
 interface GroupSaveBlockProps {
+  /** Stable group key. Used to address this block in the page's save registry. */
+  group: string;
   groupDisplayName: string;
   metadataItems: SettingMetadata[];
   initialValues: GroupValues;
@@ -252,15 +264,21 @@ function cardFlowClass(cardCount: number): string {
 }
 
 /**
- * Renders one settings group as a grid of section cards, backed by its own
- * `useDirtyState`. Each dirty section is saved via its dedicated per-section
- * endpoint (`POST /api/settings/{key}`) — never the batch `saveAll` endpoint.
+ * Renders one settings group as a card flow, backed by its own `useDirtyState`.
+ * Each dirty section is saved via its dedicated per-section endpoint
+ * (`POST /api/settings/{key}`) — never the batch `saveAll` endpoint.
  *
- * The block is intentionally isolated so multiple groups can be edited
- * independently; the AdminSaveBar it renders only reflects this group's dirty
- * state, and saving one group leaves other groups' unsaved edits intact.
+ * The block is intentionally isolated so groups can be edited independently:
+ * saving one group leaves another group's unsaved edits exactly as the user
+ * left them.
+ *
+ * It renders no save bar of its own. It publishes its dirty summary and its
+ * save/discard callbacks to the page registry, and the page renders a single
+ * bar for all groups. See `settingsSaveRegistry.ts` for why the summary travels
+ * up while the state stays down.
  */
 function GroupSaveBlock({
+  group,
   groupDisplayName,
   metadataItems,
   initialValues,
@@ -283,8 +301,10 @@ function GroupSaveBlock({
   // `ValidationException` where `errors[sectionKey]` carries the reason. Rendered
   // inline on the section card via `SettingsPagelet.error`.
   const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  // No `isSaving` / `saveError` here any more. Both were only ever read by this
+  // block's own save bar, and that bar now lives on the page. Keeping local
+  // copies would give the page two sources of truth for one visible state.
+  const { publishSummary, registerActions } = useSettingsSaveRegistry();
 
   const handleFieldChange = useCallback((sectionKey: string, field: string, value: SettingValue) => {
     const nextSection = { ...(state.values[sectionKey] ?? {}), [field]: value };
@@ -312,10 +332,14 @@ function GroupSaveBlock({
     state.reset();
     setFieldErrors({});
     setSectionErrors({});
-    setSaveError(null);
   }, [state]);
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (): Promise<GroupSaveOutcome> => {
+    const labelFor = (sectionKey: string) => {
+      const meta = metadataItems.find((m) => m.key === sectionKey);
+      return meta?.displayName || meta?.className || sectionKey;
+    };
+
     // Validate every changed section before hitting the wire.
     const allErrors: Record<string, Record<string, string>> = {};
     for (const key of state.changedKeys) {
@@ -327,12 +351,13 @@ function GroupSaveBlock({
     }
     if (Object.keys(allErrors).length > 0) {
       setFieldErrors(allErrors);
-      setSaveError('Fix validation errors before saving.');
-      return;
+      return {
+        ok: false,
+        failedLabels: Object.keys(allErrors).map(labelFor),
+        message: 'Fix validation errors before saving.',
+      };
     }
 
-    setIsSaving(true);
-    setSaveError(null);
     const changedSectionKeys = state.changedKeys.map((k) => String(k));
     const failed: string[] = [];
     const perSectionErrors: Record<string, Record<string, string>> = {};
@@ -353,7 +378,6 @@ function GroupSaveBlock({
       }
     }
 
-    setIsSaving(false);
     if (failed.length > 0) {
       // Only errors produced by *this* attempt may remain for the sections we
       // just tried. Dropping the attempted keys first (rather than spreading
@@ -370,29 +394,85 @@ function GroupSaveBlock({
         for (const key of changedSectionKeys) delete next[key];
         return { ...next, ...perSectionMessages };
       });
-      const summary = failed.length === 1
-        ? `Failed to save ${failed[0]}.`
-        : `Failed to save ${failed.length} sections: ${failed.join(', ')}.`;
-      setSaveError(firstMessage ?? summary);
-      adminToast.error(summary);
-      // Keep the dirty state so the user can retry or discard.
-      return;
+      // Keep the dirty state so the user can retry or discard. The page raises
+      // the toast and renders the message — a per-group toast here would fire
+      // once per group on a multi-group save.
+      return { ok: false, failedLabels: failed, message: firstMessage };
     }
 
     // All sections saved — accept current values as the new baseline.
     state.markPristine(state.values);
     setFieldErrors({});
     setSectionErrors({});
-    adminToast.success(`${groupDisplayName} settings saved`);
-  }, [groupDisplayName, metadataItems, state]);
+    return { ok: true, savedLabels: changedSectionKeys.map(labelFor) };
+  }, [metadataItems, state]);
 
+  // Section display names, in the order the cards render — not in the arbitrary
+  // order `changedKeys` happens to produce — so the save bar reads left-to-right
+  // the same way the page does.
   const changedLabels = useMemo(() => {
-    return state.changedKeys
-      .map((k) => {
-        const meta = metadataItems.find((m) => m.key === String(k));
-        return meta?.displayName ?? meta?.className ?? String(k);
-      });
+    const changed = new Set(state.changedKeys.map((k) => String(k)));
+    return metadataItems
+      .filter((m) => changed.has(m.key))
+      .map((m) => m.displayName || m.className);
   }, [metadataItems, state.changedKeys]);
+
+  /**
+   * How many individual *fields* the user edited, not how many sections contain
+   * an edit. "3 changes in System Log" should mean three fields; counting
+   * sections would report "1 change" for a section where three values moved.
+   *
+   * Uses the same structural comparison `useDirtyState` used to mark the section
+   * dirty, so the count can never disagree with the bar's own visibility.
+   */
+  const changedFieldCount = useMemo(() => {
+    let count = 0;
+    for (const key of state.changedKeys) {
+      const sectionKey = String(key);
+      const before = (initialValues[sectionKey] ?? {}) as SectionValues;
+      const after = (state.values[sectionKey] ?? {}) as SectionValues;
+      for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (!isStructurallyEqual(before[field], after[field])) count += 1;
+      }
+    }
+    return count;
+  }, [initialValues, state.changedKeys, state.values]);
+
+  // Publishing the summary is a render concern, so it goes through state and
+  // reruns whenever the numbers move. The registry bails out when the published
+  // value is unchanged, so a keystroke that does not alter the count costs one
+  // comparison and no render.
+  useEffect(() => {
+    if (changedFieldCount === 0) {
+      publishSummary(group, null);
+      return;
+    }
+    publishSummary(group, {
+      displayName: groupDisplayName,
+      changeCount: changedFieldCount,
+      labels: changedLabels,
+    });
+  }, [publishSummary, group, groupDisplayName, changedFieldCount, changedLabels]);
+
+  // Registering the callbacks is not a render concern, so it must not re-run on
+  // every edit — `handleSave` closes over `state.values` and so changes identity
+  // on every keystroke. A ref indirection keeps the registration itself stable
+  // while still dispatching to the current closure.
+  const callbacksRef = useRef({ save: handleSave, discard: handleDiscard });
+  useEffect(() => {
+    callbacksRef.current = { save: handleSave, discard: handleDiscard };
+  }, [handleSave, handleDiscard]);
+
+  useEffect(() => {
+    registerActions(group, {
+      save: () => callbacksRef.current.save(),
+      discard: () => callbacksRef.current.discard(),
+    });
+    return () => {
+      registerActions(group, null);
+      publishSummary(group, null);
+    };
+  }, [registerActions, publishSummary, group]);
 
   const query = searchQuery ?? '';
 
@@ -409,9 +489,8 @@ function GroupSaveBlock({
   }, [metadataItems, propertyFilter]);
 
   return (
-    <>
-      <div className={CARD_FLOW_CONTAINER_CLASS}>
-        <div className={cardFlowClass(visibleCardCount)}>
+    <div className={CARD_FLOW_CONTAINER_CLASS}>
+      <div className={cardFlowClass(visibleCardCount)}>
             {metadataItems.map((meta) => {
             // Filter the section's properties for display without touching the
             // metadata used for save / validation above.
@@ -475,20 +554,8 @@ function GroupSaveBlock({
               </Card>
             );
           })}
-        </div>
       </div>
-
-      <AdminSaveBar
-        isDirty={state.isDirty}
-        changeCount={state.changedCount}
-        changedLabels={changedLabels}
-        onDiscard={handleDiscard}
-        onSave={handleSave}
-        isSaving={isSaving}
-        error={saveError}
-        saveLabel={`Save ${groupDisplayName}`}
-      />
-    </>
+    </div>
   );
 }
 
@@ -509,6 +576,45 @@ export function SettingsPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const scrolledFieldRef = useRef<string | null>(null);
+
+  // ── Page-level save aggregation ────────────────────────────────────────────
+  // Dirty *values* stay inside each GroupSaveBlock so groups cannot clobber each
+  // other. Only the summary comes up here, and only so one bar can describe all
+  // of them. See settingsSaveRegistry.ts.
+  const [dirtyByGroup, setDirtyByGroup] = useState<Record<string, GroupDirtySummary>>({});
+  const groupActionsRef = useRef(new Map<string, GroupSaveActions>());
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [saveAllError, setSaveAllError] = useState<string | null>(null);
+
+  const publishSummary = useCallback((group: string, summary: GroupDirtySummary | null) => {
+    setDirtyByGroup((prev) => {
+      const current = prev[group];
+      if (!summary) {
+        if (!current) return prev;
+        const next = { ...prev };
+        delete next[group];
+        return next;
+      }
+      // Returning `prev` unchanged is what stops a publish-on-every-keystroke
+      // from becoming a re-render on every keystroke.
+      const same = current
+        && current.changeCount === summary.changeCount
+        && current.displayName === summary.displayName
+        && current.labels.length === summary.labels.length
+        && current.labels.every((label, i) => label === summary.labels[i]);
+      return same ? prev : { ...prev, [group]: summary };
+    });
+  }, []);
+
+  const registerActions = useCallback((group: string, actions: GroupSaveActions | null) => {
+    if (actions) groupActionsRef.current.set(group, actions);
+    else groupActionsRef.current.delete(group);
+  }, []);
+
+  const saveRegistry = useMemo(
+    () => ({ publishSummary, registerActions }),
+    [publishSummary, registerActions],
+  );
 
   // When the command palette deep-links to a specific setting the URL carries
   // `?field=<PropertyName>`. That property might live in an "advanced" section
@@ -662,6 +768,75 @@ export function SettingsPage({
     return group?.displayName || groupKey;
   }, [groupMetadata]);
 
+  // ── Save aggregation, derived ──────────────────────────────────────────────
+  // Ordered by `sortedGroups`, not by which group the user happened to touch
+  // first. The bar should read in the same order the page does, and a save
+  // should walk the page top to bottom rather than in edit order.
+  const dirtyGroupKeys = useMemo(
+    () => sortedGroups.filter((group) => group in dirtyByGroup),
+    [sortedGroups, dirtyByGroup],
+  );
+
+  const totalChangeCount = useMemo(
+    () => dirtyGroupKeys.reduce((sum, key) => sum + dirtyByGroup[key].changeCount, 0),
+    [dirtyByGroup, dirtyGroupKeys],
+  );
+
+  const dirtySectionLabels = useMemo(
+    () => dirtyGroupKeys.flatMap((key) => dirtyByGroup[key].labels),
+    [dirtyByGroup, dirtyGroupKeys],
+  );
+
+  const dirtySummary = useMemo(
+    () => formatDirtySummary(totalChangeCount, dirtySectionLabels),
+    [totalChangeCount, dirtySectionLabels],
+  );
+
+  const handleSaveAll = useCallback(async () => {
+    if (dirtyGroupKeys.length === 0) return;
+
+    setIsSavingAll(true);
+    setSaveAllError(null);
+
+    const saved: string[] = [];
+    const failed: string[] = [];
+    let firstMessage: string | undefined;
+
+    // Sequential, not parallel. Each section is a separate write and some of
+    // them restart a subsystem — dispatching all of them at once turns an
+    // ordered set of changes into a race.
+    for (const group of dirtyGroupKeys) {
+      const actions = groupActionsRef.current.get(group);
+      if (!actions) continue;
+      const outcome = await actions.save();
+      if (outcome.ok) {
+        saved.push(...outcome.savedLabels);
+      } else {
+        failed.push(...outcome.failedLabels);
+        if (!firstMessage && outcome.message) firstMessage = outcome.message;
+      }
+    }
+
+    setIsSavingAll(false);
+
+    const report = formatSaveOutcome(saved, failed);
+    if (failed.length > 0) {
+      // Groups that succeeded retract their summaries; the failed group keeps
+      // its own, so the bar narrows itself to exactly what is left to save.
+      setSaveAllError(firstMessage ?? report);
+      adminToast.error(report);
+      return;
+    }
+    adminToast.success(report);
+  }, [dirtyGroupKeys]);
+
+  const handleDiscardAll = useCallback(() => {
+    setSaveAllError(null);
+    for (const group of dirtyGroupKeys) {
+      groupActionsRef.current.get(group)?.discard();
+    }
+  }, [dirtyGroupKeys]);
+
   // Aggregate visibility: given the current mode and query, decide which
   // property in each section should render. This drives filtering AND is the
   // single source of truth for the "N of M shown" counter — pure memo, no side
@@ -743,129 +918,145 @@ export function SettingsPage({
   const noMatchingResults = searchActive && visibleSettingsCount === 0;
 
   return (
-    <div className="space-y-6" data-tour="settings-content">
-      <div className="flex items-center justify-between gap-4">
-        <p className="text-sm text-pf-text-secondary">{introText}</p>
-        <HelpButton onClick={startTour} />
-      </div>
+    <SettingsSaveRegistryContext value={saveRegistry}>
+      <div className="space-y-6" data-tour="settings-content">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-sm text-pf-text-secondary">{introText}</p>
+          <HelpButton onClick={startTour} />
+        </div>
 
-      {/* Some tabs (e.g. Farm) render only `afterContent` and have no metadata-driven
-          settings at all. Showing a filter toggle and a search box there would give the
-          user two controls that visibly do nothing. */}
-      {totalSettingsCount > 0 && (
-        <>
-          {/* The mode is a global, persisted preference, so it belongs with the page's
-              other global actions rather than in a box above the content. The filter
-              below is ephemeral and page-local, so it stays with what it filters. */}
-          <SettingsHeaderPortal>
-            <SettingsModeToggle mode={mode} onModeChange={setMode} />
-          </SettingsHeaderPortal>
+        {/* Some tabs (e.g. Farm) render only `afterContent` and have no metadata-driven
+            settings at all. Showing a filter toggle and a search box there would give the
+            user two controls that visibly do nothing. */}
+        {totalSettingsCount > 0 && (
+          <>
+            {/* The mode is a global, persisted preference, so it belongs with the page's
+                other global actions rather than in a box above the content. The filter
+                below is ephemeral and page-local, so it stays with what it filters. */}
+            <SettingsHeaderPortal>
+              <SettingsModeToggle mode={mode} onModeChange={setMode} />
+            </SettingsHeaderPortal>
 
-          <div
-            className="flex flex-wrap items-center gap-3"
-            data-testid="settings-mode-controls"
-          >
-            <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
-              <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
-              <Input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.currentTarget.value)}
-                placeholder="Filter fields on this page…"
-                aria-label="Filter setting fields on this page"
-                className="flex-1"
-              />
-              {searchActive && (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
-                  onClick={() => setQuery('')}
-                  aria-label="Clear field filter"
-                >
-                  Clear
-                </Button>
-              )}
+            <div
+              className="flex flex-wrap items-center gap-3"
+              data-testid="settings-mode-controls"
+            >
+              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
+                <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.currentTarget.value)}
+                  placeholder="Filter fields on this page…"
+                  aria-label="Filter setting fields on this page"
+                  className="flex-1"
+                />
+                {searchActive && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    iconLeft={<CloseIcon className="w-3.5 h-3.5" />}
+                    onClick={() => setQuery('')}
+                    aria-label="Clear field filter"
+                  >
+                    Clear
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-pf-text-secondary" aria-live="polite" role="status">
+                {toggleHelperText}
+                {searchActive && (
+                  <span className="ml-2 text-pf-text-tertiary">
+                    This filter covers every field on this page, including advanced ones.
+                  </span>
+                )}
+              </p>
             </div>
-            <p className="text-xs text-pf-text-secondary" aria-live="polite" role="status">
-              {toggleHelperText}
-              {searchActive && (
-                <span className="ml-2 text-pf-text-tertiary">
-                  This filter covers every field on this page, including advanced ones.
-                </span>
-              )}
-            </p>
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {noMatchingResults && (
-        <AdminEmpty
-          icon={<SettingsIcon className="w-10 h-10" />}
-          title="No fields match your filter"
-          description={`Nothing on this page matches “${trimmedQuery}”. Try a different term, clear the filter, or use the search box above to look across other settings pages.`}
-          action={
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setQuery('')}
-            >
-              Clear filter
-            </Button>
+        {noMatchingResults && (
+          <AdminEmpty
+            icon={<SettingsIcon className="w-10 h-10" />}
+            title="No fields match your filter"
+            description={`Nothing on this page matches “${trimmedQuery}”. Try a different term, clear the filter, or use the search box above to look across other settings pages.`}
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setQuery('')}
+              >
+                Clear filter
+              </Button>
+            }
+          />
+        )}
+
+        {sortedGroups.map((group) => {
+          const groupMeta = metadataByGroup[group] ?? [];
+          if (groupMeta.length === 0) return null;
+
+          // Skip the whole group when every one of its sections is filtered out.
+          // Keep the underlying `groupMeta` (full list) as the block's authority
+          // for save / validation so we don't accidentally strand any dirty edits.
+          const groupHasVisible = groupMeta.some((m) => (visibleByKey[m.key]?.size ?? 0) > 0);
+          if (!groupHasVisible) return null;
+
+          // Build a slim initial-values object scoped to this group so the
+          // GroupSaveBlock's dirty state only tracks its own sections.
+          const initialGroupValues: GroupValues = {};
+          for (const m of groupMeta) {
+            initialGroupValues[m.key] = (values[m.key] ?? {}) as SectionValues;
           }
+          const groupDisplay = getGroupDisplayName(group);
+
+          return (
+            <section key={group} aria-labelledby={`group-${group}`}>
+              <h3
+                id={`group-${group}`}
+                className="text-base font-semibold text-pf-text-primary mb-4 flex items-center gap-2"
+              >
+                <span className="h-px flex-1 bg-pf-border" />
+                <span className="px-3 text-pf-text-secondary uppercase tracking-wider text-xs">
+                  {searchActive
+                    ? <HighlightedText text={groupDisplay} query={trimmedQuery} />
+                    : groupDisplay}
+                </span>
+                <span className="h-px flex-1 bg-pf-border" />
+              </h3>
+
+              <GroupSaveBlock
+                key={group}
+                group={group}
+                groupDisplayName={groupDisplay}
+                metadataItems={groupMeta}
+                initialValues={initialGroupValues}
+                propertyFilter={visibleByKey}
+                suppressExtensions={searchActive}
+                searchQuery={trimmedQuery}
+              />
+            </section>
+          );
+        })}
+
+        {afterContent}
+
+        {/* One bar for the whole page. Every group saves through its own
+            endpoint underneath, but the user sees a single place to commit and
+            a message that names what is about to be written. */}
+        <AdminSaveBar
+          isDirty={dirtyGroupKeys.length > 0}
+          summary={dirtySummary.text}
+          summaryTitle={dirtySummary.title}
+          onDiscard={handleDiscardAll}
+          onSave={handleSaveAll}
+          isSaving={isSavingAll}
+          error={saveAllError}
         />
-      )}
-
-      {sortedGroups.map((group) => {
-        const groupMeta = metadataByGroup[group] ?? [];
-        if (groupMeta.length === 0) return null;
-
-        // Skip the whole group when every one of its sections is filtered out.
-        // Keep the underlying `groupMeta` (full list) as the block's authority
-        // for save / validation so we don't accidentally strand any dirty edits.
-        const groupHasVisible = groupMeta.some((m) => (visibleByKey[m.key]?.size ?? 0) > 0);
-        if (!groupHasVisible) return null;
-
-        // Build a slim initial-values object scoped to this group so the
-        // GroupSaveBlock's dirty state only tracks its own sections.
-        const initialGroupValues: GroupValues = {};
-        for (const m of groupMeta) {
-          initialGroupValues[m.key] = (values[m.key] ?? {}) as SectionValues;
-        }
-        const groupDisplay = getGroupDisplayName(group);
-
-        return (
-          <section key={group} aria-labelledby={`group-${group}`}>
-            <h3
-              id={`group-${group}`}
-              className="text-base font-semibold text-pf-text-primary mb-4 flex items-center gap-2"
-            >
-              <span className="h-px flex-1 bg-pf-border" />
-              <span className="px-3 text-pf-text-secondary uppercase tracking-wider text-xs">
-                {searchActive
-                  ? <HighlightedText text={groupDisplay} query={trimmedQuery} />
-                  : groupDisplay}
-              </span>
-              <span className="h-px flex-1 bg-pf-border" />
-            </h3>
-
-            <GroupSaveBlock
-              key={group}
-              groupDisplayName={groupDisplay}
-              metadataItems={groupMeta}
-              initialValues={initialGroupValues}
-              propertyFilter={visibleByKey}
-              suppressExtensions={searchActive}
-              searchQuery={trimmedQuery}
-            />
-          </section>
-        );
-      })}
-
-      {afterContent}
-    </div>
+      </div>
+    </SettingsSaveRegistryContext>
   );
 }
 

@@ -21,7 +21,7 @@ export type { AdminErrorProps } from './AdminError';
 export { AdminSaveBar } from './AdminSaveBar';
 export type { AdminSaveBarProps } from './AdminSaveBar';
 
-export { useDirtyState } from './useDirtyState';
+export { useDirtyState, isStructurallyEqual } from './useDirtyState';
 export type { UseDirtyStateOptions, UseDirtyStateResult } from './useDirtyState';
 
 export { adminToast } from './adminToast';

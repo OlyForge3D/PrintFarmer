@@ -143,7 +143,7 @@ describe('SettingsPage — hidden advanced fields survive save round-trip (#939)
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '90' } });
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save system/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
@@ -189,7 +189,7 @@ describe('SettingsPage — hidden advanced fields survive save round-trip (#939)
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '120' } });
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save system/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
@@ -215,12 +215,12 @@ describe('SettingsPage — hidden advanced fields survive save round-trip (#939)
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save system/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
     // Success toast implies validation ran cleanly across the entire section
     // (all three properties, including the hidden verboseTracing).
-    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('System settings saved'));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Saved System Log'));
   });
 });

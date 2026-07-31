@@ -19,6 +19,18 @@ export interface AdminSaveBarProps {
    * first few are enumerated in the summary ("Name, Email and 2 more changed").
    */
   changedLabels?: string[];
+  /**
+   * Fully-formed summary line. Takes precedence over `changeCount` /
+   * `changedLabels`, for callers that aggregate across several independent forms
+   * and need to phrase the count and the subject together ("3 changes in
+   * Network Discovery") rather than as a list of changed things.
+   */
+  summary?: string;
+  /**
+   * `title` for the summary line. Use it to carry the full subject list when
+   * `summary` had to elide it.
+   */
+  summaryTitle?: string;
   /** Called when the user clicks the discard button. Typically wired to `state.reset`. */
   onDiscard: () => void;
   /** Called when the user clicks save. Can be async — the button shows a spinner while pending. */
@@ -69,6 +81,8 @@ export function AdminSaveBar({
   isDirty,
   changeCount,
   changedLabels,
+  summary: summaryOverride,
+  summaryTitle,
   onDiscard,
   onSave,
   isSaving = false,
@@ -85,7 +99,7 @@ export function AdminSaveBar({
 
   if (!isDirty) return null;
 
-  const summary = formatSummary(changeCount, changedLabels);
+  const summary = summaryOverride ?? formatSummary(changeCount, changedLabels);
 
   return (
     <div
@@ -115,6 +129,7 @@ export function AdminSaveBar({
       >
         <p
           className="text-sm text-pf-text-secondary min-w-0 truncate"
+          title={summaryTitle}
           aria-live="polite"
           aria-atomic="true"
         >

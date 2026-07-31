@@ -5,6 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  * objects, and Object.is for everything else. Sufficient for scalar-heavy settings
  * shapes; callers with exotic value shapes can pass their own `isEqual`.
  */
+/**
+ * Structural comparison for settings values: scalars, arrays and plain records.
+ *
+ * Exported because callers that break a dirty key down further — counting which
+ * individual fields inside a changed section differ, for instance — must use the
+ * same rule this hook used to decide the section was dirty at all. Two
+ * comparison functions would eventually disagree, and the symptom would be a
+ * save bar claiming zero changes while refusing to go away.
+ */
+export function isStructurallyEqual(a: unknown, b: unknown): boolean {
+  return defaultIsEqual(a, b);
+}
+
 function defaultIsEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
