@@ -1,4 +1,5 @@
 import React from 'react';
+import clsx from 'clsx';
 import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
@@ -62,6 +63,59 @@ function getInputValue(val: SettingValue): string | number | '' {
   return '';
 }
 
+/**
+ * Machine values — counts, timeouts, addresses, paths — render in the mono face
+ * with tabular figures so digits do not jitter between rows and `0`/`O` stay
+ * distinguishable. DESIGN-LANGUAGE.md, "Numeric data".
+ *
+ * Array-typed settings are always machine lists in this model (subnets, hosts,
+ * file extensions, directories), so their entries take the mono face too — the
+ * metadata carries no element type to narrow it further.
+ */
+const MONO_INPUT_TYPES = new Set<SettingInputType>([
+  SettingInputType.Number,
+  SettingInputType.IpAddress,
+  SettingInputType.Subnet,
+  SettingInputType.Hostname,
+  SettingInputType.Url,
+  SettingInputType.File,
+  SettingInputType.Directory,
+]);
+
+const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
+
+/**
+ * Label / control split for a field row.
+ *
+ * The threshold and the ratio are two halves of one decision. `26rem` (416px)
+ * is the narrowest card that was measured to still read as two columns; below
+ * it the row stacks. The `0.36fr / 0.64fr` ratio — rather than the fixed
+ * `w-64` (256px) this replaced — is what guarantees the control keeps ~64% of
+ * the card's inner width at *every* card size. A fixed label gutter cannot:
+ * inside a 420px card it left roughly 164px for the actual input.
+ *
+ * `minmax(9rem, …)` floors the label so short cards do not shred long labels
+ * one word per line.
+ *
+ * Past `52rem` the ratio inverts into a problem: 36% of a 1000px card puts
+ * 360px of empty space between a label and the control it names, and the pair
+ * stops reading as one row. So the label track switches to a hard 16rem cap
+ * and the control takes the remainder.
+ */
+const FIELD_ROW_CLASS =
+  'grid grid-cols-1 items-start gap-x-4 gap-y-1 py-2.5 '
+  + '@[26rem]:grid-cols-[minmax(9rem,0.36fr)_minmax(0,0.64fr)] '
+  + '@[52rem]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]';
+
+/**
+ * The 0.64fr track is a *floor* for narrow cards. `max-w-[40rem]` is the
+ * matching ceiling: a band holding one section renders that card at the full
+ * content width, and a 750px-wide number input reads as a mistake. The cap is
+ * set so the control still clears 60% of the card's inner width at the widest
+ * card the flow will produce.
+ */
+const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[40rem]';
+
 const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   <span
     className="inline-flex items-center ml-1.5 text-pf-text-secondary hover:text-pf-accent cursor-help transition-colors"
@@ -86,7 +140,7 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
 export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact, searchQuery }) => {
   const query = searchQuery ?? '';
   const content = (
-    <div className="space-y-2">
+    <div className="@container max-w-[64rem] divide-y divide-pf-border-divider">
       {metadata.properties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string; required?: boolean };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
@@ -102,7 +156,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
 
         const label = (
           <label
-            className="flex items-center shrink-0 w-64 text-sm font-medium text-pf-text-primary"
+            className="flex items-start text-sm font-medium text-pf-text-primary @[26rem]:pt-2"
             htmlFor={fieldId}
           >
             <span className="break-words">
@@ -130,13 +184,15 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           || prop.type === 'Decimal';
         const isSelect = prop.display?.inputType === SettingInputType.Select
           && Array.isArray(prop.display?.allowedValues);
+        const inputType = prop.display?.inputType;
+        const isMono = isNumber || (inputType !== undefined && MONO_INPUT_TYPES.has(inputType));
 
         let control: React.ReactNode;
 
         if (isArray) {
           const arr = values[prop.name] as (string | number)[];
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={FIELD_CONTROL_CLASS}>
               {arr.map((val, idx) => (
                 <div key={idx} className="flex items-center mb-1.5 gap-1.5">
                   <Input
@@ -145,7 +201,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                     placeholder={displayName}
                     title={prop.display?.description || displayName}
                     aria-label={`${displayName} ${idx + 1}`}
-                    className="flex-1"
+                    className={clsx('flex-1', MONO_FIELD_CLASS)}
                     onChange={(e) => {
                       const next = Array.isArray(values[prop.name])
                         ? [...(values[prop.name] as (string | number)[])]
@@ -193,7 +249,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isBoolean) {
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={clsx(FIELD_CONTROL_CLASS, "@[26rem]:pt-1.5")}>
               <Checkbox
                 id={fieldId}
                 name={fieldId}
@@ -207,7 +263,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isTextArea) {
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={FIELD_CONTROL_CLASS}>
               <Textarea
                 id={fieldId}
                 name={fieldId}
@@ -218,13 +274,14 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
                 invalid={invalid}
+                className={clsx(isMono && MONO_FIELD_CLASS)}
               />
               {err && <div className="text-pf-error text-xs mt-1" role="alert">{err}</div>}
             </div>
           );
         } else if (isNumber) {
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={FIELD_CONTROL_CLASS}>
               <Input
                 id={fieldId}
                 name={fieldId}
@@ -238,13 +295,14 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
                 invalid={invalid}
+                className={MONO_FIELD_CLASS}
               />
               {err && <div className="text-pf-error text-xs mt-1" role="alert">{err}</div>}
             </div>
           );
         } else if (isSelect) {
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={FIELD_CONTROL_CLASS}>
               <Select
                 id={fieldId}
                 name={fieldId}
@@ -263,7 +321,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else {
           control = (
-            <div className="flex-1 min-w-0">
+            <div className={FIELD_CONTROL_CLASS}>
               <Input
                 id={fieldId}
                 name={fieldId}
@@ -274,6 +332,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 title={prop.display?.description || displayName}
                 aria-label={displayName}
                 invalid={invalid}
+                className={clsx(isMono && MONO_FIELD_CLASS)}
               />
               {err && <div className="text-pf-error text-xs mt-1" role="alert">{err}</div>}
             </div>
@@ -282,7 +341,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
 
         return (
           <div
-            className="flex items-center gap-3 py-1"
+            className={FIELD_ROW_CLASS}
             key={prop.name}
             data-setting-property={`${metadata.key}.${prop.name}`}
           >
@@ -292,7 +351,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         );
       })}
 
-      {error && <div className="text-pf-error font-medium text-sm mb-2" role="alert">{error}</div>}
+      {error && <div className="text-pf-error font-medium text-sm pt-2" role="alert">{error}</div>}
     </div>
   );
 
@@ -301,8 +360,8 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   }
 
   return (
-    <div className="settings-pagelet bg-pf-bg-1 border border-pf-border rounded-xl p-4 mb-6 shadow-xs">
-      <h3 className="text-lg font-semibold text-pf-text-primary mb-3">{metadata.displayName || metadata.className}</h3>
+    <div className="settings-pagelet bg-pf-panel border border-pf-border rounded-lg p-4 mb-6">
+      <h3 className="text-sm font-semibold text-pf-text-primary mb-1">{metadata.displayName || metadata.className}</h3>
       {content}
     </div>
   );

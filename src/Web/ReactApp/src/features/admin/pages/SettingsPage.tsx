@@ -203,6 +203,55 @@ interface GroupSaveBlockProps {
 }
 
 /**
+ * Card flow for a settings group.
+ *
+ * The old `grid-cols-1 md:grid-cols-2` had two defects: it never went past two
+ * columns at any width, and a grid row is as tall as its tallest cell — so a
+ * one-field card parked next to a twelve-field card reserved the tall one's
+ * full height in dead whitespace. A CSS multi-column flow packs cards tightly
+ * instead, and `break-inside-avoid` keeps a card whole.
+ *
+ * The breakpoints are container queries, not viewport queries, because the
+ * space available to cards depends on the app rail and the settings sidebar,
+ * not on the window. Measured on this page: a 1440px window leaves the flow
+ * 814px, 1600px leaves 974px, 1920px leaves 1294px, 2560px leaves 1934px.
+ *
+ * The thresholds derive from a single number — the `26rem` (416px) card width
+ * at which `SettingsPagelet` puts a field's label and control side by side. A
+ * column is only added when *every* resulting card still clears it:
+ *
+ *   58rem →  2 cols → cards ≥ 456px  (1600px window: 479px)
+ *   88rem →  3 cols → cards ≥ 448px  (2560px window: 634px)
+ *
+ * So field rows never collapse back to stacked just because a column was
+ * added, and controls keep ~64% of their card at every size.
+ *
+ * The query container and the multi-column box must be *different* elements:
+ * an element cannot respond to its own container query.
+ */
+const CARD_FLOW_CONTAINER_CLASS = '@container';
+
+/**
+ * Column classes for a flow holding `cardCount` cards.
+ *
+ * Capped by the card count as well as by width. CSS multi-column fills the
+ * first column before the second, so a single card in a two-column flow sits
+ * at half width with the remaining half blank. Settings bands frequently hold
+ * one section, so this case is the norm, not an edge.
+ */
+function cardFlowClass(cardCount: number): string {
+  return clsx(
+    '-mb-4 gap-4 columns-1',
+    // One card cannot fill a wide flow, and stretching it to 1300px only
+    // pushes labels away from the controls they name. Cap the measure and let
+    // the remainder read as page margin.
+    cardCount <= 1 && 'max-w-[64rem]',
+    cardCount >= 2 && '@[58rem]:columns-2',
+    cardCount >= 3 && '@[88rem]:columns-3',
+  );
+}
+
+/**
  * Renders one settings group as a grid of section cards, backed by its own
  * `useDirtyState`. Each dirty section is saved via its dedicated per-section
  * endpoint (`POST /api/settings/{key}`) — never the batch `saveAll` endpoint.
@@ -347,72 +396,86 @@ function GroupSaveBlock({
 
   const query = searchQuery ?? '';
 
+  // Column count is capped by how many cards there actually are. CSS multicol
+  // fills column 1 first, so a lone card in a two-column flow renders at half
+  // width with the other half empty — the exact real-estate waste this layout
+  // exists to remove. Bands routinely hold a single section.
+  const visibleCardCount = useMemo(() => {
+    if (!propertyFilter) return metadataItems.length;
+    return metadataItems.filter((meta) => {
+      const allowed = propertyFilter[meta.key];
+      return Boolean(allowed) && meta.properties.some((p) => allowed.has(p.name));
+    }).length;
+  }, [metadataItems, propertyFilter]);
+
   return (
     <>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {metadataItems.map((meta) => {
-          // Filter the section's properties for display without touching the
-          // metadata used for save / validation above.
-          let displayProps = meta.properties;
-          if (propertyFilter) {
-            const allowed = propertyFilter[meta.key];
-            if (!allowed) {
-              // Section not in the filter map => nothing visible => skip card.
-              return null;
+      <div className={CARD_FLOW_CONTAINER_CLASS}>
+        <div className={cardFlowClass(visibleCardCount)}>
+            {metadataItems.map((meta) => {
+            // Filter the section's properties for display without touching the
+            // metadata used for save / validation above.
+            let displayProps = meta.properties;
+            if (propertyFilter) {
+              const allowed = propertyFilter[meta.key];
+              if (!allowed) {
+                // Section not in the filter map => nothing visible => skip card.
+                return null;
+              }
+              displayProps = meta.properties.filter((p) => allowed.has(p.name));
+              if (displayProps.length === 0) {
+                return null;
+              }
             }
-            displayProps = meta.properties.filter((p) => allowed.has(p.name));
-            if (displayProps.length === 0) {
-              return null;
-            }
-          }
-          const displayMeta = displayProps.length === meta.properties.length
-            ? meta
-            : { ...meta, properties: displayProps };
+            const displayMeta = displayProps.length === meta.properties.length
+              ? meta
+              : { ...meta, properties: displayProps };
 
-          const renderer = getSectionRenderer(meta);
-          const fullWidth = Boolean(renderer?.fullWidth);
-          const extensionRender = suppressExtensions ? undefined : renderer?.extension;
-          const sectionValues = (state.values[meta.key] ?? {}) as SectionValues;
-          const cardTitle = displayMeta.displayName || displayMeta.className;
+            const renderer = getSectionRenderer(meta);
+            const fullWidth = Boolean(renderer?.fullWidth);
+            const extensionRender = suppressExtensions ? undefined : renderer?.extension;
+            const sectionValues = (state.values[meta.key] ?? {}) as SectionValues;
+            const cardTitle = displayMeta.displayName || displayMeta.className;
 
-          return (
-            <Card
-              key={meta.key}
-              className={clsx(
-                'flex flex-col',
-                fullWidth && 'md:col-span-2',
-              )}
-            >
-              <Card.Header className="pb-2">
-                <h4 className="text-sm font-semibold text-pf-text-primary">
-                  {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
-                </h4>
-                {meta.description && (
-                  <p className="text-xs text-pf-text-secondary mt-0.5">
-                    {query
-                      ? <HighlightedText text={meta.description} query={query} />
-                      : meta.description}
-                  </p>
+            return (
+              <Card
+                key={meta.key}
+                className={clsx(
+                  'mb-4 break-inside-avoid',
+                  fullWidth && '[column-span:all]',
                 )}
-              </Card.Header>
-              <Card.Body className="flex-1 pt-0">
-                <SettingsPagelet
-                  metadata={displayMeta}
-                  values={sectionValues}
-                  onChange={(field, value) => handleFieldChange(meta.key, field, value)}
-                  fieldErrors={fieldErrors[meta.key]}
-                  error={sectionErrors[meta.key]}
-                  compact
-                  searchQuery={query}
-                />
-                {extensionRender?.({
-                  values: sectionValues,
-                  onChange: (field, value) => handleFieldChange(meta.key, field, value),
-                })}
-              </Card.Body>
-            </Card>
-          );
-        })}
+              >
+                <Card.Header className="pb-2">
+                  <h4 className="text-sm font-semibold text-pf-text-primary">
+                    {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
+                  </h4>
+                  {meta.description && (
+                    <p className="text-xs text-pf-text-secondary mt-0.5">
+                      {query
+                        ? <HighlightedText text={meta.description} query={query} />
+                        : meta.description}
+                    </p>
+                  )}
+                </Card.Header>
+                <Card.Body className="pt-0">
+                  <SettingsPagelet
+                    metadata={displayMeta}
+                    values={sectionValues}
+                    onChange={(field, value) => handleFieldChange(meta.key, field, value)}
+                    fieldErrors={fieldErrors[meta.key]}
+                    error={sectionErrors[meta.key]}
+                    compact
+                    searchQuery={query}
+                  />
+                  {extensionRender?.({
+                    values: sectionValues,
+                    onChange: (field, value) => handleFieldChange(meta.key, field, value),
+                  })}
+                </Card.Body>
+              </Card>
+            );
+          })}
+        </div>
       </div>
 
       <AdminSaveBar

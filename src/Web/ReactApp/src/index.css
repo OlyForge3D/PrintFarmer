@@ -26,6 +26,7 @@
   --color-pf-border-medium: var(--pf-border-medium);
   --color-pf-border-dark: var(--pf-border-dark);
   --color-pf-border-gray: var(--pf-border-gray);
+  --color-pf-border-divider: var(--pf-border-divider);
 
   /* Text colors */
   --color-pf-text-primary: var(--pf-text-primary);
