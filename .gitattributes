@@ -24,3 +24,15 @@ install.sh text eol=lf
 /compliance/licenses/*.txt text eol=lf
 /Directory.Build.props whitespace=cr-at-eol
 /src/.editorconfig whitespace=cr-at-eol
+
+# EF Core migration scaffolding is machine-generated and enormous: every
+# *.Designer.cs embeds a full ~10,000-line model snapshot, and each new migration
+# rewrites the ~7,300-line *ModelSnapshot.cs for all three providers. A migration
+# PR therefore shows ~31,000 changed lines for ~120 lines of real SQL.
+# Marking these generated collapses them by default in GitHub diffs and drops
+# them from language stats. They remain on disk and fully expandable.
+#
+# Deliberately NOT marked: the migration files themselves (*_Name.cs). Those hold
+# the hand-written Up()/Down() SQL and must stay visible for review.
+src/migrations/**/*.Designer.cs linguist-generated=true
+src/migrations/**/*ModelSnapshot.cs linguist-generated=true

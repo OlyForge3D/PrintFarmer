@@ -54,7 +54,7 @@ public sealed class MigrationCascadingPathScannerTests
     public void PostgresMigrations_HaveOnlyKnownPreexistingCascadingPathViolations()
     {
         AssertMigrationChainCascadingPaths(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             activeProvider: "Npgsql.EntityFrameworkCore.PostgreSQL");
     }
 
@@ -62,7 +62,7 @@ public sealed class MigrationCascadingPathScannerTests
     public void SqlServerMigrations_HaveOnlyKnownPreexistingCascadingPathViolations()
     {
         AssertMigrationChainCascadingPaths(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             activeProvider: "Microsoft.EntityFrameworkCore.SqlServer");
     }
 
@@ -76,10 +76,10 @@ public sealed class MigrationCascadingPathScannerTests
     public void Wave9_BedTypesToMaintenancePlans_IsNotFlagged()
     {
         (List<(string, string, string, List<string>)> pgFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             "Npgsql.EntityFrameworkCore.PostgreSQL");
         (List<(string, string, string, List<string>)> ssFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             "Microsoft.EntityFrameworkCore.SqlServer");
 
         pgFindings.Should().NotContain(f => f.Item2 == "BedTypes" && f.Item3 == "MaintenancePlans",
@@ -98,10 +98,10 @@ public sealed class MigrationCascadingPathScannerTests
     public void PostFix4_GcodeFilesToPartOutputMappings_IsNotFlagged()
     {
         (List<(string, string, string, List<string>)> pgFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             "Npgsql.EntityFrameworkCore.PostgreSQL");
         (List<(string, string, string, List<string>)> ssFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             "Microsoft.EntityFrameworkCore.SqlServer");
 
         pgFindings.Should().NotContain(f => f.Item2 == "GcodeFiles" && f.Item3 == "PartOutputMappings",
@@ -118,10 +118,10 @@ public sealed class MigrationCascadingPathScannerTests
     public void PostFix3_PrintersToCameraSnapshots_IsNotFlagged()
     {
         (List<(string, string, string, List<string>)> pgFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.PostgreSQL.Migrations.InitialV2).Assembly,
             "Npgsql.EntityFrameworkCore.PostgreSQL");
         (List<(string, string, string, List<string>)> ssFindings, _) = EnumerateAllFirstAppearanceViolations(
-            typeof(Farm.Migrations.SqlServer.Migrations.InitialV1).Assembly,
+            typeof(Farm.Migrations.SqlServer.Migrations.InitialV2).Assembly,
             "Microsoft.EntityFrameworkCore.SqlServer");
 
         pgFindings.Should().NotContain(f => f.Item2 == "Printers" && f.Item3 == "CameraSnapshots",

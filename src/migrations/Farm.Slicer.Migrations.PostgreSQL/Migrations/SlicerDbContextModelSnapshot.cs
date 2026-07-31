@@ -691,7 +691,7 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("IdempotencyScopeId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
-                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
+                        .HasDefaultValue(Guid.Empty);
 
                     b.Property<DateTime?>("LeaseExpiresAt")
                         .HasColumnType("timestamp with time zone");
