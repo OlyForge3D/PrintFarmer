@@ -1,4 +1,14 @@
 import React, { ReactNode } from 'react';
+import { Link } from 'react-router';
+import { ArrowLeftIcon } from '@/common/components/icons/MdiIcons';
+
+/** A surface this page belongs to, rendered as a back link above the title. */
+export interface PageParent {
+  /** Human-readable name of the parent surface, e.g. "Admin Control Center" */
+  label: string;
+  /** Route to navigate back to, e.g. "/admin" */
+  to: string;
+}
 
 interface PageTemplateProps {
   /** Page title */
@@ -11,6 +21,19 @@ interface PageTemplateProps {
   titleActions?: ReactNode;
   /** Optional action buttons or controls for the header */
   actions?: ReactNode;
+  /**
+   * Surface this page belongs to. Renders a back link above the title so a page
+   * reached from a hub is never a dead end.
+   */
+  parent?: PageParent;
+  /**
+   * Render children only, with no header, background or padding.
+   *
+   * Use this when the page is mounted inside a shell that already supplies page
+   * chrome. It guarantees a single `h1` per document instead of each page
+   * hand-rolling its own `embedded ? content : <PageTemplate>` branch.
+   */
+  embedded?: boolean;
   /** Main page content */
   children: ReactNode;
   /** Optional max width container class (defaults to max-w-full) */
@@ -34,9 +57,19 @@ interface PageTemplateProps {
  *   title="Printers"
  *   subtitle="Monitor and manage your 3D printers"
  *   icon={PrinterIcon}
+ *   parent={{ label: 'Admin Control Center', to: '/admin' }}
  *   titleActions={<HelpButton onClick={startTour} />}
  *   actions={<AddPrinterButton />}
  * >
+ *   <YourPageContent />
+ * </PageTemplate>
+ * ```
+ *
+ * When a page is mounted inside a shell that already renders page chrome, pass
+ * `embedded` instead of branching on it at the call site:
+ *
+ * ```tsx
+ * <PageTemplate title="Printer Groups" embedded={embedded}>
  *   <YourPageContent />
  * </PageTemplate>
  * ```
@@ -47,6 +80,8 @@ export function PageTemplate({
   icon: Icon,
   titleActions,
   actions,
+  parent,
+  embedded = false,
   children,
   maxWidth = 'max-w-full',
   padding = 'px-4',
@@ -54,6 +89,12 @@ export function PageTemplate({
   backgroundColor = 'bg-pf-bg-2',
   showHeader = true
 }: PageTemplateProps) {
+  // Mounted inside a shell that already renders page chrome: emit content only so
+  // the document keeps exactly one h1 and one page background.
+  if (embedded) {
+    return <>{children}</>;
+  }
+
   return (
     <div
       className={`min-h-full ${backgroundColor} ${includeTopPadding ? 'pt-4 pb-4' : 'pb-4'}`}
@@ -63,22 +104,35 @@ export function PageTemplate({
       <div className={`min-w-0 ${maxWidth} ${padding}`}>
         {/* Page Header */}
         {showHeader && (
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between lg:mr-72">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 min-w-0">
-                {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
-                <h1 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
-                  {title}
-                </h1>
-                {titleActions && <div className="shrink-0">{titleActions}</div>}
+          <div className="mb-4 lg:mr-72">
+            {parent && (
+              <Link
+                to={parent.to}
+                className="-ml-1 mb-1 inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs font-medium text-pf-text-secondary transition-colors hover:bg-pf-bg-1 hover:text-pf-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
+              >
+                <span aria-hidden="true" className="flex">
+                  <ArrowLeftIcon className="h-3.5 w-3.5" />
+                </span>
+                {parent.label}
+              </Link>
+            )}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
+                  <h1 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
+                    {title}
+                  </h1>
+                  {titleActions && <div className="shrink-0">{titleActions}</div>}
+                </div>
+                {subtitle && (
+                  <p className="text-pf-text-secondary mt-1">
+                    {subtitle}
+                  </p>
+                )}
               </div>
-              {subtitle && (
-                <p className="text-pf-text-secondary mt-1">
-                  {subtitle}
-                </p>
-              )}
+              {actions && <div className="max-w-full self-start sm:shrink-0">{actions}</div>}
             </div>
-            {actions && <div className="max-w-full self-start sm:shrink-0">{actions}</div>}
           </div>
         )}
 

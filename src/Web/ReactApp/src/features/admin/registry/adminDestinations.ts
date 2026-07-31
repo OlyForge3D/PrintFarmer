@@ -105,6 +105,18 @@ export interface AdminDestination {
 const DEFAULT_ADMIN_ROLE = 'farm_admin';
 
 /**
+ * The Admin Control Center hub itself, as a back-link target.
+ *
+ * Every admin destination is reached from `/admin`, so every admin page renders
+ * this as its parent. Kept here, next to the destinations it is the parent of,
+ * so the hub's identity has exactly one definition.
+ */
+export const ADMIN_HUB_PARENT = {
+  label: 'Admin Control Center',
+  to: '/admin',
+} as const;
+
+/**
  * Complete, ordered list of admin destinations.
  *
  * Ordering within a group matters — it drives the display order on the hub
