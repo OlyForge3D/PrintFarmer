@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Input, FormField, Alert, Toggle, Checkbox, EmptyState } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DeleteIcon, EditIcon, RefreshIcon, LoadingIcon, CheckIcon, CloseIcon, ExternalLinkIcon, HistoryIcon } from '@/common/components/icons/MdiIcons';
@@ -7,7 +8,7 @@ import { useWebhooks, useWebhookEventTypes, useWebhookDeliveries, useCreateWebho
 import { toast } from 'sonner';
 import type { WebhookSubscription, CreateWebhookDto, UpdateWebhookDto } from '@/types/api';
 
-export function WebhooksAdminPage() {
+export function WebhooksAdminPage({ embedded = false }: EmbeddablePageProps) {
  const { data: webhooks, isLoading, error } = useWebhooks();
  const { data: eventTypes } = useWebhookEventTypes();
  const createMutation = useCreateWebhook();
@@ -57,7 +58,7 @@ export function WebhooksAdminPage() {
 
  if (isLoading) {
  return (
- <PageTemplate title="Webhooks" icon={ExternalLinkIcon}>
+ <PageTemplate title="Webhooks" icon={ExternalLinkIcon} embedded={embedded}>
  <div className="flex items-center justify-center py-12" role="status" aria-label="Loading webhooks">
  <LoadingIcon className="w-6 h-6 pf-animate-spin text-pf-accent" />
  </div>
@@ -67,7 +68,7 @@ export function WebhooksAdminPage() {
 
  if (error) {
  return (
- <PageTemplate title="Webhooks" icon={ExternalLinkIcon}>
+ <PageTemplate title="Webhooks" icon={ExternalLinkIcon} embedded={embedded}>
  <Alert variant="error">Failed to load webhooks</Alert>
  </PageTemplate>
  );
@@ -82,6 +83,7 @@ export function WebhooksAdminPage() {
    Add Webhook
  </Button>
  }
+ embedded={embedded}
  >
  {webhooks && webhooks.length === 0 ? (
  <EmptyState

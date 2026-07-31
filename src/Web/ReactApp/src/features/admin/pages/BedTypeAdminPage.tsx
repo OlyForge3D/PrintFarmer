@@ -3,13 +3,14 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, EditIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Input, FormField } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useBedTypes, queryKeys } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 import type { BedType, CreateBedTypeRequest, UpdateBedTypeRequest } from '@/types/api';
 
-export function BedTypeAdminPage() {
+export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
   const queryClient = useQueryClient();
   const { data: bedTypes = [], isLoading } = useBedTypes();
 
@@ -90,6 +91,7 @@ export function BedTypeAdminPage() {
           Add Bed Type
         </Button>
       }
+      embedded={embedded}
     >
       {isLoading ? (
         <div className="text-pf-text-secondary p-8 text-center">Loading…</div>

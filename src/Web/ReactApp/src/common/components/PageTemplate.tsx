@@ -1,6 +1,7 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import { Link } from 'react-router';
 import { ArrowLeftIcon } from '@/common/components/icons/MdiIcons';
+import { registerPageHeader } from '@/common/components/pageHeaderGuard';
 
 /** A surface this page belongs to, rendered as a back link above the title. */
 export interface PageParent {
@@ -27,11 +28,16 @@ interface PageTemplateProps {
    */
   parent?: PageParent;
   /**
-   * Render children only, with no header, background or padding.
+   * Render children with no header, background or padding of our own.
    *
    * Use this when the page is mounted inside a shell that already supplies page
    * chrome. It guarantees a single `h1` per document instead of each page
    * hand-rolling its own `embedded ? content : <PageTemplate>` branch.
+   *
+   * The `title`, `subtitle`, `icon` and `parent` props are all suppressed — the
+   * shell already answers "where am I". `actions` are not: they are the page's
+   * own controls and have nowhere else to go, so they render right-aligned above
+   * the content.
    */
   embedded?: boolean;
   /** Main page content */
@@ -66,10 +72,11 @@ interface PageTemplateProps {
  * ```
  *
  * When a page is mounted inside a shell that already renders page chrome, pass
- * `embedded` instead of branching on it at the call site:
+ * `embedded` instead of branching on it at the call site. The header is
+ * suppressed; `actions` still render, right-aligned above the content:
  *
  * ```tsx
- * <PageTemplate title="Printer Groups" embedded={embedded}>
+ * <PageTemplate title="Printer Groups" actions={<AddGroupButton />} embedded={embedded}>
  *   <YourPageContent />
  * </PageTemplate>
  * ```
@@ -89,10 +96,27 @@ export function PageTemplate({
   backgroundColor = 'bg-pf-bg-2',
   showHeader = true
 }: PageTemplateProps) {
-  // Mounted inside a shell that already renders page chrome: emit content only so
-  // the document keeps exactly one h1 and one page background.
+  // Only a header-rendering instance can collide with another one, so only those
+  // register. See pageHeaderGuard for what this catches.
+  useEffect(() => {
+    if (embedded || !showHeader) {
+      return undefined;
+    }
+    return registerPageHeader(title);
+  }, [embedded, showHeader, title]);
+
+  // Mounted inside a shell that already renders page chrome: emit the page's own
+  // actions and content, and nothing else, so the document keeps exactly one h1
+  // and one page background.
   if (embedded) {
-    return <>{children}</>;
+    return (
+      <>
+        {actions && (
+          <div className="mb-4 flex flex-wrap items-center justify-end gap-2">{actions}</div>
+        )}
+        {children}
+      </>
+    );
   }
 
   return (

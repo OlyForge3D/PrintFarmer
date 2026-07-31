@@ -1,7 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { resetPageHeaderGuard } from '@/common/components/pageHeaderGuard';
+
+beforeEach(() => {
+  resetPageHeaderGuard();
+});
 
 describe('PageTemplate heading semantics', () => {
   it('renders the page title as the single level-1 heading', () => {
@@ -56,6 +61,86 @@ describe('PageTemplate embedded mode', () => {
     );
 
     expect(screen.queryByRole('link', { name: 'Admin Control Center' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the page actions, because the shell has no way to supply them', () => {
+    render(
+      <PageTemplate title="Webhooks" actions={<button type="button">Add Webhook</button>} embedded>
+        <p>content</p>
+      </PageTemplate>,
+    );
+
+    // Losing the only control that creates a record would be a functional
+    // regression, not just a cosmetic one.
+    expect(screen.getByRole('button', { name: 'Add Webhook' })).toBeInTheDocument();
+  });
+
+  it('renders the actions above the content so they read as a page toolbar', () => {
+    const { container } = render(
+      <PageTemplate title="Webhooks" actions={<button type="button">Add Webhook</button>} embedded>
+        <p>content</p>
+      </PageTemplate>,
+    );
+
+    const actionsRow = container.querySelector('div');
+    expect(actionsRow?.querySelector('button')).not.toBeNull();
+    expect(actionsRow?.className).toContain('justify-end');
+    expect(actionsRow?.nextElementSibling?.textContent).toBe('content');
+  });
+});
+
+describe('PageTemplate duplicate header guard', () => {
+  beforeEach(() => {
+    resetPageHeaderGuard();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    resetPageHeaderGuard();
+  });
+
+  it('warns when a page forgets to declare itself embedded inside a shell', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(
+      <PageTemplate title="Admin Console">
+        <PageTemplate title="User Management">
+          <p>content</p>
+        </PageTemplate>
+      </PageTemplate>,
+    );
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toContain('"User Management"');
+  });
+
+  it('stays quiet for the shell plus a correctly embedded page', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(
+      <PageTemplate title="Admin Console">
+        <PageTemplate title="User Management" embedded>
+          <p>content</p>
+        </PageTemplate>
+      </PageTemplate>,
+    );
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  it('stays quiet for a headerless template, which owns no h1 to collide with', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    render(
+      <PageTemplate title="Admin Console">
+        <PageTemplate title="Models" showHeader={false}>
+          <p>content</p>
+        </PageTemplate>
+      </PageTemplate>,
+    );
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

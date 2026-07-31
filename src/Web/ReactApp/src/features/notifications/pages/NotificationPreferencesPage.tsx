@@ -183,11 +183,9 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
   };
 
   if (prefsError) {
-    const errorContent = <Alert type="error">Failed to load notification preferences</Alert>;
-    if (embedded) return errorContent;
     return (
-      <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        {errorContent}
+      <PageTemplate title="Notification Preferences" icon={BellIcon} embedded={embedded}>
+        <Alert type="error">Failed to load notification preferences</Alert>
       </PageTemplate>
     );
   }
@@ -199,15 +197,11 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     capabilitiesPending ||
     formState === null
   ) {
-    const loadingContent = (
-      <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
-        <Spinner size="lg" />
-      </div>
-    );
-    if (embedded) return loadingContent;
     return (
-      <PageTemplate title="Notification Preferences" icon={BellIcon}>
-        {loadingContent}
+      <PageTemplate title="Notification Preferences" icon={BellIcon} embedded={embedded}>
+        <div className="flex items-center justify-center py-12" role="status" aria-label="Loading preferences">
+          <Spinner size="lg" />
+        </div>
       </PageTemplate>
     );
   }
@@ -369,16 +363,10 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
     </div>
   );
 
-  if (embedded) {
-    return (
-      <div>
-        {content}
-        <div className="mt-4 flex justify-end">{saveButton}</div>
-      </div>
-    );
-  }
-
-  const headerActions = (
+  // Back is the shell's job when embedded; only the save action is ours.
+  const headerActions = embedded ? (
+    saveButton
+  ) : (
     <div className="flex items-center gap-2">
       <Button variant="ghost" onClick={() => navigate(-1)}>
         Back
@@ -392,6 +380,7 @@ export function NotificationPreferencesPage({ embedded = false }: { embedded?: b
       title="Notification Preferences"
       icon={BellIcon}
       actions={headerActions}
+      embedded={embedded}
     >
       {content}
     </PageTemplate>

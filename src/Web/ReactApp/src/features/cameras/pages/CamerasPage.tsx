@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { RotateCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { Alert, Button, Badge } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
@@ -32,7 +33,7 @@ const CAMERA_SNAPSHOT_REFRESH_MS = 4_000;
  * Shows cameras that have been explicitly added to the system via the Camera Admin page.
  * Supports both stream and snapshot modes for each camera.
  */
-export function CamerasPage() {
+export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const auth = useAuth();
   const [cameras, setCameras] = useState<DisplayCameraDto[]>([]);
   const [loading, setLoading] = useState(true);
@@ -123,6 +124,7 @@ export function CamerasPage() {
           )}
         </div>
       }
+      embedded={embedded}
     >
       {activeTab === 'manage' ? (
         <CameraManagementPanel onCamerasChanged={loadCameras} />

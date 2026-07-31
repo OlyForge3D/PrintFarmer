@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Radio, FileUpload } from '@/common/components/ui';
 import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, AlertCircleIcon, CloudDownloadIcon } from '@/common/components/icons/MdiIcons';
 import { 
@@ -17,7 +18,7 @@ import {
 } from '@/services/adminDataService';
 import { ImportMode, type ImportResponseDto, type ExportHistoryItem, type CatalogVersionDto, type CatalogUpdateCheckResult, type CatalogUpdateApplyResult } from '@/types/adminData';
 
-export function DataManagementPage() {
+export function DataManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -207,6 +208,7 @@ export function DataManagementPage() {
       title="Data Management"
       subtitle="Export, import, and manage PrintFarmer data"
       icon={DatabaseIcon}
+      embedded={embedded}
     >
       <div className="space-y-6">
         {/* Status Messages */}

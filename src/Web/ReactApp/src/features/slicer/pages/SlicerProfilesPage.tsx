@@ -27,6 +27,7 @@ import { slicerRegistry } from '@/services/slicerRegistry';
 import { catalogService } from '@/services/catalogService';
 import { FilterIcon, GearIcon, UploadIcon, SearchIcon, CheckCircleIcon, AlertCircleIcon, TimerSandIcon, CopyIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button } from '@/common/components/ui/Button';
 import { Alert } from '@/common/components/ui/Alert';
 import { Tabs } from '@/common/components/ui/Tabs';
@@ -37,7 +38,7 @@ import { Checkbox } from '@/common/components/ui/Checkbox';
 import { Textarea } from '@/common/components/ui/Textarea';
 import { Modal } from '@/common/components/modals/Modal';
 
-export const SlicerProfilesPage: React.FC = () => {
+export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = false }) => {
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -924,6 +925,7 @@ export const SlicerProfilesPage: React.FC = () => {
       title="Slicer Profiles"
       subtitle="Manage imported slicer profiles (OrcaSlicer / PrusaSlicer)"
       icon={GearIcon}
+      embedded={embedded}
     >
       {/* OrcaSlicer Quick Actions */}
       <div className="flex flex-wrap gap-3 mb-4">

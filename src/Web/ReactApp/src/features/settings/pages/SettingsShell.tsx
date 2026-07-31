@@ -96,7 +96,7 @@ function UserPreferencesPanel() {
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   quotas: (
     <SettingsSection>
-      <QuotaManagementPage />
+      <QuotaManagementPage embedded />
     </SettingsSection>
   ),
 };
@@ -138,7 +138,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   ),
   'integrations.webhooks': (
     <SettingsSection>
-      <WebhooksAdminPage />
+      <WebhooksAdminPage embedded />
     </SettingsSection>
   ),
   'profile.preferences': <UserPreferencesPanel />,
@@ -165,27 +165,27 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       />
     </SettingsSection>
   ),
-  'slicing.bed-types': <BedTypeAdminPage />,
+  'slicing.bed-types': <BedTypeAdminPage embedded />,
   'slicing.profiles': (
     <Suspense fallback={<TabLoader />}>
-      <LazySlicerProfilesPage />
+      <LazySlicerProfilesPage embedded />
     </Suspense>
   ),
-  'hardware.cameras': <CamerasPage />,
-  'hardware.nfc': <NfcDevicesPage />,
+  'hardware.cameras': <CamerasPage embedded />,
+  'hardware.nfc': <NfcDevicesPage embedded />,
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
-  'hardware.custom-fields': <CustomFieldsAdminPage />,
+  'hardware.custom-fields': <CustomFieldsAdminPage embedded />,
   'operations.status': <SystemStatusPage />,
   'operations.workers': (
     <Suspense fallback={<TabLoader />}>
       <LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />
     </Suspense>
   ),
-  'users.accounts': <UserManagementPage />,
-  'users.audit': <LoginAuditPage />,
-  'data.tags': <TagAdminPage />,
-  'data.management': <DataManagementPage />,
+  'users.accounts': <UserManagementPage embedded />,
+  'users.audit': <LoginAuditPage embedded />,
+  'data.tags': <TagAdminPage embedded />,
+  'data.management': <DataManagementPage embedded />,
 };
 
 interface SettingsShellProps {

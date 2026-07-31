@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Card, Badge, Spinner, Input, Select, FormField, ProgressBar } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DeleteIcon } from '@/common/components/icons/MdiIcons';
@@ -30,7 +31,7 @@ function periodBadgeVariant(p: QuotaPeriodType): 'default' | 'primary' | 'succes
   }
 }
 
-export function QuotaManagementPage() {
+export function QuotaManagementPage({ embedded = false }: EmbeddablePageProps) {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
 
@@ -60,7 +61,7 @@ export function QuotaManagementPage() {
 
   if (isLoading) {
     return (
-      <PageTemplate title="Print Quotas">
+      <PageTemplate title="Print Quotas" embedded={embedded}>
         <Spinner size="lg" />
       </PageTemplate>
     );
@@ -68,7 +69,7 @@ export function QuotaManagementPage() {
 
   if (error) {
     return (
-      <PageTemplate title="Print Quotas">
+      <PageTemplate title="Print Quotas" embedded={embedded}>
         <div className="p-4 text-pf-error">Failed to load quotas: {String(error)}</div>
       </PageTemplate>
     );
@@ -88,6 +89,7 @@ export function QuotaManagementPage() {
           </Button>
         </div>
       }
+      embedded={embedded}
     >
       {quotas.length === 0 ? (
         <Card>
