@@ -633,3 +633,53 @@ describe('validateSection matches IsValidCidr on whitespace (Hicks #2)', () => {
     expect(errs.discoverySubnets).toBeUndefined();
   });
 });
+
+/**
+ * Hicks (round 3, second pass) — leading-zero octets.
+ *
+ * `IPAddress.TryParse` uses inet_aton semantics, so a leading zero switches the
+ * octet to octal. Verified against the .NET runtime:
+ *
+ *   TryParse('08.0.0.1')        = False            (8 is not an octal digit)
+ *   TryParse('010.0.0.1')       = True  -> 8.0.0.1
+ *   TryParse('010.010.010.010') = True  -> 8.8.8.8
+ *
+ * Both are harmful and in opposite ways: `08.0.0.1/24` would pass the client and
+ * 400 on the server, and `010.0.0.1/24` would pass both and silently persist a
+ * different subnet than the user typed. So the validator rejects any leading
+ * zero, which is stricter than the server for the octal-valid forms and exactly
+ * matches it for the octal-invalid ones.
+ */
+describe('validateSection rejects octal-ambiguous octets (Hicks round 3)', () => {
+  const subnets: Prop = {
+    name: 'discoverySubnets',
+    type: 'Array',
+    attributes: [],
+    display: { name: 'Discovery Subnets', inputType: 'Array', required: true },
+  };
+  const section = {
+    key: 'NetworkDiscovery',
+    className: 'NetworkDiscoverySettings',
+    properties: [subnets],
+  } as never;
+
+  it.each([
+    ['octal-invalid, server 400s', '08.0.0.1/24'],
+    ['octal-valid, server silently reads 8.0.0.1', '010.0.0.1/24'],
+    ['every octet octal, server reads 8.8.8.8', '010.010.010.010/24'],
+    ['leading zero mid-address', '192.168.01.1/24'],
+    ['double zero', '00.0.0.1/24'],
+  ])('rejects %s', (_label, value) => {
+    const errs = validateSection(section, { discoverySubnets: [value] });
+    expect(errs.discoverySubnets).toBeTruthy();
+  });
+
+  it.each([
+    ['a bare zero octet', '0.0.0.0/0'],
+    ['zero in the middle', '10.0.0.1/24'],
+    ['no leading zeros', '192.168.1.0/24'],
+  ])('still accepts %s', (_label, value) => {
+    const errs = validateSection(section, { discoverySubnets: [value] });
+    expect(errs.discoverySubnets).toBeUndefined();
+  });
+});

@@ -146,18 +146,28 @@ const FORMAT_VALIDATORS: Record<string, { test: (v: string) => boolean; message:
   // have succeeded. (Verified against the .NET Core runtime, not assumed.)
   //
   // Known and deliberate divergence: `IPAddress.TryParse` also accepts IPv4
-  // shorthand and hex octets — `"192.168.1"` becomes 192.168.0.1, `"0x0A.0.0.1"`
-  // becomes 10.0.0.1. This validator rejects both. That makes the client stricter
-  // than the server in a direction that cannot cause a surprise 400, and it
-  // catches a genuine footgun: a user typing `192.168.1/24` means the 192.168.1.x
-  // range, and would otherwise silently get 192.168.0.1/24.
+  // shorthand, hex octets and octal octets — `"192.168.1"` becomes 192.168.0.1,
+  // `"0x0A.0.0.1"` becomes 10.0.0.1, and a leading zero triggers inet_aton octal
+  // parsing, so `"010.0.0.1"` becomes 8.0.0.1 and `"010.010.010.010"` becomes
+  // 8.8.8.8. This validator rejects all of them, and rejecting the octal forms
+  // is not optional:
+  //
+  //   "08.0.0.1"  -> IPAddress.TryParse === false (8 is not an octal digit), so
+  //                  accepting it here would hand the server a value it 400s on.
+  //   "010.0.0.1" -> parses, but as 8.0.0.1. Accepting it would silently save a
+  //                  different subnet than the one the user typed.
+  //
+  // Both were verified against the .NET runtime, not assumed. The same reasoning
+  // covers shorthand: a user typing `192.168.1/24` means the 192.168.1.x range
+  // and would otherwise silently get 192.168.0.1/24.
   'NetworkDiscovery.discoverySubnets': {
     test: (v) => {
       const parts = v.split('/');
       if (parts.length !== 2) return false;
       const octets = parts[0].split('.');
       if (octets.length !== 4) return false;
-      if (!octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
+      // `0` is fine; `00`, `08` and `010` are not — see the octal note above.
+      if (!octets.every((o) => /^(0|[1-9]\d{0,2})$/.test(o) && Number(o) <= 255)) return false;
       const rawPrefix = parts[1].trim();
       if (!/^[+-]?\d+$/.test(rawPrefix)) return false;
       const prefix = Number(rawPrefix);
