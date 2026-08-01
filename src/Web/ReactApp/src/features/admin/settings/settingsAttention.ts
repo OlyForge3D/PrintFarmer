@@ -136,6 +136,21 @@ const FORMAT_VALIDATORS: Record<string, { test: (v: string) => boolean; message:
   // address, and a prefix in 0..32. Duplicates are deliberately NOT rejected —
   // EnsureUniqueSubnets silently de-duplicates rather than failing, so erroring
   // here would make the client stricter than the server.
+  //
+  // The two halves have deliberately different whitespace rules, because the two
+  // server parsers do. `IPAddress.TryParse` rejects any surrounding whitespace on
+  // .NET Core, so the address half is matched strictly. `int.TryParse` defaults to
+  // NumberStyles.Integer, which allows leading/trailing whitespace, a leading sign
+  // and leading zeros — so `"10.0.0.0/24 "` is accepted by the server and must be
+  // accepted here too, or a pasted trailing space would block a save that would
+  // have succeeded. (Verified against the .NET Core runtime, not assumed.)
+  //
+  // Known and deliberate divergence: `IPAddress.TryParse` also accepts IPv4
+  // shorthand and hex octets — `"192.168.1"` becomes 192.168.0.1, `"0x0A.0.0.1"`
+  // becomes 10.0.0.1. This validator rejects both. That makes the client stricter
+  // than the server in a direction that cannot cause a surprise 400, and it
+  // catches a genuine footgun: a user typing `192.168.1/24` means the 192.168.1.x
+  // range, and would otherwise silently get 192.168.0.1/24.
   'NetworkDiscovery.discoverySubnets': {
     test: (v) => {
       const parts = v.split('/');
@@ -143,8 +158,9 @@ const FORMAT_VALIDATORS: Record<string, { test: (v: string) => boolean; message:
       const octets = parts[0].split('.');
       if (octets.length !== 4) return false;
       if (!octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
-      if (!/^\d{1,2}$/.test(parts[1])) return false;
-      const prefix = Number(parts[1]);
+      const rawPrefix = parts[1].trim();
+      if (!/^[+-]?\d+$/.test(rawPrefix)) return false;
+      const prefix = Number(rawPrefix);
       return prefix >= 0 && prefix <= 32;
     },
     message: 'is not a valid CIDR subnet (expected e.g. 192.168.1.0/24)',
@@ -188,11 +204,18 @@ export function validateSection(
 
     // Same class of client/server disagreement as the blank-row check above,
     // one step further in: the row is filled but malformed.
+    //
+    // Test the *raw* entry, never a trimmed copy. `IsValidCidr` splits the string
+    // it was given and hands the address half to `IPAddress.TryParse`, which on
+    // .NET Core rejects both leading and trailing whitespace. Validating
+    // `entry.trim()` here would accept `" 192.168.1.0/24"` and then hand the
+    // untrimmed value to the server (values are sent verbatim), producing exactly
+    // the 400 this pre-flight exists to prevent.
     const format = FORMAT_VALIDATORS[`${metaItem.key}.${prop.name}`];
     if (format && !isEmptyValue(val)) {
       const entries = Array.isArray(val) ? val : [val];
       const badAt = entries.findIndex(
-        (entry) => typeof entry === 'string' && entry.trim() !== '' && !format.test(entry.trim()),
+        (entry) => typeof entry === 'string' && !format.test(entry),
       );
       if (badAt >= 0) {
         errs[prop.name] = Array.isArray(val)

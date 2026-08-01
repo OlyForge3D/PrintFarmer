@@ -584,3 +584,52 @@ describe('validateSection mirrors IsValidCidr (Hicks #4)', () => {
   });
 });
 
+
+/**
+ * Hicks #2 — the client trimmed each entry before validating it, but
+ * `SettingsPage` sends `state.values[sectionKey]` verbatim and
+ * `IsValidCidr` does not trim. `IPAddress.TryParse` rejects surrounding
+ * whitespace on .NET Core, so `" 192.168.1.0/24"` passed the pre-flight and
+ * then 400'd on the server — the precise failure the pre-flight exists to stop.
+ *
+ * The prefix half is the opposite case: the server parses it with
+ * `int.TryParse`, whose default NumberStyles allows surrounding whitespace, a
+ * leading sign and leading zeros. Rejecting those would block a save the server
+ * would have accepted. Both directions are pinned here; both were checked
+ * against the real .NET runtime rather than assumed.
+ */
+describe('validateSection matches IsValidCidr on whitespace (Hicks #2)', () => {
+  const subnets: Prop = {
+    name: 'discoverySubnets',
+    type: 'Array',
+    attributes: [],
+    display: { name: 'Discovery Subnets', inputType: 'Array', required: true },
+  };
+  const section = {
+    key: 'NetworkDiscovery',
+    className: 'NetworkDiscoverySettings',
+    properties: [subnets],
+  } as never;
+
+  // IPAddress.TryParse(" 192.168.1.0") === false, so the server rejects these.
+  it.each([
+    ['leading space', ' 192.168.1.0/24'],
+    ['trailing space on the address', '192.168.1.0 /24'],
+    ['inner space', '192.168. 1.0/24'],
+    ['tab', '\t10.0.0.0/24'],
+  ])('rejects %s, because the server does', (_label, value) => {
+    const errs = validateSection(section, { discoverySubnets: [value] });
+    expect(errs.discoverySubnets).toBeTruthy();
+  });
+
+  // int.TryParse("24 ") === true, so the server accepts these.
+  it.each([
+    ['trailing space on the prefix', '10.0.0.0/24 '],
+    ['leading space on the prefix', '10.0.0.0/ 24'],
+    ['leading zero prefix', '10.0.0.0/024'],
+    ['signed prefix', '10.0.0.0/+24'],
+  ])('accepts %s, because the server does', (_label, value) => {
+    const errs = validateSection(section, { discoverySubnets: [value] });
+    expect(errs.discoverySubnets).toBeUndefined();
+  });
+});

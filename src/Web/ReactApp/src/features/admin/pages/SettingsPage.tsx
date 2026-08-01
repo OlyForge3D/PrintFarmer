@@ -1318,11 +1318,14 @@ export function SettingsPage({
           const groupMeta = metadataByGroup[group] ?? [];
           if (groupMeta.length === 0) return null;
 
-          // Skip the whole group when every one of its sections is filtered out.
-          // Keep the underlying `groupMeta` (full list) as the block's authority
-          // for save / validation so we don't accidentally strand any dirty edits.
+          // A group whose sections are all filtered out is *hidden*, not unmounted.
+          // `GroupSaveBlock` owns its dirty state (see the note at its top), so
+          // unmounting it throws away edits the user has not saved yet: type into a
+          // field, search for something that excludes the group, clear the search,
+          // and the edit is gone with no warning. `display:none` keeps the block
+          // mounted — so the page save bar still counts those edits and can still
+          // persist them — while removing it from the column flow entirely.
           const groupHasVisible = groupMeta.some((m) => (visibleByKey[m.key]?.size ?? 0) > 0);
-          if (!groupHasVisible) return null;
 
           // Build a slim initial-values object scoped to this group so the
           // GroupSaveBlock's dirty state only tracks its own sections.
@@ -1346,7 +1349,7 @@ export function SettingsPage({
               captionId={`group-${group}`}
               headingLevel={3}
               gap="loose"
-              className="mb-6 break-inside-avoid"
+              className={clsx('mb-6 break-inside-avoid', !groupHasVisible && 'hidden')}
               captionAside={
                 groupIssueCount > 0 ? (
                   <Badge variant={errorGroups.has(group) ? 'error' : 'warning'} size="sm">
