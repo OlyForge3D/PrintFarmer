@@ -117,3 +117,72 @@ describe('admin surface uses tokens, not literal colours (#1016)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+/**
+ * Vasquez #1 — a theme token that no `@theme` entry maps is invisible.
+ *
+ * Tailwind v4 only emits a `bg-pf-x` / `text-pf-x` / `border-pf-x` rule when
+ * `--color-pf-x` is registered in the `@theme` block. All seven themes defined
+ * `--pf-warning-bg` and `--pf-warning-border`, every status surface in the app
+ * used `bg-pf-warning-bg`, and none of it painted: the mapping was simply
+ * absent, so the class compiled to nothing. No build step complains, no lint
+ * rule fires, and the element just renders transparent.
+ *
+ * `--color-pf-error-bg` was mapped, which is why Error badges filled and
+ * Warning badges did not — the severity split this epic introduced made the
+ * asymmetry visible for the first time.
+ */
+describe('theme tokens used by utilities are registered in @theme (Vasquez #1)', () => {
+  const INDEX_CSS = resolve(HERE, '../../../index.css');
+  const SRC = resolve(HERE, '../../..');
+
+  /** `--color-pf-*` names registered in the `@theme` block. */
+  function mappedColors(): Set<string> {
+    const css = readFileSync(INDEX_CSS, 'utf8');
+    return new Set([...css.matchAll(/(--color-pf-[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+  }
+
+  /** Every `--pf-*` token any theme declares. */
+  function allThemeTokens(): Set<string> {
+    const all = new Set<string>();
+    for (const f of themeFiles) for (const t of declaredTokens(f)) all.add(t);
+    return all;
+  }
+
+  /** `pf-*` colour utilities actually used in source. */
+  function usedColorUtilities(): Set<string> {
+    const found = new Set<string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+          walk(full);
+          continue;
+        }
+        if (!/\.(tsx?|css)$/.test(entry.name)) continue;
+        const text = readFileSync(full, 'utf8');
+        for (const m of text.matchAll(/\b(?:bg|text|border|ring|fill|stroke)-(pf-[a-z0-9-]+)/g)) {
+          found.add(m[1]);
+        }
+      }
+    };
+    walk(SRC);
+    return found;
+  }
+
+  it('maps every theme token that a utility class consumes', () => {
+    const mapped = mappedColors();
+    const themeTokens = allThemeTokens();
+
+    // Only tokens the themes actually define. A utility naming something no
+    // theme declares is a different bug (a missing *definition*, not a missing
+    // mapping) and is tracked separately.
+    const unmapped = [...usedColorUtilities()]
+      .filter((u) => themeTokens.has(`--${u}`))
+      .filter((u) => !mapped.has(`--color-${u}`))
+      .sort();
+
+    expect(unmapped).toEqual([]);
+  });
+});

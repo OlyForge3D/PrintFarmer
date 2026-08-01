@@ -304,6 +304,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 id={fieldId}
                 name={fieldId}
                 aria-label={displayName}
+                aria-required={isRequired || undefined}
                 checked={Boolean(values[prop.name])}
                 invalid={invalid}
                 onChange={(e) => onChange(prop.name, e.currentTarget.checked)}

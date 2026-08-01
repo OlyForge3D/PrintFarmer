@@ -288,3 +288,44 @@ describe('SettingsPagelet — array requirement uses valid ARIA (Hicks #7)', () 
     expect(hint?.textContent).toMatch(/required/i);
   });
 });
+
+/**
+ * Vasquez #2 — every other control type in this renderer carries
+ * `aria-required` when the field is required; the boolean checkbox was the one
+ * that did not. `aria-required` *is* valid on role="checkbox" (unlike
+ * role="group", see Hicks #7 above), so the fix is the plain attribute.
+ */
+describe('SettingsPagelet — required booleans announce as required (Vasquez #2)', () => {
+  const boolSection = (required: boolean) => ({
+    key: 'SystemLog',
+    className: 'SystemLogSettings',
+    displayName: 'System Log',
+    description: '',
+    properties: [
+      {
+        name: 'enabled',
+        displayName: 'Enabled',
+        type: 'bool',
+        attributes: [],
+        display: { name: 'Enabled', inputType: 'Checkbox', required },
+      },
+    ],
+  }) as never;
+
+  it('marks a required checkbox aria-required', () => {
+    render(
+      <SettingsPagelet metadata={boolSection(true)} values={{ enabled: false }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByRole('checkbox', { name: 'Enabled' })).toHaveAttribute(
+      'aria-required',
+      'true',
+    );
+  });
+
+  it('leaves an optional checkbox unmarked', () => {
+    render(
+      <SettingsPagelet metadata={boolSection(false)} values={{ enabled: false }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByRole('checkbox', { name: 'Enabled' })).not.toHaveAttribute('aria-required');
+  });
+});
