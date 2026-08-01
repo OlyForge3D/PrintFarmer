@@ -681,7 +681,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
+            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[13.5rem_minmax(0,1fr)]">
               <SettingsSidebar
                 categories={accessibleCategories}
                 activeScope={effectiveScope}
@@ -701,18 +701,22 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
                   {subTabs}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
-                    {/* Subordinate to the page's own H1. This rendered at 32px
-                        against a 24px "Settings" H1, so the category name — a
-                        restatement of the highlighted nav item — was the
-                        largest text on the page. The scale now descends:
-                        24 (page) → 20 (category) → 18 (band) → 14 (card).
-                        The element itself stays: `aria-labelledby` and the
-                        section-change focus target both point at it. */}
+                    {/* Visually redundant: the category name is already the
+                        highlighted rail item two inches to the left, and the
+                        page H1 above it. Rendering it a third time made the
+                        content pane open with two stacked titles before any
+                        setting. The proposal's settings screen goes rail →
+                        tabs → bands with no category heading at all.
+
+                        The element stays in the tree because `aria-labelledby`
+                        and the section-change focus target both point at it,
+                        and it un-hides on focus so a keyboard user still sees
+                        where focus landed after switching categories. */}
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
                       tabIndex={-1}
-                      className="mb-4 w-fit text-xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-5"
+                      className="sr-only focus:not-sr-only focus:mb-4 focus:block focus:w-fit focus:text-xl focus:leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent"
                     >
                       {currentCategory.label}
                     </h2>

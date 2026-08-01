@@ -54,9 +54,18 @@ function buildNavGroups(categories: SettingsCategory[], scopes: SettingsScope[])
  * hairline border, accent icon — so a settings category and an admin subsystem
  * read as the same kind of thing.
  */
+/**
+ * One rail entry, sized to the proposal's `.p-nav a`: 13.5px label, 16px icon,
+ * 9px gap, 7px/10px padding. Shipped metrics were a 14px label on a 20px icon
+ * with 12px gaps and 8px/12px padding, which read as a stack of buttons rather
+ * than a list of places and pushed a ten-item rail past the fold.
+ *
+ * The active treatment is unchanged — a filled `bg-pf-bg-2` with a real border
+ * against a transparent border on the rest — because it already matched.
+ */
 function navItemClass(isActive: boolean, isMatching: boolean): string {
   return clsx(
-    'group flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors',
+    'group flex w-full items-center gap-2.5 rounded-md border px-2.5 py-[7px] text-left text-[13.5px] transition-colors',
     'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
     isActive
       ? 'border-pf-border bg-pf-bg-2 font-medium text-pf-text-primary'
@@ -166,14 +175,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
         className="hidden h-fit min-h-0 flex-col self-start rounded-md border border-pf-border bg-pf-sidebar md:flex"
         aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
           <div className="flex flex-col gap-5">
             {navGroups.map((group) => (
               <div key={group.scope.id}>
                 {showCaptions && (
                   <h2
                     id={`settings-nav-group-${group.scope.id}`}
-                    className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary"
+                    className="px-2.5 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-pf-text-tertiary"
                   >
                     {SCOPE_CAPTIONS[group.scope.id]}
                   </h2>
@@ -206,7 +215,7 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
                             )}
                             aria-hidden="true"
                           >
-                            <Icon className="h-5 w-5" />
+                            <Icon className="h-4 w-4" />
                           </span>
                           <span className="min-w-0 flex-1 truncate">
                             <SettingsMatchText text={category.label} query={searchQuery} />
@@ -341,7 +350,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                 {showCaptions && (
                   <h2
                     id={`settings-mobile-nav-group-${group.scope.id}`}
-                    className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary"
+                    className="px-2 pb-1.5 text-[10.5px] font-semibold uppercase tracking-[0.09em] text-pf-text-tertiary"
                   >
                     {SCOPE_CAPTIONS[group.scope.id]}
                   </h2>
@@ -373,7 +382,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
                             )}
                             aria-hidden="true"
                           >
-                            <Icon className="h-5 w-5" />
+                            <Icon className="h-4 w-4" />
                           </span>
                           <span className="min-w-0 flex-1 truncate">
                             <SettingsMatchText text={category.label} query={searchQuery} />
