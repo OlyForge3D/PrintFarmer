@@ -193,10 +193,32 @@ describe('settings card flow density', () => {
     window.localStorage.setItem('pf.settings.mode', 'everything');
   });
 
-  it('caps the measure of a single-card band', async () => {
+  it('caps the measure of a single-card band at the two-column threshold', async () => {
     const flow = await renderCardsInOneBand(1);
-    expect(flow.className).toContain('max-w-[64rem]');
+    expect(flow.className).toContain('max-w-[74rem]');
     expect(flow.className).not.toContain('columns-2');
+  });
+
+  it('leaves no width where a lone card sits short of the page chrome', async () => {
+    // The filter row and section headings above the cards are full-bleed. If
+    // the single-card cap is below the two-column threshold, every window
+    // between them renders a card that stops short of the chrome directly
+    // above it, against bare background. At `64rem` vs `74rem` that was a
+    // 150px strip on a 1728px window.
+    //
+    // Pinning the cap *to* the threshold closes it by construction: the card
+    // grows until the exact width a second column appears. These two numbers
+    // have to move together, so assert them against one source.
+    const lone = (await renderCardsInOneBand(1)).className;
+    cleanup();
+    const many = (await renderCardsInOneBand(3)).className;
+
+    const cap = /max-w-\[(\d+(?:\.\d+)?)rem\]/.exec(lone)?.[1];
+    const twoCol = /@\[(\d+(?:\.\d+)?)rem\]:columns-2/.exec(many)?.[1];
+
+    expect(cap).toBeDefined();
+    expect(twoCol).toBeDefined();
+    expect(Number(cap)).toBe(Number(twoCol));
   });
 
   it('lets a lone band flow its own cards', async () => {
@@ -206,7 +228,7 @@ describe('settings card flow density', () => {
     const flow = await renderCardsInOneBand(3);
     expect(flow.className).toContain('@[74rem]:columns-2');
     expect(flow.className).toContain('@[111rem]:columns-3');
-    expect(flow.className).not.toContain('max-w-[64rem]');
+    expect(flow.className).not.toContain('max-w-[74rem]');
   });
 
   it('keeps cards whole across a column break', async () => {

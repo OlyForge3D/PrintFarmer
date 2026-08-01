@@ -208,8 +208,14 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
     [metadata.properties],
   );
 
+  // Matches the `74rem` cap on a single-card flow in `SettingsPage`. If this
+  // stayed narrower, the `divide-y` rules between rows would stop short of the
+  // card's own right padding on a wide single-column layout, which reads as a
+  // rendering fault rather than a measure. Widening is safe: the label track is
+  // capped at `19.5rem` and the control at `40rem`, so the extra width lands as
+  // trailing space and cannot move a label away from the control it names.
   const content = (
-    <div className="@container max-w-[64rem] divide-y divide-pf-border-divider">
+    <div className="@container max-w-[74rem] divide-y divide-pf-border-divider">
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;

@@ -297,10 +297,20 @@ function bandFlowClass(bandCount: number): string {
 function cardFlowClass(cardCount: number): string {
   return clsx(
     '-mb-4 gap-4 columns-1',
-    // One card cannot fill a wide flow, and stretching it to 1300px only
-    // pushes labels away from the controls they name. Cap the measure and let
-    // the remainder read as page margin.
-    cardCount <= 1 && 'max-w-[64rem]',
+    // Pinned to the two-column threshold, not to a round number. A lone card
+    // stops growing exactly where a second column would start, so the flow is
+    // always either full or split and never leaves a ragged strip of bare
+    // background beside the card.
+    //
+    // This was `64rem`, on the rationale that a wider card "pushes labels away
+    // from the controls they name". That stopped being true once the label
+    // track gained a hard `19.5rem` cap and the control a `40rem` one: past
+    // 64rem the extra width lands as trailing space *inside* the card, not
+    // between the label and its control. What it did instead was leave the
+    // cards ending up to 150px short of the filter row and section headings
+    // directly above them, which are full-bleed — measured at windows 1578px
+    // to 1728px, worst at 1728px.
+    cardCount <= 1 && 'max-w-[74rem]',
     cardCount >= 2 && '@[74rem]:columns-2',
     cardCount >= 3 && '@[111rem]:columns-3',
   );
