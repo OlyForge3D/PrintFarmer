@@ -150,14 +150,14 @@ describe('settings band flow density', () => {
 
   it('opens a second column — but not a third — for two bands', async () => {
     const flow = await renderBands(2);
-    expect(flow.className).toContain('@[74rem]:columns-2');
+    expect(flow.className).toContain('@[59rem]:columns-2');
     expect(flow.className).not.toContain('columns-3');
   });
 
   it('opens up to three columns once there are three bands', async () => {
     const flow = await renderBands(3);
-    expect(flow.className).toContain('@[74rem]:columns-2');
-    expect(flow.className).toContain('@[111rem]:columns-3');
+    expect(flow.className).toContain('@[59rem]:columns-2');
+    expect(flow.className).toContain('@[89rem]:columns-3');
   });
 
   it('flows bands rather than only the cards inside one band', async () => {
@@ -195,7 +195,7 @@ describe('settings card flow density', () => {
 
   it('caps the measure of a single-card band at the two-column threshold', async () => {
     const flow = await renderCardsInOneBand(1);
-    expect(flow.className).toContain('max-w-[74rem]');
+    expect(flow.className).toContain('max-w-[59rem]');
     expect(flow.className).not.toContain('columns-2');
   });
 
@@ -203,8 +203,8 @@ describe('settings card flow density', () => {
     // The filter row and section headings above the cards are full-bleed. If
     // the single-card cap is below the two-column threshold, every window
     // between them renders a card that stops short of the chrome directly
-    // above it, against bare background. At `64rem` vs `74rem` that was a
-    // 150px strip on a 1728px window.
+    // above it, against bare background. When the cap was 64rem against a 74rem
+    // threshold that was a 150px strip on a 1728px window.
     //
     // Pinning the cap *to* the threshold closes it by construction: the card
     // grows until the exact width a second column appears. These two numbers
@@ -226,9 +226,9 @@ describe('settings card flow density', () => {
     // cards are the thing with room to flow. The shared thresholds resolve
     // against the band's `@container`, so this needs no extra coordination.
     const flow = await renderCardsInOneBand(3);
-    expect(flow.className).toContain('@[74rem]:columns-2');
-    expect(flow.className).toContain('@[111rem]:columns-3');
-    expect(flow.className).not.toContain('max-w-[74rem]');
+    expect(flow.className).toContain('@[59rem]:columns-2');
+    expect(flow.className).toContain('@[89rem]:columns-3');
+    expect(flow.className).not.toContain('max-w-[59rem]');
   });
 
   it('keeps cards whole across a column break', async () => {

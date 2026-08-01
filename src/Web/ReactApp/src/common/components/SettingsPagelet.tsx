@@ -155,9 +155,17 @@ const FIELD_ROW_CLASS =
  * Pinned to the same `26rem` threshold as `FIELD_ROW_CLASS` so the control cap
  * and the side-by-side layout switch on together — they described one decision
  * even when they were two numbers, and #1020 shipped twice with them disagreeing.
- * The cap *value* is retuned separately in #1033.
+ *
+ * The cap *value* is `24rem` (384px), set in #1033 from what the proposal
+ * actually produces rather than from a round number. Its cards run 570–590px
+ * outer across the 2- and 3-column bands, which after 34px of chrome and a
+ * 228px label track leaves controls in a 310–350px range. 384px sits just above
+ * that band, so it never binds on a card that is genuinely in a column and only
+ * engages on the wide single-card case it exists for. The previous `40rem`
+ * (640px) was inherited from the 19.5rem-label era and let a lone card render a
+ * 640px ribbon for a two-digit retention count.
  */
-const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[40rem]';
+const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[24rem]';
 
 const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   <span
@@ -194,19 +202,19 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
     [metadata.properties],
   );
 
-  // Matches the `74rem` cap on a single-card flow in `SettingsPage`. If this
+  // Matches the `59rem` cap on a single-card flow in `SettingsPage`. If this
   // stayed narrower, the `divide-y` rules between rows would stop short of the
-  // card's own right padding on a wide single-column layout, which reads as a
+  // card's own right edge on a wide single-column layout, which reads as a
   // rendering fault rather than a measure. Widening is safe: the label track is
-  // capped at `13.5rem` and the control at `40rem`, so the extra width lands as
+  // capped at `13.5rem` and the control at `24rem`, so the extra width lands as
   // trailing space and cannot move a label away from the control it names.
   //
   // Rows carry their own `px-4` and the card body carries none, so the rules
   // run edge to edge as they do in the proposal. Padding on the body instead
-  // would inset every rule by 14px on both sides and turn a continuous ledger
+  // would inset every rule by 16px on both sides and turn a continuous ledger
   // into a stack of floating strips.
   const content = (
-    <div className="@container max-w-[74rem] divide-y divide-pf-border-divider">
+    <div className="@container max-w-[59rem] divide-y divide-pf-border-divider">
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;

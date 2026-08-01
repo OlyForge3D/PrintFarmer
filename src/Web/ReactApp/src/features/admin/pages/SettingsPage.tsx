@@ -242,32 +242,35 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  * field rows stay legible, because opening a column that shreds every label is
  * not "using the space".
  *
- * ⚠️ The numbers below are **stale as of #1030** and are retuned in #1034.
+ * Re-derived in #1034 against the finished row. `SettingsPagelet` caps the
+ * label track at `13.5rem` (216px) and the row gap at 12px, and a control stops
+ * being usable below ~200px, so a legible row needs 428px of inner width. A
+ * card spends 34px on its border and the row's own gutter, giving a 462px outer
+ * card and `N × 462 + (N-1) × 16` before N columns may open:
  *
- * They were derived when `SettingsPagelet` floored the label track at `19.5rem`
- * (312px), so a legible row needed 312 + 16 + 200 = 528px of inner width. A card
- * spends 49px on padding and border, giving a 577px outer card and
- * `N × 577 + (N-1) × 16` before N columns may open:
+ *   59rem (944px)  → 2 cols → cards 464px
+ *   89rem (1424px) → 3 cols → cards 464px
  *
- *   74rem  (1184px) → 2 cols → cards 584px
- *   111rem (1776px) → 3 cols → cards 581px
+ * That is ~240px per column cheaper than the pre-#1030 numbers, which were
+ * derived when the label track was a 312px *floor* rather than a 216px cap.
  *
- * #1030 replaced that floor with a `13.5rem` (216px) **cap**, which is the ACC
- * proposal's number. A legible row is now 216 + 12 + 200 = 428px inner, so both
- * thresholds are roughly 100px per column too high — which is exactly the
- * density failure #1029 opened on: the proposal reaches two columns at a 1440px
- * viewport and this reaches them at ~1738px.
+ * What it does not do is reach two columns at a 1440px viewport, which is where
+ * the proposal reaches them. That gap is not a tuning failure and cannot be
+ * closed here: the proposal's preview frame is nearly all content, while the
+ * real page spends 554px on the app nav rail, the page gutters and the settings
+ * rail before the flow starts — measured across 1280–1728px, where the flow is
+ * exactly `viewport − 554` throughout. At 1440px that leaves 886px, 54px short
+ * of two legible columns. Buying those 54px means a ~173px control, and sizing
+ * a layout by shrinking the thing the user actually types into is the same
+ * mistake in the opposite direction as the label floor this epic removed.
  *
- * They are deliberately left alone here. Retuning them before the control cap
- * (#1033), the unit adornments (#1025) and the toggle switches (#1019) land
- * would just reintroduce cramped columns from the other side, so #1034 does it
- * once, against the finished row.
+ * Two columns therefore start at ~1498px of viewport. Three at ~1978px.
  */
 function bandFlowClass(bandCount: number): string {
   return clsx(
     'columns-1 gap-4',
-    bandCount >= 2 && '@[74rem]:columns-2',
-    bandCount >= 3 && '@[111rem]:columns-3',
+    bandCount >= 2 && '@[59rem]:columns-2',
+    bandCount >= 3 && '@[89rem]:columns-3',
   );
 }
 
@@ -296,23 +299,17 @@ function cardFlowClass(cardCount: number): string {
     //
     // The invariant is that narrow, and deliberately stated that way: a page
     // holding exactly one band with exactly one card still caps here, so above
-    // ~1184px of content it does sit short. No shipping tab is in that shape —
-    // `bandFlowClass` splits multi-band pages into sub-74rem columns long
-    // before any card sees that width — and it is strictly better than the
-    // 64rem it replaced, which sat 326px short in the same case. Tracked with
-    // the rest of the measure work in #1027 rather than special-cased here.
+    // ~944px of content it does sit short. No shipping tab is in that shape —
+    // `bandFlowClass` splits multi-band pages into sub-59rem columns long
+    // before any card sees that width. Tracked with the rest of the measure
+    // work in #1027 rather than special-cased here.
     //
-    // This was `64rem`, on the rationale that a wider card "pushes labels away
-    // from the controls they name". That stopped being true once the label
-    // track gained a hard `19.5rem` cap and the control a `40rem` one: past
-    // 64rem the extra width lands as trailing space *inside* the card, not
-    // between the label and its control. What it did instead was leave the
-    // cards ending up to 150px short of the filter row and section headings
-    // directly above them, which are full-bleed — measured at windows 1578px
-    // to 1728px, worst at 1728px.
-    cardCount <= 1 && 'max-w-[74rem]',
-    cardCount >= 2 && '@[74rem]:columns-2',
-    cardCount >= 3 && '@[111rem]:columns-3',
+    // The cap moved 74rem → 59rem with the thresholds in #1034; see the
+    // derivation on `bandFlowClass`. It is the same decision expressed twice,
+    // and the two are asserted against one source in the flow test.
+    cardCount <= 1 && 'max-w-[59rem]',
+    cardCount >= 2 && '@[59rem]:columns-2',
+    cardCount >= 3 && '@[89rem]:columns-3',
   );
 }
 
