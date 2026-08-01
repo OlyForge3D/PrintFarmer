@@ -145,7 +145,7 @@ const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
  * regression in the #1025 adornment work is visible rather than silent.
  */
 const FIELD_ROW_CLASS =
-  'grid grid-cols-1 items-start gap-x-3 gap-y-1 py-2.5 '
+  'grid grid-cols-1 items-start gap-x-3 gap-y-1 px-4 py-2.5 '
   + '@[26rem]:grid-cols-[minmax(0,13.5rem)_minmax(0,1fr)]';
 
 /**
@@ -200,6 +200,11 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   // rendering fault rather than a measure. Widening is safe: the label track is
   // capped at `13.5rem` and the control at `40rem`, so the extra width lands as
   // trailing space and cannot move a label away from the control it names.
+  //
+  // Rows carry their own `px-4` and the card body carries none, so the rules
+  // run edge to edge as they do in the proposal. Padding on the body instead
+  // would inset every rule by 14px on both sides and turn a continuous ledger
+  // into a stack of floating strips.
   const content = (
     <div className="@container max-w-[74rem] divide-y divide-pf-border-divider">
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
@@ -491,7 +496,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
         );
       })}
 
-      {error && <div className="text-pf-error font-medium text-sm pt-2" role="alert">{error}</div>}
+      {error && <div className="px-4 text-pf-error font-medium text-sm pt-2" role="alert">{error}</div>}
     </div>
   );
 
@@ -500,8 +505,8 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   }
 
   return (
-    <div className="settings-pagelet bg-pf-panel border border-pf-border rounded-lg p-4 mb-6">
-      <h3 className="text-sm font-semibold text-pf-text-primary mb-1">{metadata.displayName || metadata.className}</h3>
+    <div className="settings-pagelet bg-pf-panel border border-pf-border rounded-md py-4 mb-6">
+      <h3 className="px-4 text-sm font-semibold text-pf-text-primary mb-1">{metadata.displayName || metadata.className}</h3>
       {content}
     </div>
   );

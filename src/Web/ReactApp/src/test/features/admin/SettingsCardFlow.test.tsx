@@ -290,8 +290,16 @@ function renderPagelet() {
 const LONGEST_LABEL = 'Spool Burn-Rate Minimum Samples';
 const LONGEST_LABEL_PX = 194 + 22;
 
-/** Padding + border a card spends before its field grid starts. */
-const CARD_CHROME_PX = 49;
+/**
+ * Padding + border a card spends before its field grid starts.
+ *
+ * `1px` border each side plus the row's own `px-4` (16px each side). The
+ * horizontal padding moved from the card body onto the rows in #1032 so the
+ * `divide-y` rules run edge to edge, as they do in the proposal — the total a
+ * card spends is unchanged, but it is now spent inside the container query's
+ * measuring box rather than outside it.
+ */
+const CARD_CHROME_PX = 2 + 32;
 
 /** Column gap between bands and between cards. `gap-4`. */
 const COLUMN_GAP_PX = 16;

@@ -641,7 +641,21 @@ function GroupSaveBlock({
               <Card
                 key={meta.key}
                 className={clsx(
-                  'mb-4 break-inside-avoid',
+                  // The proposal's .p-card: a flat 1px border, 6px radius, and
+                  // one background all the way through. Shipped chrome had it
+                  // the other way round — a lighter header sitting on a darker
+                  // body — which reads as a translucent slab rather than a
+                  // panel. The header simply stops painting its own background
+                  // and drops to the softer divider rule.
+                  //
+                  // The proposal's --pf-card-bg (#0e1729) and the app's
+                  // bg-pf-panel (#0c1424) differ by under 3 per channel, so the
+                  // card keeps the app's own token rather than introducing a
+                  // settings-only background. Likewise the gutter stays at the
+                  // Card component's 16px rather than the proposal's 14px: the
+                  // 2px is invisible, and a settings-only gutter is exactly the
+                  // kind of local variant this epic exists to delete.
+                  'rounded-md mb-4 break-inside-avoid',
                   fullWidth && '[column-span:all]',
                   // A left rule reads as "this one" at a glance across a
                   // multi-column flow, where a badge alone gets lost.
@@ -654,9 +668,9 @@ function GroupSaveBlock({
                   'data-section-severity': cardIssueCount ? (cardIsError ? 'Error' : 'Warning') : undefined,
                 }}
               >
-                <Card.Header className="pb-2">
+                <Card.Header className="border-pf-border-divider bg-transparent pb-[11px] pt-3">
                   <div className="flex items-start justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-pf-text-primary">
+                    <h4 className="text-[13.5px] font-semibold text-pf-text-primary">
                       {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
                     </h4>
                     {cardIssueCount > 0 && (
@@ -673,7 +687,7 @@ function GroupSaveBlock({
                     </p>
                   )}
                 </Card.Header>
-                <Card.Body className="pt-0">
+                <Card.Body noPadding className="pb-1">
                   <SettingsPagelet
                     metadata={displayMeta}
                     values={sectionValues}
@@ -683,10 +697,14 @@ function GroupSaveBlock({
                     compact
                     searchQuery={query}
                   />
-                  {extensionRender?.({
-                    values: sectionValues,
-                    onChange: (field, value) => handleFieldChange(meta.key, field, value),
-                  })}
+                  {extensionRender && (
+                    <div className="px-4 pt-2">
+                      {extensionRender({
+                        values: sectionValues,
+                        onChange: (field, value) => handleFieldChange(meta.key, field, value),
+                      })}
+                    </div>
+                  )}
                 </Card.Body>
               </Card>
             );
