@@ -245,7 +245,7 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  *   label fits on one line   label track ≥ 297px  (275px text + 22px tooltip)
  *   control stays usable     control ≥ 200px
  *
- * The 297px is the widest of all 129 `[SettingDisplay(Name = ...)]` labels the
+ * The 297px is the widest of all 131 `[SettingDisplay(Name = ...)]` labels the
  * app ships — "Print Warmup Grace Period (seconds)" — measured in the real
  * face. An earlier pass took 218px from `System Config` alone, which is not the
  * tab that holds the long labels; see the derivation on `FIELD_ROW_CLASS`.

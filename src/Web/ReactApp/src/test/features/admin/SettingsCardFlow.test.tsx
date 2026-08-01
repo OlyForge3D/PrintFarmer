@@ -254,7 +254,7 @@ function renderPagelet() {
  * the app-wide maximum — but the long labels live on Automation & Costs, and
  * nine of them wrapped at 1920px with the floor sized at 232px.
  *
- * This figure is now the maximum over *all* 129 distinct `SettingDisplay`
+ * This figure is now the maximum over *all* 131 distinct `SettingDisplay`
  * names, rendered in the real face. Independent measurements of the worst label
  * came in between 265px and 275px depending on whether the required marker was
  * counted; the larger is used. `guards the measurement this file is built on`
@@ -483,11 +483,23 @@ describe('guards the measurement this file is built on (#1020)', () => {
         }
         if (!entry.name.endsWith('.cs')) continue;
         const source = fs.readFileSync(path.join(dir, entry.name), 'utf8');
-        // The attribute is written both inline and across several lines, so
-        // this cannot be a line-oriented match — that is how the first pass
-        // missed ObicoSettings entirely.
-        for (const m of source.matchAll(/SettingDisplay\(\s*Name\s*=\s*"([^"]+)"/g)) {
-          names.add(m[1]);
+        // Split on the attribute rather than matching `SettingDisplay(Name =`
+        // directly. Two blind spots to avoid, both of which have already bitten
+        // this guard's subject matter:
+        //
+        //   - the attribute is written inline *and* across several lines, so a
+        //     line-oriented match misses ObicoSettings entirely
+        //   - `Name` is the first argument in all of today's usages, but
+        //     `[SettingDisplay(Group = ..., Name = ...)]` is legal and would
+        //     slip an anchored regex
+        //
+        // Taking the first `Name = "..."` after each occurrence can only ever
+        // over-match, never under-match, which is the safe direction: a spurious
+        // hit fails the tripwire and prompts a re-measure, where a miss ships a
+        // wrapping label.
+        for (const chunk of source.split('SettingDisplay(').slice(1)) {
+          const m = /\bName\s*=\s*"([^"]+)"/.exec(chunk);
+          if (m) names.add(m[1]);
         }
       }
     }

@@ -114,7 +114,7 @@ const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
  * consistent 22px (16px icon + its `ml-1.5`) on every field that has one.
  *
  * The floor is sized against *every* label the app ships, not the ones on the
- * tab that happened to be open. All 129 distinct `[SettingDisplay(Name = ...)]`
+ * tab that happened to be open. All 131 distinct `[SettingDisplay(Name = ...)]`
  * values were rendered in this exact face (`500 14px Inter`) and measured. The
  * widest is "Print Warmup Grace Period (seconds)" on `ObicoSettings`, then
  * "Runout Warning Lead Time (minutes)" on `SpoolCoverageSettings` and
