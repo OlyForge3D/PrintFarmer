@@ -26,7 +26,7 @@ public class DatabaseSettings : ISystemSetting, IValidatableSetting
     [JsonPropertyName("connectionString")]
     public string? ConnectionString { get; set; }
 
-    [SettingDisplay(Name = "Command Timeout (Seconds)", Description = "Timeout for database commands.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Command Timeout", Unit = "seconds", Description = "Timeout for database commands.", InputType = SettingInputType.Number)]
     [Range(1, 300)]
     [JsonPropertyName("commandTimeoutSeconds")]
     public int CommandTimeoutSeconds { get; set; } = 30;

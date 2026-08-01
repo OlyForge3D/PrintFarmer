@@ -35,13 +35,13 @@ public class OctoPrintSettings : IAppSetting
     /// Maximum number of upload requests per minute from a single IP or API key.
     /// </summary>
     [JsonPropertyName("rateLimitPerMinute")]
-    [SettingDisplay(Name = "Rate Limit (per minute)", Description = "Maximum upload requests per minute from a single source. Set to 0 to disable.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1000, Order = 3)]
+    [SettingDisplay(Name = "Rate Limit", Unit = "per minute", Description = "Maximum upload requests per minute from a single source. Set to 0 to disable.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1000, Order = 3)]
     public int RateLimitPerMinute { get; set; } = 60;
 
     /// <summary>
     /// Maximum file size allowed for uploads in megabytes.
     /// </summary>
     [JsonPropertyName("maxUploadSizeMb")]
-    [SettingDisplay(Name = "Max Upload Size (MB)", Description = "Maximum file size for slicer uploads in megabytes.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 500, Order = 4)]
+    [SettingDisplay(Name = "Max Upload Size", Unit = "MB", Description = "Maximum file size for slicer uploads in megabytes.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 500, Order = 4)]
     public int MaxUploadSizeMb { get; set; } = 50;
 }

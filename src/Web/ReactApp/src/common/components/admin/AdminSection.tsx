@@ -45,14 +45,20 @@ export interface AdminSectionProps {
  * card title — on the settings page. A shared primitive that changes character
  * with its heading level is not shared.
  *
- * The caption is also genuinely louder than anything nested inside it, which
- * fixes a measured inversion: the Control Center used to caption its bands at
- * 14px while the group headings underneath ran 16px, so every child
- * out-shouted its parent. Because the deepest level (a destination card title)
- * is fixed at 14px semibold primary, the only monotonic chain is to raise the
- * band above it rather than squeeze the middle. Group labels below a band
- * therefore take the small uppercase treatment — a classifier over a row of
- * cards, which is what they actually are.
+ * The caption is a quiet eyebrow — 12px, uppercase, letterspaced, secondary —
+ * not a loud heading. An earlier revision sized it at 18px display-bold on the
+ * premise that a band must be typographically louder than everything nested
+ * inside it. That premise is wrong, and the design it was derived from never
+ * claimed it: a band caption is a *classifier* over a region, the same role a
+ * `<legend>` or a table caption plays, and it earns its place through case and
+ * letterspacing rather than size. The content hierarchy that does have to stay
+ * monotonic lives entirely below the caption — group heading (15px semibold
+ * primary) over card title (14px semibold primary) — and is unaffected by how
+ * the eyebrow above it is sized.
+ *
+ * The practical consequence is that the caption stops competing with the page
+ * title and stops eating vertical rhythm on settings pages, where a page can
+ * carry five or six bands.
  *
  * Renders a `<section>` so the caption is a real landmark label rather than
  * decoration.
@@ -79,7 +85,7 @@ export function AdminSection({
         <div className="flex items-center gap-2">
           <Heading
             id={captionId}
-            className="font-pf-display text-lg font-bold uppercase tracking-wide text-pf-text-primary"
+            className="font-pf-sans text-xs font-semibold uppercase tracking-[0.06em] text-pf-text-secondary"
           >
             {caption}
           </Heading>

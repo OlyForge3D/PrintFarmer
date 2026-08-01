@@ -26,7 +26,7 @@ public class PrintStatsSyncSettings : IAppSetting
     /// Interval in seconds between sync operations (default: 5 minutes = 300 seconds)
     /// </summary>
     [JsonPropertyName("intervalSeconds")]
-    [SettingDisplay(Name = "Interval (Seconds)", Description = "Time between sync operations.", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 86400, Order = 2)]
+    [SettingDisplay(Name = "Interval", Unit = "seconds", Description = "Time between sync operations.", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 86400, Order = 2)]
     public int IntervalSeconds { get; set; } = 300;
 
     /// <summary>
@@ -47,6 +47,6 @@ public class PrintStatsSyncSettings : IAppSetting
     /// Timeout in seconds for each printer API call
     /// </summary>
     [JsonPropertyName("apiTimeoutSeconds")]
-    [SettingDisplay(Name = "API Timeout (Seconds)", Description = "Timeout in seconds for each printer API call.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 120, Order = 5)]
+    [SettingDisplay(Name = "API Timeout", Unit = "seconds", Description = "Timeout in seconds for each printer API call.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 120, Order = 5)]
     public int ApiTimeoutSeconds { get; set; } = 10;
 }

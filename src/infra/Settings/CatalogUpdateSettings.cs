@@ -26,7 +26,7 @@ public class CatalogUpdateSettings : IAppSetting
     /// Interval in seconds between catalog update scans (default: 3600 = 1 hour).
     /// </summary>
     [JsonPropertyName("intervalSeconds")]
-    [SettingDisplay(Name = "Interval (seconds)", Description = "How often to scan for catalog model updates", InputType = SettingInputType.Number, MinValue = 300, MaxValue = 86400)]
+    [SettingDisplay(Name = "Interval", Unit = "seconds", Description = "How often to scan for catalog model updates", InputType = SettingInputType.Number, MinValue = 300, MaxValue = 86400)]
     public int IntervalSeconds { get; set; } = 3600;
 
     /// <summary>

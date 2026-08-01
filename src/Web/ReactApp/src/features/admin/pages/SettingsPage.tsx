@@ -240,42 +240,37 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  *
  * The thresholds are set by the narrowest card a column may produce while its
  * field rows stay legible, because opening a column that shreds every label is
- * not "using the space". Two measured constraints:
+ * not "using the space".
  *
- *   label fits on one line   label track ≥ 297px  (275px text + 22px tooltip)
- *   control stays usable     control ≥ 200px
+ * Re-derived in #1034 against the finished row. `SettingsPagelet` caps the
+ * label track at `13.5rem` (216px) and the row gap at 12px, and a control stops
+ * being usable below ~200px, so a legible row needs 428px of inner width. A
+ * card spends 34px on its border and the row's own gutter, giving a 462px outer
+ * card and `N × 462 + (N-1) × 16` before N columns may open:
  *
- * The 297px is the widest of all 131 `[SettingDisplay(Name = ...)]` labels the
- * app ships — "Print Warmup Grace Period (seconds)" — measured in the real
- * face. An earlier pass took 218px from `System Config` alone, which is not the
- * tab that holds the long labels; see the derivation on `FIELD_ROW_CLASS`.
- * 200px is what the widest control content needs: a `255.255.255.255/32` CIDR
- * in the mono face plus its clear button.
+ *   59rem (944px)  → 2 cols → cards 464px
+ *   89rem (1424px) → 3 cols → cards 464px
  *
- * `SettingsPagelet` floors the label track at `19.5rem` (312px), so a legible
- * row needs 312 + 16 + 200 = 528px of inner width. A card spends 49px on
- * padding and border, so the floor is a 577px outer card, and a flow needs
- * `N × 577 + (N-1) × 16` before it may open N columns:
+ * That is ~240px per column cheaper than the pre-#1030 numbers, which were
+ * derived when the label track was a 312px *floor* rather than a 216px cap.
  *
- *   74rem  (1184px) → 2 cols → cards 584px → track 312px, control 223px
- *   111rem (1776px) → 3 cols → cards 581px → track 312px, control 220px
+ * What it does not do is reach two columns at a 1440px viewport, which is where
+ * the proposal reaches them. That gap is not a tuning failure and cannot be
+ * closed here: the proposal's preview frame is nearly all content, while the
+ * real page spends 554px on the app nav rail, the page gutters and the settings
+ * rail before the flow starts — measured across 1280–1728px, where the flow is
+ * exactly `viewport − 554` throughout. At 1440px that leaves 886px, 54px short
+ * of two legible columns. Buying those 54px means a ~173px control, and sizing
+ * a layout by shrinking the thing the user actually types into is the same
+ * mistake in the opposite direction as the label floor this epic removed.
  *
- * Those replace `52rem` / `78rem`, which opened columns at 435px and 445px
- * cards — 144px of label track against a 297px label block. The cost is
- * density: 1440px renders one column of 886px cards instead of two of 435px,
- * and 1920px two of 675px instead of three of 445px. That trade is deliberate
- * and was the explicit answer to #1020 — legibility over density.
- *
- * The reason the numbers are this large is that the labels carry their units
- * ("(minutes)", "(seconds)"). Moving those to a control adornment would drop
- * every offender under 200px and let these thresholds come back down; that is
- * a metadata change rather than a layout one and is tracked separately.
+ * Two columns therefore start at ~1498px of viewport. Three at ~1978px.
  */
 function bandFlowClass(bandCount: number): string {
   return clsx(
     'columns-1 gap-4',
-    bandCount >= 2 && '@[74rem]:columns-2',
-    bandCount >= 3 && '@[111rem]:columns-3',
+    bandCount >= 2 && '@[59rem]:columns-2',
+    bandCount >= 3 && '@[89rem]:columns-3',
   );
 }
 
@@ -304,23 +299,17 @@ function cardFlowClass(cardCount: number): string {
     //
     // The invariant is that narrow, and deliberately stated that way: a page
     // holding exactly one band with exactly one card still caps here, so above
-    // ~1184px of content it does sit short. No shipping tab is in that shape —
-    // `bandFlowClass` splits multi-band pages into sub-74rem columns long
-    // before any card sees that width — and it is strictly better than the
-    // 64rem it replaced, which sat 326px short in the same case. Tracked with
-    // the rest of the measure work in #1027 rather than special-cased here.
+    // ~944px of content it does sit short. No shipping tab is in that shape —
+    // `bandFlowClass` splits multi-band pages into sub-59rem columns long
+    // before any card sees that width. Tracked with the rest of the measure
+    // work in #1027 rather than special-cased here.
     //
-    // This was `64rem`, on the rationale that a wider card "pushes labels away
-    // from the controls they name". That stopped being true once the label
-    // track gained a hard `19.5rem` cap and the control a `40rem` one: past
-    // 64rem the extra width lands as trailing space *inside* the card, not
-    // between the label and its control. What it did instead was leave the
-    // cards ending up to 150px short of the filter row and section headings
-    // directly above them, which are full-bleed — measured at windows 1578px
-    // to 1728px, worst at 1728px.
-    cardCount <= 1 && 'max-w-[74rem]',
-    cardCount >= 2 && '@[74rem]:columns-2',
-    cardCount >= 3 && '@[111rem]:columns-3',
+    // The cap moved 74rem → 59rem with the thresholds in #1034; see the
+    // derivation on `bandFlowClass`. It is the same decision expressed twice,
+    // and the two are asserted against one source in the flow test.
+    cardCount <= 1 && 'max-w-[59rem]',
+    cardCount >= 2 && '@[59rem]:columns-2',
+    cardCount >= 3 && '@[89rem]:columns-3',
   );
 }
 
@@ -649,7 +638,21 @@ function GroupSaveBlock({
               <Card
                 key={meta.key}
                 className={clsx(
-                  'mb-4 break-inside-avoid',
+                  // The proposal's .p-card: a flat 1px border, 6px radius, and
+                  // one background all the way through. Shipped chrome had it
+                  // the other way round — a lighter header sitting on a darker
+                  // body — which reads as a translucent slab rather than a
+                  // panel. The header simply stops painting its own background
+                  // and drops to the softer divider rule.
+                  //
+                  // The proposal's --pf-card-bg (#0e1729) and the app's
+                  // bg-pf-panel (#0c1424) differ by under 3 per channel, so the
+                  // card keeps the app's own token rather than introducing a
+                  // settings-only background. Likewise the gutter stays at the
+                  // Card component's 16px rather than the proposal's 14px: the
+                  // 2px is invisible, and a settings-only gutter is exactly the
+                  // kind of local variant this epic exists to delete.
+                  'rounded-md mb-4 break-inside-avoid',
                   fullWidth && '[column-span:all]',
                   // A left rule reads as "this one" at a glance across a
                   // multi-column flow, where a badge alone gets lost.
@@ -662,9 +665,9 @@ function GroupSaveBlock({
                   'data-section-severity': cardIssueCount ? (cardIsError ? 'Error' : 'Warning') : undefined,
                 }}
               >
-                <Card.Header className="pb-2">
+                <Card.Header className="border-pf-border-divider bg-transparent pb-[11px] pt-3">
                   <div className="flex items-start justify-between gap-2">
-                    <h4 className="text-sm font-semibold text-pf-text-primary">
+                    <h4 className="text-[13.5px] font-semibold text-pf-text-primary">
                       {query ? <HighlightedText text={cardTitle} query={query} /> : cardTitle}
                     </h4>
                     {cardIssueCount > 0 && (
@@ -681,7 +684,7 @@ function GroupSaveBlock({
                     </p>
                   )}
                 </Card.Header>
-                <Card.Body className="pt-0">
+                <Card.Body noPadding className="pb-1">
                   <SettingsPagelet
                     metadata={displayMeta}
                     values={sectionValues}
@@ -691,10 +694,14 @@ function GroupSaveBlock({
                     compact
                     searchQuery={query}
                   />
-                  {extensionRender?.({
-                    values: sectionValues,
-                    onChange: (field, value) => handleFieldChange(meta.key, field, value),
-                  })}
+                  {extensionRender && (
+                    <div className="px-4 pt-2">
+                      {extensionRender({
+                        values: sectionValues,
+                        onChange: (field, value) => handleFieldChange(meta.key, field, value),
+                      })}
+                    </div>
+                  )}
                 </Card.Body>
               </Card>
             );
@@ -1239,9 +1246,14 @@ export function SettingsPage({
 
   return (
     <SettingsSaveRegistryContext value={saveRegistry}>
-      <div className="space-y-6" data-tour="settings-content">
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-sm text-pf-text-secondary">{introText}</p>
+      <div className="space-y-4" data-tour="settings-content">
+        {/* The proposal puts nothing between the tab strip and the first band.
+            We keep the tab-scoped intro and the page-local filter — the header's
+            global search cannot narrow the fields in front of you — but on one
+            compact row instead of two full-width blocks, so the content pane
+            opens on settings rather than on chrome. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="min-w-[16rem] flex-1 text-[13px] text-pf-text-secondary">{introText}</p>
           <HelpButton onClick={startTour} />
         </div>
 
@@ -1258,10 +1270,10 @@ export function SettingsPage({
             </SettingsHeaderPortal>
 
             <div
-              className="flex flex-wrap items-center gap-3"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1"
               data-testid="settings-mode-controls"
             >
-              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
+              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-sm">
                 <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
                 <Input
                   type="search"
@@ -1284,7 +1296,7 @@ export function SettingsPage({
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-pf-text-secondary" aria-live="polite" role="status">
+              <p className="text-xs text-pf-text-tertiary" aria-live="polite" role="status">
                 {toggleHelperText}
                 {searchActive && (
                   <span className="ml-2 text-pf-text-tertiary">

@@ -328,4 +328,87 @@ describe('SettingsPagelet — required booleans announce as required (Vasquez #2
     );
     expect(screen.getByRole('checkbox', { name: 'Enabled' })).not.toHaveAttribute('aria-required');
   });
+
+  it('renders booleans as switches, not bare checkboxes (#1019)', () => {
+    // The visual is the custom track; the native input is visually hidden and
+    // drives it. Asserting `sr-only` is what distinguishes a switch from the
+    // stock checkbox this replaced — the role is `checkbox` either way, which
+    // is correct and is why the two tests above still pass unchanged.
+    render(
+      <SettingsPagelet metadata={boolSection(false)} values={{ enabled: false }} onChange={vi.fn()} />,
+    );
+    const input = screen.getByRole('checkbox', { name: 'Enabled' });
+    expect(input.className).toContain('sr-only');
+  });
+
+  it('still reports changes when the switch is operated', () => {
+    // A control that looks right and reports nothing is the worst outcome of a
+    // swap like this, and it is invisible in a screenshot.
+    const onChange = vi.fn();
+    render(
+      <SettingsPagelet metadata={boolSection(false)} values={{ enabled: false }} onChange={onChange} />,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+    expect(onChange).toHaveBeenCalledWith('enabled', true);
+  });
+});
+
+describe('SettingsPagelet — units are adornments, not label text (#1025)', () => {
+  const unitSection = (unit?: string) => ({
+    key: 'ShiftPlan',
+    className: 'ShiftPlanSettings',
+    displayName: 'Shift Plan',
+    description: '',
+    properties: [
+      {
+        name: 'maintenanceLeadTimeMinutes',
+        type: 'int',
+        attributes: [],
+        display: { name: 'Maintenance Lead Time', inputType: 'Number', unit },
+      },
+    ],
+  }) as never;
+
+  const renderUnit = (unit?: string) => render(
+    <SettingsPagelet
+      metadata={unitSection(unit)}
+      values={{ maintenanceLeadTimeMinutes: 30 }}
+      onChange={vi.fn()}
+    />,
+  );
+
+  it('renders the unit beside the control', () => {
+    const { container } = renderUnit('minutes');
+    const adornment = container.querySelector('[data-setting-unit]');
+    expect(adornment).not.toBeNull();
+    expect(adornment).toHaveTextContent('minutes');
+  });
+
+  it('keeps the unit out of the visible label', () => {
+    const { container } = renderUnit('minutes');
+    const label = container.querySelector('label');
+    // The label's own text must not carry the parenthetical — that is the
+    // 96px this issue exists to reclaim. The adornment lives outside it.
+    expect(label?.textContent).toBe('Maintenance Lead Time');
+  });
+
+  it('still announces the unit to a screen reader', () => {
+    // The regression this guards is silent and invisible: every control sets
+    // `aria-label`, which OVERRIDES the `<label>` element rather than adding
+    // to it. So moving the unit out of the label text removes it from the
+    // accessible name unless it is deliberately put back. A sighted layout
+    // change has no business making the field ambiguous to a screen reader.
+    renderUnit('minutes');
+    expect(
+      screen.getByRole('spinbutton', { name: 'Maintenance Lead Time (minutes)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('leaves a unitless field alone in both name and markup', () => {
+    const { container } = renderUnit(undefined);
+    expect(container.querySelector('[data-setting-unit]')).toBeNull();
+    expect(
+      screen.getByRole('spinbutton', { name: 'Maintenance Lead Time' }),
+    ).toBeInTheDocument();
+  });
 });

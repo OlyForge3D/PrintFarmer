@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import clsx from 'clsx';
 import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { Button, Input, Select, Textarea, Toggle } from '@/common/components/ui';
 import { HighlightedText } from '@/features/admin/settings/HighlightedText';
 import { isPropertyRequired, isPropertyAlwaysRequired } from '@/features/admin/settings/settingsAttention';
 
@@ -24,6 +24,12 @@ export interface SettingPropertyDisplayMetadata {
    * discovery subnets are required only while discovery is enabled.
    */
   requiredWhen?: string;
+  /**
+   * Unit of measure, rendered as an adornment beside the control instead of
+   * inside the label. Bare and lowercase ("minutes"); this component supplies
+   * the presentation.
+   */
+  unit?: string;
   allowedValues?: unknown[];
   minValue?: number;
   maxValue?: number;
@@ -94,84 +100,79 @@ const MONO_INPUT_TYPES = new Set<SettingInputType>([
 const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
 
 /**
- * Label / control split for a field row.
+ * Label / control split for a field row (#1030).
  *
- * The floor, the threshold and the ratio are three halves of one decision, and
- * the floor is the one that matters. It was `9rem` (144px), justified as being
- * there "so long labels do not shred one word per line" — which it was not
- * achieving. Measured in Chromium against the real `System Config` labels:
+ * The label track is a **cap**, not a floor:
  *
- *   196px  "Enable Background Scanning"   <- worst case text
- *   171px  "Enable Database Logging"
- *   138px  "Allowed Extensions *"
- *   134px  "Discovery Subnets *"
+ *     @[26rem]:grid-cols-[minmax(0,13.5rem)_minmax(0,1fr)]
  *
- * Against a 144px track the first of those wrapped to *three* lines and the
- * next three to two, at every window width from 900px to 2200px.
+ * That is the ACC proposal's number (`acc-consistency-proposal.html`, `.p-f`),
+ * and the distinction is the whole point. `minmax(0, 13.5rem)` lets the track
+ * *shrink*, so a long label may wrap. `minmax(19.5rem, 0.36fr)` — what #1020
+ * shipped — could not, because it was sized so that no label could ever wrap
+ * at any width.
  *
- * The number the track has to clear is not the text width, though. The label
- * is a flex row holding the text *and* `InfoTooltip`, which measures a
- * consistent 22px (16px icon + its `ml-1.5`) on every field that has one.
+ * That "never wrap" invariant was never in the proposal. Deriving it from the
+ * widest of 131 shipped `[SettingDisplay(Name = ...)]` labels ("Print Warmup
+ * Grace Period (seconds)", 275px + 22px for `InfoTooltip` = 297px, floored to
+ * 312px) meant every row in the app paid 96px for one label on one tab. Two
+ * columns then needed a ~1738px viewport where the proposal reaches them at
+ * 1180px — the density complaint that opened #1029.
  *
- * The floor is sized against *every* label the app ships, not the ones on the
- * tab that happened to be open. All 131 distinct `[SettingDisplay(Name = ...)]`
- * values were rendered in this exact face (`500 14px Inter`) and measured. The
- * widest is "Print Warmup Grace Period (seconds)" on `ObicoSettings`, then
- * "Runout Warning Lead Time (minutes)" on `SpoolCoverageSettings` and
- * "Analysis Request Timeout (seconds)" — none of which are on System Config.
- * An earlier pass sized this at 232px from that one tab and left nine labels
- * wrapping on Automation & Costs, one click away. Independent measurements of
- * the worst label came in between 265px and 275px depending on whether the
- * required marker was counted; the floor is sized against the largest of them,
- * so worst case is 275 + 22 = 297px and the floor is `19.5rem` (312px) — the
- * full label block plus 15px of headroom.
+ * The proposal buys legibility back by other means, all of which are now in
+ * place rather than traded away:
  *
- * `SettingsCardFlow.test.tsx` reads the C# attributes back and fails if a
- * longer label is ever added, because that measurement cannot be repeated from
- * a unit test and would otherwise rot silently — which is exactly how the
- * 232px version shipped.
+ *   - 13px label instead of 14px (~7% narrower)
+ *   - units live in a control adornment, not the label text (#1025), which is
+ *     what actually retires the long-label problem at source
+ *   - the rare genuinely-long label is allowed to wrap onto a second line
  *
- * The floor now dominates the `0.36fr` ratio everywhere the row is side by
- * side: 0.36 only overtakes 312px at 867px inner, past the `52rem` (832px)
- * inversion, which caps it straight back to the same 19.5rem. That is
- * deliberate — cap and floor are one number, so the label gutter is a constant
- * 312px at every card width and the crossover has no step in it.
+ * There is no `@[52rem]` inversion any more, and there does not need to be.
+ * That band existed only to stop a *floor* from being stretched by an `fr`
+ * ratio into a 360px gutter on a wide card. A cap cannot be stretched, so the
+ * crossover it guarded no longer exists — which also retires the entire class
+ * of bug that produced #1020 and its two follow-up fixes, where cap and floor
+ * were chosen independently and disagreed.
  *
- * That inversion exists because 36% of a 1000px card would put 360px of empty
- * space between a label and the control it names. Holding the cap equal to the
- * floor also means the inversion cannot reintroduce wrapping, which a lower
- * cap silently did: the previous 16rem (256px) cap sat under the 297px worst
- * case, so the widest labels wrapped in *wide* single-column cards while
- * narrow ones stayed clean — the least findable form of this bug.
+ * `26rem` (416px) is the stack threshold: below it the row stacks, label above
+ * control, which is the most legible option at that size and cannot wrap at
+ * all. `bandFlowClass` is pinned to the same number so no flow produces a card
+ * that lands between the two rules.
  *
- * `33rem` (528px) is the narrowest card that reads as two columns, derived
- * rather than chosen: 312px of label + 16px gap leaves 200px of control, which
- * is what the widest content needs (a `255.255.255.255/32` CIDR in the mono
- * face plus its clear button). Below `33rem` the row stacks, which is the
- * *most* legible option at that size — the label gets the full width and
- * cannot wrap at all. `bandFlowClass` is pinned to the same 528px, so no flow
- * can produce a card that lands between the two rules.
- *
- * The cost of carrying a 312px gutter for labels this long is real, and the
- * better long-term fix is to stop shipping the unit inside the label at all —
- * "Runout Warning Lead Time" with `minutes` rendered as a control adornment
- * drops every offender under 200px and would let the column thresholds come
- * back down. That is a metadata/content change rather than a layout one, so it
- * is tracked separately rather than smuggled into this fix.
+ * `SettingsCardFlow.test.tsx` still walks the C# attributes and fails when a
+ * longer label appears. It no longer proves "nothing wraps" — that is not a
+ * property we hold. It proves we still know what the longest label is, so a
+ * regression in the #1025 adornment work is visible rather than silent.
  */
 const FIELD_ROW_CLASS =
-  'grid grid-cols-1 items-start gap-x-4 gap-y-1 py-2.5 '
-  + '@[33rem]:grid-cols-[minmax(19.5rem,0.36fr)_minmax(0,0.64fr)] '
-  + '@[52rem]:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]';
+  'grid grid-cols-1 items-start gap-x-3 gap-y-1 px-4 py-2.5 '
+  + '@[26rem]:grid-cols-[minmax(0,13.5rem)_minmax(0,1fr)]';
 
 /**
- * The 0.64fr track is a *floor* for narrow cards. `max-w-[40rem]` is the
- * matching ceiling: a band holding one section renders that card at the full
- * content width, and a 750px-wide number input reads as a mistake. The cap is
- * set so the control still clears 60% of the card's inner width at the widest
- * card the flow will produce.
+ * The control's matching ceiling. A band holding one section renders that card
+ * at the full content width, and a 750px-wide number input reads as a mistake.
+ *
+ * Pinned to the same `26rem` threshold as `FIELD_ROW_CLASS` so the control cap
+ * and the side-by-side layout switch on together — they described one decision
+ * even when they were two numbers, and #1020 shipped twice with them disagreeing.
+ *
+ * The cap *value* is `24rem` (384px), set in #1033 from what the proposal
+ * actually produces rather than from a round number. *Its* cards run 570–590px
+ * outer across the 2- and 3-column bands, which after 34px of chrome and a
+ * 228px label track leaves controls in a 310–350px range, and 384px sits just
+ * above that band.
+ *
+ * Our own cards are narrower at the bottom of each band — 464px at the 2- and
+ * 3-column thresholds, giving a 202px control — but the content region has no
+ * max-width above a single card, so a 2-column band spans 944–1424px and its
+ * cards run 464–704px. The cap therefore does bind in-column, from roughly a
+ * 1310px container upward, which on a 1600px window is the ordinary case. That
+ * is the intent: it is a ceiling on every control, not an escape hatch for the
+ * single-card layout. The previous `40rem` (640px) was inherited from the
+ * 19.5rem-label era and let a lone card render a 640px ribbon for a two-digit
+ * retention count.
  */
-const FIELD_CONTROL_CLASS = 'min-w-0 @[33rem]:max-w-[40rem]';
+const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[24rem]';
 
 const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   <span
@@ -187,7 +188,7 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
  * Metadata-driven form renderer for a single settings section. Given the section
  * metadata and current values, this component renders each property as the
  * appropriate control from the shared UI library (`Input`, `Select`, `Textarea`,
- * `Checkbox`). It does NOT own state, dirty tracking, or save behaviour — those
+ * `Toggle`). It does NOT own state, dirty tracking, or save behaviour — those
  * belong to the parent (`SettingsPage`).
  *
  * Section-specific UI that doesn't fit the metadata (e.g. Obico's server table
@@ -208,17 +209,33 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
     [metadata.properties],
   );
 
-  // Matches the `74rem` cap on a single-card flow in `SettingsPage`. If this
+  // Matches the `59rem` cap on a single-card flow in `SettingsPage`. If this
   // stayed narrower, the `divide-y` rules between rows would stop short of the
-  // card's own right padding on a wide single-column layout, which reads as a
+  // card's own right edge on a wide single-column layout, which reads as a
   // rendering fault rather than a measure. Widening is safe: the label track is
-  // capped at `19.5rem` and the control at `40rem`, so the extra width lands as
+  // capped at `13.5rem` and the control at `24rem`, so the extra width lands as
   // trailing space and cannot move a label away from the control it names.
+  //
+  // Rows carry their own `px-4` and the card body carries none, so the rules
+  // run edge to edge as they do in the proposal. Padding on the body instead
+  // would inset every rule by 16px on both sides and turn a continuous ledger
+  // into a stack of floating strips.
   const content = (
-    <div className="@container max-w-[74rem] divide-y divide-pf-border-divider">
+    <div
+      data-testid="settings-pagelet-measure"
+      className="@container max-w-[59rem] divide-y divide-pf-border-divider"
+    >
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
+        // Every control below sets `aria-label`, which *overrides* the `<label>`
+        // element rather than adding to it. So when the unit moved out of the
+        // visible label (#1025) it had to be put back here, or a screen reader
+        // would announce "Runout Warning Lead Time" and never mention minutes.
+        // This keeps the spoken name identical to what it was before the move.
+        const accessibleName = prop.display?.unit
+          ? `${displayName} (${prop.display.unit})`
+          : displayName;
         // `isPropertyRequired` is the one predicate that knows about `RequiredWhen`.
         // Reading `prop.required` here instead would be wrong twice over: the
         // metadata lives at `display.required`, so the flag never arrives, and a
@@ -237,7 +254,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
 
         const label = (
           <label
-            className="flex items-start text-sm font-medium text-pf-text-primary @[33rem]:pt-2"
+            className="flex items-start text-[13px] font-medium text-pf-text-secondary @[26rem]:pt-1.5"
             htmlFor={fieldId}
           >
             <span className="break-words">
@@ -284,7 +301,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div
               className={FIELD_CONTROL_CLASS}
               role="group"
-              aria-label={displayName}
+              aria-label={accessibleName}
               aria-describedby={isRequired ? `${fieldId}-required` : undefined}
             >
               {isRequired && (
@@ -348,11 +365,25 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isBoolean) {
           control = (
-            <div className={clsx(FIELD_CONTROL_CLASS, "@[33rem]:pt-1.5")}>
-              <Checkbox
+            <div className={clsx(FIELD_CONTROL_CLASS, "@[26rem]:pt-1")}>
+              {/*
+                A switch, not a checkbox (#1019). Every boolean in this surface
+                is a live setting that takes effect on save, not an item being
+                selected from a set — which is the distinction the two controls
+                actually carry, and the proposal renders them as switches.
+
+                `size="sm"` (32x16) rather than the proposal's 38x20. The design
+                system ships two switch sizes, 32x16 and 44x24, and both are in
+                use elsewhere. Introducing a third that exists only on this page
+                would be precisely the kind of local divergence this epic was
+                opened to remove, so the deviation is 6px of width and is taken
+                deliberately.
+              */}
+              <Toggle
                 id={fieldId}
                 name={fieldId}
-                aria-label={displayName}
+                size="sm"
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 checked={Boolean(values[prop.name])}
                 invalid={invalid}
@@ -372,7 +403,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
@@ -394,7 +425,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value === '' ? '' : Number(e.currentTarget.value))}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={MONO_FIELD_CLASS}
@@ -410,7 +441,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 name={fieldId}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
               >
@@ -433,7 +464,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
@@ -443,6 +474,34 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         }
 
+        // The unit sits beside the control, not inside the label (#1025).
+        //
+        // Writing it into the label — "Runout Warning Lead Time (minutes)" —
+        // is what made the label track the widest thing on the page: nine of
+        // the ten labels that wrapped did so only because of a parenthetical.
+        // Beside the control it also reads better, because a unit describes
+        // the value the user is typing, not the thing being named.
+        //
+        // Wrapped at the row rather than inside each control branch: there are
+        // six of those, and the unit's relationship to the control is the same
+        // in all of them. `items-start` + `pt-2` keeps the unit on the input's
+        // line when a validation error pushes a second line underneath.
+        const unit = prop.display?.unit;
+        const controlWithUnit = unit
+          ? (
+            <div className="flex min-w-0 items-start gap-2">
+              {control}
+              <span
+                className="shrink-0 pt-2 text-[12px] text-pf-text-secondary"
+                data-setting-unit
+                aria-hidden="true"
+              >
+                {unit}
+              </span>
+            </div>
+          )
+          : control;
+
         return (
           <div
             className={FIELD_ROW_CLASS}
@@ -450,12 +509,12 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             data-setting-property={`${metadata.key}.${prop.name}`}
           >
             {label}
-            {control}
+            {controlWithUnit}
           </div>
         );
       })}
 
-      {error && <div className="text-pf-error font-medium text-sm pt-2" role="alert">{error}</div>}
+      {error && <div className="px-4 text-pf-error font-medium text-sm pt-2" role="alert">{error}</div>}
     </div>
   );
 
@@ -464,8 +523,8 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   }
 
   return (
-    <div className="settings-pagelet bg-pf-panel border border-pf-border rounded-lg p-4 mb-6">
-      <h3 className="text-sm font-semibold text-pf-text-primary mb-1">{metadata.displayName || metadata.className}</h3>
+    <div className="settings-pagelet bg-pf-panel border border-pf-border rounded-md py-4 mb-6">
+      <h3 className="px-4 text-sm font-semibold text-pf-text-primary mb-1">{metadata.displayName || metadata.className}</h3>
       {content}
     </div>
   );

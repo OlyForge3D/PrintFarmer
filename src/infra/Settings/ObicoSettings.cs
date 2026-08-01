@@ -35,7 +35,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public decimal ConfidenceThreshold { get; set; } = 0.7m;
 
     [SettingDisplay(
-        Name = "Scan Interval (seconds)",
+        Name = "Scan Interval", Unit = "seconds",
         Description = "How often to check active print jobs for failures (minimum 10 seconds).",
         InputType = SettingInputType.Number,
         MinValue = 10,
@@ -51,7 +51,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public bool AutoPauseOnFailure { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Startup Delay (seconds)",
+        Name = "Startup Delay", Unit = "seconds",
         Description = "How long the monitor waits after application start before beginning scans. Allows the database and printer connections to initialize. Setting this too low causes a burst of errors on every restart.",
         InputType = SettingInputType.Number,
         MinValue = 5,
@@ -60,7 +60,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int StartupDelaySeconds { get; set; } = 30;
 
     [SettingDisplay(
-        Name = "Print Warmup Grace Period (seconds)",
+        Name = "Print Warmup Grace Period", Unit = "seconds",
         Description = "How long to wait after a print starts before scanning for failures. Skips the nozzle heating, purge line, and first-layer adhesion phases that frequently trigger false positives. Reducing this significantly increases the risk of false auto-pauses.",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -69,7 +69,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int WarmupGracePeriodSeconds { get; set; } = 120;
 
     [SettingDisplay(
-        Name = "Analysis Request Timeout (seconds)",
+        Name = "Analysis Request Timeout", Unit = "seconds",
         Description = "Maximum time to wait for the Obico ML API to respond to a single snapshot analysis request. If the ML service is overloaded or unreachable, a long timeout will stall the entire monitoring cycle and delay checks for all other printers.",
         InputType = SettingInputType.Number,
         MinValue = 5,

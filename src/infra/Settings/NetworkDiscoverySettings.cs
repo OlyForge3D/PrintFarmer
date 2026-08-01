@@ -39,11 +39,11 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
 
-    [SettingDisplay(Name = "Client Timeout (ms)", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
+    [SettingDisplay(Name = "Client Timeout", Unit = "ms", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
     [JsonPropertyName("clientTimeoutMs")]
     public int ClientTimeoutMs { get; set; } = 200; // Valid range: 50-60000
 
-    [SettingDisplay(Name = "Request Delay (ms)", MinValue = 0, MaxValue = 10000, Description = "Delay between network scan requests in milliseconds.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Request Delay", Unit = "ms", MinValue = 0, MaxValue = 10000, Description = "Delay between network scan requests in milliseconds.", InputType = SettingInputType.Number)]
     [JsonPropertyName("requestDelayMs")]
     public int RequestDelayMs { get; set; } = 100; // Valid range: 0-10000
 
@@ -66,7 +66,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     /// <summary>
     /// Interval between background discovery scans in minutes.
     /// </summary>
-    [SettingDisplay(Name = "Scan Interval (minutes)", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Scan Interval", Unit = "minutes", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
     [JsonPropertyName("backgroundScanIntervalMinutes")]
     public int BackgroundScanIntervalMinutes { get; set; } = 30;
 
