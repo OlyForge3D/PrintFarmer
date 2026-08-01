@@ -60,9 +60,14 @@ export interface AttentionRowProps {
  * indistinguishable. The button goes through `Button variant="unstyled"`, which
  * applies no styles of its own — that keeps the two in lockstep while still
  * being a real `<Button>`, as the design system requires.
+ *
+ * Sized to the proposal's `.btn-sm`: 13px on 10px/5px padding. The row itself
+ * follows `.p-attn` — 14px/16px padding, 12px gap, an 18px icon, a 13.5px/600
+ * title and a 13px secondary consequence line — so the two surfaces that render
+ * attention items (this and the Admin Control Center) stay identical.
  */
 const ACTION_CLASS =
-  'inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-3 py-1.5 text-sm font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent';
+  'inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1 text-[13px] font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent';
 
 export function AttentionRow({
   severity,
@@ -79,7 +84,7 @@ export function AttentionRow({
   return (
     <li
       className={clsx(
-        'flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-start',
+        'flex flex-col gap-3 rounded-md border px-4 py-3.5 sm:flex-row sm:items-start',
         presentation.rowBorderClass,
         presentation.rowBgClass,
         className,
@@ -87,12 +92,12 @@ export function AttentionRow({
       {...dataAttributes}
     >
       <span className={clsx('mt-0.5 shrink-0', presentation.iconClass)} aria-hidden="true">
-        <Icon className="h-5 w-5" ariaLabel="" />
+        <Icon className="h-[18px] w-[18px]" ariaLabel="" />
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="sr-only">{presentation.srPrefix}: </span>
-          <p className="text-sm font-semibold text-pf-text-primary">{title}</p>
+          <p className="text-[13.5px] font-semibold text-pf-text-primary">{title}</p>
           {showSeverity && (
             <Badge variant={presentation.badgeVariant} size="sm">
               {presentation.label}
@@ -100,7 +105,7 @@ export function AttentionRow({
           )}
         </div>
         {detail !== undefined && detail !== null && detail !== '' && (
-          <p className="mt-1 text-sm text-pf-text-secondary">{detail}</p>
+          <p className="mt-0.5 text-[13px] text-pf-text-secondary">{detail}</p>
         )}
       </div>
       {action && (
