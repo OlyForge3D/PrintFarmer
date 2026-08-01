@@ -262,7 +262,8 @@ function renderPagelet() {
 }
 
 /**
- * The widest label the app ships, and the width its *track* must hold.
+ * The widest label the app ships, and the width its *track* would need to hold
+ * it on one line.
  *
  * The label is a flex row of two children, and the second one is easy to
  * forget:
@@ -270,18 +271,19 @@ function renderPagelet() {
  *   275px  text span   "Print Warmup Grace Period (seconds)"  <- widest
  *    22px  InfoTooltip  16px icon + its own ml-1.5
  *
- * Two earlier passes at #1020 got this wrong in two different ways. The first
- * counted only the text span and left two widths wrapping by two pixels. The
- * second measured the widest label on `System Config` (218px) and treated it as
- * the app-wide maximum — but the long labels live on Automation & Costs, and
- * nine of them wrapped at 1920px with the floor sized at 232px.
+ * ⚠️ **This is no longer a floor the layout must clear (#1030).** The label
+ * track is now a `13.5rem` (216px) cap, per the ACC proposal, and a label wider
+ * than that is allowed to wrap onto a second line. Sizing the track against
+ * this figure cost 96px on every row in the app to keep one label on one line
+ * on one tab, and pushed two columns from a 1180px viewport out to ~1738px.
  *
- * This figure is now the maximum over *all* 131 distinct `SettingDisplay`
- * names, rendered in the real face. Independent measurements of the worst label
- * came in between 265px and 275px depending on whether the required marker was
- * counted; the larger is used. `guards the measurement this file is built on`
- * below fails if a longer label is ever added, because the measurement needs a
- * browser and cannot be repeated from here.
+ * It is kept, and still measured at 14px, because it is the tripwire for
+ * #1025 — moving units out of label text and into control adornments. Every
+ * offender here is an offender *because* of its "(seconds)" / "(minutes)"
+ * suffix. When #1025 lands this number should drop sharply; if a new label
+ * appears above it instead, that is a regression in the metadata convention and
+ * `guards the measurement this file is built on` fails so it is visible rather
+ * than silent.
  *
  * Update this only from a fresh measurement, never to make a test pass.
  */
@@ -294,8 +296,15 @@ const CARD_CHROME_PX = 49;
 /** Column gap between bands and between cards. `gap-4`. */
 const COLUMN_GAP_PX = 16;
 
-/** The label track floor in `FIELD_ROW_CLASS`. `19.5rem`. */
-const LABEL_TRACK_FLOOR_PX = 312;
+/**
+ * The label track **cap** in `FIELD_ROW_CLASS`. `13.5rem`, from the ACC
+ * proposal's `.p-f` rule. A cap, not a floor: the track may shrink below this
+ * and a long label may wrap. See the note on `LONGEST_LABEL_PX`.
+ */
+const LABEL_TRACK_CAP_PX = 216;
+
+/** Column gap inside a field row. `gap-x-3`, matching the proposal's 12px. */
+const FIELD_GAP_PX = 12;
 
 /**
  * The narrowest control that still holds the widest content the app puts in
@@ -305,9 +314,10 @@ const MIN_CONTROL_PX = 200;
 
 /**
  * The narrowest card inner width a column may produce. Derived, not chosen:
- * the label track floor, the gap, and a control that still fits its content.
+ * the label track cap, the in-row gap, and a control that still fits its
+ * content. 216 + 12 + 200 = 428px.
  */
-const NARROWEST_CARD_INNER = LABEL_TRACK_FLOOR_PX + COLUMN_GAP_PX + MIN_CONTROL_PX;
+const NARROWEST_CARD_INNER = LABEL_TRACK_CAP_PX + FIELD_GAP_PX + MIN_CONTROL_PX;
 
 describe('field rows', () => {
   it('has no fixed-width label gutter left anywhere', () => {
@@ -333,12 +343,9 @@ describe('field rows', () => {
   });
 
   it('keeps rows side-by-side in the narrowest card the flow can produce', () => {
-    // The threshold is set by layout, not taste, and the number it has to
-    // clear moved when #1020 retuned the column thresholds for legibility.
-    // `bandFlowClass` now floors a card at ~529px outer / ~480px inner, so a
-    // `33rem` (528px) row threshold keeps every row on a real page side by
-    // side. The coupling between the two is asserted in its own test rather
-    // than left implicit.
+    // The threshold is set by layout, not taste: a row goes side by side as
+    // soon as the cap, the gap and a usable control fit. 216 + 12 + 200 =
+    // 428px, and `26rem` (416px) is the proposal's threshold just under it.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
@@ -347,48 +354,42 @@ describe('field rows', () => {
     expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(NARROWEST_CARD_INNER);
   });
 
-  it('floors the label track above the longest label the app ships', () => {
-    // The defect #1020 was filed for. The old `9rem` (144px) floor was
-    // justified as stopping labels shredding "one word per line" and did not:
-    // measured in Chromium, the `Enable Background Scanning` label block is
-    // 218px and wrapped to three lines against it. Anything at or below the
-    // longest label reintroduces that, so assert the floor clears it.
+  it('caps the label track rather than flooring it', () => {
+    // #1030. The distinction is the whole point: `minmax(0, 13.5rem)` may
+    // shrink, `minmax(19.5rem, ...)` may not. The floor bought a guarantee
+    // ("no label ever wraps") that the proposal never asked for and charged
+    // 96px per row across the app to keep it.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
-    const floor = /grid-cols-\[minmax\(([\d.]+)rem,/.exec(row.className);
-    expect(floor).not.toBeNull();
-    expect(Number(floor![1]) * 16).toBe(LABEL_TRACK_FLOOR_PX);
-    expect(LABEL_TRACK_FLOOR_PX).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
+    const track = /grid-cols-\[minmax\(([\d.]+(?:rem)?),\s*([\d.]+)rem\)/.exec(row.className);
+    expect(track).not.toBeNull();
+    expect(track![1]).toBe('0');
+    expect(Number(track![2]) * 16).toBe(LABEL_TRACK_CAP_PX);
   });
 
-  it('gives the control the majority of the row', () => {
+  it('gives the control the rest of the row, unweighted', () => {
+    // `minmax(0, 1fr)`, not a `0.64fr` share. A ratio only makes sense against
+    // a track that can grow; against a hard cap it just moves the label away
+    // from the control it names.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
-    expect(row.className).toContain('0.64fr');
+    expect(row.className).toContain('minmax(0,1fr)');
+    expect(row.className).not.toContain('fr)_minmax(0,0.64fr)');
   });
 
-  it('stops the label drifting away from its control in wide cards', () => {
-    // Above 52rem the ratio inverts into a problem: 36% of a 1000px card is
-    // 360px of dead space between a label and the control it names.
+  it('has exactly one side-by-side rule, so cap and threshold cannot disagree', () => {
+    // #1020 shipped three times with a floor, a ratio and an inversion cap
+    // chosen independently; twice they disagreed and wide cards wrapped while
+    // narrow ones stayed clean. A cap cannot be stretched by an `fr` ratio, so
+    // the inversion band that guarded that crossover is gone — and must stay
+    // gone, or the same class of bug is available again.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
-    expect(row.className).toContain('@[52rem]:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]');
-  });
-
-  it('cannot reintroduce wrapping via the wide-card inversion', () => {
-    // The 52rem branch drops the label track from 36% to a hard 19.5rem cap. If
-    // that cap ever fell below the longest label, wide cards would start
-    // wrapping while narrow ones stayed clean — the least findable version of
-    // this bug.
-    const row = renderPagelet().container.querySelector(
-      '[data-setting-property]',
-    ) as HTMLElement;
-    const cap = /@\[52rem\]:grid-cols-\[minmax\(0,([\d.]+)rem\)/.exec(row.className);
-    expect(cap).not.toBeNull();
-    expect(Number(cap![1]) * 16).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
+    const rules = row.className.match(/@\[[\d.]+rem\]:grid-cols-/g) ?? [];
+    expect(rules).toHaveLength(1);
   });
 
   it('separates rows with a hairline so a card reads as a spec sheet', () => {
@@ -447,13 +448,10 @@ describe('column thresholds and field rows stay coupled (#1020)', () => {
       const inner = narrowestCardOuter(Number(match[1]), cols) - CARD_CHROME_PX;
       // The row must still be side by side...
       expect(inner).toBeGreaterThanOrEqual(NARROWEST_CARD_INNER);
-      // ...and the label must still fit on one line. The track is
-      // `max(19.5rem, 0.36 * inner)`, so the floor governs at these widths.
-      const track = Math.max(LABEL_TRACK_FLOOR_PX, 0.36 * inner);
-      expect(track).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
       // ...and the control must still hold the widest content the app puts in
-      // one, or the row reads as a label with a sliver attached.
-      expect(inner - track - COLUMN_GAP_PX).toBeGreaterThanOrEqual(MIN_CONTROL_PX);
+      // one, or the row reads as a label with a sliver attached. The track is
+      // now a hard cap (#1030), so it contributes a constant, not a ratio.
+      expect(inner - LABEL_TRACK_CAP_PX - FIELD_GAP_PX).toBeGreaterThanOrEqual(MIN_CONTROL_PX);
     }
   });
 
@@ -528,7 +526,7 @@ describe('guards the measurement this file is built on (#1020)', () => {
     return [...names];
   }
 
-  it('still finds the label the floor was measured against', () => {
+  it('still finds the label the row was measured against', () => {
     const labels = shippedSettingLabels();
     // A sanity floor: if the scan silently matched nothing, every other
     // assertion here would pass vacuously.
@@ -543,13 +541,15 @@ describe('guards the measurement this file is built on (#1020)', () => {
 
     expect(
       longer,
-      `New setting label(s) longer than the ${LONGEST_LABEL.length}-character label the layout was `
+      `New setting label(s) longer than the ${LONGEST_LABEL.length}-character label the row was `
       + `measured against (${JSON.stringify(LONGEST_LABEL)} = ${LONGEST_LABEL_PX}px incl. tooltip):\n`
       + `${longer.map((n) => `  ${n.length}  ${n}`).join('\n')}\n\n`
-      + 'Character count is not width, so this is a prompt to re-measure rather than proof of a '
-      + 'defect. Render the new label at 500 14px Inter, add the 22px InfoTooltip affordance, and '
-      + 'update LONGEST_LABEL / LONGEST_LABEL_PX here and the floor in SettingsPagelet.tsx. Do not '
-      + 'raise the constants to make this pass.',
+      + 'Since #1030 the label track is a 13.5rem CAP, so a long label wraps rather than widening '
+      + 'every row in the app — this is not a layout break. It is a prompt to check the label '
+      + 'itself: labels get long because they carry their units ("(seconds)", "(minutes)"), and '
+      + 'those belong in a control adornment (#1025), not in the name. Either shorten the label or '
+      + 'give it an adornment, then update LONGEST_LABEL / LONGEST_LABEL_PX from a fresh '
+      + 'measurement. Do NOT raise the label track cap to accommodate it.',
     ).toEqual([]);
   });
 });

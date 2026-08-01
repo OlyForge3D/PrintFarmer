@@ -240,36 +240,28 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  *
  * The thresholds are set by the narrowest card a column may produce while its
  * field rows stay legible, because opening a column that shreds every label is
- * not "using the space". Two measured constraints:
+ * not "using the space".
  *
- *   label fits on one line   label track ≥ 297px  (275px text + 22px tooltip)
- *   control stays usable     control ≥ 200px
+ * ⚠️ The numbers below are **stale as of #1030** and are retuned in #1034.
  *
- * The 297px is the widest of all 131 `[SettingDisplay(Name = ...)]` labels the
- * app ships — "Print Warmup Grace Period (seconds)" — measured in the real
- * face. An earlier pass took 218px from `System Config` alone, which is not the
- * tab that holds the long labels; see the derivation on `FIELD_ROW_CLASS`.
- * 200px is what the widest control content needs: a `255.255.255.255/32` CIDR
- * in the mono face plus its clear button.
+ * They were derived when `SettingsPagelet` floored the label track at `19.5rem`
+ * (312px), so a legible row needed 312 + 16 + 200 = 528px of inner width. A card
+ * spends 49px on padding and border, giving a 577px outer card and
+ * `N × 577 + (N-1) × 16` before N columns may open:
  *
- * `SettingsPagelet` floors the label track at `19.5rem` (312px), so a legible
- * row needs 312 + 16 + 200 = 528px of inner width. A card spends 49px on
- * padding and border, so the floor is a 577px outer card, and a flow needs
- * `N × 577 + (N-1) × 16` before it may open N columns:
+ *   74rem  (1184px) → 2 cols → cards 584px
+ *   111rem (1776px) → 3 cols → cards 581px
  *
- *   74rem  (1184px) → 2 cols → cards 584px → track 312px, control 223px
- *   111rem (1776px) → 3 cols → cards 581px → track 312px, control 220px
+ * #1030 replaced that floor with a `13.5rem` (216px) **cap**, which is the ACC
+ * proposal's number. A legible row is now 216 + 12 + 200 = 428px inner, so both
+ * thresholds are roughly 100px per column too high — which is exactly the
+ * density failure #1029 opened on: the proposal reaches two columns at a 1440px
+ * viewport and this reaches them at ~1738px.
  *
- * Those replace `52rem` / `78rem`, which opened columns at 435px and 445px
- * cards — 144px of label track against a 297px label block. The cost is
- * density: 1440px renders one column of 886px cards instead of two of 435px,
- * and 1920px two of 675px instead of three of 445px. That trade is deliberate
- * and was the explicit answer to #1020 — legibility over density.
- *
- * The reason the numbers are this large is that the labels carry their units
- * ("(minutes)", "(seconds)"). Moving those to a control adornment would drop
- * every offender under 200px and let these thresholds come back down; that is
- * a metadata change rather than a layout one and is tracked separately.
+ * They are deliberately left alone here. Retuning them before the control cap
+ * (#1033), the unit adornments (#1025) and the toggle switches (#1019) land
+ * would just reintroduce cramped columns from the other side, so #1034 does it
+ * once, against the finished row.
  */
 function bandFlowClass(bandCount: number): string {
   return clsx(
