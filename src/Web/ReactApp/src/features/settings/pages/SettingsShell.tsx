@@ -705,11 +705,12 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                   {subTabs}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
                     {/* Visually redundant: the category name is already the
-                        highlighted rail item two inches to the left, and the
-                        page H1 above it. Rendering it a third time made the
-                        content pane open with two stacked titles before any
-                        setting. The proposal's settings screen goes rail →
-                        tabs → bands with no category heading at all.
+                        highlighted rail item two inches to the left, under a
+                        page H1 that names the scope it belongs to. Rendering it
+                        a third time made the content pane open with two stacked
+                        titles before any setting. The proposal's settings
+                        screen goes rail → tabs → bands with no category heading
+                        at all.
 
                         The element stays in the tree because `aria-labelledby`
                         and the section-change focus target both point at it,

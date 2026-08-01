@@ -157,13 +157,20 @@ const FIELD_ROW_CLASS =
  * even when they were two numbers, and #1020 shipped twice with them disagreeing.
  *
  * The cap *value* is `24rem` (384px), set in #1033 from what the proposal
- * actually produces rather than from a round number. Its cards run 570–590px
+ * actually produces rather than from a round number. *Its* cards run 570–590px
  * outer across the 2- and 3-column bands, which after 34px of chrome and a
- * 228px label track leaves controls in a 310–350px range. 384px sits just above
- * that band, so it never binds on a card that is genuinely in a column and only
- * engages on the wide single-card case it exists for. The previous `40rem`
- * (640px) was inherited from the 19.5rem-label era and let a lone card render a
- * 640px ribbon for a two-digit retention count.
+ * 228px label track leaves controls in a 310–350px range, and 384px sits just
+ * above that band.
+ *
+ * Our own cards are narrower at the bottom of each band — 464px at the 2- and
+ * 3-column thresholds, giving a 202px control — but the content region has no
+ * max-width above a single card, so a 2-column band spans 944–1424px and its
+ * cards run 464–704px. The cap therefore does bind in-column, from roughly a
+ * 1310px container upward, which on a 1600px window is the ordinary case. That
+ * is the intent: it is a ceiling on every control, not an escape hatch for the
+ * single-card layout. The previous `40rem` (640px) was inherited from the
+ * 19.5rem-label era and let a lone card render a 640px ribbon for a two-digit
+ * retention count.
  */
 const FIELD_CONTROL_CLASS = 'min-w-0 @[26rem]:max-w-[24rem]';
 
