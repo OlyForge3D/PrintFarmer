@@ -240,35 +240,42 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  *
  * The thresholds are set by the narrowest card a column may produce while its
  * field rows stay legible, because opening a column that shreds every label is
- * not "using the space". Two measured constraints, both from Chromium against
- * the real `System Config` labels:
+ * not "using the space". Two measured constraints:
  *
- *   label fits on one line   label track ≥ 218px  (196px text + 22px tooltip)
- *   row reads as a pair      control ≥ label track
+ *   label fits on one line   label track ≥ 297px  (275px text + 22px tooltip)
+ *   control stays usable     control ≥ 200px
  *
- * `SettingsPagelet` floors the label track at `14.5rem` (232px), so the second
- * constraint binds: inner − 232 − 16 ≥ 232, i.e. inner ≥ 480px. A card spends
- * 49px on padding and border, so the floor is a ~529px outer card, and a flow
- * needs `N × 529 + (N-1) × 16` before it may open N columns:
+ * The 297px is the widest of all 129 `[SettingDisplay(Name = ...)]` labels the
+ * app ships — "Print Warmup Grace Period (seconds)" — measured in the real
+ * face. An earlier pass took 218px from `System Config` alone, which is not the
+ * tab that holds the long labels; see the derivation on `FIELD_ROW_CLASS`.
+ * 200px is what the widest control content needs: a `255.255.255.255/32` CIDR
+ * in the mono face plus its clear button.
  *
- *   68rem  (1088px) → 2 cols → cards 536px → track 232px, control 239px
- *   102rem (1632px) → 3 cols → cards 533px → track 232px, control 236px
+ * `SettingsPagelet` floors the label track at `19.5rem` (312px), so a legible
+ * row needs 312 + 16 + 200 = 528px of inner width. A card spends 49px on
+ * padding and border, so the floor is a 577px outer card, and a flow needs
+ * `N × 577 + (N-1) × 16` before it may open N columns:
+ *
+ *   74rem  (1184px) → 2 cols → cards 584px → track 312px, control 223px
+ *   111rem (1776px) → 3 cols → cards 581px → track 312px, control 220px
  *
  * Those replace `52rem` / `78rem`, which opened columns at 435px and 445px
- * cards — 144px of label track against a 218px label block, so "Enable
- * Background Scanning" wrapped to three lines at both 1440px and 1920px. The
- * cost is density: 1440px now renders one column of 886px cards instead of two
- * of 435px, and 1920px two of 675px instead of three of 445px. That trade is
- * deliberate and was the explicit answer to #1020 — legibility over density.
+ * cards — 144px of label track against a 297px label block. The cost is
+ * density: 1440px renders one column of 886px cards instead of two of 435px,
+ * and 1920px two of 675px instead of three of 445px. That trade is deliberate
+ * and was the explicit answer to #1020 — legibility over density.
  *
- * Verified in Chromium after the change; zero labels wrap at any width from
- * 768px to 2560px.
+ * The reason the numbers are this large is that the labels carry their units
+ * ("(minutes)", "(seconds)"). Moving those to a control adornment would drop
+ * every offender under 200px and let these thresholds come back down; that is
+ * a metadata change rather than a layout one and is tracked separately.
  */
 function bandFlowClass(bandCount: number): string {
   return clsx(
     'columns-1 gap-4',
-    bandCount >= 2 && '@[68rem]:columns-2',
-    bandCount >= 3 && '@[102rem]:columns-3',
+    bandCount >= 2 && '@[74rem]:columns-2',
+    bandCount >= 3 && '@[111rem]:columns-3',
   );
 }
 
@@ -294,8 +301,8 @@ function cardFlowClass(cardCount: number): string {
     // pushes labels away from the controls they name. Cap the measure and let
     // the remainder read as page margin.
     cardCount <= 1 && 'max-w-[64rem]',
-    cardCount >= 2 && '@[68rem]:columns-2',
-    cardCount >= 3 && '@[102rem]:columns-3',
+    cardCount >= 2 && '@[74rem]:columns-2',
+    cardCount >= 3 && '@[111rem]:columns-3',
   );
 }
 

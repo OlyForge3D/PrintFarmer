@@ -110,38 +110,59 @@ const MONO_FIELD_CLASS = 'font-pf-mono tabular-nums';
  * next three to two, at every window width from 900px to 2200px.
  *
  * The number the track has to clear is not the text width, though. The label
- * is a flex row holding the text *and* `InfoTooltip`, which measures 16px plus
- * its own `ml-1.5` — so the widest label needs 196 + 22 = 218px. A first pass
- * at this set the floor to `13.5rem` (216px) from the text alone and left
- * 1680px and 2200px still wrapping by two pixels. The floor is now `14.5rem`
- * (232px): the full label block plus 14px of headroom, so a slightly longer
- * label added later does not silently re-open the defect.
+ * is a flex row holding the text *and* `InfoTooltip`, which measures a
+ * consistent 22px (16px icon + its `ml-1.5`) on every field that has one.
  *
- * The `0.36fr / 0.64fr` ratio still governs above the floor and still does the
- * job it was introduced for — guaranteeing the control keeps ~64% of the inner
- * width rather than whatever a fixed gutter leaves. Floor and ratio meet at
- * 644px inner (0.36 x 644 = 232), so there is no step at the crossover.
+ * The floor is sized against *every* label the app ships, not the ones on the
+ * tab that happened to be open. All 129 distinct `[SettingDisplay(Name = ...)]`
+ * values were rendered in this exact face (`500 14px Inter`) and measured. The
+ * widest is "Print Warmup Grace Period (seconds)" on `ObicoSettings`, then
+ * "Runout Warning Lead Time (minutes)" on `SpoolCoverageSettings` and
+ * "Analysis Request Timeout (seconds)" — none of which are on System Config.
+ * An earlier pass sized this at 232px from that one tab and left nine labels
+ * wrapping on Automation & Costs, one click away. Independent measurements of
+ * the worst label came in between 265px and 275px depending on whether the
+ * required marker was counted; the floor is sized against the largest of them,
+ * so worst case is 275 + 22 = 297px and the floor is `19.5rem` (312px) — the
+ * full label block plus 15px of headroom.
  *
- * `30rem` (480px) is the narrowest card that reads as two columns, and it is
- * derived rather than chosen: below it the control would be narrower than the
- * label beside it (480 - 232 - 16 = 232), at which point the row stops reading
- * as a pair. The old `23rem` was justified by bands flowing to three columns
- * at 1440px and landing cards at 401px inner. `bandFlowClass` no longer
- * produces a card that narrow — its thresholds now floor the card at ~529px
- * outer / ~480px inner — so the objection is gone. Below `30rem` the row
- * stacks, which is the *most* legible option at that size: the label gets the
- * full width and cannot wrap at all.
+ * `SettingsCardFlow.test.tsx` reads the C# attributes back and fails if a
+ * longer label is ever added, because that measurement cannot be repeated from
+ * a unit test and would otherwise rot silently — which is exactly how the
+ * 232px version shipped.
  *
- * Past `52rem` the ratio inverts into a problem: 36% of a 1000px card puts
- * 360px of empty space between a label and the control it names, and the pair
- * stops reading as one row. So the label track switches to a hard 16rem cap
- * and the control takes the remainder. 16rem (256px) still clears the 218px
- * worst-case label block, so the inversion cannot reintroduce wrapping either.
+ * The floor now dominates the `0.36fr` ratio everywhere the row is side by
+ * side: 0.36 only overtakes 312px at 867px inner, past the `52rem` (832px)
+ * inversion, which caps it straight back to the same 19.5rem. That is
+ * deliberate — cap and floor are one number, so the label gutter is a constant
+ * 312px at every card width and the crossover has no step in it.
+ *
+ * That inversion exists because 36% of a 1000px card would put 360px of empty
+ * space between a label and the control it names. Holding the cap equal to the
+ * floor also means the inversion cannot reintroduce wrapping, which a lower
+ * cap silently did: the previous 16rem (256px) cap sat under the 297px worst
+ * case, so the widest labels wrapped in *wide* single-column cards while
+ * narrow ones stayed clean — the least findable form of this bug.
+ *
+ * `33rem` (528px) is the narrowest card that reads as two columns, derived
+ * rather than chosen: 312px of label + 16px gap leaves 200px of control, which
+ * is what the widest content needs (a `255.255.255.255/32` CIDR in the mono
+ * face plus its clear button). Below `33rem` the row stacks, which is the
+ * *most* legible option at that size — the label gets the full width and
+ * cannot wrap at all. `bandFlowClass` is pinned to the same 528px, so no flow
+ * can produce a card that lands between the two rules.
+ *
+ * The cost of carrying a 312px gutter for labels this long is real, and the
+ * better long-term fix is to stop shipping the unit inside the label at all —
+ * "Runout Warning Lead Time" with `minutes` rendered as a control adornment
+ * drops every offender under 200px and would let the column thresholds come
+ * back down. That is a metadata/content change rather than a layout one, so it
+ * is tracked separately rather than smuggled into this fix.
  */
 const FIELD_ROW_CLASS =
   'grid grid-cols-1 items-start gap-x-4 gap-y-1 py-2.5 '
-  + '@[30rem]:grid-cols-[minmax(14.5rem,0.36fr)_minmax(0,0.64fr)] '
-  + '@[52rem]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]';
+  + '@[33rem]:grid-cols-[minmax(19.5rem,0.36fr)_minmax(0,0.64fr)] '
+  + '@[52rem]:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]';
 
 /**
  * The 0.64fr track is a *floor* for narrow cards. `max-w-[40rem]` is the
@@ -150,7 +171,7 @@ const FIELD_ROW_CLASS =
  * set so the control still clears 60% of the card's inner width at the widest
  * card the flow will produce.
  */
-const FIELD_CONTROL_CLASS = 'min-w-0 @[30rem]:max-w-[40rem]';
+const FIELD_CONTROL_CLASS = 'min-w-0 @[33rem]:max-w-[40rem]';
 
 const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
   <span
@@ -210,7 +231,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
 
         const label = (
           <label
-            className="flex items-start text-sm font-medium text-pf-text-primary @[30rem]:pt-2"
+            className="flex items-start text-sm font-medium text-pf-text-primary @[33rem]:pt-2"
             htmlFor={fieldId}
           >
             <span className="break-words">
@@ -321,7 +342,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isBoolean) {
           control = (
-            <div className={clsx(FIELD_CONTROL_CLASS, "@[30rem]:pt-1.5")}>
+            <div className={clsx(FIELD_CONTROL_CLASS, "@[33rem]:pt-1.5")}>
               <Checkbox
                 id={fieldId}
                 name={fieldId}

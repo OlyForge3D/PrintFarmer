@@ -1,4 +1,6 @@
 import '@testing-library/jest-dom';
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
@@ -148,14 +150,14 @@ describe('settings band flow density', () => {
 
   it('opens a second column — but not a third — for two bands', async () => {
     const flow = await renderBands(2);
-    expect(flow.className).toContain('@[68rem]:columns-2');
+    expect(flow.className).toContain('@[74rem]:columns-2');
     expect(flow.className).not.toContain('columns-3');
   });
 
   it('opens up to three columns once there are three bands', async () => {
     const flow = await renderBands(3);
-    expect(flow.className).toContain('@[68rem]:columns-2');
-    expect(flow.className).toContain('@[102rem]:columns-3');
+    expect(flow.className).toContain('@[74rem]:columns-2');
+    expect(flow.className).toContain('@[111rem]:columns-3');
   });
 
   it('flows bands rather than only the cards inside one band', async () => {
@@ -202,8 +204,8 @@ describe('settings card flow density', () => {
     // cards are the thing with room to flow. The shared thresholds resolve
     // against the band's `@container`, so this needs no extra coordination.
     const flow = await renderCardsInOneBand(3);
-    expect(flow.className).toContain('@[68rem]:columns-2');
-    expect(flow.className).toContain('@[102rem]:columns-3');
+    expect(flow.className).toContain('@[74rem]:columns-2');
+    expect(flow.className).toContain('@[111rem]:columns-3');
     expect(flow.className).not.toContain('max-w-[64rem]');
   });
 
@@ -238,18 +240,31 @@ function renderPagelet() {
 }
 
 /**
- * The width the label *track* must hold, measured in Chromium against the real
- * `System Config` labels. The label is a flex row of two children, and the
- * second one is easy to forget:
+ * The widest label the app ships, and the width its *track* must hold.
  *
- *   196px  text span   "Enable Background Scanning"  <- widest
+ * The label is a flex row of two children, and the second one is easy to
+ * forget:
+ *
+ *   275px  text span   "Print Warmup Grace Period (seconds)"  <- widest
  *    22px  InfoTooltip  16px icon + its own ml-1.5
  *
- * A first pass at #1020 sized the floor from the 196px alone and left two
- * widths still wrapping by two pixels. Update this only from a fresh
- * measurement, never to make a test pass.
+ * Two earlier passes at #1020 got this wrong in two different ways. The first
+ * counted only the text span and left two widths wrapping by two pixels. The
+ * second measured the widest label on `System Config` (218px) and treated it as
+ * the app-wide maximum — but the long labels live on Automation & Costs, and
+ * nine of them wrapped at 1920px with the floor sized at 232px.
+ *
+ * This figure is now the maximum over *all* 129 distinct `SettingDisplay`
+ * names, rendered in the real face. Independent measurements of the worst label
+ * came in between 265px and 275px depending on whether the required marker was
+ * counted; the larger is used. `guards the measurement this file is built on`
+ * below fails if a longer label is ever added, because the measurement needs a
+ * browser and cannot be repeated from here.
+ *
+ * Update this only from a fresh measurement, never to make a test pass.
  */
-const LONGEST_LABEL_PX = 196 + 22;
+const LONGEST_LABEL = 'Print Warmup Grace Period (seconds)';
+const LONGEST_LABEL_PX = 275 + 22;
 
 /** Padding + border a card spends before its field grid starts. */
 const CARD_CHROME_PX = 49;
@@ -257,15 +272,20 @@ const CARD_CHROME_PX = 49;
 /** Column gap between bands and between cards. `gap-4`. */
 const COLUMN_GAP_PX = 16;
 
-/** The label track floor in `FIELD_ROW_CLASS`. `14.5rem`. */
-const LABEL_TRACK_FLOOR_PX = 232;
+/** The label track floor in `FIELD_ROW_CLASS`. `19.5rem`. */
+const LABEL_TRACK_FLOOR_PX = 312;
+
+/**
+ * The narrowest control that still holds the widest content the app puts in
+ * one: a `255.255.255.255/32` CIDR in the mono face plus its clear button.
+ */
+const MIN_CONTROL_PX = 200;
 
 /**
  * The narrowest card inner width a column may produce. Derived, not chosen:
- * below it the control is narrower than the label beside it and the row stops
- * reading as a pair. `inner - floor - gap >= floor`.
+ * the label track floor, the gap, and a control that still fits its content.
  */
-const NARROWEST_CARD_INNER = LABEL_TRACK_FLOOR_PX * 2 + COLUMN_GAP_PX;
+const NARROWEST_CARD_INNER = LABEL_TRACK_FLOOR_PX + COLUMN_GAP_PX + MIN_CONTROL_PX;
 
 describe('field rows', () => {
   it('has no fixed-width label gutter left anywhere', () => {
@@ -294,7 +314,7 @@ describe('field rows', () => {
     // The threshold is set by layout, not taste, and the number it has to
     // clear moved when #1020 retuned the column thresholds for legibility.
     // `bandFlowClass` now floors a card at ~529px outer / ~480px inner, so a
-    // `30rem` (480px) row threshold keeps every row on a real page side by
+    // `33rem` (528px) row threshold keeps every row on a real page side by
     // side. The coupling between the two is asserted in its own test rather
     // than left implicit.
     const row = renderPagelet().container.querySelector(
@@ -333,11 +353,11 @@ describe('field rows', () => {
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
-    expect(row.className).toContain('@[52rem]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]');
+    expect(row.className).toContain('@[52rem]:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]');
   });
 
   it('cannot reintroduce wrapping via the wide-card inversion', () => {
-    // The 52rem branch drops the label track from 36% to a hard 16rem cap. If
+    // The 52rem branch drops the label track from 36% to a hard 19.5rem cap. If
     // that cap ever fell below the longest label, wide cards would start
     // wrapping while narrow ones stayed clean — the least findable version of
     // this bug.
@@ -406,13 +426,12 @@ describe('column thresholds and field rows stay coupled (#1020)', () => {
       // The row must still be side by side...
       expect(inner).toBeGreaterThanOrEqual(NARROWEST_CARD_INNER);
       // ...and the label must still fit on one line. The track is
-      // `max(14.5rem, 0.36 * inner)`, so the floor governs at these widths.
+      // `max(19.5rem, 0.36 * inner)`, so the floor governs at these widths.
       const track = Math.max(LABEL_TRACK_FLOOR_PX, 0.36 * inner);
       expect(track).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
-      // ...and the control must not end up narrower than the label beside it,
-      // which is what makes a row read as a pair rather than a label with a
-      // sliver attached.
-      expect(inner - track - COLUMN_GAP_PX).toBeGreaterThanOrEqual(track);
+      // ...and the control must still hold the widest content the app puts in
+      // one, or the row reads as a label with a sliver attached.
+      expect(inner - track - COLUMN_GAP_PX).toBeGreaterThanOrEqual(MIN_CONTROL_PX);
     }
   });
 
@@ -429,5 +448,74 @@ describe('column thresholds and field rows stay coupled (#1020)', () => {
 
     expect(bandThresholds).toBeDefined();
     expect(bandThresholds).toEqual(cardThresholds);
+  });
+});
+
+/**
+ * The whole geometry in this file rests on one number that cannot be computed
+ * here: how wide the widest label renders. That needs a browser and a font.
+ *
+ * #1020 shipped twice with that number measured off whichever tab happened to
+ * be open, and both times the unit tests passed while the app visibly wrapped.
+ * The constant is the weak seam, so it gets its own guard: read the labels back
+ * out of the C# they are declared in and fail if one appears that the pinned
+ * measurement never covered.
+ *
+ * Character count is not width — "Print Warmup Grace Period (seconds)" and
+ * "Active Sync Initial Delay (Seconds)" are both 35 characters and differ by
+ * 21px. It is used only as a *tripwire*: a longer label is a signal to go
+ * re-measure, not a claim about pixels. The floor carries 15px of headroom on
+ * top, which covers roughly two average characters of drift.
+ */
+describe('guards the measurement this file is built on (#1020)', () => {
+  /** Every `[SettingDisplay(Name = "...")]` value in the backend. */
+  function shippedSettingLabels(): string[] {
+    const skip = new Set(['obj', 'bin', 'node_modules', '.git', 'Web']);
+    const roots = [path.resolve(process.cwd(), '..', '..')];
+    const names = new Set<string>();
+
+    while (roots.length > 0) {
+      const dir = roots.pop()!;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!skip.has(entry.name)) roots.push(path.join(dir, entry.name));
+          continue;
+        }
+        if (!entry.name.endsWith('.cs')) continue;
+        const source = fs.readFileSync(path.join(dir, entry.name), 'utf8');
+        // The attribute is written both inline and across several lines, so
+        // this cannot be a line-oriented match — that is how the first pass
+        // missed ObicoSettings entirely.
+        for (const m of source.matchAll(/SettingDisplay\(\s*Name\s*=\s*"([^"]+)"/g)) {
+          names.add(m[1]);
+        }
+      }
+    }
+    return [...names];
+  }
+
+  it('still finds the label the floor was measured against', () => {
+    const labels = shippedSettingLabels();
+    // A sanity floor: if the scan silently matched nothing, every other
+    // assertion here would pass vacuously.
+    expect(labels.length).toBeGreaterThan(100);
+    expect(labels).toContain(LONGEST_LABEL);
+  });
+
+  it('has not gained a label longer than the one that was measured', () => {
+    const longer = shippedSettingLabels()
+      .filter((name) => name.length > LONGEST_LABEL.length)
+      .sort((a, b) => b.length - a.length);
+
+    expect(
+      longer,
+      `New setting label(s) longer than the ${LONGEST_LABEL.length}-character label the layout was `
+      + `measured against (${JSON.stringify(LONGEST_LABEL)} = ${LONGEST_LABEL_PX}px incl. tooltip):\n`
+      + `${longer.map((n) => `  ${n.length}  ${n}`).join('\n')}\n\n`
+      + 'Character count is not width, so this is a prompt to re-measure rather than proof of a '
+      + 'defect. Render the new label at 500 14px Inter, add the 22px InfoTooltip affordance, and '
+      + 'update LONGEST_LABEL / LONGEST_LABEL_PX here and the floor in SettingsPagelet.tsx. Do not '
+      + 'raise the constants to make this pass.',
+    ).toEqual([]);
   });
 });
