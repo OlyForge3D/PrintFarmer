@@ -371,10 +371,10 @@ export function AdminControlCenterPage() {
               {groupedDestinations.map(({ group, destinations }) => (
                 <div key={group.id} className="flex flex-col gap-3">
                   <div className="flex flex-col gap-0.5">
-                    <h3 className="text-sm font-semibold uppercase tracking-wide text-pf-text-secondary">
+                    <h3 className="text-[15px] font-semibold text-pf-text-primary">
                       {group.label}
                     </h3>
-                    <p className="text-xs text-pf-text-tertiary">{group.description}</p>
+                    <p className="text-xs text-pf-text-secondary">{group.description}</p>
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {destinations.map((destination) => (
