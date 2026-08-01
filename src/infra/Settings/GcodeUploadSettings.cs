@@ -25,7 +25,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
         set => _allowedExtensions = NormalizeExtensions(value);
     }
 
-    [SettingDisplay(Name = "Daily Upload Limit (Bytes)", Description = "Maximum total bytes allowed for upload per day.", InputType = SettingInputType.Number, Required = true)]
+    [SettingDisplay(Name = "Daily Upload Limit", Unit = "bytes", Description = "Maximum total bytes allowed for upload per day.", InputType = SettingInputType.Number, Required = true)]
     [JsonPropertyName("dailyUploadLimitBytes")]
     public long DailyUploadLimitBytes { get; set; } = 2L * 1024 * 1024 * 1024;
 

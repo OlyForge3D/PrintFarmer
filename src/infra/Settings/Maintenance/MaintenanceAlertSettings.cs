@@ -26,7 +26,7 @@ public class MaintenanceAlertSettings : IAppSetting
     /// Interval in seconds between alert evaluations (default: 300 = 5 minutes).
     /// </summary>
     [JsonPropertyName("intervalSeconds")]
-    [SettingDisplay(Name = "Interval (seconds)", Description = "How often to check for maintenance alerts", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 3600)]
+    [SettingDisplay(Name = "Interval", Unit = "seconds", Description = "How often to check for maintenance alerts", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 3600)]
     public int IntervalSeconds { get; set; } = 300;
 
     /// <summary>

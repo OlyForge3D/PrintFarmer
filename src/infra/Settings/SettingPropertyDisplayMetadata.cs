@@ -24,6 +24,13 @@ public class SettingPropertyDisplayMetadata
     /// </summary>
     public string? RequiredWhen { get; set; }
 
+    /// <summary>
+    /// Unit of measure, rendered as an adornment beside the control. Bare and
+    /// lowercase ("minutes"), never parenthesised — the client supplies the
+    /// presentation.
+    /// </summary>
+    public string? Unit { get; set; }
+
     // Allowed values for select-type settings
     public object[]? AllowedValues { get; set; }
 

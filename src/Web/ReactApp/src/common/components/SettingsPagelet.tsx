@@ -24,6 +24,12 @@ export interface SettingPropertyDisplayMetadata {
    * discovery subnets are required only while discovery is enabled.
    */
   requiredWhen?: string;
+  /**
+   * Unit of measure, rendered as an adornment beside the control instead of
+   * inside the label. Bare and lowercase ("minutes"); this component supplies
+   * the presentation.
+   */
+  unit?: string;
   allowedValues?: unknown[];
   minValue?: number;
   maxValue?: number;
@@ -199,6 +205,14 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
+        // Every control below sets `aria-label`, which *overrides* the `<label>`
+        // element rather than adding to it. So when the unit moved out of the
+        // visible label (#1025) it had to be put back here, or a screen reader
+        // would announce "Runout Warning Lead Time" and never mention minutes.
+        // This keeps the spoken name identical to what it was before the move.
+        const accessibleName = prop.display?.unit
+          ? `${displayName} (${prop.display.unit})`
+          : displayName;
         // `isPropertyRequired` is the one predicate that knows about `RequiredWhen`.
         // Reading `prop.required` here instead would be wrong twice over: the
         // metadata lives at `display.required`, so the flag never arrives, and a
@@ -264,7 +278,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             <div
               className={FIELD_CONTROL_CLASS}
               role="group"
-              aria-label={displayName}
+              aria-label={accessibleName}
               aria-describedby={isRequired ? `${fieldId}-required` : undefined}
             >
               {isRequired && (
@@ -332,7 +346,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
               <Checkbox
                 id={fieldId}
                 name={fieldId}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 checked={Boolean(values[prop.name])}
                 invalid={invalid}
@@ -352,7 +366,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
@@ -374,7 +388,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value === '' ? '' : Number(e.currentTarget.value))}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={MONO_FIELD_CLASS}
@@ -390,7 +404,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 name={fieldId}
                 value={String(getInputValue(values[prop.name] as SettingValue))}
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
               >
@@ -413,7 +427,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
                 onChange={(e) => onChange(prop.name, e.currentTarget.value)}
                 placeholder={displayName}
                 title={prop.display?.description || displayName}
-                aria-label={displayName}
+                aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 invalid={invalid}
                 className={clsx(isMono && MONO_FIELD_CLASS)}
@@ -423,6 +437,34 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         }
 
+        // The unit sits beside the control, not inside the label (#1025).
+        //
+        // Writing it into the label — "Runout Warning Lead Time (minutes)" —
+        // is what made the label track the widest thing on the page: nine of
+        // the ten labels that wrapped did so only because of a parenthetical.
+        // Beside the control it also reads better, because a unit describes
+        // the value the user is typing, not the thing being named.
+        //
+        // Wrapped at the row rather than inside each control branch: there are
+        // six of those, and the unit's relationship to the control is the same
+        // in all of them. `items-start` + `pt-2` keeps the unit on the input's
+        // line when a validation error pushes a second line underneath.
+        const unit = prop.display?.unit;
+        const controlWithUnit = unit
+          ? (
+            <div className="flex min-w-0 items-start gap-2">
+              {control}
+              <span
+                className="shrink-0 pt-2 text-[12px] text-pf-text-secondary"
+                data-setting-unit
+                aria-hidden="true"
+              >
+                {unit}
+              </span>
+            </div>
+          )
+          : control;
+
         return (
           <div
             className={FIELD_ROW_CLASS}
@@ -430,7 +472,7 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             data-setting-property={`${metadata.key}.${prop.name}`}
           >
             {label}
-            {control}
+            {controlWithUnit}
           </div>
         );
       })}

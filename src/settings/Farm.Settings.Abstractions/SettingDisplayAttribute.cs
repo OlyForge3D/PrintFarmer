@@ -79,4 +79,22 @@ public sealed class SettingDisplayAttribute : Attribute
     /// </para>
     /// </summary>
     public string? RequiredWhen { get; set; }
+
+    /// <summary>
+    /// Unit of measure for the value, rendered as an adornment beside the
+    /// control rather than as part of the label.
+    /// <para>
+    /// Units used to be written into <see cref="Name"/> — "Runout Warning Lead
+    /// Time (minutes)". That is the single largest contributor to label width:
+    /// nine of the ten labels that wrap in the settings UI do so only because
+    /// of their parenthetical. Widening the label track to fit them cost every
+    /// row in the application 96px and pushed the two-column layout out by
+    /// ~550px of viewport (#1030), so the unit moves to where it belongs.
+    /// </para>
+    /// <para>
+    /// Write the bare unit, lowercase, as it should read next to a number:
+    /// <c>Unit = "minutes"</c>, not <c>"(minutes)"</c> or <c>"Minutes"</c>.
+    /// </para>
+    /// </summary>
+    public string? Unit { get; set; }
 }

@@ -32,7 +32,7 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     /// visibility but cost query load; 60s is a balanced default.
     /// </summary>
     [JsonPropertyName("compileIntervalSeconds")]
-    [SettingDisplay(Name = "Compile Interval (seconds)", Description = "How often the shift-plan compiler recomputes materialized tasks (15–3600).", InputType = SettingInputType.Number, MinValue = 15, MaxValue = 3600, Order = 1)]
+    [SettingDisplay(Name = "Compile Interval", Unit = "seconds", Description = "How often the shift-plan compiler recomputes materialized tasks (15–3600).", InputType = SettingInputType.Number, MinValue = 15, MaxValue = 3600, Order = 1)]
     public int CompileIntervalSeconds { get; set; } = 60;
 
     /// <summary>
@@ -43,7 +43,7 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     /// begins. A value of 0 disables the buffer.
     /// </summary>
     [JsonPropertyName("maintenanceLeadMinutes")]
-    [SettingDisplay(Name = "Maintenance Lead Time (minutes)", Description = "How far in advance of an idle window a maintenance task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 2)]
+    [SettingDisplay(Name = "Maintenance Lead Time", Unit = "minutes", Description = "How far in advance of an idle window a maintenance task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 2)]
     public int MaintenanceLeadMinutes { get; set; } = 30;
 
     /// <summary>
@@ -52,19 +52,19 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     /// are not pushed into low-value time slices.
     /// </summary>
     [JsonPropertyName("minIdleWindowMinutes")]
-    [SettingDisplay(Name = "Minimum Idle Window (minutes)", Description = "Idle windows shorter than this are ignored (5–1440).", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 1440, Order = 3)]
+    [SettingDisplay(Name = "Minimum Idle Window", Unit = "minutes", Description = "Idle windows shorter than this are ignored (5–1440).", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 1440, Order = 3)]
     public int MinIdleWindowMinutes { get; set; } = 20;
 
     /// <summary>
     /// Spool reorder threshold in grams used by source-qualified burn-rate projections.
     /// </summary>
     [JsonPropertyName("spoolReorderThresholdGrams")]
-    [SettingDisplay(Name = "Spool Reorder Threshold (g)", Description = "Project when remaining spool weight will cross this value (0–100000).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 100000, Order = 4)]
+    [SettingDisplay(Name = "Spool Reorder Threshold", Unit = "g", Description = "Project when remaining spool weight will cross this value (0–100000).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 100000, Order = 4)]
     public double SpoolReorderThresholdGrams { get; set; } = 250;
 
     /// <summary>Completed-job lookback used for authoritative burn-rate samples.</summary>
     [JsonPropertyName("spoolBurnRateLookbackDays")]
-    [SettingDisplay(Name = "Spool Burn-Rate Lookback (days)", Description = "Completed-job history window used for burn-rate projection (1–3650).", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 3650, Order = 5)]
+    [SettingDisplay(Name = "Spool Burn-Rate Lookback", Unit = "days", Description = "Completed-job history window used for burn-rate projection (1–3650).", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 3650, Order = 5)]
     public int SpoolBurnRateLookbackDays { get; set; } = 30;
 
     /// <summary>Minimum authoritative usage rows required for a ready projection.</summary>
@@ -74,7 +74,7 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
 
     /// <summary>Lead time applied before a projected spool reorder-threshold crossing.</summary>
     [JsonPropertyName("spoolRestockLeadMinutes")]
-    [SettingDisplay(Name = "Spool Restock Lead Time (minutes)", Description = "How far before the projected reorder-threshold crossing a spool-restock task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 7)]
+    [SettingDisplay(Name = "Spool Restock Lead Time", Unit = "minutes", Description = "How far before the projected reorder-threshold crossing a spool-restock task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 7)]
     public int SpoolRestockLeadMinutes { get; set; }
 
     /// <summary>
@@ -82,7 +82,7 @@ public class ShiftPlanSettings : IAppSetting, IValidatableSetting
     /// an in-progress job's ETA rather than an already-completed plate.
     /// </summary>
     [JsonPropertyName("harvestLeadMinutes")]
-    [SettingDisplay(Name = "Harvest Lead Time (minutes)", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 8)]
+    [SettingDisplay(Name = "Harvest Lead Time", Unit = "minutes", Description = "How far ahead of a projected harvest the task appears (0–1440).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1440, Order = 8)]
     public int HarvestLeadMinutes { get; set; }
 
     /// <inheritdoc />

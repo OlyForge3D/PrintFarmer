@@ -334,6 +334,7 @@ public class SettingsService : ISettingsService
                             // without them.
                             Required = displayAttr.Required,
                             RequiredWhen = displayAttr.RequiredWhen,
+                            Unit = displayAttr.Unit,
                             AllowedValues = displayAttr.AllowedValues,
                             MinValue = (displayAttr.MinValue == -1) ? null : displayAttr.MinValue,
                             MaxValue = (displayAttr.MaxValue == -1) ? null : displayAttr.MaxValue

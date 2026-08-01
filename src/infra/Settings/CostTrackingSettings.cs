@@ -19,7 +19,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public bool EnableAutomaticCostCalculation { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Electricity Rate (per kWh)",
+        Name = "Electricity Rate", Unit = "per kWh",
         Description = "Cost of electricity per kilowatt-hour (e.g., 0.12 for $0.12/kWh).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -67,7 +67,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     /// Global fallback price per kilogram when no Spoolman or material-specific price is available.
     /// </summary>
     [SettingDisplay(
-        Name = "Default Filament Price (per kg)",
+        Name = "Default Filament Price", Unit = "per kg",
         Description = "Fallback filament price per kilogram when Spoolman pricing and material defaults are unavailable.",
         InputType = SettingInputType.Number,
         MinValue = 0,

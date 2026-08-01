@@ -265,30 +265,30 @@ function renderPagelet() {
  * The widest label the app ships, and the width its *track* would need to hold
  * it on one line.
  *
- * The label is a flex row of two children, and the second one is easy to
- * forget:
+ * ⚠️ **This is not a floor the layout must clear (#1030).** The label track is
+ * a `13.5rem` (216px) cap, per the ACC proposal, and a label wider than that
+ * wraps onto a second line. Sizing the track against this figure cost 96px on
+ * every row in the application to keep one label on one line on one tab.
  *
- *   275px  text span   "Print Warmup Grace Period (seconds)"  <- widest
- *    22px  InfoTooltip  16px icon + its own ml-1.5
+ * The figure dropped sharply in #1025, which moved unit parentheticals out of
+ * label text and into control adornments. Before that the widest was "Print
+ * Warmup Grace Period (seconds)" at 275px + 22px of `InfoTooltip`, and ten
+ * labels wrapped; nine of them did so *only* because of their unit suffix.
+ * Measured live at 1600px after the move, exactly one label still wraps, and
+ * it does so by landing precisely on the cap: 194px of text + 22px of tooltip
+ * affordance is 216px against a 216px track. That is an accepted outcome for
+ * one label — the alternative is charging every row in the app for it, which
+ * is what #1030 removed.
  *
- * ⚠️ **This is no longer a floor the layout must clear (#1030).** The label
- * track is now a `13.5rem` (216px) cap, per the ACC proposal, and a label wider
- * than that is allowed to wrap onto a second line. Sizing the track against
- * this figure cost 96px on every row in the app to keep one label on one line
- * on one tab, and pushed two columns from a 1180px viewport out to ~1738px.
- *
- * It is kept, and still measured at 14px, because it is the tripwire for
- * #1025 — moving units out of label text and into control adornments. Every
- * offender here is an offender *because* of its "(seconds)" / "(minutes)"
- * suffix. When #1025 lands this number should drop sharply; if a new label
- * appears above it instead, that is a regression in the metadata convention and
- * `guards the measurement this file is built on` fails so it is visible rather
- * than silent.
+ * It is kept as the tripwire for that convention. If a longer label appears,
+ * the likely cause is a new setting that wrote its unit into the name instead
+ * of using `Unit`, and `has not gained a label longer than the one that was
+ * measured` fails so that is visible rather than silent.
  *
  * Update this only from a fresh measurement, never to make a test pass.
  */
-const LONGEST_LABEL = 'Print Warmup Grace Period (seconds)';
-const LONGEST_LABEL_PX = 275 + 22;
+const LONGEST_LABEL = 'Spool Burn-Rate Minimum Samples';
+const LONGEST_LABEL_PX = 194 + 22;
 
 /** Padding + border a card spends before its field grid starts. */
 const CARD_CHROME_PX = 49;

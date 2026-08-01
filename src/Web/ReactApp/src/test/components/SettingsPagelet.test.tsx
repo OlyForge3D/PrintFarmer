@@ -329,3 +329,63 @@ describe('SettingsPagelet — required booleans announce as required (Vasquez #2
     expect(screen.getByRole('checkbox', { name: 'Enabled' })).not.toHaveAttribute('aria-required');
   });
 });
+
+describe('SettingsPagelet — units are adornments, not label text (#1025)', () => {
+  const unitSection = (unit?: string) => ({
+    key: 'ShiftPlan',
+    className: 'ShiftPlanSettings',
+    displayName: 'Shift Plan',
+    description: '',
+    properties: [
+      {
+        name: 'maintenanceLeadTimeMinutes',
+        type: 'int',
+        attributes: [],
+        display: { name: 'Maintenance Lead Time', inputType: 'Number', unit },
+      },
+    ],
+  }) as never;
+
+  const renderUnit = (unit?: string) => render(
+    <SettingsPagelet
+      metadata={unitSection(unit)}
+      values={{ maintenanceLeadTimeMinutes: 30 }}
+      onChange={vi.fn()}
+    />,
+  );
+
+  it('renders the unit beside the control', () => {
+    const { container } = renderUnit('minutes');
+    const adornment = container.querySelector('[data-setting-unit]');
+    expect(adornment).not.toBeNull();
+    expect(adornment).toHaveTextContent('minutes');
+  });
+
+  it('keeps the unit out of the visible label', () => {
+    const { container } = renderUnit('minutes');
+    const label = container.querySelector('label');
+    // The label's own text must not carry the parenthetical — that is the
+    // 96px this issue exists to reclaim. The adornment lives outside it.
+    expect(label?.textContent).toBe('Maintenance Lead Time');
+  });
+
+  it('still announces the unit to a screen reader', () => {
+    // The regression this guards is silent and invisible: every control sets
+    // `aria-label`, which OVERRIDES the `<label>` element rather than adding
+    // to it. So moving the unit out of the label text removes it from the
+    // accessible name unless it is deliberately put back. A sighted layout
+    // change has no business making the field ambiguous to a screen reader.
+    renderUnit('minutes');
+    expect(
+      screen.getByRole('spinbutton', { name: 'Maintenance Lead Time (minutes)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('leaves a unitless field alone in both name and markup', () => {
+    const { container } = renderUnit(undefined);
+    expect(container.querySelector('[data-setting-unit]')).toBeNull();
+    expect(
+      screen.getByRole('spinbutton', { name: 'Maintenance Lead Time' }),
+    ).toBeInTheDocument();
+  });
+});

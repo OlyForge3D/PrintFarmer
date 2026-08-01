@@ -13,11 +13,11 @@ public class QueuePlanningSettings : IAppSetting, IValidatableSetting
     public static string SectionKey => SectionName;
 
     [JsonPropertyName("workdayStartHourUtc")]
-    [SettingDisplay(Name = "Workday Start Hour (UTC)", Description = "Hour of day when staffed work begins (0-23 UTC).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 23, Order = 1)]
+    [SettingDisplay(Name = "Workday Start Hour", Unit = "UTC", Description = "Hour of day when staffed work begins (0-23 UTC).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 23, Order = 1)]
     public int WorkdayStartHourUtc { get; set; } = 8;
 
     [JsonPropertyName("workdayEndHourUtc")]
-    [SettingDisplay(Name = "Workday End Hour (UTC)", Description = "Hour of day when staffed work ends (0-23 UTC).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 23, Order = 2)]
+    [SettingDisplay(Name = "Workday End Hour", Unit = "UTC", Description = "Hour of day when staffed work ends (0-23 UTC).", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 23, Order = 2)]
     public int WorkdayEndHourUtc { get; set; } = 17;
 
     [JsonPropertyName("bedClearMinutes")]
@@ -25,7 +25,7 @@ public class QueuePlanningSettings : IAppSetting, IValidatableSetting
     public int BedClearMinutes { get; set; } = 10;
 
     [JsonPropertyName("defaultDeadlineHours")]
-    [SettingDisplay(Name = "Default Deadline Offset (Hours)", Description = "Automatically assign a deadline this many hours from now when jobs are queued without a deadline.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 720, Order = 4)]
+    [SettingDisplay(Name = "Default Deadline Offset", Unit = "hours", Description = "Automatically assign a deadline this many hours from now when jobs are queued without a deadline.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 720, Order = 4)]
     public int? DefaultDeadlineHours { get; set; }
 
     [JsonPropertyName("requireDeadline")]
@@ -33,7 +33,7 @@ public class QueuePlanningSettings : IAppSetting, IValidatableSetting
     public bool RequireDeadline { get; set; }
 
     [JsonPropertyName("minimumLeadHours")]
-    [SettingDisplay(Name = "Minimum Lead Time (Hours)", Description = "Minimum number of hours from now that a deadline must be set in the future.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 720, Order = 6)]
+    [SettingDisplay(Name = "Minimum Lead Time", Unit = "hours", Description = "Minimum number of hours from now that a deadline must be set in the future.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 720, Order = 6)]
     public int MinimumLeadHours { get; set; }
 
     public void Validate()

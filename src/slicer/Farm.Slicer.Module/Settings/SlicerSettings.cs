@@ -36,7 +36,7 @@ public class SlicerSettings : IAppSetting
     [JsonPropertyName("maxConcurrentJobs")]
     public int MaxConcurrentJobs { get; set; } = 1;
 
-    [SettingDisplay(Name = "Max Memory (MB)", Description = "Advisory memory ceiling for slice job admission. Future versions will use this for predictive scheduling.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max Memory", Unit = "MB", Description = "Advisory memory ceiling for slice job admission. Future versions will use this for predictive scheduling.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxMemoryMb")]
     public int MaxMemoryMb { get; set; } = 1024;
 }
