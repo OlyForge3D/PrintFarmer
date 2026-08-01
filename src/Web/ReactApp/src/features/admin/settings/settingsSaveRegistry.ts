@@ -11,7 +11,10 @@ import type { SettingsIssue } from './settingsAttention';
  */
 export type GroupSaveOutcome =
   | { ok: true; savedLabels: string[] }
-  | { ok: false; failedLabels: string[]; message?: string };
+  // A group holds several sections and each is its own request, so a failure is
+  // rarely total: `savedLabels` names the ones that did land, or the bar reports
+  // only what broke and the user never learns the rest is already persisted.
+  | { ok: false; savedLabels?: string[]; failedLabels: string[]; message?: string };
 
 /** What a group publishes for display in the page-level save bar. */
 export interface GroupDirtySummary {

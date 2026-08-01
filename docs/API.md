@@ -1530,8 +1530,9 @@ Content-Type: application/json
 ```
 
 Requires authentication. This is the canonical save endpoint — the settings UI fires one
-call per group when the user presses Save. There is no "Save All" button; each group has
-its own save button.
+call per dirty section when the user presses Save. There is no "Save All" button and no
+per-group save button; a single page-level save bar fans out to every section the user
+edited, each validated independently so one failure cannot roll back the rest.
 
 **Status codes:**
 

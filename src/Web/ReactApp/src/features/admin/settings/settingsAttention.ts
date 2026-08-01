@@ -95,6 +95,19 @@ export function isPropertyRequired(
   return Boolean(values[gate]);
 }
 
+/**
+ * Is this property required regardless of any other field's value?
+ *
+ * Ordering uses this rather than {@link isPropertyRequired} on purpose. A
+ * `RequiredWhen` field flips as the user toggles its gate, so ordering on the
+ * dynamic answer would make rows physically move under the pointer mid-edit.
+ * Only the unconditional case earns a position change.
+ */
+export function isPropertyAlwaysRequired(prop: SettingPropertyMetadata): boolean {
+  if (prop.attributes.includes('RequiredAttribute')) return true;
+  return Boolean(prop.display?.required) && !prop.display?.requiredWhen;
+}
+
 /** The number a field currently holds, or NaN when it isn't numeric. */
 function numericValue(prop: SettingPropertyMetadata, val: SettingValue): number {
   const isNumberType = prop.display?.inputType === SettingInputType.Number
@@ -104,6 +117,39 @@ function numericValue(prop: SettingPropertyMetadata, val: SettingValue): number 
   if (typeof val === 'string' && val !== '') return Number(val);
   return NaN;
 }
+
+/**
+ * Format constraints the server enforces that the settings metadata cannot
+ * express. Keyed `SectionKey.propertyName`, applied to every entry of an array
+ * property (or to the single value of a scalar one).
+ *
+ * This table exists because `/api/settings/metadata` carries no pattern or
+ * regex field — only type, required, min and max. Without it the client happily
+ * accepts `not-a-subnet`, the save bar reports no problem, and the server 400s
+ * on a value the UI already told the user was fine.
+ *
+ * Each entry must mirror a specific server validator. Cite it, so the next
+ * person can check the two still agree.
+ */
+const FORMAT_VALIDATORS: Record<string, { test: (v: string) => boolean; message: string }> = {
+  // Mirrors NetworkDiscoverySettings.IsValidCidr: exactly one '/', a parseable
+  // address, and a prefix in 0..32. Duplicates are deliberately NOT rejected —
+  // EnsureUniqueSubnets silently de-duplicates rather than failing, so erroring
+  // here would make the client stricter than the server.
+  'NetworkDiscovery.discoverySubnets': {
+    test: (v) => {
+      const parts = v.split('/');
+      if (parts.length !== 2) return false;
+      const octets = parts[0].split('.');
+      if (octets.length !== 4) return false;
+      if (!octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) <= 255)) return false;
+      if (!/^\d{1,2}$/.test(parts[1])) return false;
+      const prefix = Number(parts[1]);
+      return prefix >= 0 && prefix <= 32;
+    },
+    message: 'is not a valid CIDR subnet (expected e.g. 192.168.1.0/24)',
+  },
+};
 
 /**
  * Validate one section. Returns `{ [fieldName]: message }`.
@@ -136,6 +182,22 @@ export function validateSection(
       );
       if (blankAt >= 0) {
         errs[prop.name] = `Entry ${blankAt + 1} is blank. Remove it or fill it in.`;
+        continue;
+      }
+    }
+
+    // Same class of client/server disagreement as the blank-row check above,
+    // one step further in: the row is filled but malformed.
+    const format = FORMAT_VALIDATORS[`${metaItem.key}.${prop.name}`];
+    if (format && !isEmptyValue(val)) {
+      const entries = Array.isArray(val) ? val : [val];
+      const badAt = entries.findIndex(
+        (entry) => typeof entry === 'string' && entry.trim() !== '' && !format.test(entry.trim()),
+      );
+      if (badAt >= 0) {
+        errs[prop.name] = Array.isArray(val)
+          ? `Entry ${badAt + 1} ${format.message}.`
+          : `This value ${format.message}.`;
         continue;
       }
     }

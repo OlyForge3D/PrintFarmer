@@ -513,3 +513,74 @@ describe('validateSection agrees with the server (Hicks #3)', () => {
   });
 });
 
+/**
+ * One step further in than the blank-row check: the row is filled, but the value
+ * is not a CIDR. `NetworkDiscoverySettings.Validate()` runs `IsValidCidr` over
+ * every entry and throws, so without this the page reports the section healthy,
+ * enables Save, and the user gets a 400 on a value the UI already blessed.
+ *
+ * These fixtures use the real serialized property name (`discoverySubnets`),
+ * because the format table is keyed `SectionKey.propertyName` — a rename that
+ * misses the table would silently drop the check, and this pins the key.
+ */
+describe('validateSection mirrors IsValidCidr (Hicks #4)', () => {
+  const subnets: Prop = {
+    name: 'discoverySubnets',
+    type: 'Array',
+    attributes: [],
+    display: { name: 'Discovery Subnets', inputType: 'Array', required: true },
+  };
+  const section = {
+    key: 'NetworkDiscovery',
+    className: 'NetworkDiscoverySettings',
+    properties: [subnets],
+  } as never;
+
+  it.each([
+    ['no prefix', '192.168.1.0'],
+    ['not an address', 'not-a-subnet'],
+    ['prefix above 32', '10.0.0.0/33'],
+    ['octet above 255', '10.0.0.300/24'],
+    ['three octets', '10.0.0/24'],
+    ['two slashes', '10.0.0.0/24/8'],
+  ])('rejects %s', (_label, value) => {
+    expect(validateSection(section, { discoverySubnets: [value] })).toEqual({
+      discoverySubnets: 'Entry 1 is not a valid CIDR subnet (expected e.g. 192.168.1.0/24).',
+    });
+  });
+
+  it('names the offending row, not just the field', () => {
+    expect(
+      validateSection(section, { discoverySubnets: ['10.0.0.0/24', 'garbage'] }),
+    ).toEqual({
+      discoverySubnets: 'Entry 2 is not a valid CIDR subnet (expected e.g. 192.168.1.0/24).',
+    });
+  });
+
+  it.each([['10.0.0.0/24'], ['192.168.1.0/32'], ['0.0.0.0/0']])('accepts %s', (value) => {
+    expect(validateSection(section, { discoverySubnets: [value] })).toEqual({});
+  });
+
+  it('does not reject duplicates, because the server de-duplicates them', () => {
+    // EnsureUniqueSubnets() rewrites the list rather than throwing. Erroring
+    // here would make the client stricter than the server — the opposite of the
+    // bug this whole block exists to prevent.
+    expect(
+      validateSection(section, { discoverySubnets: ['10.0.0.0/24', '10.0.0.0/24'] }),
+    ).toEqual({});
+  });
+
+  it('leaves fields with no format rule alone', () => {
+    const plain = {
+      key: 'SystemLog',
+      className: 'SystemLogSettings',
+      properties: [
+        { name: 'discoverySubnets', type: 'Array', attributes: [], display: { name: 'X', inputType: 'Array' } },
+      ],
+    } as never;
+    // Same property name, different section — the table is keyed on both, so
+    // this must not inherit NetworkDiscovery's CIDR rule.
+    expect(validateSection(plain, { discoverySubnets: ['anything'] })).toEqual({});
+  });
+});
+

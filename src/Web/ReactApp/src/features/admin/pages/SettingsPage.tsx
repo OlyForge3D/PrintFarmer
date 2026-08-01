@@ -438,11 +438,21 @@ function GroupSaveBlock({
       // Keep the dirty state so the user can retry or discard. The page raises
       // the toast and renders the message — a per-group toast here would fire
       // once per group on a multi-group save.
-      return { ok: false, failedLabels: failed, message: firstMessage };
+      return {
+        ok: false,
+        savedLabels: saved.map(labelFor),
+        failedLabels: failed,
+        message: firstMessage,
+      };
     }
 
-    // All sections saved — accept current values as the new baseline.
-    state.markPristine(state.values);
+    // Every section saved. Settle the baseline for exactly those keys rather
+    // than calling `markPristine(state.values)`: `markPristine` replaces the
+    // working values as well, and `state.values` is the click-time snapshot, so
+    // an edit the user made while the request was in flight would be silently
+    // overwritten. `acceptKeys` moves only the baseline, which leaves that edit
+    // in place and correctly still dirty.
+    state.acceptKeys(saved);
     setFieldErrors({});
     setSectionErrors({});
     return { ok: true, savedLabels: changedSectionKeys.map(labelFor) };
@@ -470,14 +480,18 @@ function GroupSaveBlock({
     let count = 0;
     for (const key of state.changedKeys) {
       const sectionKey = String(key);
-      const before = (initialValues[sectionKey] ?? {}) as SectionValues;
+      // The baseline, not the page-load snapshot. After a save `original` moves
+      // but `initialValues` does not, so comparing against the latter lets the
+      // bar report "0 changes" for a section it is simultaneously showing as
+      // dirty — edit a field, save, then edit it back to its page-load value.
+      const before = (state.original[sectionKey] ?? {}) as SectionValues;
       const after = (state.values[sectionKey] ?? {}) as SectionValues;
       for (const field of new Set([...Object.keys(before), ...Object.keys(after)])) {
         if (!isStructurallyEqual(before[field], after[field])) count += 1;
       }
     }
     return count;
-  }, [initialValues, state.changedKeys, state.values]);
+  }, [state.original, state.changedKeys, state.values]);
 
   // Publishing the summary is a render concern, so it goes through state and
   // reruns whenever the numbers move. The registry bails out when the published
@@ -874,6 +888,31 @@ export function SettingsPage({
     const orderMap: Record<string, number> = {};
     for (const g of groupMetadata) orderMap[g.key] = g.order;
 
+    // Tier 2 (#1012): in Essential mode, bands whose fields are mostly essential
+    // lead, so the common cases sit near the top. Ratio, not count — a 3-field
+    // band that is entirely essential is more useful up top than a 40-field band
+    // with 6. Bucketed to one decimal so near-identical bands fall through to
+    // the declared order instead of being shuffled by a rounding difference.
+    const essentialDensity = (group: string): number => {
+      const sections = byGroup[group]
+        .map((item) => visibleMetadata.find((m) => m.key === item.key))
+        .filter((m): m is SettingMetadata => Boolean(m));
+      let total = 0;
+      let essential = 0;
+      for (const section of sections) {
+        for (const prop of section.properties) {
+          total += 1;
+          if (isEssentialProperty(section.key, prop.name)) essential += 1;
+        }
+      }
+      return total === 0 ? 0 : Math.round((essential / total) * 10) / 10;
+    };
+
+    const densityMap: Record<string, number> = {};
+    if (effectiveMode === 'essential') {
+      for (const group of Object.keys(byGroup)) densityMap[group] = essentialDensity(group);
+    }
+
     const sorted = Object.keys(byGroup)
       .filter((group) => isSlicerAvailable || group !== 'Slicing')
       .sort((a, b) => {
@@ -883,6 +922,12 @@ export function SettingsPage({
         const flaggedA = attentionGroups.has(a) ? 0 : 1;
         const flaggedB = attentionGroups.has(b) ? 0 : 1;
         if (flaggedA !== flaggedB) return flaggedA - flaggedB;
+
+        // Essential-mode only: `densityMap` is empty in Everything mode, so
+        // both sides read 0 and this term drops out entirely.
+        const densityA = densityMap[a] ?? 0;
+        const densityB = densityMap[b] ?? 0;
+        if (densityA !== densityB) return densityB - densityA;
 
         const orderA = orderMap[a] ?? 999;
         const orderB = orderMap[b] ?? 999;
@@ -904,7 +949,7 @@ export function SettingsPage({
       sortedGroups: sorted,
       metadataByGroup: metaByGroup,
     };
-  }, [allowedGroupSet, attentionGroups, groupMetadata, isSlicerAvailable, metadata]);
+  }, [allowedGroupSet, attentionGroups, effectiveMode, groupMetadata, isSlicerAvailable, metadata]);
 
   const getGroupDisplayName = useCallback((groupKey: string): string => {
     const group = groupMetadata.find((g) => g.key === groupKey);
@@ -955,6 +1000,10 @@ export function SettingsPage({
       if (outcome.ok) {
         saved.push(...outcome.savedLabels);
       } else {
+        // A group can partially succeed: report the sections that landed as
+        // well as the ones that didn't, or the user is told "1 failed" and
+        // never learns the other two are already on the server.
+        saved.push(...(outcome.savedLabels ?? []));
         failed.push(...outcome.failedLabels);
         if (!firstMessage && outcome.message) firstMessage = outcome.message;
       }

@@ -9,6 +9,7 @@ import {
   ADMIN_DESTINATIONS,
   ADMIN_HUB_PARENT,
 } from '@/features/admin/registry/adminDestinations';
+import { LEGACY_REDIRECTS } from '@/features/admin/registry/legacyRedirects';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors/components/PowerMonitorSettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
@@ -336,6 +337,15 @@ describe('admin destination contract (#1016)', () => {
  * by the shell, exempt for a stated reason, or covered here by a real render —
  * and a new one that is none of those fails the first test in the block.
  */
+/**
+ * Routes that exist in the router but deliberately have no hub tile, each with
+ * the reason. Anything not listed here must be registered in
+ * `ADMIN_DESTINATIONS` so the Control Center can actually reach it.
+ */
+const ROUTER_ONLY: Record<string, string> = {
+  '/admin/power-monitors': 'reached from the Hardware tile, not a top-level destination',
+};
+
 describe('admin destinations the shell does not draw (Hicks #5)', () => {
   const NOT_SHELL_DRAWN = ADMIN_OWNED.filter(
     (d) => !d.path.startsWith('/admin/settings') && !d.path.startsWith('/admin/manage'),
@@ -345,7 +355,6 @@ describe('admin destinations the shell does not draw (Hicks #5)', () => {
   const EXEMPT: Record<string, string> = {
     '/admin': 'the hub itself — it cannot link back to itself',
   };
-
   it('has an owner for every destination outside the shell', () => {
     const unaccounted = NOT_SHELL_DRAWN.map((d) => d.path).filter(
       (p) => !(p in EXEMPT) && !(p in STANDALONE_RENDERERS),
@@ -364,6 +373,36 @@ describe('admin destinations the shell does not draw (Hicks #5)', () => {
   it.each(Object.keys(STANDALONE_RENDERERS))('%s renders exactly one h1', (path) => {
     STANDALONE_RENDERERS[path]();
     expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+  });
+
+  /**
+   * The reverse direction. Every assertion above starts from
+   * `ADMIN_DESTINATIONS`, so a route that exists in the router but was never
+   * added to the registry is invisible to all of them: no hub tile, no back-link
+   * check, no h1 check. That is the same shape of gap that let
+   * `/admin/power-monitors` ship without a back link, one level up.
+   *
+   * Walk the router instead, and require the registry to account for each route.
+   */
+  it('registers every /admin route declared in the router', () => {
+    // Registry entries are deep links (`/admin/settings?scope=system&tab=…`),
+    // so compare on the pathname or every settings destination looks unrelated
+    // to the `/admin/settings` route that serves it.
+    const registered = new Set(ADMIN_DESTINATIONS.map((d) => d.path.split('?')[0]));
+    // Legacy paths are routes on purpose — they exist to keep old bookmarks
+    // working and redirect into the shell, so they have no tile by design.
+    // Derived from `LEGACY_REDIRECTS` rather than hand-listed, so retiring a
+    // redirect immediately makes its route an unregistered orphan here.
+    const legacy = new Set(LEGACY_REDIRECTS.map((r) => r.from));
+
+    const routerAdminPaths = [...declaredRoutePaths()].filter(
+      (p) => p.startsWith('/admin') && !p.includes(':'),
+    );
+
+    const unregistered = routerAdminPaths.filter(
+      (p) => !registered.has(p) && !legacy.has(p) && !(p in ROUTER_ONLY),
+    );
+    expect(unregistered).toEqual([]);
   });
 });
 

@@ -179,9 +179,11 @@ via `POST /api/settings/{keyName}` — the controller returns `404 Not Found`.
 
 ## Save Model — One Section At A Time
 
-There is **no "Save All" button** anywhere in the settings UI. Each group renders a
-`GroupSaveBlock` (in `SettingsPage.tsx`) with its own Save/Reset controls, and saves fire
-one section at a time via:
+There is **no "Save All" button** anywhere in the settings UI. The page renders a **single
+page-level save bar** (docked to the bottom of the viewport via the shell's footer slot),
+which fans out through the save registry (`settingsSaveRegistry.ts`) to each dirty group.
+Individual groups do *not* render their own save buttons. Every save still fires one
+section at a time via:
 
 ```http
 POST /api/settings/{keyName}
@@ -204,9 +206,13 @@ Responses:
 - **404 Not Found** — the section is blocklisted (`HomeAssistant`, `Telegram`) or does
   not exist.
 
-After a successful save the group's `state.markPristine(values)` marks its own edits as
-the new baseline. The page intentionally does not refetch other groups' values — that
-would clobber unsaved edits elsewhere. Refreshing the page always reflects server state.
+After a successful save the group calls `state.acceptKeys(savedSectionKeys)`, which advances
+the *baseline* for exactly those sections. It deliberately does not call
+`markPristine(state.values)`: `markPristine` also replaces the working values, and
+`state.values` is the snapshot taken when Save was clicked — so an edit the user made while
+the request was in flight would be silently discarded. The page intentionally does not
+refetch other groups' values either, as that would clobber unsaved edits elsewhere.
+Refreshing the page always reflects server state.
 
 ### `saveAllSettings` is dead code
 

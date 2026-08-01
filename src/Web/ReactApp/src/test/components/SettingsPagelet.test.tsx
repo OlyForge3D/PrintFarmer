@@ -147,3 +147,144 @@ describe('SettingsPagelet', () => {
     expect(new Set(labels).size).toBe(labels.length);
   });
 });
+
+/**
+ * #1012 — "Within a card: required fields first, then the declared order."
+ *
+ * Ordering keys off the *unconditional* requirement only. A `RequiredWhen`
+ * field flips as the user toggles its gate, and reordering on that would make
+ * rows physically move under the pointer mid-edit.
+ */
+describe('SettingsPagelet — required fields lead (#1012)', () => {
+  function prop(name: string, display: Record<string, unknown>) {
+    return { name, displayName: name, type: 'string', attributes: [], ...display };
+  }
+
+  function sectionWith(properties: unknown[]) {
+    return {
+      key: 'Ordering',
+      className: 'OrderingSettings',
+      displayName: 'Ordering',
+      description: '',
+      properties,
+    } as never;
+  }
+
+  function renderedLabels(container: HTMLElement): string[] {
+    return Array.from(container.querySelectorAll('label')).map((l) =>
+      (l.textContent ?? '').replace('*', '').trim(),
+    );
+  }
+
+  it('floats a required field above optional ones declared before it', () => {
+    const { container } = render(
+      <SettingsPagelet
+        metadata={sectionWith([
+          prop('alpha', { display: { name: 'Alpha', inputType: 'Text' } }),
+          prop('beta', { display: { name: 'Beta', inputType: 'Text' } }),
+          prop('gamma', { display: { name: 'Gamma', inputType: 'Text', required: true } }),
+        ])}
+        values={{ alpha: '', beta: '', gamma: '' }}
+        onChange={vi.fn()}
+      />,
+    );
+    expect(renderedLabels(container)).toEqual(['Gamma', 'Alpha', 'Beta']);
+  });
+
+  it('keeps the declared order among the non-required tail', () => {
+    const { container } = render(
+      <SettingsPagelet
+        metadata={sectionWith([
+          prop('zulu', { display: { name: 'Zulu', inputType: 'Text' } }),
+          prop('alpha', { display: { name: 'Alpha', inputType: 'Text' } }),
+        ])}
+        values={{ zulu: '', alpha: '' }}
+        onChange={vi.fn()}
+      />,
+    );
+    // Declared order, not alphabetical — the sort must be stable, not a re-sort.
+    expect(renderedLabels(container)).toEqual(['Zulu', 'Alpha']);
+  });
+
+  it('does not reorder a conditionally-required field when its gate flips', () => {
+    const properties = [
+      prop('enabled', { display: { name: 'Enabled', inputType: 'Checkbox' } }),
+      prop('alpha', { display: { name: 'Alpha', inputType: 'Text' } }),
+      prop('gated', {
+        display: { name: 'Gated', inputType: 'Text', required: true, requiredWhen: 'enabled' },
+      }),
+    ];
+    const off = render(
+      <SettingsPagelet
+        metadata={sectionWith(properties)}
+        values={{ enabled: false, alpha: '', gated: '' }}
+        onChange={vi.fn()}
+      />,
+    );
+    const orderWhenOff = renderedLabels(off.container);
+    off.unmount();
+
+    const on = render(
+      <SettingsPagelet
+        metadata={sectionWith(properties)}
+        values={{ enabled: true, alpha: '', gated: '' }}
+        onChange={vi.fn()}
+      />,
+    );
+    // Same positions either way: only the required *marker* changes, not layout.
+    expect(renderedLabels(on.container)).toEqual(orderWhenOff);
+  });
+});
+
+/**
+ * `aria-required` is not a supported attribute on `role="group"` — ARIA allows
+ * it on textbox, combobox, listbox, radiogroup and the checkbox/radio family,
+ * and assistive tech drops it anywhere else. The requirement has to reach the
+ * user through something that is actually announced.
+ */
+describe('SettingsPagelet — array requirement uses valid ARIA (Hicks #7)', () => {
+  const arraySection = {
+    key: 'NetworkDiscovery',
+    className: 'NetworkDiscoverySettings',
+    displayName: 'Network Discovery',
+    description: '',
+    properties: [
+      {
+        name: 'discoverySubnets',
+        displayName: 'Discovery Subnets',
+        type: 'string[]',
+        attributes: [],
+        display: { name: 'Discovery Subnets', inputType: 'Array', isMulti: true, required: true },
+      },
+    ],
+  } as never;
+
+  it('never puts aria-required on the group', () => {
+    const { container } = render(
+      <SettingsPagelet
+        metadata={arraySection}
+        values={{ discoverySubnets: ['10.0.0.0/24'] }}
+        onChange={vi.fn()}
+      />,
+    );
+    const group = container.querySelector('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(group).not.toHaveAttribute('aria-required');
+  });
+
+  it('describes the group with a hint a screen reader will read', () => {
+    const { container } = render(
+      <SettingsPagelet
+        metadata={arraySection}
+        values={{ discoverySubnets: ['10.0.0.0/24'] }}
+        onChange={vi.fn()}
+      />,
+    );
+    const group = container.querySelector('[role="group"]')!;
+    const describedBy = group.getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    // The referenced node must exist, or the attribute is decoration.
+    const hint = container.querySelector(`#${CSS.escape(describedBy!)}`);
+    expect(hint?.textContent).toMatch(/required/i);
+  });
+});

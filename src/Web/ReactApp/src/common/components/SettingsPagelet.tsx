@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import clsx from 'clsx';
 import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
 import { HighlightedText } from '@/features/admin/settings/HighlightedText';
-import { isPropertyRequired } from '@/features/admin/settings/settingsAttention';
+import { isPropertyRequired, isPropertyAlwaysRequired } from '@/features/admin/settings/settingsAttention';
 
 export type SettingValue = string | number | boolean | string[] | number[] | (string | number)[] | Record<string, unknown> | undefined;
 
@@ -153,9 +153,21 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
  */
 export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, values, onChange, fieldErrors, error, compact, searchQuery }) => {
   const query = searchQuery ?? '';
+
+  // Required fields lead, everything else keeps its declared order (#1012).
+  // `sort` is stable in every engine we target, so the non-required tail is
+  // untouched and a section with no required fields renders exactly as before.
+  const orderedProperties = useMemo(
+    () =>
+      [...metadata.properties].sort(
+        (a, b) => Number(isPropertyAlwaysRequired(b)) - Number(isPropertyAlwaysRequired(a)),
+      ),
+    [metadata.properties],
+  );
+
   const content = (
     <div className="@container max-w-[64rem] divide-y divide-pf-border-divider">
-      {metadata.properties.map((prop0: SettingPropertyMetadata) => {
+      {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;
         // `isPropertyRequired` is the one predicate that knows about `RequiredWhen`.
@@ -215,12 +227,22 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
             // The requirement is "at least one entry", which is a property of the
             // collection rather than of any one row. Marking each row required
             // would tell a screen reader every existing row must stay filled.
+            //
+            // `aria-required` is NOT a supported attribute on `role="group"`
+            // (ARIA allows it on textbox, combobox, listbox, radiogroup and
+            // friends), so assistive tech drops it. A description the group
+            // points at is valid on any role and is actually announced.
             <div
               className={FIELD_CONTROL_CLASS}
               role="group"
               aria-label={displayName}
-              aria-required={isRequired || undefined}
+              aria-describedby={isRequired ? `${fieldId}-required` : undefined}
             >
+              {isRequired && (
+                <span id={`${fieldId}-required`} className="sr-only">
+                  Required — enter at least one value.
+                </span>
+              )}
               {arr.map((val, idx) => (
                 <div key={idx} className="flex items-center mb-1.5 gap-1.5">
                   <Input

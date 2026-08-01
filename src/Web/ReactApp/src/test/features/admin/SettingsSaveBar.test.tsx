@@ -528,3 +528,67 @@ describe('SettingsPage — a partial failure settles only what saved (Hicks #2)'
     });
   });
 });
+
+/**
+ * The success path must not discard an edit the user made while the request was
+ * in flight.
+ *
+ * `handleSave` snapshots `state.values` when Save is clicked and awaits the POST.
+ * The old code then called `markPristine(state.values)` on that snapshot, and
+ * `markPristine` writes *both* the baseline and the working values — so a keystroke
+ * landing during the request was overwritten by the click-time value and the field
+ * silently reverted. `acceptKeys` moves only the baseline, so the newer edit
+ * survives and correctly stays dirty.
+ */
+describe('SettingsPage — an edit made during a save survives it (Hicks #1)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('pf.settings.mode', 'everything');
+    saveSettingsMock.mockReset();
+    toastSuccessMock.mockReset();
+    toastErrorMock.mockReset();
+  });
+
+  it('keeps the newer value and leaves the bar dirty', async () => {
+    let release: () => void = () => {};
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    saveSettingsMock.mockImplementation(() => inFlight.then(() => undefined));
+
+    await renderPage();
+    edit('Retention Days', '45');
+
+    // Click Save, then type again before the request resolves.
+    let saveDone: Promise<unknown>;
+    await act(async () => {
+      saveDone = Promise.resolve();
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+      await saveDone;
+    });
+    edit('Retention Days', '99');
+
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+
+    // The field keeps what the user actually typed last...
+    expect(screen.getByLabelText('Retention Days')).toHaveValue(99);
+    // ...and the page still knows that value is unsaved.
+    await waitFor(() => {
+      expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument();
+    });
+  });
+});
+
+/**
+ * A group holds several sections and each is its own request, so "the group
+ * failed" almost always means "one section failed and the others landed". The
+ * bar has to say both, or the user re-sends writes that already succeeded.
+ *
+ * This needs two sections sharing one group, which the fixture above cannot
+ * express — every section there is its own group, so a "partial" failure is
+ * really one whole group failing and another whole group succeeding, a path
+ * that was already correct. The real case lives in
+ * `SettingsPartialFailure.test.tsx` with a fixture built for it.
+ */
