@@ -695,14 +695,28 @@ nav changes the content width independently of the window.
   own width. Cards then flow inside their band against *that* band's width. Deciding column
   count per card instead collapses to a single column on any page whose bands hold one card
   each — which is most settings pages.
-- **Field rows go side-by-side above a `23rem` (368px) container** and stack below it, with the
-  label/control split held at `0.36fr / 0.64fr` so the control keeps ~64% of the card at every
-  size. The threshold is set by the narrowest card the flow actually produces — 401px inner, at
-  a 1440px window — not by taste. A `26rem` threshold would collapse exactly those rows back to
-  stacked, which is the layout the ratio exists to prevent. Past `52rem` the label track caps at
-  `16rem`, because 36% of a 1000px card puts 360px of dead space between a label and its control.
-- **Type scale descends 24 → 20 → 18 → 14** across page title, category, band, and card. A
-  category heading larger than the page title inverts the hierarchy.
+- **Field rows go side-by-side above a `26rem` (416px) container** and stack below it, on a
+  `minmax(0, 13.5rem) minmax(0, 1fr)` grid: the label track is a **cap, not a floor**. A
+  fractional split (`0.36fr / 0.64fr`) or a fixed floor reserves the widest label's width on
+  every row, which on a real page is ~96px of dead space per row — and the space is stolen
+  from the control, which is the part the user has to read a value out of. A label that
+  occasionally wraps costs less than that. Controls cap at `24rem` (384px) for the same
+  reason in the other direction: a text input stretched across a 900px card is harder to
+  scan, not easier.
+- **Units live in an adornment, never in the label.** `[SettingDisplay(Unit = "MB")]` renders
+  beside the control. Baking `(MB)` into the label name inflates the label track for every
+  row in the card. The unit still reaches assistive tech through the control's `aria-label`.
+- **Bands and cards flow to 2 columns above `59rem` and 3 above `89rem`.** Both numbers are
+  derived, not chosen: a legible row is 216 (label cap) + 12 (gap) + 200 (minimum useful
+  control) = 428px of grid, plus 34px of card chrome = 462px, so *N* columns need
+  `N × 462 + (N − 1) × 16`. Raising the column count earlier buys a second column by making
+  every control in it too narrow to read.
+- **Type scale descends 24 → 15 → 13.5 → 13** across page title, band caption, card title and
+  field label — but hierarchy below the page title is carried by *case and letterspacing*,
+  not size. Band captions are 12px uppercase at `.06em`, the eyebrow convention. Making a
+  band caption louder than the settings it introduces gives a page six competing titles. The
+  settings category name is not rendered at all: the highlighted nav item and the page H1
+  already say it.
 
 ### Saving
 

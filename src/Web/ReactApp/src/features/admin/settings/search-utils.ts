@@ -28,6 +28,11 @@ export function propertyMatchesQuery(
   return (
     textMatches(prop.display?.name, query)
     || textMatches(prop.name, query)
+    // #1025 moved unit suffixes out of the label and into an adornment beside
+    // the control. A user who types "MB" is searching for text they can see, so
+    // the unit has to stay searchable wherever it is rendered — otherwise the
+    // filter silently got worse the moment a label was cleaned up.
+    || textMatches(prop.display?.unit, query)
     || textMatches(prop.display?.description, query)
   );
 }

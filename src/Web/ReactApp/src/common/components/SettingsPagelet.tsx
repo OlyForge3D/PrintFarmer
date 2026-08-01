@@ -214,7 +214,10 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
   // would inset every rule by 16px on both sides and turn a continuous ledger
   // into a stack of floating strips.
   const content = (
-    <div className="@container max-w-[59rem] divide-y divide-pf-border-divider">
+    <div
+      data-testid="settings-pagelet-measure"
+      className="@container max-w-[59rem] divide-y divide-pf-border-divider"
+    >
       {orderedProperties.map((prop0: SettingPropertyMetadata) => {
         const prop = prop0 as SettingPropertyMetadata & { displayName?: string };
         const displayName = (prop.display && (prop.display.name as string | undefined)) || prop.displayName || prop.name;

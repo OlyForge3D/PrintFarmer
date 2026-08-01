@@ -61,10 +61,16 @@ export interface AttentionRowProps {
  * applies no styles of its own — that keeps the two in lockstep while still
  * being a real `<Button>`, as the design system requires.
  *
- * Sized to the proposal's `.btn-sm`: 13px on 10px/5px padding. The row itself
- * follows `.p-attn` — 14px/16px padding, 12px gap, an 18px icon, a 13.5px/600
- * title and a 13px secondary consequence line — so the two surfaces that render
- * attention items (this and the Admin Control Center) stay identical.
+ * The row follows the proposal's `.p-attn` exactly — 14px/16px padding, 12px
+ * gap, an 18px icon, a 13.5px/600 title and a 13px secondary consequence line —
+ * so the two surfaces that render attention items (this and the Admin Control
+ * Center) stay identical.
+ *
+ * The action is deliberately *not* the proposal's `.btn-sm` (28px tall, 12px
+ * horizontal, 12.5px text). At 12.5px it sits below the 13px consequence line
+ * it is meant to answer, which reads as a footnote rather than the way out. It
+ * ships one step up — 13px on 10px/4px — matching the app's own small button
+ * rather than the mockup's.
  */
 const ACTION_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1 text-[13px] font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent';

@@ -92,8 +92,17 @@ public sealed class SettingDisplayAttribute : Attribute
     /// ~550px of viewport (#1030), so the unit moves to where it belongs.
     /// </para>
     /// <para>
-    /// Write the bare unit, lowercase, as it should read next to a number:
-    /// <c>Unit = "minutes"</c>, not <c>"(minutes)"</c> or <c>"Minutes"</c>.
+    /// Write the bare unit exactly as it should read beside a number, with no
+    /// parentheses and no Title Case: <c>Unit = "minutes"</c>, not
+    /// <c>"(minutes)"</c> or <c>"Minutes"</c>. Standard abbreviations keep
+    /// their own casing — <c>"MB"</c>, <c>"ms"</c>, <c>"kg"</c> — since that is
+    /// how they read next to a number.
+    /// </para>
+    /// <para>
+    /// The property also carries reference frames that are not strictly units,
+    /// such as <c>"UTC"</c> beside a time-of-day field. They render and read
+    /// identically to a unit, so they use the same slot rather than earning a
+    /// second one.
     /// </para>
     /// </summary>
     public string? Unit { get; set; }

@@ -221,6 +221,27 @@ describe('settings card flow density', () => {
     expect(Number(cap)).toBe(Number(twoCol));
   });
 
+  it('caps the pagelet at the same width the card flow does', async () => {
+    // The two caps live in different modules — `cardFlowClass` in SettingsPage
+    // and the `@container` element in SettingsPagelet — and a divergence is
+    // invisible until someone widens one of them. The pagelet's cap is the
+    // inner bound; if it ever falls below the flow's, the field rules stop
+    // short of the card's right edge, which is the exact fault #1032 removed.
+    //
+    // Reading them out of two different rendered elements is the point: the
+    // sibling test above compares `cardFlowClass` to itself and cannot catch
+    // this.
+    const flow = await renderCardsInOneBand(1);
+    const pagelet = screen.getAllByTestId('settings-pagelet-measure')[0];
+
+    const flowCap = /max-w-\[(\d+(?:\.\d+)?)rem\]/.exec(flow.className)?.[1];
+    const pageletCap = /max-w-\[(\d+(?:\.\d+)?)rem\]/.exec(pagelet.className)?.[1];
+
+    expect(flowCap).toBeDefined();
+    expect(pageletCap).toBeDefined();
+    expect(Number(pageletCap)).toBe(Number(flowCap));
+  });
+
   it('lets a lone band flow its own cards', async () => {
     // A page with one band gives that band the full content width, so its
     // cards are the thing with room to flow. The shared thresholds resolve
@@ -321,11 +342,26 @@ const FIELD_GAP_PX = 12;
 const MIN_CONTROL_PX = 200;
 
 /**
- * The narrowest card inner width a column may produce. Derived, not chosen:
- * the label track cap, the in-row gap, and a control that still fits its
- * content. 216 + 12 + 200 = 428px.
+ * The narrowest card **inner** width a column may produce — the grid box, after
+ * the row's own padding. Derived, not chosen: the label track cap, the in-row
+ * gap, and a control that still fits its content. 216 + 12 + 200 = 428px.
  */
 const NARROWEST_CARD_INNER = LABEL_TRACK_CAP_PX + FIELD_GAP_PX + MIN_CONTROL_PX;
+
+/**
+ * The same card measured the way the container query measures it.
+ *
+ * `@[26rem]` on a field row resolves against `SettingsPagelet`'s `@container`
+ * element, which *contains* the row's `px-4`. So the row threshold and
+ * `NARROWEST_CARD_INNER` are in different boxes and must not be compared
+ * directly: at the 416px switch point the grid is 384px, not 428px.
+ *
+ * The column math spends 34px of chrome (`CARD_CHROME_PX`); 2px of that is the
+ * card's border, which sits outside the container element, and 32px is the row
+ * padding, which sits inside it. So the container is 2px narrower than the
+ * card: 462 − 2 = 460px.
+ */
+const NARROWEST_CARD_CONTAINER = NARROWEST_CARD_INNER + CARD_CHROME_PX - 2;
 
 describe('field rows', () => {
   it('has no fixed-width label gutter left anywhere', () => {
@@ -351,15 +387,18 @@ describe('field rows', () => {
   });
 
   it('keeps rows side-by-side in the narrowest card the flow can produce', () => {
-    // The threshold is set by layout, not taste: a row goes side by side as
-    // soon as the cap, the gap and a usable control fit. 216 + 12 + 200 =
-    // 428px, and `26rem` (416px) is the proposal's threshold just under it.
+    // The property being asserted is that no card the column flow produces is
+    // ever narrow enough to stack its rows. That is a claim about the *container*
+    // the query measures, so it is checked against `NARROWEST_CARD_CONTAINER`
+    // (460px) — not against `NARROWEST_CARD_INNER`, which is the grid box and
+    // is 32px smaller. Comparing the threshold to 428 happens to pass but
+    // asserts a relationship that does not exist.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
     const threshold = /@\[([\d.]+)rem\]:grid-cols-\[minmax\(/.exec(row.className);
     expect(threshold).not.toBeNull();
-    expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(NARROWEST_CARD_INNER);
+    expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(NARROWEST_CARD_CONTAINER);
   });
 
   it('caps the label track rather than flooring it', () => {

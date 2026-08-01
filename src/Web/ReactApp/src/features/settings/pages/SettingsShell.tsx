@@ -565,11 +565,14 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return;
     }
 
+    // Focus first, then scroll. The heading is `sr-only` until `:focus-visible`
+    // un-hides it (see its className), so measuring a scroll target before the
+    // reveal would aim at a 1×1 box and land the pane 44px off once it expands.
+    sectionHeadingRef.current?.focus();
+
     if (typeof sectionHeadingRef.current?.scrollIntoView === 'function') {
       sectionHeadingRef.current.scrollIntoView({ block: 'start', behavior: scrollBehavior() });
     }
-
-    sectionHeadingRef.current?.focus();
 
     shouldFocusSectionRef.current = false;
     previousRenderedKeyRef.current = activeDestinationKey;
@@ -710,13 +713,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
                         The element stays in the tree because `aria-labelledby`
                         and the section-change focus target both point at it,
-                        and it un-hides on focus so a keyboard user still sees
-                        where focus landed after switching categories. */}
+                        and it un-hides on `:focus-visible` — not `:focus`.
+                        That distinction is the whole behaviour: the effect
+                        above calls `.focus()` on every category change,
+                        including mouse clicks, so `:focus` would put the 20px
+                        heading straight back where this commit removed it and
+                        then yank the pane up 44px when focus left. On a
+                        programmatically focused `tabindex="-1"` element,
+                        `:focus-visible` matches only when the preceding
+                        interaction was a keypress — exactly the user who needs
+                        to see where focus landed. It also keeps the reveal and
+                        the focus ring on one pseudo-class instead of showing
+                        the heading with no ring on a click. */}
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
                       tabIndex={-1}
-                      className="sr-only focus:not-sr-only focus:mb-4 focus:block focus:w-fit focus:text-xl focus:leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent"
+                      className="sr-only focus-visible:not-sr-only focus-visible:mb-4 focus-visible:block focus-visible:w-fit focus-visible:rounded-md focus-visible:text-xl focus-visible:leading-none focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
                     >
                       {currentCategory.label}
                     </h2>
