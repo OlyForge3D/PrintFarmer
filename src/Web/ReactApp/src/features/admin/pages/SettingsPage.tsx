@@ -228,7 +228,7 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  * Column count was decided *inside* a band, but a band routinely holds exactly
  * one section — the comment on `cardFlowClass` says so outright — so the flow
  * resolved to `columns-1` and the page rendered a single stack of full-width
- * cards at every width. Measured before this change, on `System Config`:
+ * cards at every width. Measured before that change, on `System Config`:
  *
  *   1440px window → 814px flow  → 1 column
  *   1920px window → 1294px flow → 1 column
@@ -238,21 +238,37 @@ const CARD_FLOW_CONTAINER_CLASS = '@container';
  * The unit that has to flow is therefore the band, not the card. Each band
  * keeps its caption glued to its own cards and stays whole across a break.
  *
- * Thresholds derive from the `23rem` (368px) card width at which
- * `SettingsPagelet` puts a field's label beside its control, plus ~36px of
- * card padding and border, plus the 16px column gap. A column is only opened
- * when every resulting card still clears it:
+ * The thresholds are set by the narrowest card a column may produce while its
+ * field rows stay legible, because opening a column that shreds every label is
+ * not "using the space". Two measured constraints, both from Chromium against
+ * the real `System Config` labels:
  *
- *   52rem → 2 cols → cards ≥ 404px  (1440px window: 435px)
- *   78rem → 3 cols → cards ≥ 405px  (1920px window: 444px)
+ *   label fits on one line   label track ≥ 218px  (196px text + 22px tooltip)
+ *   row reads as a pair      control ≥ label track
  *
- * so adding a column never collapses a field row back to stacked.
+ * `SettingsPagelet` floors the label track at `14.5rem` (232px), so the second
+ * constraint binds: inner − 232 − 16 ≥ 232, i.e. inner ≥ 480px. A card spends
+ * 49px on padding and border, so the floor is a ~529px outer card, and a flow
+ * needs `N × 529 + (N-1) × 16` before it may open N columns:
+ *
+ *   68rem  (1088px) → 2 cols → cards 536px → track 232px, control 239px
+ *   102rem (1632px) → 3 cols → cards 533px → track 232px, control 236px
+ *
+ * Those replace `52rem` / `78rem`, which opened columns at 435px and 445px
+ * cards — 144px of label track against a 218px label block, so "Enable
+ * Background Scanning" wrapped to three lines at both 1440px and 1920px. The
+ * cost is density: 1440px now renders one column of 886px cards instead of two
+ * of 435px, and 1920px two of 675px instead of three of 445px. That trade is
+ * deliberate and was the explicit answer to #1020 — legibility over density.
+ *
+ * Verified in Chromium after the change; zero labels wrap at any width from
+ * 768px to 2560px.
  */
 function bandFlowClass(bandCount: number): string {
   return clsx(
     'columns-1 gap-4',
-    bandCount >= 2 && '@[52rem]:columns-2',
-    bandCount >= 3 && '@[78rem]:columns-3',
+    bandCount >= 2 && '@[68rem]:columns-2',
+    bandCount >= 3 && '@[102rem]:columns-3',
   );
 }
 
@@ -278,8 +294,8 @@ function cardFlowClass(cardCount: number): string {
     // pushes labels away from the controls they name. Cap the measure and let
     // the remainder read as page margin.
     cardCount <= 1 && 'max-w-[64rem]',
-    cardCount >= 2 && '@[52rem]:columns-2',
-    cardCount >= 3 && '@[78rem]:columns-3',
+    cardCount >= 2 && '@[68rem]:columns-2',
+    cardCount >= 3 && '@[102rem]:columns-3',
   );
 }
 

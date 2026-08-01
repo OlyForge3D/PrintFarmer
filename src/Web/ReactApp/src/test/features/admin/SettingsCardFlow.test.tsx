@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -148,14 +148,14 @@ describe('settings band flow density', () => {
 
   it('opens a second column — but not a third — for two bands', async () => {
     const flow = await renderBands(2);
-    expect(flow.className).toContain('@[52rem]:columns-2');
+    expect(flow.className).toContain('@[68rem]:columns-2');
     expect(flow.className).not.toContain('columns-3');
   });
 
   it('opens up to three columns once there are three bands', async () => {
     const flow = await renderBands(3);
-    expect(flow.className).toContain('@[52rem]:columns-2');
-    expect(flow.className).toContain('@[78rem]:columns-3');
+    expect(flow.className).toContain('@[68rem]:columns-2');
+    expect(flow.className).toContain('@[102rem]:columns-3');
   });
 
   it('flows bands rather than only the cards inside one band', async () => {
@@ -202,8 +202,8 @@ describe('settings card flow density', () => {
     // cards are the thing with room to flow. The shared thresholds resolve
     // against the band's `@container`, so this needs no extra coordination.
     const flow = await renderCardsInOneBand(3);
-    expect(flow.className).toContain('@[52rem]:columns-2');
-    expect(flow.className).toContain('@[78rem]:columns-3');
+    expect(flow.className).toContain('@[68rem]:columns-2');
+    expect(flow.className).toContain('@[102rem]:columns-3');
     expect(flow.className).not.toContain('max-w-[64rem]');
   });
 
@@ -237,6 +237,36 @@ function renderPagelet() {
   );
 }
 
+/**
+ * The width the label *track* must hold, measured in Chromium against the real
+ * `System Config` labels. The label is a flex row of two children, and the
+ * second one is easy to forget:
+ *
+ *   196px  text span   "Enable Background Scanning"  <- widest
+ *    22px  InfoTooltip  16px icon + its own ml-1.5
+ *
+ * A first pass at #1020 sized the floor from the 196px alone and left two
+ * widths still wrapping by two pixels. Update this only from a fresh
+ * measurement, never to make a test pass.
+ */
+const LONGEST_LABEL_PX = 196 + 22;
+
+/** Padding + border a card spends before its field grid starts. */
+const CARD_CHROME_PX = 49;
+
+/** Column gap between bands and between cards. `gap-4`. */
+const COLUMN_GAP_PX = 16;
+
+/** The label track floor in `FIELD_ROW_CLASS`. `14.5rem`. */
+const LABEL_TRACK_FLOOR_PX = 232;
+
+/**
+ * The narrowest card inner width a column may produce. Derived, not chosen:
+ * below it the control is narrower than the label beside it and the row stops
+ * reading as a pair. `inner - floor - gap >= floor`.
+ */
+const NARROWEST_CARD_INNER = LABEL_TRACK_FLOOR_PX * 2 + COLUMN_GAP_PX;
+
 describe('field rows', () => {
   it('has no fixed-width label gutter left anywhere', () => {
     // The `w-64` this replaced left roughly 164px for the control inside a
@@ -256,21 +286,38 @@ describe('field rows', () => {
     const list = container.firstElementChild as HTMLElement;
     expect(list.className).toContain('@container');
     const row = container.querySelector('[data-setting-property]') as HTMLElement;
-    expect(row.className).toContain('@[23rem]:grid-cols-');
+    expect(row.className).toMatch(/@\[\d+(\.\d+)?rem\]:grid-cols-/);
     expect(row.className).not.toMatch(/\b(sm|md|lg|xl|2xl):grid-cols-/);
   });
 
   it('keeps rows side-by-side in the narrowest card the flow can produce', () => {
-    // The threshold is set by layout, not taste. Three band columns in a
-    // 1440px window land a card at ~435px outer / ~401px inner. A threshold
-    // above that would collapse every row on the page back to stacked, which
-    // is the exact failure the label/control ratio exists to prevent.
+    // The threshold is set by layout, not taste, and the number it has to
+    // clear moved when #1020 retuned the column thresholds for legibility.
+    // `bandFlowClass` now floors a card at ~529px outer / ~480px inner, so a
+    // `30rem` (480px) row threshold keeps every row on a real page side by
+    // side. The coupling between the two is asserted in its own test rather
+    // than left implicit.
     const row = renderPagelet().container.querySelector(
       '[data-setting-property]',
     ) as HTMLElement;
-    const threshold = /@\[(\d+)rem\]:grid-cols-\[minmax\(9rem/.exec(row.className);
+    const threshold = /@\[([\d.]+)rem\]:grid-cols-\[minmax\(/.exec(row.className);
     expect(threshold).not.toBeNull();
-    expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(401);
+    expect(Number(threshold![1]) * 16).toBeLessThanOrEqual(NARROWEST_CARD_INNER);
+  });
+
+  it('floors the label track above the longest label the app ships', () => {
+    // The defect #1020 was filed for. The old `9rem` (144px) floor was
+    // justified as stopping labels shredding "one word per line" and did not:
+    // measured in Chromium, the `Enable Background Scanning` label block is
+    // 218px and wrapped to three lines against it. Anything at or below the
+    // longest label reintroduces that, so assert the floor clears it.
+    const row = renderPagelet().container.querySelector(
+      '[data-setting-property]',
+    ) as HTMLElement;
+    const floor = /grid-cols-\[minmax\(([\d.]+)rem,/.exec(row.className);
+    expect(floor).not.toBeNull();
+    expect(Number(floor![1]) * 16).toBe(LABEL_TRACK_FLOOR_PX);
+    expect(LABEL_TRACK_FLOOR_PX).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
   });
 
   it('gives the control the majority of the row', () => {
@@ -287,6 +334,19 @@ describe('field rows', () => {
       '[data-setting-property]',
     ) as HTMLElement;
     expect(row.className).toContain('@[52rem]:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]');
+  });
+
+  it('cannot reintroduce wrapping via the wide-card inversion', () => {
+    // The 52rem branch drops the label track from 36% to a hard 16rem cap. If
+    // that cap ever fell below the longest label, wide cards would start
+    // wrapping while narrow ones stayed clean — the least findable version of
+    // this bug.
+    const row = renderPagelet().container.querySelector(
+      '[data-setting-property]',
+    ) as HTMLElement;
+    const cap = /@\[52rem\]:grid-cols-\[minmax\(0,([\d.]+)rem\)/.exec(row.className);
+    expect(cap).not.toBeNull();
+    expect(Number(cap![1]) * 16).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
   });
 
   it('separates rows with a hairline so a card reads as a spec sheet', () => {
@@ -307,5 +367,67 @@ describe('field rows', () => {
   it('leaves prose fields in the body face', () => {
     renderPagelet();
     expect(screen.getByLabelText('Label').className).not.toContain('font-pf-mono');
+  });
+});
+
+/**
+ * The two halves of #1020's fix live in different files — `bandFlowClass` in
+ * `SettingsPage.tsx` decides how many columns open, `FIELD_ROW_CLASS` in
+ * `SettingsPagelet.tsx` decides how a row inside the resulting card splits.
+ * Neither imports the other, so nothing but this block stops someone lowering
+ * a column threshold, halving the card width, and silently reintroducing the
+ * three-line labels the epic was reopened to fix.
+ *
+ * Rather than restate the numbers, these derive the narrowest card each flow
+ * can produce from the flow's own emitted class names.
+ */
+describe('column thresholds and field rows stay coupled (#1020)', () => {
+  beforeEach(() => {
+    window.localStorage.setItem('pf.settings.mode', 'everything');
+  });
+
+  /** Narrowest card a flow yields at `cols`, given its `@[Nrem]` threshold. */
+  function narrowestCardOuter(thresholdRem: number, cols: number): number {
+    return (thresholdRem * 16 - (cols - 1) * COLUMN_GAP_PX) / cols;
+  }
+
+  it('never opens a column narrower than a legible field row', async () => {
+    const flow = await renderBands(3);
+    const two = /@\[(\d+)rem\]:columns-2/.exec(flow.className);
+    const three = /@\[(\d+)rem\]:columns-3/.exec(flow.className);
+    expect(two).not.toBeNull();
+    expect(three).not.toBeNull();
+
+    for (const [match, cols] of [
+      [two!, 2],
+      [three!, 3],
+    ] as const) {
+      const inner = narrowestCardOuter(Number(match[1]), cols) - CARD_CHROME_PX;
+      // The row must still be side by side...
+      expect(inner).toBeGreaterThanOrEqual(NARROWEST_CARD_INNER);
+      // ...and the label must still fit on one line. The track is
+      // `max(14.5rem, 0.36 * inner)`, so the floor governs at these widths.
+      const track = Math.max(LABEL_TRACK_FLOOR_PX, 0.36 * inner);
+      expect(track).toBeGreaterThanOrEqual(LONGEST_LABEL_PX);
+      // ...and the control must not end up narrower than the label beside it,
+      // which is what makes a row read as a pair rather than a label with a
+      // sliver attached.
+      expect(inner - track - COLUMN_GAP_PX).toBeGreaterThanOrEqual(track);
+    }
+  });
+
+  it('keeps the band flow and the card flow on identical thresholds', async () => {
+    // A band holding one card is the common case, so the two flows are the
+    // same layout seen at two scales. Letting them diverge means a card inside
+    // a lone band breaks at a different width than the bands around it.
+    const bandFlow = await renderBands(3);
+    const bandThresholds = bandFlow.className.match(/@\[\d+rem\]:columns-\d/g)?.sort();
+
+    cleanup();
+    const cardFlow = await renderCardsInOneBand(3);
+    const cardThresholds = cardFlow.className.match(/@\[\d+rem\]:columns-\d/g)?.sort();
+
+    expect(bandThresholds).toBeDefined();
+    expect(bandThresholds).toEqual(cardThresholds);
   });
 });
