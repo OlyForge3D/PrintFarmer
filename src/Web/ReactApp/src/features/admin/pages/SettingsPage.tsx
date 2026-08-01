@@ -298,9 +298,17 @@ function cardFlowClass(cardCount: number): string {
   return clsx(
     '-mb-4 gap-4 columns-1',
     // Pinned to the two-column threshold, not to a round number. A lone card
-    // stops growing exactly where a second column would start, so the flow is
-    // always either full or split and never leaves a ragged strip of bare
-    // background beside the card.
+    // stops growing exactly where a second column would start, so on a page
+    // with more than one band the flow is always either full or split and
+    // never leaves a ragged strip of bare background beside the card.
+    //
+    // The invariant is that narrow, and deliberately stated that way: a page
+    // holding exactly one band with exactly one card still caps here, so above
+    // ~1184px of content it does sit short. No shipping tab is in that shape —
+    // `bandFlowClass` splits multi-band pages into sub-74rem columns long
+    // before any card sees that width — and it is strictly better than the
+    // 64rem it replaced, which sat 326px short in the same case. Tracked with
+    // the rest of the measure work in #1027 rather than special-cased here.
     //
     // This was `64rem`, on the rationale that a wider card "pushes labels away
     // from the controls they name". That stopped being true once the label
