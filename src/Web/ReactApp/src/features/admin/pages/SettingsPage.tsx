@@ -1246,9 +1246,14 @@ export function SettingsPage({
 
   return (
     <SettingsSaveRegistryContext value={saveRegistry}>
-      <div className="space-y-6" data-tour="settings-content">
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-sm text-pf-text-secondary">{introText}</p>
+      <div className="space-y-4" data-tour="settings-content">
+        {/* The proposal puts nothing between the tab strip and the first band.
+            We keep the tab-scoped intro and the page-local filter — the header's
+            global search cannot narrow the fields in front of you — but on one
+            compact row instead of two full-width blocks, so the content pane
+            opens on settings rather than on chrome. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <p className="min-w-[16rem] flex-1 text-[13px] text-pf-text-secondary">{introText}</p>
           <HelpButton onClick={startTour} />
         </div>
 
@@ -1265,10 +1270,10 @@ export function SettingsPage({
             </SettingsHeaderPortal>
 
             <div
-              className="flex flex-wrap items-center gap-3"
+              className="flex flex-wrap items-center gap-x-3 gap-y-1"
               data-testid="settings-mode-controls"
             >
-              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-md">
+              <div className="flex flex-1 items-center gap-2 min-w-[200px] max-w-sm">
                 <SearchIcon className="w-4 h-4 text-pf-text-secondary" />
                 <Input
                   type="search"
@@ -1291,7 +1296,7 @@ export function SettingsPage({
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-pf-text-secondary" aria-live="polite" role="status">
+              <p className="text-xs text-pf-text-tertiary" aria-live="polite" role="status">
                 {toggleHelperText}
                 {searchActive && (
                   <span className="ml-2 text-pf-text-tertiary">
