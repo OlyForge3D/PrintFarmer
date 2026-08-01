@@ -5,14 +5,23 @@ import { MemoryRouter } from 'react-router';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
- * Epic #939 — per-group save scoping (#935).
+ * Epic #939 — per-group save scoping (#935), re-presented behind one page-level
+ * save bar (#1013).
  *
  * The pre-existing SettingsPage.test.tsx covers two sections in the *same*
- * group. The scarier regression is two *different* groups both dirty at once:
- *   - Each GroupSaveBlock must own its own dirty state.
- *   - Saving group A must POST only A's sections, leaving B still dirty.
- *   - The `Save {Group}` label must be group-specific so a user with two
- *     open save bars can't get confused about which they're saving.
+ * group. The scarier regression is two *different* groups both dirty at once.
+ *
+ * The bar those groups feed is now shared, but the isolation underneath it is
+ * unchanged and is what this file guards:
+ *   - Each GroupSaveBlock still owns its own dirty state.
+ *   - A save still POSTs each group's sections through that group's own path,
+ *     and never touches a section the user did not edit.
+ *   - When one group's write fails, the other group's write still lands, and
+ *     the failed group keeps the user's edit intact for a retry.
+ *
+ * The "which bar am I looking at" confusion the group-specific `Save {Group}`
+ * label existed to prevent is gone with the extra bars, so that assertion is
+ * replaced by its successor: one bar, naming the sections it will write.
  */
 
 const saveSettingsMock = vi.fn();
@@ -135,70 +144,88 @@ describe('SettingsPage — save-scoping across independent groups (#939)', () =>
     window.localStorage.removeItem('pf.settings.mode');
   });
 
-  it('renders a Save bar per group, each labelled with its own group name', async () => {
+  it('renders one bar for two dirty groups, naming both sections', async () => {
     await renderPage();
 
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Layer Height'), { target: { value: '0.16' } });
 
-    // Two independent save buttons, each named for its group.
-    expect(await screen.findByRole('button', { name: /save system/i })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: /save slicing/i })).toBeInTheDocument();
-    // No global "Save All" button — the batch flow was retired.
+    await waitFor(() => expect(screen.queryAllByTestId('admin-save-bar')).toHaveLength(1));
+    expect(screen.getAllByRole('button', { name: /save changes/i })).toHaveLength(1);
+    expect(
+      screen.getByText('2 changes in System Log and Slicer Defaults'),
+    ).toBeInTheDocument();
+    // No global "Save All" button — the batch endpoint stayed retired.
     expect(screen.queryByRole('button', { name: /save all/i })).not.toBeInTheDocument();
   });
 
-  it('saving one group hits only its section endpoint and leaves the other block dirty', async () => {
+  it('writes each dirty group through its own section endpoint', async () => {
     await renderPage();
 
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '90' } });
     fireEvent.change(screen.getByLabelText('Layer Height'), { target: { value: '0.12' } });
 
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /save system/i }));
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     });
 
-    // Exactly one save happened, targeting only the System section.
-    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
+    // Two writes, one per group, each carrying only its own section's values.
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(2));
     expect(saveSettingsMock).toHaveBeenCalledWith('SystemLog', { retentionDays: 90 });
-    expect(saveSettingsMock.mock.calls.map((c) => c[0])).not.toContain('SlicerDefaults');
+    expect(saveSettingsMock).toHaveBeenCalledWith('SlicerDefaults', { layerHeight: 0.12 });
 
-    // System toast fires — Slicing toast does not.
-    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('System settings saved'));
-    expect(toastSuccessMock).not.toHaveBeenCalledWith('Slicing settings saved');
-
-    // The Slicing block is still dirty — its edit was not clobbered by the
-    // sibling save, and its save button is still available.
-    expect(screen.getByRole('button', { name: /save slicing/i })).toBeInTheDocument();
-    expect((screen.getByLabelText('Layer Height') as HTMLInputElement).value).toBe('0.12');
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith('Saved System Log, Slicer Defaults');
+    });
+    await waitFor(() => expect(screen.queryAllByTestId('admin-save-bar')).toHaveLength(0));
   });
 
-  it('discarding one group leaves the other group dirty and untouched', async () => {
+  it('a failing group keeps its edit while the sibling group still commits', async () => {
+    // The isolation guarantee, exercised through the only path that can still
+    // separate the two groups now that one button saves both.
+    saveSettingsMock.mockImplementation((key: string) => (
+      key === 'SlicerDefaults'
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve(undefined)
+    ));
+
     await renderPage();
 
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '77' } });
     fireEvent.change(screen.getByLabelText('Layer Height'), { target: { value: '0.28' } });
 
-    const systemBar = screen.getByRole('button', { name: /save system/i }).closest('[data-testid="admin-save-bar"]');
-    expect(systemBar).toBeTruthy();
-    const discardWithinSystem = systemBar!.querySelector('button[type="button"]');
-    // Explicitly click the Discard within the system save bar, not the slicing one.
-    const systemDiscard = Array.from(systemBar!.querySelectorAll('button')).find(
-      (b) => b.textContent && /discard/i.test(b.textContent),
-    );
-    expect(systemDiscard).toBeTruthy();
-    if (!systemDiscard) throw new Error('unreachable — assertion above'); // narrow for TS
-    fireEvent.click(systemDiscard);
-    // suppress unused warning if TS-strict picks it up
-    void discardWithinSystem;
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    });
 
-    // System field reverted, System bar hidden.
-    expect((screen.getByLabelText('Retention Days') as HTMLInputElement).value).toBe('30');
-    expect(screen.queryByRole('button', { name: /save system/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        'Saved System Log. Failed to save Slicer Defaults',
+      );
+    });
 
-    // Slicing block untouched — still dirty with its edited value.
+    // The group that succeeded is clean and keeps its saved value.
+    expect((screen.getByLabelText('Retention Days') as HTMLInputElement).value).toBe('77');
+    // The group that failed keeps the user's edit, and is all the bar now names.
     expect((screen.getByLabelText('Layer Height') as HTMLInputElement).value).toBe('0.28');
-    expect(screen.getByRole('button', { name: /save slicing/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('1 change in Slicer Defaults')).toBeInTheDocument();
+    });
+  });
+
+  it('discard reverts both groups at once', async () => {
+    await renderPage();
+
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '77' } });
+    fireEvent.change(screen.getByLabelText('Layer Height'), { target: { value: '0.28' } });
+    expect(await screen.findByTestId('admin-save-bar')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /discard/i }));
+
+    await waitFor(() => expect(screen.queryAllByTestId('admin-save-bar')).toHaveLength(0));
+    expect((screen.getByLabelText('Retention Days') as HTMLInputElement).value).toBe('30');
+    expect((screen.getByLabelText('Layer Height') as HTMLInputElement).value).toBe('0.2');
     expect(saveSettingsMock).not.toHaveBeenCalled();
   });
 });

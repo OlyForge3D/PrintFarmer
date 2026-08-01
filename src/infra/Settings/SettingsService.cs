@@ -326,6 +326,14 @@ public class SettingsService : ISettingsService
                             Order = displayAttr.Order,
                             InputType = displayAttr.InputType,
                             IsMulti = displayAttr.IsMulti,
+
+                            // Both of these were declared on the attribute and on this
+                            // DTO but never copied across, so every consumer saw
+                            // `required: false` regardless of what the settings class
+                            // declared. The client cannot flag an unconfigured section
+                            // without them.
+                            Required = displayAttr.Required,
+                            RequiredWhen = displayAttr.RequiredWhen,
                             AllowedValues = displayAttr.AllowedValues,
                             MinValue = (displayAttr.MinValue == -1) ? null : displayAttr.MinValue,
                             MaxValue = (displayAttr.MaxValue == -1) ? null : displayAttr.MaxValue

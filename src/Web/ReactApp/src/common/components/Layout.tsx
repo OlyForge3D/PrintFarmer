@@ -698,7 +698,7 @@ export function Layout() {
           onClick={handleClick}
           onKeyDown={handleKeyDown}
           className={clsx(
-            'flex h-9 w-11 items-center justify-center rounded-2xl transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+            'flex h-9 w-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
             isActive
               ? 'bg-pf-accent-bg/18 text-pf-accent'
               : 'text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
@@ -1172,12 +1172,12 @@ export function Layout() {
           data-main-content
           inert={sidebarOpen || undefined}
           tabIndex={-1}
-          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-full"
+          className="flex-1 min-h-0 overflow-x-hidden overflow-y-auto bg-pf-bg-0 focus:outline-hidden lg:h-full has-[[data-page-fill]]:flex has-[[data-page-fill]]:flex-col"
         >
           <EmailConfirmationBanner />
           <PlatformBanner />
           <InstallBanner />
-          <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2">
+          <div className="px-1 pt-1 pb-2 lg:px-2 lg:pt-2 lg:pb-2 has-[[data-page-fill]]:flex has-[[data-page-fill]]:min-h-0 has-[[data-page-fill]]:flex-1 has-[[data-page-fill]]:flex-col">
             {/* React Router's `location.key` is a unique string generated
                 per history entry. It changes on ANY navigation — including
                 same-pathname but different search or hash — where

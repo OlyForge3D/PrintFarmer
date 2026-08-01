@@ -232,7 +232,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
     const input = await screen.findByLabelText('Thread Pool Size');
     fireEvent.change(input, { target: { value: '8' } });
 
-    const saveBtn = await screen.findByRole('button', { name: /save system/i });
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
     await act(async () => {
       fireEvent.click(saveBtn);
     });
@@ -240,7 +240,7 @@ describe('SettingsPage — Essential / Everything toggle (#937)', () => {
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
     // Uses the section key, not a batch endpoint.
     expect(saveSettingsMock).toHaveBeenCalledWith('AdvancedTuning', { threadPoolSize: 8 });
-    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('System settings saved'));
+    await waitFor(() => expect(toastSuccessMock).toHaveBeenCalledWith('Saved Advanced Tuning'));
   });
 
   it('clears search via the Clear button and restores mode-filtered view', async () => {

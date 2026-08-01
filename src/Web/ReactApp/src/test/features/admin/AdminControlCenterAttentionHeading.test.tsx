@@ -119,9 +119,7 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
       screen.queryByRole('heading', { name: 'Needs attention' }),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-hub-attention')).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('heading', { name: 'Nothing needs your attention' }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-hub-attention-clear')).not.toBeInTheDocument();
   });
 
   it('does render the "Needs attention" heading on a successful load, even with zero items', async () => {
@@ -134,13 +132,11 @@ describe('AdminControlCenterPage — attention heading orphan-suppression (#939)
       expect(screen.queryByLabelText('Loading attention items')).not.toBeInTheDocument();
     });
 
-    // Success path shows the empty state under the heading — both present.
+    // Success path shows the all-clear line under the heading — both present.
     expect(
       screen.getByRole('heading', { name: 'Needs attention' }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('heading', { name: 'Nothing needs your attention' }),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId('admin-hub-attention-clear')).toBeInTheDocument();
   });
 
   it('renders the attention heading and list when items are present', async () => {

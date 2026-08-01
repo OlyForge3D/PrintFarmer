@@ -19,6 +19,18 @@ export interface AdminSaveBarProps {
    * first few are enumerated in the summary ("Name, Email and 2 more changed").
    */
   changedLabels?: string[];
+  /**
+   * Fully-formed summary line. Takes precedence over `changeCount` /
+   * `changedLabels`, for callers that aggregate across several independent forms
+   * and need to phrase the count and the subject together ("3 changes in
+   * Network Discovery") rather than as a list of changed things.
+   */
+  summary?: string;
+  /**
+   * `title` for the summary line. Use it to carry the full subject list when
+   * `summary` had to elide it.
+   */
+  summaryTitle?: string;
   /** Called when the user clicks the discard button. Typically wired to `state.reset`. */
   onDiscard: () => void;
   /** Called when the user clicks save. Can be async — the button shows a spinner while pending. */
@@ -35,7 +47,7 @@ export interface AdminSaveBarProps {
   saveLabel?: string;
   /** Optional discard label. Defaults to `Discard`. */
   discardLabel?: string;
-  /** Optional extra classes on the outer sticky container. */
+  /** Optional extra classes on the outer container. */
   className?: string;
 }
 
@@ -69,6 +81,8 @@ export function AdminSaveBar({
   isDirty,
   changeCount,
   changedLabels,
+  summary: summaryOverride,
+  summaryTitle,
   onDiscard,
   onSave,
   isSaving = false,
@@ -85,16 +99,25 @@ export function AdminSaveBar({
 
   if (!isDirty) return null;
 
-  const summary = formatSummary(changeCount, changedLabels);
+  const summary = summaryOverride ?? formatSummary(changeCount, changedLabels);
 
   return (
     <div
       role="region"
       aria-label="Unsaved changes"
       className={clsx(
-        'sticky bottom-0 z-40 mt-4',
+        // Docked by the shell below its scroll pane, not floating inside it.
+        // `sticky bottom-0` used to live here and never once pinned — the pane
+        // it sat in could not scroll, so the bar simply flowed 249px below the
+        // fold. The shell now owns placement; this is just the bar's skin.
+        //
+        // Full-bleed with a top hairline is the right treatment now that it is
+        // a panel footer rather than a floating slab: it reads as the bottom
+        // edge of the settings panel, and the panel's own rounded border clips
+        // it. The lift shadow it used to carry was a hardcoded
+        // `rgba(0,0,0,0.35)`, which both broke the no-literal-colour rule and
+        // made no sense on an element that is no longer floating above content.
         'border-t border-pf-border bg-pf-bg-0/95 backdrop-blur-sm',
-        'shadow-[0_-8px_16px_-8px_rgba(0,0,0,0.35)]',
         className,
       )}
       data-testid="admin-save-bar"
@@ -115,6 +138,7 @@ export function AdminSaveBar({
       >
         <p
           className="text-sm text-pf-text-secondary min-w-0 truncate"
+          title={summaryTitle}
           aria-live="polite"
           aria-atomic="true"
         >

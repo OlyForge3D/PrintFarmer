@@ -2,6 +2,7 @@ import React, { useState, useEffect, useEffectEvent } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import {
   Plus,
   Shield,
@@ -28,7 +29,7 @@ const APPLICATION_AREAS = [
   { id: 'spools', name: 'Spools', description: 'Manage filament spools inventory' },
 ] as const;
 
-export function UserManagementPage() {
+export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const { hasRole } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
@@ -271,6 +272,7 @@ export function UserManagementPage() {
         title="User Management"
         subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
         icon={Users}
+        embedded={embedded}
       >
         <TableSkeleton rows={6} cols={6} />
       </PageTemplate>
@@ -298,6 +300,7 @@ export function UserManagementPage() {
           <span>Add User</span>
         </Button>
       }
+      embedded={embedded}
     >
       {/* Controls */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 justify-between">
@@ -346,7 +349,7 @@ export function UserManagementPage() {
                       {user.roles.map((role) => (
                         <span
                           key={role}
-                          className={`inline-flex px-2 py-1 text-xs rounded-full border ${getRoleBadgeColor(role)}`}
+                          className={`inline-flex px-2 py-1 text-xs rounded-xs border ${getRoleBadgeColor(role)}`}
                         >
                           {roles.find(r => r.name === role)?.displayName || role}
                         </span>

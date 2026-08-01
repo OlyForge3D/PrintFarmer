@@ -137,7 +137,7 @@ describe('SettingsPage — wrong-section error attribution', () => {
     // Edit Telegram's Enabled checkbox — this is the section that will fail.
     fireEvent.click(screen.getByLabelText('Telegram Enabled'));
 
-    const saveBtn = await screen.findByRole('button', { name: /save integrations/i });
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
     await act(async () => {
       fireEvent.click(saveBtn);
     });
@@ -181,7 +181,7 @@ describe('SettingsPage — wrong-section error attribution', () => {
     fireEvent.click(screen.getByLabelText('Telegram Enabled'));
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save integrations/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));
@@ -224,7 +224,7 @@ describe('SettingsPage — wrong-section error attribution', () => {
     fireEvent.click(screen.getByLabelText('Telegram Enabled'));
 
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save integrations/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
 
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(1));

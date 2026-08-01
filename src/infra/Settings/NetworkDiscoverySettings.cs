@@ -23,7 +23,18 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     /// </summary>
     private static readonly string[] DefaultSubnets = new[] { "10.0.0.0/24", "10.0.5.0/24" };
 
-    [SettingDisplay(Name = "Discovery Subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true)]
+    // `Validate()` below throws when this list is empty, so the requirement is
+    // real — it was just invisible to the UI until a save failed. Declaring it
+    // here lets the settings page flag an unconfigured discovery section up
+    // front.
+    //
+    // Deliberately *not* gated with `RequiredWhen = "enableDiscovery"`. Unlike
+    // TelegramSettings and HomeAssistantSettings, whose validators return early
+    // when the feature is off, `Validate()` here demands subnets unconditionally
+    // — turning discovery off does not make the section saveable. Annotating a
+    // gate the validator does not honour would tell the page a save is safe that
+    // the server is about to reject with a 400.
+    [SettingDisplay(Name = "Discovery Subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
     [JsonPropertyName("discoverySubnets")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);

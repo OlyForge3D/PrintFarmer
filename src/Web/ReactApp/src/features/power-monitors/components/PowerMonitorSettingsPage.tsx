@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import type { CostTrackingSettings } from '@/types/api';
 import { apiClient } from '@/services/api';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { Button, FormField, Input, Select, Toggle, Badge } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { DeleteIcon, EditIcon, PlusIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
@@ -179,6 +180,7 @@ export function PowerMonitorSettingsPage() {
       title="Power Monitors"
       subtitle="Manage smart plug power monitors for energy tracking"
       icon={SettingsIcon}
+      parent={ADMIN_HUB_PARENT}
       titleActions={
         <Button variant="primary" onClick={openCreate}>
           <PlusIcon className="w-4 h-4 mr-1" />

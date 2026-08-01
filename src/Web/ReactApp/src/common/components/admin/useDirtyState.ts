@@ -5,6 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
  * objects, and Object.is for everything else. Sufficient for scalar-heavy settings
  * shapes; callers with exotic value shapes can pass their own `isEqual`.
  */
+/**
+ * Structural comparison for settings values: scalars, arrays and plain records.
+ *
+ * Exported because callers that break a dirty key down further — counting which
+ * individual fields inside a changed section differ, for instance — must use the
+ * same rule this hook used to decide the section was dirty at all. Two
+ * comparison functions would eventually disagree, and the symptom would be a
+ * save bar claiming zero changes while refusing to go away.
+ */
+export function isStructurallyEqual(a: unknown, b: unknown): boolean {
+  return defaultIsEqual(a, b);
+}
+
 function defaultIsEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object') return false;
@@ -59,6 +72,16 @@ export interface UseDirtyStateResult<T extends Record<string, unknown>> {
    * successful save. Clears `isDirty` and `changedKeys`.
    */
   markPristine: (next?: T) => void;
+  /**
+   * Adopt the current values as the baseline for *only* the named keys.
+   *
+   * A page that saves each group with its own request can partially succeed:
+   * three groups dirty, one 400s. `markPristine` is all-or-nothing, so the
+   * choice used to be between claiming the failed group saved and telling the
+   * user the two that did save are still pending — then re-POSTing them on
+   * retry. This keeps the failure dirty and lets the successes settle.
+   */
+  acceptKeys: (keys: (keyof T)[]) => void;
   /** True whenever any key differs from the original. */
   isDirty: boolean;
   /** The keys whose current value no longer matches the original. */
@@ -113,6 +136,18 @@ export function useDirtyState<T extends Record<string, unknown>>(
     setValuesState(nextBaseline);
   }, [values]);
 
+  const acceptKeys = useCallback((keys: (keyof T)[]) => {
+    if (keys.length === 0) return;
+    // Only the baseline moves. `values` is left alone so a group the user is
+    // still editing does not get yanked out from under them by a save of some
+    // other group.
+    setOriginal(prev => {
+      const next = { ...prev };
+      for (const key of keys) next[key] = values[key];
+      return next;
+    });
+  }, [values]);
+
   const changedKeys = useMemo<(keyof T)[]>(() => {
     const keys = new Set<keyof T>([
       ...(Object.keys(original) as (keyof T)[]),
@@ -153,9 +188,11 @@ export function useDirtyState<T extends Record<string, unknown>>(
     replaceValues,
     reset,
     markPristine,
+    acceptKeys,
     isDirty,
     changedKeys,
     changedCount: changedKeys.length,
     original,
   };
 }
+

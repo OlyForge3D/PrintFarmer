@@ -4,6 +4,7 @@ import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
+import { SETTINGS_SCOPES } from '@/features/settings/types';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
 vi.mock('@/common/components/ThemeSwitcher', () => ({
@@ -167,20 +168,29 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=profile');
   });
 
-  it('renders the new scoped settings shell and admin-visible scope switcher', () => {
+  it('renders one flat nav listing every reachable category, with no scope switcher', () => {
     setAuthRoles(['farm_admin']);
     renderSettings();
 
-    const h1s = screen.getAllByRole('heading', { level: 1, name: 'Settings' });
+    const h1s = screen.getAllByRole('heading', { level: 1, name: 'User Settings' });
     expect(h1s.length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole('heading', { level: 2, name: 'Profile' })).toBeInTheDocument();
     expect(screen.queryByText('Configure your farm, hardware, and account')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Command palette/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('radiogroup', { name: 'Settings scopes' })[0]).toBeInTheDocument();
-    expect(screen.getAllByRole('radio', { name: 'User' })[0]).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getAllByRole('radio', { name: 'System' })[0]).toHaveAttribute('aria-checked', 'false');
-    expect(screen.getAllByRole('button', { name: /Admin/i })[0]).toBeInTheDocument();
-    expect(getCategoryButton('Profile')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Search settings/i })).toBeInTheDocument();
+
+    // Scope is a property of a category, not a mode to enter first: no radiogroup,
+    // no separate Admin pill, one control idiom for the whole nav.
+    expect(screen.queryByRole('radiogroup', { name: 'Settings scopes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+
+    // Every destination an admin can reach is visible at once, grouped by scope.
+    for (const label of ['User', 'System', 'Admin']) {
+      expect(screen.getAllByRole('heading', { level: 2, name: label }).length).toBeGreaterThanOrEqual(1);
+    }
+    for (const label of ['Profile', 'General', 'Slicing', 'Hardware', 'Integrations', 'Quotas', 'Operations', 'Users', 'Data']) {
+      expect(getCategoryButton(label)).toBeInTheDocument();
+    }
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
   });
 
   it('defaults to the User Settings profile category and preferences sub-page', () => {
@@ -190,10 +200,11 @@ describe('SettingsShell', () => {
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('switches to System Settings from the scope switcher', () => {
+  it('switches scope in one click by picking a category from another scope', () => {
     renderSettings();
 
-    fireEvent.click(screen.getAllByRole('radio', { name: 'System' })[0]);
+    // Used to take two clicks: pick the System scope, then pick General.
+    fireEvent.click(getCategoryButton('General'));
 
     expect(getCategoryButton('General')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('heading', { level: 2, name: 'General' })).toHaveFocus();
@@ -290,7 +301,7 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).not.toHaveTextContent('sub=');
   });
 
-  it('shows only farm-wide categories in the System scope sidebar', () => {
+  it('scopes the nav to farm-wide categories when the route locks the scope', () => {
     renderSettings('/settings?scope=system');
 
     expect(getCategoryButton('General')).toBeInTheDocument();
@@ -298,9 +309,23 @@ describe('SettingsShell', () => {
     expect(getCategoryButton('Hardware')).toBeInTheDocument();
     expect(getCategoryButton('Integrations')).toBeInTheDocument();
     expect(getCategoryButton('Quotas')).toBeInTheDocument();
+
+    // `?scope=system` on /settings is a soft preference, not a route lock — an
+    // admin can still reach the other scopes from the same nav.
+    expect(getCategoryButton('Profile')).toBeInTheDocument();
+    expect(getCategoryButton('Operations')).toBeInTheDocument();
+  });
+
+  it('hides scopes the user cannot reach', () => {
+    setAuthRoles(['farm_user']);
+    renderSettings('/settings');
+
+    expect(getCategoryButton('Profile')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'General' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Operations' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Users' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Data' })).not.toBeInTheDocument();
+    // A single group needs no caption; the page title already says "Settings".
+    expect(screen.queryByRole('heading', { level: 2, name: 'User' })).not.toBeInTheDocument();
   });
 
   it('opens Slicing on the defaults sub-page inside System Settings', () => {
@@ -354,9 +379,25 @@ describe('SettingsShell', () => {
     await waitFor(() => {
       expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
     });
-    expect(screen.getAllByRole('heading', { level: 1, name: 'Settings' }).length).toBeGreaterThan(0);
+    // The H1 names the scope, so this also proves the redirect landed on `user`
+    // rather than merely rendering some settings page.
+    expect(screen.getAllByRole('heading', { level: 1, name: 'User Settings' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
     expect(toast.info).toHaveBeenCalledWith("You don't have access to admin settings. Showing your user settings instead.");
+  });
+
+  // The H1, the document title, and the sidebar's accessible name must all name
+  // the same scope. They used to come from three places; one hardcoded string
+  // drifted and shipped a page whose tab and heading disagreed.
+  it.each([
+    ['/settings?scope=user', 'User Settings'],
+    ['/admin/settings?scope=system&tab=general', 'System Settings'],
+  ])('titles %s from the scope registry, not a hardcoded string', (route, expected) => {
+    setAuthRoles(['farm_admin']);
+    renderSettings(route);
+
+    expect(screen.getAllByRole('heading', { level: 1, name: expected }).length).toBeGreaterThan(0);
+    expect(SETTINGS_SCOPES.some(scope => scope.label === expected)).toBe(true);
   });
 
   it('keeps API Keys reachable under User Settings through legacy links', () => {
@@ -381,7 +422,7 @@ describe('SettingsShell', () => {
   it('opens the command palette from the header button and returns focus on escape', async () => {
     renderSettings();
 
-    const launcher = screen.getByRole('button', { name: /Command palette/i });
+    const launcher = screen.getByRole('button', { name: /Search settings/i });
     launcher.focus();
     fireEvent.click(launcher);
 
@@ -389,7 +430,7 @@ describe('SettingsShell', () => {
     expect(paletteSearch).toHaveFocus();
 
     fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
-    expect(await screen.findByRole('button', { name: /Command palette/i })).toHaveFocus();
+    expect(await screen.findByRole('button', { name: /Search settings/i })).toHaveFocus();
   });
 
   it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin destination', async () => {
@@ -411,5 +452,41 @@ describe('SettingsShell', () => {
     });
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=users');
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=audit');
+  });
+});
+
+describe('SettingsShell — footer slot sits below the scrollport (Vasquez #1)', () => {
+  /**
+   * The save bar has to be reachable while the cards above it scroll. It used
+   * to try to achieve that with `position: sticky` from inside the scroll pane,
+   * which cannot work: a sticky box is bound by the scrolled content, so it
+   * flowed off the bottom of the page instead of pinning. The shell now exposes
+   * a slot *below* the pane and the content page portals its bar into it.
+   *
+   * If the slot ever moves back inside `.pf-settings-scroll-pane`, the bar goes
+   * back under the fold and this fails.
+   */
+  it('renders the footer slot outside the scroll pane', () => {
+    const { container } = renderSettings('/settings');
+
+    const pane = container.querySelector('.pf-settings-scroll-pane');
+    expect(pane).not.toBeNull();
+
+    const slot = container.querySelector('.shrink-0.empty\\:hidden');
+    expect(slot).not.toBeNull();
+    expect(pane!.contains(slot!)).toBe(false);
+  });
+
+  /** The pane must stay the scrollport, and the slot must follow it. */
+  it('orders the slot after the pane inside the same column', () => {
+    const { container } = renderSettings('/settings');
+
+    const pane = container.querySelector('.pf-settings-scroll-pane')!;
+    const slot = container.querySelector('.shrink-0.empty\\:hidden')!;
+
+    expect(slot.parentElement).toBe(pane.parentElement);
+    expect(
+      pane.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

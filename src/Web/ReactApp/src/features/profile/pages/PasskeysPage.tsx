@@ -289,15 +289,12 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
     </>
   );
 
-  if (embedded) {
-    return content;
-  }
-
   return (
     <PageTemplate
       title="Passkeys"
       icon={KeyIcon}
       subtitle="Manage your registered passkeys for passwordless sign-in."
+      embedded={embedded}
     >
       {content}
     </PageTemplate>

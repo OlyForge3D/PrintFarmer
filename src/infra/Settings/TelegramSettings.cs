@@ -26,7 +26,9 @@ public class TelegramSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(
         Name = "Chat ID",
         Description = "Telegram chat ID that receives PrintFarmer notifications.",
-        InputType = SettingInputType.Text)]
+        InputType = SettingInputType.Text,
+        Required = true,
+        RequiredWhen = "enabled")]
     [JsonPropertyName("chatId")]
     public string ChatId { get; set; } = string.Empty;
 

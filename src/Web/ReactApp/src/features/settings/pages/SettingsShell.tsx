@@ -1,14 +1,18 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
 import { Button } from '@/common/components/ui';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { useCommandPalette } from '@/features/settings/components/commandPaletteContext';
+import { SettingsHeaderSlotContext } from '@/features/settings/components/settingsHeaderSlotContext';
+import { SettingsFooterSlotContext } from '@/features/settings/components/settingsFooterSlotContext';
+import { commandPaletteShortcutLabel } from '@/features/settings/components/commandPaletteShortcut';
 import { SettingsContentTransition } from '@/features/settings/components/SettingsContentTransition';
 import { SettingsSection } from '@/features/settings/components/SettingsSection';
 import { SettingsSidebar } from '@/features/settings/components/SettingsSidebar';
@@ -54,12 +58,6 @@ const LazyWorkerManagementPage = lazy(() =>
   import('@/features/slicer/pages/WorkerManagementPage').then((mod) => ({ default: mod.WorkerManagementPage })),
 );
 
-const SETTINGS_FRAME_NOISE = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='64' height='64' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E\")";
-const SETTINGS_FRAME_GRID = [
-  'linear-gradient(rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
-  'linear-gradient(90deg, rgba(56, 189, 248, 0.08) 1px, transparent 1px)',
-].join(', ');
-
 function scrollBehavior(): ScrollBehavior {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
     return 'smooth';
@@ -84,7 +82,7 @@ function UserPreferencesPanel() {
   return (
     <SettingsSection>
       <div className="space-y-6">
-        <section className="rounded-2xl border border-pf-border bg-pf-bg-0 px-5 py-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+        <section className="rounded-md border border-pf-border bg-pf-card px-5 py-5">
           <h3 className="text-lg font-semibold text-pf-text-primary">Appearance</h3>
           <p className="mt-1 text-sm text-pf-text-secondary">
             Choose a theme and preview the dashboard surface in real time.
@@ -102,7 +100,7 @@ function UserPreferencesPanel() {
 const SINGLE_PAGE_CONTENT: Record<string, ReactNode> = {
   quotas: (
     <SettingsSection>
-      <QuotaManagementPage />
+      <QuotaManagementPage embedded />
     </SettingsSection>
   ),
 };
@@ -144,7 +142,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   ),
   'integrations.webhooks': (
     <SettingsSection>
-      <WebhooksAdminPage />
+      <WebhooksAdminPage embedded />
     </SettingsSection>
   ),
   'profile.preferences': <UserPreferencesPanel />,
@@ -171,27 +169,27 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       />
     </SettingsSection>
   ),
-  'slicing.bed-types': <BedTypeAdminPage />,
+  'slicing.bed-types': <BedTypeAdminPage embedded />,
   'slicing.profiles': (
     <Suspense fallback={<TabLoader />}>
-      <LazySlicerProfilesPage />
+      <LazySlicerProfilesPage embedded />
     </Suspense>
   ),
-  'hardware.cameras': <CamerasPage />,
-  'hardware.nfc': <NfcDevicesPage />,
+  'hardware.cameras': <CamerasPage embedded />,
+  'hardware.nfc': <NfcDevicesPage embedded />,
   'hardware.printer-groups': <PrinterGroupsPage embedded />,
   'hardware.nfc-bindings': <NfcBindingsPage embedded />,
-  'hardware.custom-fields': <CustomFieldsAdminPage />,
+  'hardware.custom-fields': <CustomFieldsAdminPage embedded />,
   'operations.status': <SystemStatusPage />,
   'operations.workers': (
     <Suspense fallback={<TabLoader />}>
       <LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />
     </Suspense>
   ),
-  'users.accounts': <UserManagementPage />,
-  'users.audit': <LoginAuditPage />,
-  'data.tags': <TagAdminPage />,
-  'data.management': <DataManagementPage />,
+  'users.accounts': <UserManagementPage embedded />,
+  'users.audit': <LoginAuditPage embedded />,
+  'data.tags': <TagAdminPage embedded />,
+  'data.management': <DataManagementPage embedded />,
 };
 
 interface SettingsShellProps {
@@ -209,11 +207,23 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
 
+  // Callback ref, not useRef: the slot's DOM node has to be a *rendered* value so
+  // the context re-renders its consumers once the node exists. A ref mutation
+  // would not trigger that, and the portal would never find its target.
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
+  const [footerSlot, setFooterSlot] = useState<HTMLElement | null>(null);
+  const commandPaletteShortcut = useMemo(() => commandPaletteShortcutLabel(), []);
+
   const requestedScope = searchParams.get('scope');
   const requestedCategory = searchParams.get('tab');
   const requestedSubPage = searchParams.get('sub');
   const query = searchParams.get('q') || '';
   const normalizedQuery = query.trim().toLowerCase();
+
+  // The shell serves three routes. `/admin/settings` and `/admin/manage` are
+  // destinations reached from the Control Center, so they carry a link back to
+  // it; `/settings` is a personal page that was never below /admin.
+  const isAdminRoute = routeScope === 'system' || routeScope === 'admin';
 
   const availableScopes = useMemo(() => {
     if (routeScope === 'user') {
@@ -252,32 +262,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   const shouldFocusSectionRef = useRef(false);
   const previousRenderedKeyRef = useRef<string | null>(null);
-
-  const handleScopeChange = useCallback(
-    (scopeId: string) => {
-      if (!availableScopes.some((scope) => scope.id === scopeId)) {
-        return;
-      }
-
-      const defaultCategoryId = getDefaultCategoryForScope(scopeId as typeof activeScope);
-      const defaultSubPageId = getDefaultSubPage(defaultCategoryId);
-      shouldFocusSectionRef.current = true;
-      setSearchParams((prev) => {
-        const next = new URLSearchParams(prev);
-        next.set('scope', scopeId);
-        next.set('tab', defaultCategoryId);
-        if (defaultSubPageId) {
-          next.set('sub', defaultSubPageId);
-        } else {
-          next.delete('sub');
-        }
-        next.delete('q');
-        next.delete('workerTab');
-        return next;
-      });
-    },
-    [availableScopes, setSearchParams],
-  );
 
   const handleCategoryChange = useCallback(
     (categoryId: string) => {
@@ -615,31 +599,48 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     );
   }, [currentCategory, renderedContentKey]);
 
-  const pageTitle = effectiveScope === 'admin' ? 'Admin Console' : 'Settings';
+  // The scope registry already names every scope, and the document title (above)
+  // reads from it. The H1 used to hardcode its own strings, so the browser tab
+  // said "System Settings" while the heading said "Settings" — and `/settings`
+  // and `/admin/settings` shared one indistinguishable H1. Read the registry so
+  // there is a single source of truth. The one exception is `admin`, whose
+  // registry label is the short nav chip "Admin"; the page has been called the
+  // Admin Console since the redirect map was written, so keep that name here.
+  const pageTitle = effectiveScope === 'admin'
+    ? 'Admin Console'
+    : currentScopeMeta?.label ?? 'Settings';
   const pageDescription = currentScopeMeta?.description ?? 'Manage PrintFarmer settings and administration.';
 
   const hasNoMatches = isFiltering && matchingCategoryIds && matchingCategoryIds.length === 0;
-  const toolbar = (
-    <div className="sticky top-0 z-20 border-b border-pf-border/70 bg-pf-bg-0/88 px-4 py-4 backdrop-blur-xl supports-[backdrop-filter]:bg-pf-bg-0/78 md:px-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-end lg:mr-72">
-        <Button
-          type="button"
-          variant="subtle"
-          size="md"
-          onClick={openCommandPalette}
-          iconLeft={<SearchIcon className="h-4 w-4" ariaLabel="Open command palette" />}
-          className="h-11 justify-between rounded-2xl border border-pf-border/70 bg-pf-bg-0/70 px-4 text-sm text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm sm:min-w-[12rem]"
-        >
-          <span className="inline-flex items-center gap-3">
-            <span>Command palette</span>
-            <span className="rounded-md border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
-              {typeof navigator !== 'undefined' && navigator.platform.toLowerCase().includes('mac') ? '⌘K' : 'Ctrl K'}
-            </span>
-          </span>
-        </Button>
-      </div>
 
-      {!hasNoMatches ? (
+  // Page-level actions. The mode toggle arrives by portal from whichever content
+  // page owns it (see SettingsHeaderPortal); the palette is always available, so
+  // the shell renders it directly. Slot first so the page's own control sits to
+  // the left of the shell-wide one.
+  const headerActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <div ref={setHeaderSlot} className="contents" />
+      <Button
+        type="button"
+        variant="subtle"
+        size="sm"
+        onClick={openCommandPalette}
+        iconLeft={<SearchIcon className="h-4 w-4" />}
+        className="rounded-md border border-pf-border bg-pf-bg-0 text-pf-text-secondary hover:text-pf-text-primary"
+      >
+        <span className="inline-flex items-center gap-2">
+          <span>Search settings</span>
+          <kbd className="rounded-xs border border-pf-border bg-pf-bg-1 px-1.5 py-0.5 font-sans text-[10px] font-semibold uppercase tracking-[0.16em] text-pf-text-tertiary">
+            {commandPaletteShortcut}
+          </kbd>
+        </span>
+      </Button>
+    </div>
+  );
+
+  const subTabs =
+    !hasNoMatches && currentCategory.subPages.length > 0 ? (
+      <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
           subPages={currentCategory.subPages}
           activeSubPage={activeSubPage}
@@ -649,33 +650,28 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
           ariaLabel={`${currentCategory.label} ${effectiveScope === 'admin' ? 'admin' : 'settings'}`}
           searchQuery={query}
         />
-      ) : null}
-    </div>
-  );
+      </div>
+    ) : null;
 
   return (
-    <>
+    <SettingsHeaderSlotContext.Provider value={headerSlot}>
+      <SettingsFooterSlotContext.Provider value={footerSlot}>
       <PageTemplate
         title={pageTitle}
         subtitle={pageDescription}
         padding="px-0"
         showHeader
+        fill
+        parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
+        actions={headerActions}
       >
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-[1.5rem] border border-pf-border/70 bg-pf-bg-0/95 pt-4 shadow-[0_24px_80px_-46px_rgba(0,0,0,0.82)] backdrop-blur-sm">
-          <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[1.5rem]" aria-hidden="true">
-            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.08]" style={{ backgroundImage: SETTINGS_FRAME_GRID, backgroundSize: '24px 24px' }} />
-            <div className="absolute inset-0 rounded-[1.5rem] opacity-[0.05]" style={{ backgroundImage: SETTINGS_FRAME_NOISE, backgroundSize: '160px 160px' }} />
-          </div>
-
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-md border border-pf-border bg-pf-panel">
           <div className="relative flex min-h-0 flex-1 flex-col">
           {hasNoMatches ? (
             <div className="relative flex flex-1 min-h-0 flex-col">
-              <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                {toolbar}
                 <div className="flex min-h-[60%] items-center justify-center px-4 py-10 md:px-6">
-                  <div className="mx-auto max-w-md rounded-3xl border border-dashed border-pf-border bg-pf-bg-0/80 px-6 py-10 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                  <div className="mx-auto max-w-md rounded-md border border-dashed border-pf-border bg-pf-bg-1 px-6 py-10 text-center">
                     <p className="text-sm font-medium text-pf-text-primary">No matching settings</p>
                     <p className="mt-2 text-sm text-pf-text-secondary">
                       We couldn&apos;t find anything for &ldquo;{query}&rdquo;. Try a broader term like hardware, theme, or users.
@@ -685,35 +681,38 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
               </div>
             </div>
           ) : (
-            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[18.5rem_minmax(0,1fr)]">
+            <div className="flex flex-1 min-h-0 flex-col md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
               <SettingsSidebar
-                categories={scopeCategories}
+                categories={accessibleCategories}
                 activeScope={effectiveScope}
                 activeCategory={effectiveCategory}
                 availableScopes={availableScopes}
                 onCategoryChange={handleCategoryChange}
-                onScopeChange={handleScopeChange}
                 matchingCategoryIds={matchingCategoryIds}
                 isFiltering={isFiltering}
                 searchQuery={query}
               />
 
-              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border/70 md:border-t-0 md:border-l md:border-pf-border/70">
-                <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-10 bg-gradient-to-b from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-                <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-10 bg-gradient-to-t from-pf-bg-0 via-pf-bg-0/70 to-transparent" aria-hidden="true" />
-
+              <div className="relative flex min-h-0 flex-1 flex-col border-t border-pf-border md:border-t-0 md:border-l md:border-pf-border">
                 <p className="sr-only" aria-live="polite">
                   {sectionAnnouncement}
                 </p>
 
                 <div className="pf-settings-scroll-pane min-h-0 flex-1 overflow-y-auto overscroll-contain">
-                  {toolbar}
+                  {subTabs}
                   <div className="px-4 pb-10 pt-5 md:px-6 md:pb-12 md:pt-6">
+                    {/* Subordinate to the page's own H1. This rendered at 32px
+                        against a 24px "Settings" H1, so the category name — a
+                        restatement of the highlighted nav item — was the
+                        largest text on the page. The scale now descends:
+                        24 (page) → 20 (category) → 18 (band) → 14 (card).
+                        The element itself stays: `aria-labelledby` and the
+                        section-change focus target both point at it. */}
                     <h2
                       id="settings-content-heading"
                       ref={sectionHeadingRef}
                       tabIndex={-1}
-                      className="mb-5 w-fit text-2xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-6 md:text-[2rem]"
+                      className="mb-4 w-fit text-xl leading-none focus:outline-hidden focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-pf-accent md:mb-5"
                     >
                       {currentCategory.label}
                     </h2>
@@ -729,12 +728,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
                     </SettingsContentTransition>
                   </div>
                 </div>
+
+                {/* Docked below the scrollport, not inside it. See
+                    settingsFooterSlotContext for why sticky could never work
+                    here: the pane above is the scrollport, so a bar inside it
+                    is bound by the scrolled content, not the viewport.
+                    `shrink-0` keeps the bar at its natural height while the
+                    pane absorbs the remaining space. */}
+                <div ref={setFooterSlot} className="shrink-0 empty:hidden" />
               </div>
             </div>
           )}
           </div>
         </div>
       </PageTemplate>
-    </>
+      </SettingsFooterSlotContext.Provider>
+    </SettingsHeaderSlotContext.Provider>
   );
 };

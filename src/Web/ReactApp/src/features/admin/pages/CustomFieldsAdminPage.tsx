@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, EditIcon, PlusIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Input, Select, FormField, Textarea, Toggle } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useCustomFieldDefinitions, queryKeys } from '@/common/hooks/useApi';
@@ -31,7 +32,7 @@ function toKebabCase(s: string): string {
     .replace(/^-|-$/g, '');
 }
 
-export function CustomFieldsAdminPage() {
+export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps) {
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<CustomFieldEntityType>('Printer');
 
@@ -167,6 +168,7 @@ export function CustomFieldsAdminPage() {
           Add Field
         </Button>
       }
+      embedded={embedded}
     >
       <div className="mb-6 flex gap-2">
         {(['Printer', 'User'] as const).map(tab => (

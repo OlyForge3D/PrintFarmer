@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
 import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
 import { getRevisionConflict, getErrorMessage } from '@/common/utils/apiErrors';
@@ -64,7 +65,7 @@ const hslToHex = (hslString: string): string => {
     return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
-export const TagAdminPage: React.FC = () => {
+export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }) => {
     const queryClient = useQueryClient();
     const [activeTab, setActiveTab] = useState<'management' | 'analytics'>('management');
     const [showNewTagForm, setShowNewTagForm] = useState(false);
@@ -423,6 +424,7 @@ export const TagAdminPage: React.FC = () => {
                 title="Tag Management"
                 subtitle="Create, manage, and analyze 3D model tags"
                 icon={TagIcon}
+                embedded={embedded}
             >
                 <div className="flex items-center justify-center h-64">
                     <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
@@ -436,6 +438,7 @@ export const TagAdminPage: React.FC = () => {
             title="Tag Management"
             subtitle="Create, manage, and analyze 3D model tags"
             icon={TagIcon}
+            embedded={embedded}
         >
             <Tabs defaultTab="management" activeTab={activeTab} onTabChange={(tabId) => setActiveTab(tabId as 'management' | 'analytics')}>
                 <Tabs.List>
@@ -686,6 +689,7 @@ export const TagAdminPage: React.FC = () => {
                     {/* Tag Preview */}
                     <div className="flex flex-col items-center py-4 bg-pf-bg-2 rounded-lg">
                         <div
+                            data-pf-radius="full"
                             className="px-4 py-2 rounded-full text-white font-medium shadow-md transition-all duration-200"
                             style={{ backgroundColor: newTagColor }}
                         >

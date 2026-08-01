@@ -173,7 +173,7 @@ describe('SettingsPage — stale section-level error on partial failure', () => 
     fireEvent.click(screen.getByLabelText('Obico Enabled'));
     fireEvent.click(screen.getByLabelText('Telegram Enabled'));
 
-    const saveBtn = await screen.findByRole('button', { name: /save integrations/i });
+    const saveBtn = await screen.findByRole('button', { name: /save changes/i });
 
     // First save — both fail, both cards show their section-level alerts.
     await act(async () => {
@@ -190,7 +190,7 @@ describe('SettingsPage — stale section-level error on partial failure', () => 
     // masked by the field-edit self-healing path. This exercises the partial-
     // failure merge in handleSave directly.
     await act(async () => {
-      fireEvent.click(await screen.findByRole('button', { name: /save integrations/i }));
+      fireEvent.click(await screen.findByRole('button', { name: /save changes/i }));
     });
     await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledTimes(4));
 

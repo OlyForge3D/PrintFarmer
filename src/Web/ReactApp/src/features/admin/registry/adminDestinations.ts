@@ -105,6 +105,18 @@ export interface AdminDestination {
 const DEFAULT_ADMIN_ROLE = 'farm_admin';
 
 /**
+ * The Admin Control Center hub itself, as a back-link target.
+ *
+ * Every admin destination is reached from `/admin`, so every admin page renders
+ * this as its parent. Kept here, next to the destinations it is the parent of,
+ * so the hub's identity has exactly one definition.
+ */
+export const ADMIN_HUB_PARENT = {
+  label: 'Admin Control Center',
+  to: '/admin',
+} as const;
+
+/**
  * Complete, ordered list of admin destinations.
  *
  * Ordering within a group matters — it drives the display order on the hub
@@ -117,6 +129,26 @@ const DEFAULT_ADMIN_ROLE = 'farm_admin';
  * - `/admin/*` — standalone admin pages.
  * - Bare `/foo` paths are operational pages surfaced in admin because a farm_admin
  *   uses them daily (Locations, Catalog, Analytics, Auto-Dispatch, Maintenance).
+ *
+ * Contract for entries under `/admin`:
+ *
+ * Every such destination renders its frame through `AdminPageShell` — meaning the
+ * shell owns the page's single `<h1>` and its back link to `ADMIN_HUB_PARENT`. A
+ * page below `/admin` never renders its own `PageTemplate`, its own heading, or its
+ * own back navigation. Pages that also stand alone on a non-admin route take an
+ * `embedded` prop and suppress their own frame when the shell already drew one;
+ * forgetting to pass it yields two competing `<h1>`s for one view.
+ *
+ * `src/test/features/admin/AdminDestinationContract.test.tsx` enforces this: it
+ * walks every path in this array, asserts each resolves to a route declared in
+ * `App.tsx`, and asserts exactly one `<h1>` and one link to `/admin` on each
+ * shell-owned destination. Adding an entry here is what puts a page under that
+ * contract, so a new destination that skips `AdminPageShell` fails the walk by name
+ * rather than being discovered visually later.
+ *
+ * The operational `/foo` entries are deliberately outside this contract — they are
+ * not below `/admin` and are reachable from elsewhere in the app, so a back link to
+ * the Control Center would misdescribe where the user came from.
  */
 export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
   // ── Overview ──────────────────────────────────────────────────────────

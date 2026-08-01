@@ -13,13 +13,19 @@ export interface CardProps {
   hoverable?: boolean;
   /** Click handler (makes card interactive) */
   onClick?: () => void;
+  /**
+   * Data attributes merged onto the card element. Cards frequently need a
+   * stable DOM hook (which entity is this, is it flagged) and `className` is
+   * the wrong place to encode state. Mirrors `AdminStatTile.dataAttributes`.
+   */
+  dataAttributes?: Record<string, string | undefined>;
 }
 
 export const Card: React.FC<CardProps> & {
   Header: typeof CardHeader;
   Body: typeof CardBody;
   Footer: typeof CardFooter;
-} = ({ children, className, title, hoverable = false, onClick }) => {
+} = ({ children, className, title, hoverable = false, onClick, dataAttributes }) => {
   const isInteractive = !!onClick || hoverable;
 
   return (
@@ -31,6 +37,7 @@ export const Card: React.FC<CardProps> & {
         onClick && 'cursor-pointer',
         className
       )}
+      {...dataAttributes}
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}

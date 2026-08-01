@@ -27,7 +27,9 @@ public class HomeAssistantSettings : IAppSetting, IValidatableSetting
     [SettingDisplay(
         Name = "Base URL",
         Description = "Home Assistant base URL (e.g., http://homeassistant.local:8123).",
-        InputType = SettingInputType.Url)]
+        InputType = SettingInputType.Url,
+        Required = true,
+        RequiredWhen = "enabled")]
     [JsonPropertyName("baseUrl")]
     public string BaseUrl { get; set; } = string.Empty;
 

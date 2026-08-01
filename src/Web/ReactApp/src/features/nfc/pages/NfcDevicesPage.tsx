@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, Badge, Spinner } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { useNfcDevices, useDeleteNfcDevice } from '@/common/hooks/useApi';
 import { NfcDeviceDetailModal } from '@/features/nfc/components/NfcDeviceDetailModal';
 import type { NfcDeviceDto } from '@/types/api';
@@ -24,18 +25,18 @@ function SignalBadge({ rssi }: { rssi?: number }) {
   return <Badge variant="error">Poor ({rssi})</Badge>;
 }
 
-export function NfcDevicesPage() {
+export function NfcDevicesPage({ embedded = false }: EmbeddablePageProps) {
   const { data: devices = [], isLoading, error } = useNfcDevices();
   const deleteMutation = useDeleteNfcDevice();
   const [selectedDevice, setSelectedDevice] = useState<NfcDeviceDto | null>(null);
 
   if (isLoading) {
-    return <PageTemplate title="NFC Devices"><Spinner size="lg" /></PageTemplate>;
+    return <PageTemplate title="NFC Devices" embedded={embedded}><Spinner size="lg" /></PageTemplate>;
   }
 
   if (error) {
     return (
-      <PageTemplate title="NFC Devices">
+      <PageTemplate title="NFC Devices" embedded={embedded}>
         <div className="p-4 text-pf-error">Failed to load NFC devices: {String(error)}</div>
       </PageTemplate>
     );
@@ -45,6 +46,7 @@ export function NfcDevicesPage() {
     <PageTemplate
       title="NFC Devices"
       subtitle={`${devices.length} registered reader${devices.length !== 1 ? 's' : ''}`}
+      embedded={embedded}
     >
       {devices.length === 0 ? (
         <Card>

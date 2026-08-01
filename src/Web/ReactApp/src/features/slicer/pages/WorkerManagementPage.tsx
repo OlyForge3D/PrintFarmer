@@ -12,6 +12,7 @@ import { Textarea } from '@/common/components/ui/Textarea';
 import { Input } from '@/common/components/ui/Input';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Select } from '@/common/components/ui/Select';
+import { Spinner } from '@/common/components/ui/Spinner';
 import { RefreshIcon, WrenchIcon, ChevronDownIcon, ChevronRightIcon, ListIcon } from '@/common/components/icons/MdiIcons';
 import { SliceJobsPanel } from '@/features/slicer/components/SliceJobsPanel';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
@@ -285,23 +286,16 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
   };
 
   if (loading) {
-    const loadingContent = (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
-      </div>
-    );
-
-    if (embedded) {
-      return loadingContent;
-    }
-
     return (
       <PageTemplate
         title="Worker Management"
         subtitle="Monitor and manage your Slicer workers"
         icon={WrenchIcon}
+        embedded={embedded}
       >
-        {loadingContent}
+        <div className="flex items-center justify-center py-12">
+          <Spinner size="lg" />
+        </div>
       </PageTemplate>
     );
   }
@@ -677,15 +671,12 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
     </>
   );
 
-  if (embedded) {
-    return pageContent;
-  }
-
   return (
     <PageTemplate
       title="Worker Management"
       subtitle="Monitor and manage your Slicer workers"
       icon={WrenchIcon}
+      embedded={embedded}
     >
       {pageContent}
     </PageTemplate>

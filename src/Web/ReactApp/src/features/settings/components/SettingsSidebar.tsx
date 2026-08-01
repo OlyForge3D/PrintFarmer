@@ -7,15 +7,63 @@ import { getSettingsCategoryIcon } from '@/features/settings/settings-navigation
 import type { SettingsCategory, SettingsScope, SettingsScopeId } from '@/features/settings/types';
 
 interface SettingsSidebarProps {
+  /** Every category the current user can reach, across all available scopes. */
   categories: SettingsCategory[];
   activeScope: SettingsScopeId;
   activeCategory: string;
   availableScopes: SettingsScope[];
   onCategoryChange: (categoryId: string) => void;
-  onScopeChange: (scopeId: SettingsScopeId) => void;
   matchingCategoryIds?: string[];
   isFiltering?: boolean;
   searchQuery?: string;
+}
+
+interface NavGroup {
+  scope: SettingsScope;
+  categories: SettingsCategory[];
+}
+
+/** Short caption for a scope. The nav is the context, so "Settings" is redundant. */
+const SCOPE_CAPTIONS: Record<SettingsScopeId, string> = {
+  user: 'User',
+  system: 'System',
+  admin: 'Admin',
+};
+
+/**
+ * Group categories under their scope, in the order the scopes are offered.
+ *
+ * Scope is a property of a category, not a mode the user has to enter first —
+ * `resolveSettingsNavigationTarget` already derives the scope from whichever
+ * category is picked. So the nav shows every destination at once and lets one
+ * click do what used to take two.
+ */
+function buildNavGroups(categories: SettingsCategory[], scopes: SettingsScope[]): NavGroup[] {
+  return scopes
+    .map((scope) => ({
+      scope,
+      categories: categories.filter((category) => category.scopeId === scope.id),
+    }))
+    .filter((group) => group.categories.length > 0);
+}
+
+/**
+ * Class list for one nav item.
+ *
+ * The active state is the Control Center's own tile treatment — raised surface,
+ * hairline border, accent icon — so a settings category and an admin subsystem
+ * read as the same kind of thing.
+ */
+function navItemClass(isActive: boolean, isMatching: boolean): string {
+  return clsx(
+    'group flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left text-sm transition-colors',
+    'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
+    isActive
+      ? 'border-pf-border bg-pf-bg-2 font-medium text-pf-text-primary'
+      : isMatching
+        ? 'border-transparent bg-pf-bg-1 text-pf-text-primary hover:border-pf-border'
+        : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-1 hover:text-pf-text-primary',
+  );
 }
 
 export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
@@ -24,7 +72,6 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   activeCategory,
   availableScopes,
   onCategoryChange,
-  onScopeChange,
   matchingCategoryIds,
   isFiltering = false,
   searchQuery,
@@ -39,14 +86,14 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     return categories.filter((category) => matchingCategoryIds.includes(category.id));
   }, [categories, isFiltering, matchingCategoryIds]);
 
-  const primaryScopes = useMemo(
-    () => availableScopes.filter((scope) => scope.id !== 'admin'),
-    [availableScopes],
+  const navGroups = useMemo(
+    () => buildNavGroups(visibleCategories, availableScopes),
+    [availableScopes, visibleCategories],
   );
-  const adminScope = useMemo(
-    () => availableScopes.find((scope) => scope.id === 'admin'),
-    [availableScopes],
-  );
+
+  // With one group the caption states the obvious; the page title already says it.
+  const showCaptions = navGroups.length > 1;
+
   const activeScopeMeta = useMemo(
     () => availableScopes.find((scope) => scope.id === activeScope) ?? availableScopes[0],
     [activeScope, availableScopes],
@@ -102,95 +149,84 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
     [isFiltering, matchingCategoryIds],
   );
 
+  // Arrow keys walk the visible list as one sequence, across group boundaries.
+  const flatIndexOf = useCallback(
+    (categoryId: string) => visibleCategories.findIndex((category) => category.id === categoryId),
+    [visibleCategories],
+  );
+
   return (
     <>
+      {/* `h-fit self-start` rather than `h-full`: the nav held 206px of items in
+          a 1386px column, so 85% of it was an empty tinted slab running the
+          length of the page. Ending the panel after its items turns that into
+          page background, and the border makes the edge read as intentional
+          rather than as a truncated fill. */}
       <nav
-        className="hidden h-full min-h-0 flex-col bg-pf-bg-0/72 backdrop-blur-xl md:flex"
+        className="hidden h-fit min-h-0 flex-col self-start rounded-md border border-pf-border bg-pf-sidebar md:flex"
         aria-label={`${activeScopeMeta?.label ?? 'Settings'} categories`}
       >
-        <div className="border-b border-pf-border/70 px-4 py-5">
-          {primaryScopes.length > 1 ? (
-            <ScopeSwitcher
-              scopes={primaryScopes}
-              activeScope={activeScope}
-              onScopeChange={onScopeChange}
-            />
-          ) : null}
-
-          {adminScope ? (
-            <button
-              type="button"
-              onClick={() => onScopeChange(adminScope.id)}
-              aria-pressed={activeScope === adminScope.id ? 'true' : 'false'}
-              title={adminScope.label}
-              className={clsx(
-                'mt-3 flex w-full items-center justify-start rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
-                activeScope === adminScope.id
-                  ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
-                  : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
-              )}
-            >
-              <span className="font-medium">{adminScope.label}</span>
-            </button>
-          ) : null}
-        </div>
-
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <ul role="list" className="space-y-1.5">
-            {visibleCategories.map((category, index) => {
-              const Icon = getSettingsCategoryIcon(category.id);
-              const isActive = activeCategory === category.id;
-              const isMatching = isMatchingCategory(category.id);
-
-              return (
-                <li key={category.id}>
-                  <button
-                    ref={(element) => setItemRef(category.id, element)}
-                    type="button"
-                    onClick={() => onCategoryChange(category.id)}
-                    onKeyDown={(event) => handleKeyDown(event, index)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={clsx(
-                      'group relative w-full rounded-[1.1rem] px-4 py-3 text-left text-sm',
-                      'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
-                      'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                      'transition-[transform,background-color,color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
-                      isActive
-                        ? 'bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
-                        : isMatching
-                          ? 'bg-pf-bg-1/75 text-pf-text-primary hover:bg-pf-bg-1/80'
-                          : 'text-pf-text-secondary hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
-                    )}
+          <div className="flex flex-col gap-5">
+            {navGroups.map((group) => (
+              <div key={group.scope.id}>
+                {showCaptions && (
+                  <h2
+                    id={`settings-nav-group-${group.scope.id}`}
+                    className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary"
                   >
-                    <span className="flex items-center gap-3">
-                      <span
-                        className={clsx(
-                          'shrink-0 transition-colors motion-reduce:transition-none',
-                          isActive ? 'text-pf-accent' : 'text-pf-text-secondary group-hover:text-pf-text-primary',
-                        )}
-                        aria-hidden="true"
-                      >
-                        <Icon className="h-5 w-5" />
-                      </span>
-                      <span className="min-w-0 flex-1 truncate font-medium tracking-[0.01em]">
-                        <SettingsMatchText text={category.label} query={searchQuery} />
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    {SCOPE_CAPTIONS[group.scope.id]}
+                  </h2>
+                )}
+                <ul
+                  role="list"
+                  className="flex flex-col gap-1"
+                  aria-labelledby={showCaptions ? `settings-nav-group-${group.scope.id}` : undefined}
+                >
+                  {group.categories.map((category) => {
+                    const Icon = getSettingsCategoryIcon(category.id);
+                    const isActive = activeCategory === category.id;
+
+                    return (
+                      <li key={category.id}>
+                        <button
+                          ref={(element) => setItemRef(category.id, element)}
+                          type="button"
+                          onClick={() => onCategoryChange(category.id)}
+                          onKeyDown={(event) => handleKeyDown(event, flatIndexOf(category.id))}
+                          aria-current={isActive ? 'page' : undefined}
+                          className={navItemClass(isActive, isMatchingCategory(category.id))}
+                        >
+                          <span
+                            className={clsx(
+                              'shrink-0',
+                              isActive
+                                ? 'text-pf-accent'
+                                : 'text-pf-text-tertiary group-hover:text-pf-text-secondary',
+                            )}
+                            aria-hidden="true"
+                          >
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">
+                            <SettingsMatchText text={category.label} query={searchQuery} />
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         </div>
       </nav>
 
       <MobileCategorySelector
         categories={visibleCategories}
-        activeScope={activeScope}
-        activeCategory={activeCategory}
         availableScopes={availableScopes}
+        activeCategory={activeCategory}
         onCategoryChange={onCategoryChange}
-        onScopeChange={onScopeChange}
         matchingCategoryIds={matchingCategoryIds}
         isFiltering={isFiltering}
         searchQuery={searchQuery}
@@ -199,50 +235,11 @@ export const SettingsSidebar: React.FC<SettingsSidebarProps> = ({
   );
 };
 
-interface ScopeSwitcherProps {
-  scopes: SettingsScope[];
-  activeScope: SettingsScopeId;
-  onScopeChange: (scopeId: SettingsScopeId) => void;
-  className?: string;
-}
-
-function ScopeSwitcher({ scopes, activeScope, onScopeChange, className }: ScopeSwitcherProps) {
-  return (
-    <div className={clsx('rounded-2xl border border-pf-border/80 bg-pf-bg-1/75 p-1', className)} role="radiogroup" aria-label="Settings scopes">
-      <div className="grid grid-cols-2 gap-1">
-        {scopes.map((scope) => {
-          const isActive = scope.id === activeScope;
-          return (
-            <button
-              key={scope.id}
-              type="button"
-              role="radio"
-              aria-checked={isActive}
-              title={scope.id === 'user' ? 'User' : scope.id === 'system' ? 'System' : scope.label}
-              onClick={() => onScopeChange(scope.id)}
-              className={clsx(
-                'rounded-xl px-3 py-2 text-sm font-medium transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                isActive
-                  ? 'bg-pf-accent-bg/30 text-pf-text-primary shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
-                  : 'text-pf-text-secondary hover:bg-pf-bg-0/85 hover:text-pf-text-primary',
-              )}
-            >
-              {scope.id === 'user' ? 'User' : scope.id === 'system' ? 'System' : scope.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 interface MobileCategorySelectorProps {
   categories: SettingsCategory[];
-  activeScope: SettingsScopeId;
-  activeCategory: string;
   availableScopes: SettingsScope[];
+  activeCategory: string;
   onCategoryChange: (categoryId: string) => void;
-  onScopeChange: (scopeId: SettingsScopeId) => void;
   matchingCategoryIds?: string[];
   isFiltering?: boolean;
   searchQuery?: string;
@@ -250,11 +247,9 @@ interface MobileCategorySelectorProps {
 
 const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   categories,
-  activeScope,
-  activeCategory,
   availableScopes,
+  activeCategory,
   onCategoryChange,
-  onScopeChange,
   matchingCategoryIds,
   isFiltering = false,
   searchQuery,
@@ -264,8 +259,11 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   const [isOpen, setIsOpen] = useState(false);
 
   const activeLabel = categories.find((category) => category.id === activeCategory)?.label ?? 'Select';
-  const primaryScopes = availableScopes.filter((scope) => scope.id !== 'admin');
-  const adminScope = availableScopes.find((scope) => scope.id === 'admin');
+  const navGroups = useMemo(
+    () => buildNavGroups(categories, availableScopes),
+    [availableScopes, categories],
+  );
+  const showCaptions = navGroups.length > 1;
 
   useEffect(() => {
     if (!isOpen) {
@@ -303,11 +301,6 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
     setIsOpen(false);
   };
 
-  const handleScopeSelect = (scopeId: SettingsScopeId) => {
-    onScopeChange(scopeId);
-    setIsOpen(false);
-  };
-
   const isMatchingCategory = (categoryId: string) => {
     if (!isFiltering || !matchingCategoryIds) {
       return false;
@@ -317,32 +310,7 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
   };
 
   return (
-    <div ref={dropdownRef} className="relative border-b border-pf-border/70 px-4 py-4 md:hidden">
-      {primaryScopes.length > 1 ? (
-        <ScopeSwitcher
-          scopes={primaryScopes}
-          activeScope={activeScope}
-          onScopeChange={handleScopeSelect}
-          className="mb-3"
-        />
-      ) : null}
-
-      {adminScope ? (
-        <button
-          type="button"
-          onClick={() => handleScopeSelect(adminScope.id)}
-          aria-pressed={activeScope === adminScope.id}
-          className={clsx(
-            'mb-3 flex w-full items-center justify-start rounded-2xl border px-3 py-2 text-left text-sm transition-colors',
-            activeScope === adminScope.id
-              ? 'border-pf-accent/35 bg-pf-accent-bg/25 text-pf-text-primary'
-              : 'border-pf-border/80 bg-pf-bg-1/75 text-pf-text-secondary hover:border-pf-border hover:bg-pf-bg-1/90 hover:text-pf-text-primary',
-          )}
-        >
-          <span className="font-medium">{adminScope.label}</span>
-        </button>
-      ) : null}
-
+    <div ref={dropdownRef} className="relative border-b border-pf-border px-4 py-4 md:hidden">
       <button
         ref={buttonRef}
         type="button"
@@ -350,8 +318,8 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
         aria-controls="settings-category-menu"
         aria-expanded={isOpen}
         aria-label={`Settings category: ${activeLabel}`}
-          title={`Settings category: ${activeLabel}`}
-        className="flex w-full items-center justify-between gap-2 rounded-2xl border border-pf-border/80 bg-pf-bg-1/85 px-4 py-3 text-sm font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-sm focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
+        title={`Settings category: ${activeLabel}`}
+        className="flex w-full items-center justify-between gap-2 rounded-md border border-pf-border bg-pf-bg-1 px-4 py-3 text-sm font-medium text-pf-text-primary focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
       >
         <span className="flex min-w-0 items-center gap-3">
           <span className="text-pf-accent" aria-hidden="true">
@@ -363,46 +331,62 @@ const MobileCategorySelector: React.FC<MobileCategorySelectorProps> = ({
       </button>
 
       {isOpen ? (
-        <ul
+        <div
           id="settings-category-menu"
-          aria-label="Settings categories"
-          className="absolute inset-x-4 top-[calc(100%-0.25rem)] z-50 max-h-72 overflow-auto rounded-2xl border border-pf-border bg-pf-bg-0/95 p-1 shadow-lg backdrop-blur-md"
+          className="absolute inset-x-4 top-[calc(100%-0.25rem)] z-50 max-h-72 overflow-auto rounded-md border border-pf-border bg-pf-panel p-2 shadow-lg"
         >
-          {categories.map((category) => {
-            const Icon = getSettingsCategoryIcon(category.id);
-            const isActive = activeCategory === category.id;
-            const isMatching = isMatchingCategory(category.id);
-
-            return (
-              <li key={category.id}>
-                <button
-                  type="button"
-                  onClick={() => handleSelect(category.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  title={category.label}
-                  className={clsx(
-                    'flex w-full items-center gap-3 rounded-xl px-4 py-2.5 text-left text-sm',
-                    'motion-safe:animate-[pf-settings-nav-item-in_280ms_cubic-bezier(0.16,1,0.3,1)_both]',
-                    'focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-inset',
-                    'transition-[transform,background-color,color,box-shadow] motion-reduce:transition-none active:scale-[0.985]',
-                    isActive
-                      ? 'bg-pf-accent-bg/25 font-medium text-pf-text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08),inset_0_0_0_1px_rgba(255,255,255,0.04)]'
-                      : isMatching
-                        ? 'bg-pf-bg-1/75 text-pf-text-primary hover:bg-pf-bg-1/80'
-                        : 'text-pf-text-secondary hover:bg-pf-bg-1/80 hover:text-pf-text-primary',
-                  )}
+          <div className="flex flex-col gap-4">
+            {navGroups.map((group) => (
+              <div key={group.scope.id}>
+                {showCaptions && (
+                  <h2
+                    id={`settings-mobile-nav-group-${group.scope.id}`}
+                    className="px-2 pb-1.5 text-xs font-semibold uppercase tracking-wide text-pf-text-tertiary"
+                  >
+                    {SCOPE_CAPTIONS[group.scope.id]}
+                  </h2>
+                )}
+                <ul
+                  role="list"
+                  className="flex flex-col gap-1"
+                  aria-labelledby={
+                    showCaptions ? `settings-mobile-nav-group-${group.scope.id}` : undefined
+                  }
                 >
-                  <span className={clsx(isActive ? 'text-pf-accent' : 'text-pf-text-secondary')} aria-hidden="true">
-                    <Icon className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate">
-                    <SettingsMatchText text={category.label} query={searchQuery} />
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                  {group.categories.map((category) => {
+                    const Icon = getSettingsCategoryIcon(category.id);
+                    const isActive = activeCategory === category.id;
+
+                    return (
+                      <li key={category.id}>
+                        <button
+                          type="button"
+                          onClick={() => handleSelect(category.id)}
+                          aria-current={isActive ? 'page' : undefined}
+                          title={category.label}
+                          className={navItemClass(isActive, isMatchingCategory(category.id))}
+                        >
+                          <span
+                            className={clsx(
+                              'shrink-0',
+                              isActive ? 'text-pf-accent' : 'text-pf-text-tertiary',
+                            )}
+                            aria-hidden="true"
+                          >
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <span className="min-w-0 flex-1 truncate">
+                            <SettingsMatchText text={category.label} query={searchQuery} />
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : null}
     </div>
   );

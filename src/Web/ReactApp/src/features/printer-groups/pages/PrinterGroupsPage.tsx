@@ -102,19 +102,16 @@ export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) 
       </>
     );
 
-    return embedded ? detailContent : <PageTemplate title="Printer Groups" icon={PrinterIcon}>{detailContent}</PageTemplate>;
+    return (
+      <PageTemplate title="Printer Groups" icon={PrinterIcon} embedded={embedded}>
+        {detailContent}
+      </PageTemplate>
+    );
   }
 
   // List view
   const listContent = (
     <>
-      {embedded ? (
-        <div className="mb-4 flex justify-end">
-          <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
-            Create Group
-          </Button>
-        </div>
-      ) : null}
       {isLoading ? (
         <div className="flex items-center justify-center min-h-[40vh]">
           <Spinner size="lg" />
@@ -159,11 +156,12 @@ export function PrinterGroupsPage({ embedded = false }: PrinterGroupsPageProps) 
     </>
   );
 
-  return embedded ? listContent : (
+  return (
     <PageTemplate
       title="Printer Groups"
       subtitle="Organize printers into groups for easier management"
       icon={PrinterIcon}
+      embedded={embedded}
       actions={
         <Button variant="primary" onClick={handleCreate} iconLeft={<PlusIcon />}>
           Create Group

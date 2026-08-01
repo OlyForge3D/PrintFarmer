@@ -26,6 +26,8 @@
   --color-pf-border-medium: var(--pf-border-medium);
   --color-pf-border-dark: var(--pf-border-dark);
   --color-pf-border-gray: var(--pf-border-gray);
+  --color-pf-border-divider: var(--pf-border-divider);
+  --color-pf-border-strong: var(--pf-border-strong);
 
   /* Text colors */
   --color-pf-text-primary: var(--pf-text-primary);
@@ -41,7 +43,11 @@
   --color-pf-accent-2: var(--pf-accent-2);
   --color-pf-success: var(--pf-success);
   --color-pf-success-bg: var(--pf-success-bg);
+  --color-pf-success-border: var(--pf-success-border);
   --color-pf-success-hover: var(--pf-success-hover);
+  --color-pf-info: var(--pf-info);
+  --color-pf-info-bg: var(--pf-info-bg);
+  --color-pf-info-border: var(--pf-info-border);
   --color-pf-link: var(--pf-link);
   --color-pf-progress-track: var(--pf-progress-track);
   --color-pf-progress-fill: var(--pf-progress-fill);
@@ -73,6 +79,8 @@
   --color-pf-error-text: var(--pf-error-text);
   --color-pf-error-border: var(--pf-error-border);
   --color-pf-warning: var(--pf-warning);
+  --color-pf-warning-bg: var(--pf-warning-bg);
+  --color-pf-warning-border: var(--pf-warning-border);
   --color-pf-warning-text: var(--pf-warning-text);
 
   /* Loading and disabled */
@@ -404,17 +412,6 @@
     to {
       opacity: 1;
       transform: translateY(0);
-    }
-  }
-
-  @keyframes pf-settings-nav-item-in {
-    from {
-      opacity: 0;
-      transform: translateX(-10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
     }
   }
 

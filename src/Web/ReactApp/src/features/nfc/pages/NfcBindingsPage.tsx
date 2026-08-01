@@ -25,13 +25,19 @@ export function NfcBindingsPage({ embedded = false }: NfcBindingsPageProps) {
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
   if (isLoading) {
-    const loadingContent = <Spinner size="lg" />;
-    return embedded ? loadingContent : <PageTemplate title="NFC Tag Bindings">{loadingContent}</PageTemplate>;
+    return (
+      <PageTemplate title="NFC Tag Bindings" embedded={embedded}>
+        <Spinner size="lg" />
+      </PageTemplate>
+    );
   }
 
   if (error) {
-    const errorContent = <div className="p-4 text-pf-error">Failed to load NFC bindings: {String(error)}</div>;
-    return embedded ? errorContent : <PageTemplate title="NFC Tag Bindings">{errorContent}</PageTemplate>;
+    return (
+      <PageTemplate title="NFC Tag Bindings" embedded={embedded}>
+        <div className="p-4 text-pf-error">Failed to load NFC bindings: {String(error)}</div>
+      </PageTemplate>
+    );
   }
 
   const handleUnbind = (id: string) => {
@@ -95,10 +101,11 @@ export function NfcBindingsPage({ embedded = false }: NfcBindingsPageProps) {
     </>
   );
 
-  return embedded ? content : (
+  return (
     <PageTemplate
       title="NFC Tag Bindings"
       subtitle={`${bindings.length} bound tag${bindings.length !== 1 ? 's' : ''}`}
+      embedded={embedded}
     >
       {content}
     </PageTemplate>

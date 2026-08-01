@@ -18,6 +18,12 @@ public class SettingPropertyDisplayMetadata
 
     public bool Required { get; set; }
 
+    /// <summary>
+    /// JSON name of a boolean property in the same section that gates
+    /// <see cref="Required"/>. Null when the requirement is unconditional.
+    /// </summary>
+    public string? RequiredWhen { get; set; }
+
     // Allowed values for select-type settings
     public object[]? AllowedValues { get; set; }
 

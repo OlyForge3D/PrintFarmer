@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import clsx from 'clsx';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import {
   Button,
   Input,
@@ -52,7 +53,7 @@ function truncateUserAgent(ua: string): string {
   return ua.length > UA_MAX_CHARS ? `${ua.slice(0, UA_MAX_CHARS)}…` : ua;
 }
 
-export function LoginAuditPage() {
+export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
   const {
     from, to, username, success, page, pageSize,
     setUsername,
@@ -89,6 +90,7 @@ export function LoginAuditPage() {
       title="Login Audit Log"
       subtitle="View all authentication attempts with timestamps, outcomes, and originating IP addresses"
       icon={ShieldIcon}
+      embedded={embedded}
     >
       {/* Filter bar */}
       <div

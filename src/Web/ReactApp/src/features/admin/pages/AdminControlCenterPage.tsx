@@ -1,8 +1,14 @@
 import { useMemo } from 'react';
-import clsx from 'clsx';
 import { Link } from 'react-router';
-import { Badge, Button, Card } from '@/common/components/ui';
-import { AdminEmpty, AdminError, AdminLoading } from '@/common/components/admin';
+import { Button, Card } from '@/common/components/ui';
+import {
+  AdminEmpty,
+  AdminError,
+  AdminLoading,
+  AdminSection,
+  AdminStatTile,
+  AttentionRow,
+} from '@/common/components/admin';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   AlertCircleIcon,
@@ -11,7 +17,6 @@ import {
   CheckCircleIcon,
   HelpCircleIcon,
   HomeIcon,
-  InfoIcon,
   RefreshIcon,
 } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -22,10 +27,8 @@ import {
 } from '@/features/admin/registry';
 import { useAdminOverview } from '@/features/admin/hooks/useAdminOverview';
 import {
-  isKnownAttentionSeverity,
   isKnownSubsystemStatus,
   type AttentionItemDto,
-  type KnownAttentionSeverity,
   type KnownSubsystemStatus,
   type SubsystemHealthDto,
 } from '@/types/adminOverview';
@@ -89,56 +92,9 @@ function presentationForSubsystemStatus(raw: string): StatusPresentation {
   };
 }
 
-interface AttentionPresentation {
-  label: string;
-  Icon: (props: { className?: string; ariaLabel?: string }) => JSX.Element;
-  iconClass: string;
-  badgeVariant: 'error' | 'warning' | 'info' | 'default';
-  rowBorderClass: string;
-  rowBgClass: string;
-  srPrefix: string;
-}
-
-const ATTENTION_PRESENTATION: Record<KnownAttentionSeverity, AttentionPresentation> = {
-  Error: {
-    label: 'Error',
-    Icon: AlertCircleIcon,
-    iconClass: 'text-pf-error',
-    badgeVariant: 'error',
-    rowBorderClass: 'border-pf-error/40',
-    rowBgClass: 'bg-pf-error-bg/40',
-    srPrefix: 'Error',
-  },
-  Warning: {
-    label: 'Warning',
-    Icon: AlertIcon,
-    iconClass: 'text-pf-warning',
-    badgeVariant: 'warning',
-    rowBorderClass: 'border-pf-warning/40',
-    rowBgClass: 'bg-pf-bg-1',
-    srPrefix: 'Warning',
-  },
-  Info: {
-    label: 'Info',
-    Icon: InfoIcon,
-    iconClass: 'text-pf-accent',
-    badgeVariant: 'info',
-    rowBorderClass: 'border-pf-border',
-    rowBgClass: 'bg-pf-bg-1',
-    srPrefix: 'Info',
-  },
-};
-
-function presentationForAttentionSeverity(raw: string): AttentionPresentation {
-  if (isKnownAttentionSeverity(raw)) {
-    return ATTENTION_PRESENTATION[raw];
-  }
-  return {
-    ...ATTENTION_PRESENTATION.Info,
-    label: raw || 'Notice',
-    srPrefix: `Unknown severity "${raw || 'unspecified'}"`,
-  };
-}
+// Attention severity presentation now lives in the shared AttentionRow so the
+// hub and the settings page cannot drift apart. See
+// `common/components/admin/AttentionRow.tsx`.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -164,34 +120,21 @@ function SubsystemTile({ subsystem }: { subsystem: SubsystemHealthDto }) {
   const presentation = presentationForSubsystemStatus(subsystem.status);
   const { Icon } = presentation;
   return (
-    <div
-      role="group"
-      aria-label={`${subsystem.name}: ${presentation.srPrefix}`}
-      className={clsx(
-        'flex flex-col gap-2 rounded-md border bg-pf-panel p-4',
-        presentation.tileBorderClass,
-      )}
-      data-testid="admin-hub-subsystem"
-      data-subsystem-key={subsystem.key}
-      data-subsystem-status={subsystem.status}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className={clsx('shrink-0', presentation.iconClass)} aria-hidden="true">
-            <Icon className="h-5 w-5" ariaLabel="" />
-          </span>
-          <span className="min-w-0 truncate text-sm font-semibold text-pf-text-primary">
-            {subsystem.name}
-          </span>
-        </div>
-        <Badge variant={presentation.badgeVariant} size="sm">
-          {presentation.label}
-        </Badge>
-      </div>
-      {subsystem.detail && (
-        <p className="text-xs text-pf-text-secondary">{subsystem.detail}</p>
-      )}
-    </div>
+    <AdminStatTile
+      icon={<Icon className="h-5 w-5" ariaLabel="" />}
+      iconClassName={presentation.iconClass}
+      label={subsystem.name}
+      badge={presentation.label}
+      badgeVariant={presentation.badgeVariant}
+      detail={subsystem.detail}
+      borderClassName={presentation.tileBorderClass}
+      ariaLabel={`${subsystem.name}: ${presentation.srPrefix}`}
+      dataAttributes={{
+        'data-testid': 'admin-hub-subsystem',
+        'data-subsystem-key': subsystem.key,
+        'data-subsystem-status': subsystem.status,
+      }}
+    />
   );
 }
 
@@ -216,50 +159,24 @@ function resolveAttentionActionRoute(item: AttentionItemDto): string | null {
   return item.actionRoute ?? null;
 }
 
-function AttentionRow({ item }: { item: AttentionItemDto }) {
-  const presentation = presentationForAttentionSeverity(item.severity);
-  const { Icon } = presentation;
+function AttentionRowFromDto({ item }: { item: AttentionItemDto }) {
   const actionRoute = resolveAttentionActionRoute(item);
-  const hasAction = Boolean(item.actionLabel && actionRoute);
   return (
-    <li
-      className={clsx(
-        'flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-start',
-        presentation.rowBorderClass,
-        presentation.rowBgClass,
-      )}
-      data-testid="admin-hub-attention-item"
-      data-attention-key={item.key}
-      data-attention-severity={item.severity}
-    >
-      <span
-        className={clsx('mt-0.5 shrink-0', presentation.iconClass)}
-        aria-hidden="true"
-      >
-        <Icon className="h-5 w-5" ariaLabel="" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="sr-only">{presentation.srPrefix}: </span>
-          <p className="text-sm font-semibold text-pf-text-primary">{item.title}</p>
-          <Badge variant={presentation.badgeVariant} size="sm">
-            {presentation.label}
-          </Badge>
-        </div>
-        <p className="mt-1 text-sm text-pf-text-secondary">{item.detail}</p>
-      </div>
-      {hasAction && actionRoute && (
-        <div className="shrink-0 sm:ml-auto sm:self-center">
-          <Link
-            to={actionRoute}
-            className="inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-3 py-1.5 text-sm font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent"
-          >
-            {item.actionLabel}
-            <ArrowRightIcon className="h-3.5 w-3.5" ariaLabel="" />
-          </Link>
-        </div>
-      )}
-    </li>
+    <AttentionRow
+      severity={item.severity}
+      title={item.title}
+      detail={item.detail}
+      action={
+        item.actionLabel && actionRoute
+          ? { label: item.actionLabel, to: actionRoute }
+          : undefined
+      }
+      dataAttributes={{
+        'data-testid': 'admin-hub-attention-item',
+        'data-attention-key': item.key,
+        'data-attention-severity': item.severity,
+      }}
+    />
   );
 }
 
@@ -346,21 +263,17 @@ export function AdminControlCenterPage() {
     >
       <div className="flex flex-col gap-8">
         {/* ── Band 1: health ── */}
-        <section aria-labelledby="admin-hub-health-heading" className="flex flex-col gap-3">
-          <header className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2
-              id="admin-hub-health-heading"
-              className="text-sm font-semibold uppercase tracking-wide text-pf-text-secondary"
-            >
-              System health
-            </h2>
-            {data?.checkedAt && (
+        <AdminSection
+          caption="System health"
+          captionId="admin-hub-health-heading"
+          headerAside={
+            data?.checkedAt ? (
               <p className="text-xs text-pf-text-tertiary">
                 Checked at {formatCheckedAt(data.checkedAt)}
               </p>
-            )}
-          </header>
-
+            ) : null
+          }
+        >
           {isLoading && (
             <AdminLoading
               variant="card-grid"
@@ -399,41 +312,32 @@ export function AdminControlCenterPage() {
               size="compact"
             />
           )}
-        </section>
+        </AdminSection>
 
         {/* ── Band 2: attention ── */}
         {/* Suppressed on error — band 1 already reports the failure, and an
             "Needs attention" heading with nothing beneath it reads as broken. */}
         {!isError && (
-        <section
-          aria-labelledby="admin-hub-attention-heading"
-          className="flex flex-col gap-3"
+        <AdminSection
+          caption="Needs attention"
+          captionId="admin-hub-attention-heading"
+          count={data?.attention.length}
         >
-          <header className="flex flex-wrap items-baseline justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <h2
-                id="admin-hub-attention-heading"
-                className="text-sm font-semibold uppercase tracking-wide text-pf-text-secondary"
-              >
-                Needs attention
-              </h2>
-              {data && data.attention.length > 0 && (
-                <Badge variant="default" size="sm">
-                  {data.attention.length}
-                </Badge>
-              )}
-            </div>
-          </header>
-
           {isLoading && <AdminLoading variant="list" label="Loading attention items" rows={3} />}
 
           {!isLoading && data && data.attention.length === 0 && (
-            <AdminEmpty
-              icon={<CheckCircleIcon className="h-10 w-10 text-pf-success" ariaLabel="" />}
-              title="Nothing needs your attention"
-              description="Every subsystem is reporting healthy."
-              size="compact"
-            />
+            /* An all-clear is one line of good news, not a 206px empty state.
+               Measured: the centred illustration treatment pushed the entire
+               destination grid down by a fifth of the viewport to say nothing
+               happened. The band still announces itself via the caption, so the
+               body only has to confirm it. */
+            <p
+              className="flex items-center gap-2 text-sm text-pf-text-secondary"
+              data-testid="admin-hub-attention-clear"
+            >
+              <CheckCircleIcon className="h-4 w-4 shrink-0 text-pf-success" ariaLabel="" />
+              Nothing needs your attention — every subsystem is reporting healthy.
+            </p>
           )}
 
           {!isLoading && data && data.attention.length > 0 && (
@@ -442,27 +346,19 @@ export function AdminControlCenterPage() {
               data-testid="admin-hub-attention"
             >
               {data.attention.map((item) => (
-                <AttentionRow key={item.key} item={item} />
+                <AttentionRowFromDto key={item.key} item={item} />
               ))}
             </ul>
           )}
-        </section>
+        </AdminSection>
         )}
 
         {/* ── Band 3: domains ── */}
-        <section
-          aria-labelledby="admin-hub-domains-heading"
-          className="flex flex-col gap-4"
+        <AdminSection
+          caption="Everything you can manage"
+          captionId="admin-hub-domains-heading"
+          gap="loose"
         >
-          <header>
-            <h2
-              id="admin-hub-domains-heading"
-              className="text-sm font-semibold uppercase tracking-wide text-pf-text-secondary"
-            >
-              Everything you can manage
-            </h2>
-          </header>
-
           {groupedDestinations.length === 0 ? (
             <AdminEmpty
               icon={<HomeIcon className="h-8 w-8" ariaLabel="" />}
@@ -475,10 +371,10 @@ export function AdminControlCenterPage() {
               {groupedDestinations.map(({ group, destinations }) => (
                 <div key={group.id} className="flex flex-col gap-3">
                   <div className="flex flex-col gap-0.5">
-                    <h3 className="text-base font-semibold text-pf-text-primary">
+                    <h3 className="text-sm font-semibold uppercase tracking-wide text-pf-text-secondary">
                       {group.label}
                     </h3>
-                    <p className="text-xs text-pf-text-secondary">{group.description}</p>
+                    <p className="text-xs text-pf-text-tertiary">{group.description}</p>
                   </div>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {destinations.map((destination) => (
@@ -489,7 +385,7 @@ export function AdminControlCenterPage() {
               ))}
             </div>
           )}
-        </section>
+        </AdminSection>
       </div>
     </PageTemplate>
   );

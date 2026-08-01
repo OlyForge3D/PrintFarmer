@@ -693,11 +693,12 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
       </div>
   );
 
-  return embedded ? content : (
+  return (
     <PageTemplate
       title="API Keys"
       subtitle="Manage purpose-limited credentials for slicers and PrintFarmer Desktop"
       icon={KeyIcon}
+      embedded={embedded}
     >
       {content}
     </PageTemplate>

@@ -151,14 +151,14 @@ function ThemePreview({ option }: { option: ThemeOption }) {
   }) as CSSProperties, [option.preview]);
 
   return (
-    <div className="space-y-3 rounded-[1.35rem] border border-pf-border bg-pf-bg-1/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="space-y-3 rounded-lg border border-pf-border bg-pf-bg-1/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-pf-text-tertiary">Live preview</p>
         <p className="mt-1 text-sm text-pf-text-secondary">{option.label} live preview</p>
       </div>
 
       <div
-        className="aspect-[5/6] overflow-hidden rounded-[1.25rem] border border-white/6 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.7)]"
+        className="aspect-[5/6] overflow-hidden rounded-md border border-white/6 shadow-[0_18px_40px_-24px_rgba(0,0,0,0.7)]"
         style={previewStyle}
       >
         <div
@@ -182,7 +182,7 @@ function ThemePreview({ option }: { option: ThemeOption }) {
           </div>
 
           <div className="grid flex-1 gap-3 p-4">
-            <div className="rounded-[1.1rem] border border-white/6 bg-[var(--preview-panel)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <div className="rounded-sm border border-white/6 bg-[var(--preview-panel)] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">Printer card</div>
@@ -205,7 +205,7 @@ function ThemePreview({ option }: { option: ThemeOption }) {
             </div>
 
             <div className="grid grid-cols-[118px_minmax(0,1fr)] gap-3">
-              <div className="rounded-[1.1rem] border border-white/6 bg-[var(--preview-panel)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <div className="rounded-sm border border-white/6 bg-[var(--preview-panel)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">Nozzle</div>
                 <div className="mt-3 flex items-center justify-center">
                   <div
@@ -224,7 +224,7 @@ function ThemePreview({ option }: { option: ThemeOption }) {
                 </div>
               </div>
 
-              <div className="space-y-3 rounded-[1.1rem] border border-white/6 bg-[var(--preview-panel-muted)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+              <div className="space-y-3 rounded-sm border border-white/6 bg-[var(--preview-panel-muted)] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">Queue pressure</div>
                   <div className="mt-2 flex items-end justify-between gap-2">
@@ -317,7 +317,7 @@ export function ThemeSwitcher() {
                 onClick={() => setTheme(option.id)}
                 onKeyDown={(event) => handleOptionKeyDown(event, index)}
                 className={clsx(
-                  'group flex flex-col gap-2 rounded-2xl border p-3 text-left transition-all duration-200',
+                  'group flex flex-col gap-2 rounded-lg border p-3 text-left transition-all duration-200',
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--pf-focus-ring-offset)]',
                   isActive
                     ? 'border-[var(--pf-accent)] bg-[var(--pf-accent-bg)] text-[var(--pf-on-accent)] shadow-[var(--pf-glow-accent)]'

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import clsx from 'clsx';
 import {
   AccountCheckIcon,
@@ -8,6 +8,10 @@ import {
   LogoutIcon,
   SettingsIcon,
 } from '@/common/components/icons/MdiIcons';
+import {
+  clearFloatingBarInset,
+  observeFloatingBarWidth,
+} from '@/common/components/floatingBarInset';
 import { NotificationBell } from '@/common/components/NotificationBell';
 import { Button } from '@/common/components/ui';
 import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
@@ -47,6 +51,21 @@ export function FloatingControlBar({
   onLogout,
 }: FloatingControlBarProps) {
   const accountMenuId = useId();
+
+  // The bar is `hidden lg:block`, so it only overlaps page content on large
+  // viewports. Measuring an element inside a `display: none` ancestor yields 0,
+  // which is the correct reservation for small screens — no branch needed.
+  const [desktopWrapper, setDesktopWrapper] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!desktopWrapper) {
+      clearFloatingBarInset();
+      return undefined;
+    }
+    return observeFloatingBarWidth(desktopWrapper);
+  }, [desktopWrapper]);
+  const desktopWrapperRef = useCallback((node: HTMLDivElement | null) => {
+    setDesktopWrapper(node);
+  }, []);
 
   const bar = (
     <div className={mobile ? MOBILE_BAR_CLASS_NAME : FLOATING_BAR_CLASS_NAME}>
@@ -159,5 +178,9 @@ export function FloatingControlBar({
     return bar;
   }
 
-  return <div className={DESKTOP_WRAPPER_CLASS_NAME}>{bar}</div>;
+  return (
+    <div ref={desktopWrapperRef} className={DESKTOP_WRAPPER_CLASS_NAME}>
+      {bar}
+    </div>
+  );
 }
