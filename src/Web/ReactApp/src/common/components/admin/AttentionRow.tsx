@@ -66,11 +66,12 @@ export interface AttentionRowProps {
  * so the two surfaces that render attention items (this and the Admin Control
  * Center) stay identical.
  *
- * The action is deliberately *not* the proposal's `.btn-sm` (28px tall, 12px
- * horizontal, 12.5px text). At 12.5px it sits below the 13px consequence line
- * it is meant to answer, which reads as a footnote rather than the way out. It
- * ships one step up — 13px on 10px/4px — matching the app's own small button
- * rather than the mockup's.
+ * The action is deliberately neither the proposal's `.btn-sm` (28px tall, 12px
+ * horizontal, 12.5px text) nor `Button size="sm"` (12px text, 8px/4px padding).
+ * At 12px–12.5px it sits *below* the 13px consequence line it is meant to
+ * answer, which reads as a footnote rather than the way out. So it ships one
+ * step up at 13px on 10px/4px — a one-off in this file, owned as such. If the
+ * app's small button ever moves to 13px, delete this and use it.
  */
 const ACTION_CLASS =
   'inline-flex items-center gap-1.5 rounded-md border border-pf-border bg-pf-bg-1 px-2.5 py-1 text-[13px] font-medium text-pf-text-primary transition-colors hover:border-pf-accent hover:text-pf-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent';

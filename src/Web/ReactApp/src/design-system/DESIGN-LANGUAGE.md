@@ -702,7 +702,8 @@ nav changes the content width independently of the window.
   from the control, which is the part the user has to read a value out of. A label that
   occasionally wraps costs less than that. Controls cap at `24rem` (384px) for the same
   reason in the other direction: a text input stretched across a 900px card is harder to
-  scan, not easier.
+  scan, not easier. The cap is ours, not the proposal's — `.p-f > .vv` has no max-width — and
+  is derived from the 310–350px controls a real column produces.
 - **Units live in an adornment, never in the label.** `[SettingDisplay(Unit = "MB")]` renders
   beside the control. Baking `(MB)` into the label name inflates the label track for every
   row in the card. The unit still reaches assistive tech through the control's `aria-label`.
@@ -711,12 +712,14 @@ nav changes the content width independently of the window.
   control) = 428px of grid, plus 34px of card chrome = 462px, so *N* columns need
   `N × 462 + (N − 1) × 16`. Raising the column count earlier buys a second column by making
   every control in it too narrow to read.
-- **Type scale descends 24 → 15 → 13.5 → 13** across page title, band caption, card title and
-  field label — but hierarchy below the page title is carried by *case and letterspacing*,
-  not size. Band captions are 12px uppercase at `.06em`, the eyebrow convention. Making a
-  band caption louder than the settings it introduces gives a page six competing titles. The
-  settings category name is not rendered at all: the highlighted nav item and the page H1
-  already say it.
+- **Type descends 24 → 15 → 13.5 → 13** across page title, in-band group heading, card title
+  and field label. Band captions sit *outside* that scale on purpose: 12px uppercase at
+  `.06em`, the eyebrow convention, earning their level through case and letterspacing instead
+  of size. Making a band caption louder than the settings it introduces gives a page six
+  competing titles, which is what it did before #1031. The settings category name is not
+  rendered *visually* — the highlighted nav item and the page H1 already say it — but the
+  element stays in the tree as the content section's `aria-labelledby` target and its
+  post-navigation focus target, and un-hides on `:focus-visible`. Do not delete it.
 
 ### Saving
 
