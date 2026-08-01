@@ -328,6 +328,29 @@ describe('SettingsPagelet — required booleans announce as required (Vasquez #2
     );
     expect(screen.getByRole('checkbox', { name: 'Enabled' })).not.toHaveAttribute('aria-required');
   });
+
+  it('renders booleans as switches, not bare checkboxes (#1019)', () => {
+    // The visual is the custom track; the native input is visually hidden and
+    // drives it. Asserting `sr-only` is what distinguishes a switch from the
+    // stock checkbox this replaced — the role is `checkbox` either way, which
+    // is correct and is why the two tests above still pass unchanged.
+    render(
+      <SettingsPagelet metadata={boolSection(false)} values={{ enabled: false }} onChange={vi.fn()} />,
+    );
+    const input = screen.getByRole('checkbox', { name: 'Enabled' });
+    expect(input.className).toContain('sr-only');
+  });
+
+  it('still reports changes when the switch is operated', () => {
+    // A control that looks right and reports nothing is the worst outcome of a
+    // swap like this, and it is invisible in a screenshot.
+    const onChange = vi.fn();
+    render(
+      <SettingsPagelet metadata={boolSection(false)} values={{ enabled: false }} onChange={onChange} />,
+    );
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Enabled' }));
+    expect(onChange).toHaveBeenCalledWith('enabled', true);
+  });
 });
 
 describe('SettingsPagelet — units are adornments, not label text (#1025)', () => {

@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import clsx from 'clsx';
 import { SettingInputType } from '@/types/SettingInputType';
 import { InfoIcon, PlusIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Input, Select, Textarea, Checkbox } from '@/common/components/ui';
+import { Button, Input, Select, Textarea, Toggle } from '@/common/components/ui';
 import { HighlightedText } from '@/features/admin/settings/HighlightedText';
 import { isPropertyRequired, isPropertyAlwaysRequired } from '@/features/admin/settings/settingsAttention';
 
@@ -173,7 +173,7 @@ const InfoTooltip: React.FC<{ description: string }> = ({ description }) => (
  * Metadata-driven form renderer for a single settings section. Given the section
  * metadata and current values, this component renders each property as the
  * appropriate control from the shared UI library (`Input`, `Select`, `Textarea`,
- * `Checkbox`). It does NOT own state, dirty tracking, or save behaviour — those
+ * `Toggle`). It does NOT own state, dirty tracking, or save behaviour — those
  * belong to the parent (`SettingsPage`).
  *
  * Section-specific UI that doesn't fit the metadata (e.g. Obico's server table
@@ -342,10 +342,24 @@ export const SettingsPagelet: React.FC<SettingsPageletProps> = ({ metadata, valu
           );
         } else if (isBoolean) {
           control = (
-            <div className={clsx(FIELD_CONTROL_CLASS, "@[26rem]:pt-1.5")}>
-              <Checkbox
+            <div className={clsx(FIELD_CONTROL_CLASS, "@[26rem]:pt-1")}>
+              {/*
+                A switch, not a checkbox (#1019). Every boolean in this surface
+                is a live setting that takes effect on save, not an item being
+                selected from a set — which is the distinction the two controls
+                actually carry, and the proposal renders them as switches.
+
+                `size="sm"` (32x16) rather than the proposal's 38x20. The design
+                system ships two switch sizes, 32x16 and 44x24, and both are in
+                use elsewhere. Introducing a third that exists only on this page
+                would be precisely the kind of local divergence this epic was
+                opened to remove, so the deviation is 6px of width and is taken
+                deliberately.
+              */}
+              <Toggle
                 id={fieldId}
                 name={fieldId}
+                size="sm"
                 aria-label={accessibleName}
                 aria-required={isRequired || undefined}
                 checked={Boolean(values[prop.name])}
