@@ -13,6 +13,15 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // #1028: a ~1-in-5 intermittent failure went undiagnosed because the run
+    // that caught it was filtered to summary lines and the failing test's name
+    // scrolled past. The JSON reporter writes the full result set to disk on
+    // every run, so the next occurrence is diagnosable however the console
+    // output is piped or truncated. `default` is kept so interactive runs look
+    // unchanged. The output file is gitignored.
+    reporters: ['default', 'json'],
+    outputFile: { json: './test-results/vitest-results.json' },
+
     // Exclude e2e tests - they use Playwright and must be run separately with npx playwright test
     exclude: [
       '**/node_modules/**',
