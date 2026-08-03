@@ -8,6 +8,18 @@ namespace Farm.Infrastructure.Settings;
 /// The long-lived access token is stored encrypted (via ISensitiveDataProtector)
 /// in <see cref="EncryptedToken"/>; it is never returned in plain form to API clients.
 /// </summary>
+/// <remarks>
+/// This section is hidden from the generic settings surface — see the blocklist in
+/// <c>UnifiedSettingsController</c> — because <see cref="EncryptedToken"/> is an ordinary
+/// serialized property and would otherwise be served by <c>GET /api/settings/HomeAssistant</c>
+/// and overwritable by a plain save. It is edited through <c>AdminHomeAssistantController</c>.
+/// <para>
+/// Consequence: the <c>Required</c> / <c>RequiredWhen</c> hints below are never read by the UI,
+/// because the settings page only ever sees sections present in <c>GET /api/settings/metadata</c>.
+/// They are kept as documentation of intent; <see cref="Validate"/> is what actually enforces
+/// them, and the admin controller calls it before every save.
+/// </para>
+/// </remarks>
 [AppSetting(SectionName)]
 [SettingGroup("Integrations", DisplayName = "Integrations", Description = "External service integrations", Icon = "pf-icon-integration", Order = 5)]
 [SettingDisplay(Name = "Home Assistant", Description = "Settings for optional Home Assistant smart plug integration.", Icon = "pf-icon-homeassistant", Group = "Integrations", Order = 2)]

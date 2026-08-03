@@ -12,6 +12,13 @@ vi.mock('@/common/hooks/useUnifiedLogging', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
+    // QueueRealtimeBridge mounts with every authenticated <App>. Without these
+    // it throws and enters a 100/250/500ms retry loop that races the route
+    // assertions below.
+    getQueueSubscriptionResources: vi
+      .fn()
+      .mockResolvedValue({ printerIds: [], jobIds: [], projectIds: [] }),
+    getPrinters: vi.fn().mockResolvedValue([]),
   },
 }));
 

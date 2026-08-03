@@ -427,10 +427,15 @@ describe('SettingsShell', () => {
     fireEvent.click(launcher);
 
     const paletteSearch = await screen.findByRole('combobox', { name: 'Search settings command palette' });
-    expect(paletteSearch).toHaveFocus();
+    // #1028: `findBy*` resolves as soon as the node exists, but the palette
+    // moves focus in an effect that lands a tick later. Asserting focus
+    // immediately loses that race under load.
+    await waitFor(() => expect(paletteSearch).toHaveFocus());
 
     fireEvent.keyDown(await screen.findByRole('dialog', { name: 'Command palette' }), { key: 'Escape' });
-    expect(await screen.findByRole('button', { name: /Search settings/i })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Search settings/i })).toHaveFocus()
+    );
   });
 
   it('opens the command palette with Ctrl+K and navigates to a fuzzy-matched admin destination', async () => {

@@ -13,6 +13,17 @@ function createClient() {
 }
 const wrapperFactory = (client: QueryClient) => ({ children }: { children: React.ReactNode }) => React.createElement(QueryClientProvider, { client }, children);
 
+/** A promise the test controls, so a request can be held open deliberately. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -50,10 +61,13 @@ describe('optimistic manufacturer/model creation', () => {
     const manufacturerId = 'mfg-1';
     client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
-    const createSpy = vi.spyOn(apiClient, 'createModel').mockImplementation(async (model: Omit<PrinterModelDto, 'id'>) => {
-      await new Promise(r => setTimeout(r, 5));
-      return { id: 'model-real', ...model } as PrinterModelDto;
-    });
+    // The optimistic entry is asserted below while the request is still in
+    // flight. A `setTimeout` would let the mutation settle inside `act()` under
+    // load, so the window is held open explicitly instead.
+    const gate = deferred<PrinterModelDto>();
+    const createSpy = vi
+      .spyOn(apiClient, 'createModel')
+      .mockImplementation(() => gate.promise);
 
     const { result } = renderHook(() => useCreateModel(), { wrapper });
 
@@ -63,6 +77,10 @@ describe('optimistic manufacturer/model creation', () => {
 
     const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-') && m.name === 'MK4')).toBe(true);
+
+    await act(async () => {
+      gate.resolve({ id: 'model-real', name: 'MK4', manufacturerId } as PrinterModelDto);
+    });
 
     await waitFor(() => {
       const models = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
@@ -80,16 +98,21 @@ describe('optimistic manufacturer/model creation', () => {
     const manufacturerId = 'mfg-err';
     client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
-    vi.spyOn(apiClient, 'createModel').mockImplementation(async () => {
-      await new Promise(r => setTimeout(r, 5));
-      throw new Error('fail');
-    });
+    // Same held-open window as above: the rollback must not be allowed to run
+    // before the optimistic entry is observed.
+    const gate = deferred<PrinterModelDto>();
+    vi.spyOn(apiClient, 'createModel').mockImplementation(() => gate.promise);
 
     const { result } = renderHook(() => useCreateModel(), { wrapper });
     await act(async () => { result.current.mutate({ name: 'Bad', manufacturerId }); });
 
     const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-'))).toBe(true);
+
+    await act(async () => {
+      gate.reject(new Error('fail'));
+      await gate.promise.catch(() => {});
+    });
 
     await waitFor(() => {
       const finalModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
@@ -189,7 +212,13 @@ describe('optimistic job cancel/delete', () => {
     const wrapper = wrapperFactory(client);
     const job = createMockJob('job-cancel-err');
     client.setQueryData(queryKeys.jobQueue(), [job]);
-    vi.spyOn(apiClient, 'cancelPrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('cancel fail'); });
+    // #1028: this test asserts the transient optimistic state *before* the
+    // rollback. A fixed `setTimeout(5)` gives it no guarantee — under load the
+    // 5ms timer fires inside `act` and the rollback has already run, so the
+    // interim read returns 'Queued'. Holding the request open until the test
+    // releases it makes the window explicit instead of hoping for it.
+    const request = deferred<void>();
+    vi.spyOn(apiClient, 'cancelPrintQueueJob').mockImplementation(() => request.promise);
     const { result } = renderHook(() => useCancelPrintQueueJob(), { wrapper });
     await act(async () => {
       result.current.mutate({
@@ -199,6 +228,10 @@ describe('optimistic job cancel/delete', () => {
     });
     const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
     expect(interim?.find(j => j.job.id === 'job-cancel-err')?.job.status).toBe('Cancelled');
+    await act(async () => {
+      request.reject(new Error('cancel fail'));
+      await request.promise.catch(() => {});
+    });
     await waitFor(() => {
       const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
       expect(after?.find(j => j.job.id === 'job-cancel-err')?.job.status).toBe('Queued');
@@ -210,7 +243,9 @@ describe('optimistic job cancel/delete', () => {
     const wrapper = wrapperFactory(client);
     const job = createMockJob('job-del-err');
     client.setQueryData(queryKeys.jobQueue(), [job]);
-    vi.spyOn(apiClient, 'deletePrintQueueJob').mockImplementation(async () => { await new Promise(r => setTimeout(r, 5)); throw new Error('delete fail'); });
+    // Same transient-state race as the cancel case above (#1028).
+    const request = deferred<void>();
+    vi.spyOn(apiClient, 'deletePrintQueueJob').mockImplementation(() => request.promise);
     const { result } = renderHook(() => useDeletePrintQueueJob(), { wrapper });
     await act(async () => {
       result.current.mutate({
@@ -220,6 +255,10 @@ describe('optimistic job cancel/delete', () => {
     });
     const interim = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
     expect(interim?.some(j => j.job.id === 'job-del-err')).toBe(false);
+    await act(async () => {
+      request.reject(new Error('delete fail'));
+      await request.promise.catch(() => {});
+    });
     await waitFor(() => {
       const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
       expect(after?.some(j => j.job.id === 'job-del-err')).toBe(true);
