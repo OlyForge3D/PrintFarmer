@@ -170,7 +170,9 @@ describe('App slicer route consolidation', () => {
     });
     rerender(<App />);
 
-    expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
+    // #1028: the slicer route is code-split, so this wait covers a dynamic
+    // import. Under full-suite parallel load that can exceed the 1s default.
+    expect(await screen.findByText('NewSliceJobPageMock', undefined, { timeout: 5000 })).toBeInTheDocument();
   });
 
   it('keeps a resolved disabled capability distinct from unresolved data', async () => {

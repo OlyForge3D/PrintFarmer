@@ -341,7 +341,17 @@ const renderWithProviders = (ui: React.ReactElement, { route = '/slicer' } = {})
 // === Tests ===
 describe('NewSliceJobPage', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // #1028: several tests queue one-shot behaviour with `mockResolvedValueOnce`
+    // / `mockRejectedValueOnce` (L393, L501-502, L655, L666). `clearAllMocks`
+    // only wipes call history — it leaves an unconsumed one-shot on the queue,
+    // where it fires in whichever test happens to run next. Under
+    // `--sequence.shuffle` that put the rejection queued by "should handle
+    // profile service errors gracefully" in front of the profile-filtering
+    // tests: machine profiles rejected, so the dependent filament/process fetch
+    // never ran and the assertion failed. `resetAllMocks` drains those queues
+    // and restores each mock to the implementation its `vi.fn(impl)` factory
+    // gave it, so every test starts from the same state whatever the order.
+    vi.resetAllMocks();
     slicerWorkspaceSpy.mockClear();
     vi.mocked(apiClient.get).mockResolvedValue({ data: mockModelList } as never);
   });

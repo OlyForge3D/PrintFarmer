@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { renderHook } from '@testing-library/react';
@@ -18,6 +18,17 @@ function createTestClient() {
 function wrapperFactory(client: QueryClient) {
   return ({ children }: { children: React.ReactNode }) => React.createElement(QueryClientProvider, { client }, children);
 }
+
+/**
+ * #1028: every test here spies on the same `apiClient` method, and `vi.spyOn`
+ * returns the *existing* mock when the property is already spied — so without a
+ * restore the call history accumulates across tests. `toHaveBeenCalledTimes(1)`
+ * then depends on this file's execution order, which is why the suite went red
+ * under `--sequence.shuffle` (3/8 runs) while passing in definition order.
+ */
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe('optimistic printer create', () => {
   it('adds temp printer immediately and replaces after success', async () => {
