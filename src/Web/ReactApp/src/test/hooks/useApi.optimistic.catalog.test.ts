@@ -61,10 +61,13 @@ describe('optimistic manufacturer/model creation', () => {
     const manufacturerId = 'mfg-1';
     client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
-    const createSpy = vi.spyOn(apiClient, 'createModel').mockImplementation(async (model: Omit<PrinterModelDto, 'id'>) => {
-      await new Promise(r => setTimeout(r, 5));
-      return { id: 'model-real', ...model } as PrinterModelDto;
-    });
+    // The optimistic entry is asserted below while the request is still in
+    // flight. A `setTimeout` would let the mutation settle inside `act()` under
+    // load, so the window is held open explicitly instead.
+    const gate = deferred<PrinterModelDto>();
+    const createSpy = vi
+      .spyOn(apiClient, 'createModel')
+      .mockImplementation(() => gate.promise);
 
     const { result } = renderHook(() => useCreateModel(), { wrapper });
 
@@ -74,6 +77,10 @@ describe('optimistic manufacturer/model creation', () => {
 
     const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-') && m.name === 'MK4')).toBe(true);
+
+    await act(async () => {
+      gate.resolve({ id: 'model-real', name: 'MK4', manufacturerId } as PrinterModelDto);
+    });
 
     await waitFor(() => {
       const models = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
@@ -91,16 +98,21 @@ describe('optimistic manufacturer/model creation', () => {
     const manufacturerId = 'mfg-err';
     client.setQueryData(queryKeys.models(manufacturerId), [] as PrinterModelDto[]);
 
-    vi.spyOn(apiClient, 'createModel').mockImplementation(async () => {
-      await new Promise(r => setTimeout(r, 5));
-      throw new Error('fail');
-    });
+    // Same held-open window as above: the rollback must not be allowed to run
+    // before the optimistic entry is observed.
+    const gate = deferred<PrinterModelDto>();
+    vi.spyOn(apiClient, 'createModel').mockImplementation(() => gate.promise);
 
     const { result } = renderHook(() => useCreateModel(), { wrapper });
     await act(async () => { result.current.mutate({ name: 'Bad', manufacturerId }); });
 
     const tempModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));
     expect(tempModels?.some(m => m.id.startsWith('temp-'))).toBe(true);
+
+    await act(async () => {
+      gate.reject(new Error('fail'));
+      await gate.promise.catch(() => {});
+    });
 
     await waitFor(() => {
       const finalModels = client.getQueryData<PrinterModelDto[]>(queryKeys.models(manufacturerId));

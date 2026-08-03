@@ -124,7 +124,7 @@ export function FailureDetectionStatusCard() {
             No printers have Obico monitoring enabled yet.
           </div>
         ) : (
-          // Equal `1fr` tracks, not the old `lg:grid-cols-[1.2fr,1fr]`. This
+          // Equal `1fr` tracks, not the old 1.2fr/1fr viewport breakpoint. This
           // does split into two columns at the measured 700px and 860px
           // container widths, so the 1.2:1 emphasis on "needing attention" is
           // genuinely lost there — `auto-fit` cannot weight tracks unequally
