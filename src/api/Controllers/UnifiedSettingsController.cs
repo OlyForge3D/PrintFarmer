@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
@@ -26,11 +26,24 @@ public class UnifiedSettingsController(
     // Keys for settings types that own their own secret fields (encrypted tokens, etc.) and must
     // not be exposed or mutated through the generic settings surface.  Each such type has a
     // dedicated admin controller that handles masking / encryption correctly.
+    //
+    // This filter applies to the metadata endpoint as well as the value endpoints, and that is
+    // deliberate: the encrypted field is a serialized property with a [JsonPropertyName], so it
+    // appears in GetAllMetadata() output and would be returned by GET /api/settings/{key}. See
+    // SettingsMetadataCoverageTests, which fails if a settings class grows a secret-bearing
+    // property without being listed here.
     private static readonly HashSet<string> _settingsBlocklist = new(StringComparer.OrdinalIgnoreCase)
     {
         HomeAssistantSettings.SectionName,
         TelegramSettings.SectionName
     };
+
+    /// <summary>
+    /// Section keys hidden from the generic settings surface because the type owns encrypted
+    /// fields. Exposed so tests can assert the list stays in sync with the settings classes
+    /// rather than re-declaring it and drifting.
+    /// </summary>
+    public static IReadOnlyCollection<string> SecretBearingSectionKeys => _settingsBlocklist;
 
     // Section keys that may be read WITHOUT authentication. This is an allowlist, not a blocklist:
     // it fails CLOSED. Only sections that a trusted, tokenless internal component genuinely needs
