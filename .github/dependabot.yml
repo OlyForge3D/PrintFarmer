@@ -12,6 +12,15 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     labels: ["dependencies", "backend"]
+    groups:
+      # EF Core assemblies are strongly versioned against each other. Bumping
+      # them individually produces CS1705 assembly version conflicts, so they
+      # must be updated as a single unit.
+      entity-framework-core:
+        patterns:
+          - "Microsoft.EntityFrameworkCore*"
+          - "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore"
+          - "Npgsql.EntityFrameworkCore.PostgreSQL"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
