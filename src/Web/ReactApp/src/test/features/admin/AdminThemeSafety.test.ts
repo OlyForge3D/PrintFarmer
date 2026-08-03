@@ -177,12 +177,160 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
 
     // Only tokens the themes actually define. A utility naming something no
     // theme declares is a different bug (a missing *definition*, not a missing
-    // mapping) and is tracked separately.
+    // mapping) and is covered by the ratchet below.
     const unmapped = [...usedColorUtilities()]
       .filter((u) => themeTokens.has(`--${u}`))
       .filter((u) => !mapped.has(`--color-${u}`))
       .sort();
 
     expect(unmapped).toEqual([]);
+  });
+});
+
+/**
+ * #1023 — a `pf-*` colour utility can be dead in two different ways.
+ *
+ * For `text-pf-success-text` to paint, both halves have to be present:
+ *
+ *   1. `--pf-success-text` is *declared* by a stylesheet, and
+ *   2. `--color-pf-success-text` is *mapped* in the `@theme` block.
+ *
+ * Miss the mapping and Tailwind never emits the rule. Miss the declaration and
+ * it emits `color: var(--pf-success-text)`, which resolves to nothing, so the
+ * element silently inherits its parent's colour. Neither failure produces a
+ * build error, a lint error, or a visible crash — the element just renders in
+ * the wrong colour, which is why `--pf-success-text` survived in `Badge.tsx`
+ * across seven themes without anyone noticing.
+ *
+ * The block above deliberately only checks half of this: it excludes utilities
+ * whose token no theme declares, because at the time it was written 33 such
+ * utilities already existed and it was scoped to the mapping bug.
+ *
+ * This is the other half, written as a ratchet rather than a clean assertion.
+ * The pre-existing offenders are pinned by name below and the comparison is an
+ * exact set equality, so:
+ *
+ *   - introducing a new dead utility fails (it is not in the list), and
+ *   - fixing a pinned one also fails, forcing its line to be deleted.
+ *
+ * The list can therefore only shrink. Burning it down is tracked separately —
+ * it spans 105 call sites across features unrelated to any settings work, and
+ * each one needs a human decision about which existing token it meant.
+ */
+describe('colour utilities name a token that exists (#1023)', () => {
+  const KNOWN_DEAD = [
+    'pf-accent-dark',
+    'pf-background',
+    'pf-background-secondary',
+    'pf-bg',
+    'pf-bg-3',
+    'pf-bg-card',
+    'pf-bg-dark',
+    'pf-bg-hover',
+    'pf-bg-primary',
+    'pf-bg-secondary',
+    'pf-bg-tertiary',
+    'pf-border-hover',
+    'pf-card',
+    'pf-hover',
+    'pf-info-text',
+    'pf-input',
+    'pf-muted',
+    'pf-panel-hover',
+    'pf-panel-secondary',
+    'pf-primary',
+    'pf-primary-hover',
+    'pf-sidebar',
+    'pf-status-danger',
+    'pf-surface',
+    'pf-surface-elevated',
+    'pf-surface-hover',
+    'pf-surface-secondary',
+    'pf-surface-tertiary',
+    'pf-table-header',
+    'pf-table-header-text',
+    'pf-text',
+    'pf-text-0',
+    'pf-text-1',
+  ];
+
+  const SRC = resolve(HERE, '../../..');
+
+  /** Every `--pf-*` declared and every `--color-pf-*` mapped, across all CSS in src. */
+  function cssFacts(): { declared: Set<string>; mapped: Set<string> } {
+    const declared = new Set<string>();
+    const mapped = new Set<string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.css')) continue;
+        const css = readFileSync(full, 'utf8');
+        for (const m of css.matchAll(/(--pf-[a-z0-9-]+)\s*:/g)) declared.add(m[1]);
+        for (const m of css.matchAll(/(--color-pf-[a-z0-9-]+)\s*:/g)) mapped.add(m[1]);
+      }
+    };
+    walk(SRC);
+    return { declared, mapped };
+  }
+
+  /** `pf-*` colour utilities used in source, excluding this file's own examples. */
+  function usedUtilities(): Set<string> {
+    const found = new Set<string>();
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+          walk(full);
+          continue;
+        }
+        if (!/\.(tsx?|css)$/.test(entry.name)) continue;
+        if (entry.name === 'AdminThemeSafety.test.ts') continue;
+        const text = readFileSync(full, 'utf8');
+        for (const m of text.matchAll(
+          /\b(?:bg|text|border|ring|fill|stroke|divide)-(pf-[a-z0-9-]+)/g,
+        )) {
+          found.add(m[1]);
+        }
+      }
+    };
+    walk(SRC);
+    return found;
+  }
+
+  function deadUtilities(): string[] {
+    const { declared, mapped } = cssFacts();
+    return [...usedUtilities()]
+      .filter((u) => !declared.has(`--${u}`) || !mapped.has(`--color-${u}`))
+      .sort();
+  }
+
+  it('finds utilities to check', () => {
+    // Without this the comparison below could pass on an empty scan.
+    expect(usedUtilities().size).toBeGreaterThan(50);
+  });
+
+  it('declares --pf-success-text in every theme and maps it', () => {
+    const { declared, mapped } = cssFacts();
+    expect(declared.has('--pf-success-text')).toBe(true);
+    expect(mapped.has('--color-pf-success-text')).toBe(true);
+
+    // Parity is asserted generally above; this pins the specific token #1023
+    // is about, so a theme dropping it fails here by name.
+    for (const file of themeFiles) {
+      expect({ file, has: declaredTokens(file).has('--pf-success-text') }).toEqual({
+        file,
+        has: true,
+      });
+    }
+  });
+
+  it('introduces no new dead colour utility', () => {
+    expect(deadUtilities()).toEqual([...KNOWN_DEAD].sort());
   });
 });
