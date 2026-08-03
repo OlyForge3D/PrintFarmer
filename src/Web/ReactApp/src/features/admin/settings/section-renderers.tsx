@@ -37,7 +37,10 @@ function renderObico(): ReactNode {
     // card in a `columns-*` flow, so its real width (~645px at a 1920px
     // viewport) has nothing to do with the viewport. A viewport breakpoint
     // split it into two 315px halves and clipped both panels.
-    <div className="mt-4 grid gap-4 grid-cols-[repeat(auto-fit,minmax(28rem,1fr))]">
+    // `min(28rem,100%)` so the track can still collapse below its preferred
+    // floor on a narrow container; a bare `28rem` minimum overflows the
+    // `overflow-hidden` card on phone widths.
+    <div className="mt-4 grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(28rem,100%),1fr))]">
       <FailureDetectionStatusCard />
       <ObicoServersSection />
     </div>

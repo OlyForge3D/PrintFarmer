@@ -106,7 +106,7 @@ export function FailureDetectionStatusCard() {
           12px semibold uppercase with tracking-wide) plus px-4 and the border.
           Below that the single words overflow the tile and clip.
         */}
-        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]">
+        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(7.5rem,100%),1fr))]">
           <MetricTile label="Configured" value={String(data.configuredPrinterCount)} />
           <MetricTile label="Actively monitored" value={String(data.activelyMonitoredPrinterCount)} />
           <MetricTile label="Last analyzed" value={String(data.lastAnalyzedPrinterCount)} />
@@ -124,7 +124,13 @@ export function FailureDetectionStatusCard() {
             No printers have Obico monitoring enabled yet.
           </div>
         ) : (
-          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(20rem,1fr))]">
+          // Equal `1fr` tracks, not the old `lg:grid-cols-[1.2fr,1fr]`. This
+          // does split into two columns at the measured 700px and 860px
+          // container widths, so the 1.2:1 emphasis on "needing attention" is
+          // genuinely lost there — `auto-fit` cannot weight tracks unequally
+          // while still collapsing on its own. Accepted trade: the collapse
+          // matters more than the emphasis.
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))]">
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-pf-text-secondary">
                 Printers needing attention

@@ -22,6 +22,12 @@ import { describe, it, expect } from 'vitest';
  * and the defect is a class string, not behaviour. Geometry was verified
  * separately in Chromium at 1280/1440/1920/2560px: no label overflows and the
  * `Registered Obico ML Servers` heading sits on one line at all four.
+ *
+ * Each floor is wrapped in `min(<floor>,100%)`. A bare `minmax(28rem,1fr)`
+ * track cannot shrink below 448px, so on a phone-width container (~309px after
+ * the shell and page padding) it overflows the `overflow-hidden` card and is
+ * clipped. `min()` preserves the preferred floor on desktop while letting the
+ * track collapse when the container is genuinely smaller.
  */
 
 const ROOT = path.resolve(__dirname, '../../..');
@@ -46,16 +52,34 @@ describe('settings card internal layout (#1026)', () => {
   });
 
   it('the Obico extension sizes its two panels by their own width', () => {
-    // 28rem: below that the status card cannot hold four legible metric tiles
-    // side by side, so a single 645px column is the correct answer.
-    expect(read(CARD_INTERNAL_FILES[0])).toContain('grid-cols-[repeat(auto-fit,minmax(28rem,1fr))]');
+    // 28rem is deliberately high enough that the two panels always stack.
+    // Lowering it to 26rem would let them split at a 1440px viewport (860px
+    // container) but not at 1280 (700px), 1920 (645px) or 2560 (627px) — the
+    // container narrows as the viewport grows, so the panels would pop apart
+    // and back together as the window widens. A stable single column is the
+    // legible answer; that non-monotonic split is not.
+    expect(read(CARD_INTERNAL_FILES[0])).toContain(
+      'grid-cols-[repeat(auto-fit,minmax(min(28rem,100%),1fr))]'
+    );
   });
 
   it('metric tiles reserve the widest label word', () => {
     // 7.5rem = 82px ("CONFIGURED" at 12px semibold uppercase, tracking-wide)
     // plus px-4 and the 1px borders. Narrower and the word overflows the tile,
     // which is what shipped: 61px tiles holding an 82px word.
-    expect(read(CARD_INTERNAL_FILES[1])).toContain('grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]');
+    expect(read(CARD_INTERNAL_FILES[1])).toContain(
+      'grid-cols-[repeat(auto-fit,minmax(min(7.5rem,100%),1fr))]'
+    );
+  });
+
+  it.each(CARD_INTERNAL_FILES)('%s lets every auto-fit track collapse below its floor', relative => {
+    // A bare `minmax(28rem,1fr)` track cannot shrink under 448px, so on a 375px
+    // phone (~309px of content box after the shell and page padding) it
+    // overflows — and `Card` is `overflow-hidden`, so the excess is clipped
+    // rather than scrolled. `min(<floor>,100%)` keeps the preferred floor while
+    // allowing the track to collapse when the container is smaller.
+    const bareFloors = read(relative).match(/minmax\((?!min\()[^,)]+,/g) ?? [];
+    expect(bareFloors).toEqual([]);
   });
 
   it('the Obico servers heading can drop its action button to a second line', () => {

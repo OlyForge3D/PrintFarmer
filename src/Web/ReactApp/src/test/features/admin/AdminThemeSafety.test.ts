@@ -203,8 +203,13 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * across seven themes without anyone noticing.
  *
  * The block above deliberately only checks half of this: it excludes utilities
- * whose token no theme declares, because at the time it was written 33 such
+ * whose token no theme declares, because at the time it was written 31 such
  * utilities already existed and it was scoped to the mapping bug.
+ *
+ * `@theme` may alias — `--color-pf-card: var(--pf-card-bg)` — so "does the
+ * token exist" has to be asked of the alias *target*, not of the utility's own
+ * name. Checking the name directly reports `pf-card` and `pf-sidebar` as dead
+ * when both paint correctly.
  *
  * This is the other half, written as a ratchet rather than a clean assertion.
  * The pre-existing offenders are pinned by name below and the comparison is an
@@ -231,7 +236,6 @@ describe('colour utilities name a token that exists (#1023)', () => {
     'pf-bg-secondary',
     'pf-bg-tertiary',
     'pf-border-hover',
-    'pf-card',
     'pf-hover',
     'pf-info-text',
     'pf-input',
@@ -240,7 +244,6 @@ describe('colour utilities name a token that exists (#1023)', () => {
     'pf-panel-secondary',
     'pf-primary',
     'pf-primary-hover',
-    'pf-sidebar',
     'pf-status-danger',
     'pf-surface',
     'pf-surface-elevated',
@@ -256,10 +259,17 @@ describe('colour utilities name a token that exists (#1023)', () => {
 
   const SRC = resolve(HERE, '../../..');
 
-  /** Every `--pf-*` declared and every `--color-pf-*` mapped, across all CSS in src. */
-  function cssFacts(): { declared: Set<string>; mapped: Set<string> } {
+  /**
+   * Every `--pf-*` declaration, and every `--color-pf-*` mapping with its value.
+   *
+   * The mapping value matters. `@theme` may alias — `--color-pf-card:
+   * var(--pf-card-bg)` — so the token that has to exist is `--pf-card-bg`, not
+   * `--pf-card`. Comparing the utility's own name against `declared` marks
+   * every aliased utility dead even though it paints correctly.
+   */
+  function cssFacts(): { declared: Set<string>; mapped: Map<string, string> } {
     const declared = new Set<string>();
-    const mapped = new Set<string>();
+    const mapped = new Map<string, string>();
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         const full = join(dir, entry.name);
@@ -271,7 +281,9 @@ describe('colour utilities name a token that exists (#1023)', () => {
         if (!entry.name.endsWith('.css')) continue;
         const css = readFileSync(full, 'utf8');
         for (const m of css.matchAll(/(--pf-[a-z0-9-]+)\s*:/g)) declared.add(m[1]);
-        for (const m of css.matchAll(/(--color-pf-[a-z0-9-]+)\s*:/g)) mapped.add(m[1]);
+        for (const m of css.matchAll(/(--color-pf-[a-z0-9-]+)\s*:([^;]*);/g)) {
+          mapped.set(m[1], m[2].trim());
+        }
       }
     };
     walk(SRC);
@@ -303,11 +315,34 @@ describe('colour utilities name a token that exists (#1023)', () => {
     return found;
   }
 
+  /**
+   * A utility is dead when Tailwind emits nothing for it (no `@theme` mapping),
+   * or when it emits a rule whose value resolves to nothing (the mapping points
+   * at a token no stylesheet declares). Aliases are followed to their target.
+   */
   function deadUtilities(): string[] {
     const { declared, mapped } = cssFacts();
-    return [...usedUtilities()]
-      .filter((u) => !declared.has(`--${u}`) || !mapped.has(`--color-${u}`))
-      .sort();
+
+    const resolves = (utility: string): boolean => {
+      let value = mapped.get(`--color-${utility}`);
+      if (value === undefined) return false; // no rule emitted at all
+
+      // Follow `var(--pf-x)` aliases; a literal colour always resolves.
+      const seen = new Set<string>();
+      let alias = /^var\((--pf-[a-z0-9-]+)\)$/.exec(value);
+      while (alias) {
+        const target = alias[1];
+        if (seen.has(target)) return false; // cycle
+        seen.add(target);
+        if (declared.has(target)) return true;
+        value = mapped.get(`--color-${target.slice(2)}`);
+        if (value === undefined) return false;
+        alias = /^var\((--pf-[a-z0-9-]+)\)$/.exec(value);
+      }
+      return true;
+    };
+
+    return [...usedUtilities()].filter((u) => !resolves(u)).sort();
   }
 
   it('finds utilities to check', () => {
@@ -319,7 +354,6 @@ describe('colour utilities name a token that exists (#1023)', () => {
     const { declared, mapped } = cssFacts();
     expect(declared.has('--pf-success-text')).toBe(true);
     expect(mapped.has('--color-pf-success-text')).toBe(true);
-
     // Parity is asserted generally above; this pins the specific token #1023
     // is about, so a theme dropping it fails here by name.
     for (const file of themeFiles) {

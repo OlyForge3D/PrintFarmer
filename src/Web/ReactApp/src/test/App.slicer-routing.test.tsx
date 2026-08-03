@@ -12,6 +12,13 @@ vi.mock('@/common/hooks/useUnifiedLogging', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSetupStatus: vi.fn().mockResolvedValue({ needsSetup: false }),
+    // QueueRealtimeBridge mounts with every authenticated <App>. Without these
+    // it throws and enters a 100/250/500ms retry loop that races the route
+    // assertions below.
+    getQueueSubscriptionResources: vi
+      .fn()
+      .mockResolvedValue({ printerIds: [], jobIds: [], projectIds: [] }),
+    getPrinters: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -170,9 +177,7 @@ describe('App slicer route consolidation', () => {
     });
     rerender(<App />);
 
-    // #1028: the slicer route is code-split, so this wait covers a dynamic
-    // import. Under full-suite parallel load that can exceed the 1s default.
-    expect(await screen.findByText('NewSliceJobPageMock', undefined, { timeout: 5000 })).toBeInTheDocument();
+    expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
   });
 
   it('keeps a resolved disabled capability distinct from unresolved data', async () => {

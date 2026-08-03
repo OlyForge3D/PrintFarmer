@@ -36,8 +36,12 @@ public class SettingsMetadataCoverageTests
     /// <summary>Property names that indicate a stored credential rather than a user-facing value.</summary>
     private static readonly string[] SecretNameFragments =
     [
-        "Encrypted", "Secret", "Password", "ApiKey", "AccessToken", "BotToken", "PrivateKey",
+        "Encrypted", "Secret", "Password", "Passphrase", "ApiKey", "Token", "PrivateKey",
+        "Credential",
     ];
+
+    /// <summary>Types a credential can actually be stored in.</summary>
+    private static bool CanHoldASecret(Type t) => t == typeof(string) || t == typeof(byte[]);
 
     private static IEnumerable<Type> AppSettingTypes() =>
         typeof(SlicerSettings).Assembly.GetTypes()
@@ -51,17 +55,23 @@ public class SettingsMetadataCoverageTests
     /// <c>[JsonIgnore]</c>d.
     /// </summary>
     /// <remarks>
-    /// Restricted to <see cref="string"/> because a credential is stored as text. Without that
-    /// restriction the name match alone flags policy flags whose names merely contain a secret
-    /// word — <c>OctoPrintSettings.RequireApiKey</c> and <c>HashStoredApiKeys</c> are both
+    /// Restricted to types a credential can actually be stored in. Without that restriction the
+    /// name match alone flags policy flags whose names merely contain a secret word —
+    /// <c>OctoPrintSettings.RequireApiKey</c> and <c>HashStoredApiKeys</c> are both
     /// <see cref="bool"/> and hold no secret.
+    /// <para>
+    /// Known blind spot: a credential held on a nested settings object (rather than directly on
+    /// the <c>[AppSetting]</c> class) is not walked, and a credential whose property name carries
+    /// none of <see cref="SecretNameFragments"/> is not matched. Widen both lists rather than
+    /// working around this gate.
+    /// </para>
     /// </remarks>
     private static string[] SecretProperties(Type settingType) =>
         settingType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.PropertyType == typeof(string))
+            .Where(p => CanHoldASecret(p.PropertyType))
             .Where(p => p.GetCustomAttribute<JsonIgnoreAttribute>() == null)
-            .Where(p => SecretNameFragments.Any(f => p.Name.Contains(f, StringComparison.Ordinal)))
+            .Where(p => SecretNameFragments.Any(f => p.Name.Contains(f, StringComparison.OrdinalIgnoreCase)))
             .Select(p => p.Name)
             .ToArray();
 
