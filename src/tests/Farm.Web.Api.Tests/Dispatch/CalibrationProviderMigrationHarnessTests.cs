@@ -14,6 +14,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -48,6 +49,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 /// 5. The filtered unique index on <c>(IdempotencyScope, IdempotencyKey)</c> is enforced
 ///    for active calibration jobs.
 /// </summary>
+[Collection(ProviderDatabaseTestCollection.Name)]
 public class CalibrationProviderMigrationHarnessTests
 {
     // Environment variable names for optional provider connection strings.
