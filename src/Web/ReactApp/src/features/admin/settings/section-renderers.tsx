@@ -33,7 +33,11 @@ export interface SectionRenderer {
 
 function renderObico(): ReactNode {
   return (
-    <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+    // `auto-fit`, not a `lg:` breakpoint. This grid lives inside a settings
+    // card in a `columns-*` flow, so its real width (~645px at a 1920px
+    // viewport) has nothing to do with the viewport. A viewport breakpoint
+    // split it into two 315px halves and clipped both panels.
+    <div className="mt-4 grid gap-4 grid-cols-[repeat(auto-fit,minmax(28rem,1fr))]">
       <FailureDetectionStatusCard />
       <ObicoServersSection />
     </div>

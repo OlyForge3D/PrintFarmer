@@ -208,8 +208,8 @@ export function ObicoServersSection() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-[16rem] flex-1">
           <h3 className="text-lg font-semibold text-pf-text-primary">Registered Obico ML Servers</h3>
           <p className="text-sm text-pf-text-secondary">
             Add pooled Obico ML servers here. Printers can use one of these servers or fall back to the global Obico Failure Detection settings above.

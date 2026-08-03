@@ -101,7 +101,12 @@ export function FailureDetectionStatusCard() {
         </div>
       </Card.Header>
       <Card.Body className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-4">
+        {/*
+          7.5rem = the widest label's intrinsic width (82px for "CONFIGURED" at
+          12px semibold uppercase with tracking-wide) plus px-4 and the border.
+          Below that the single words overflow the tile and clip.
+        */}
+        <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))]">
           <MetricTile label="Configured" value={String(data.configuredPrinterCount)} />
           <MetricTile label="Actively monitored" value={String(data.activelyMonitoredPrinterCount)} />
           <MetricTile label="Last analyzed" value={String(data.lastAnalyzedPrinterCount)} />
@@ -119,7 +124,7 @@ export function FailureDetectionStatusCard() {
             No printers have Obico monitoring enabled yet.
           </div>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-[1.2fr,1fr]">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(20rem,1fr))]">
             <div className="space-y-2">
               <div className="text-xs font-semibold uppercase tracking-wide text-pf-text-secondary">
                 Printers needing attention
