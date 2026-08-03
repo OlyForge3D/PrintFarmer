@@ -13,14 +13,26 @@ updates:
     open-pull-requests-limit: 5
     labels: ["dependencies", "backend"]
     groups:
-      # EF Core assemblies are strongly versioned against each other. Bumping
-      # them individually produces CS1705 assembly version conflicts, so they
-      # must be updated as a single unit.
+      # Dependency families below ship as strongly versioned sets. Bumping one
+      # member without the rest produces CS1705 assembly version conflicts, so
+      # each family must move as a single unit.
+      #
+      # Order matters: a package joins the FIRST group whose patterns match it.
       entity-framework-core:
         patterns:
           - "Microsoft.EntityFrameworkCore*"
           - "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore"
-          - "Npgsql.EntityFrameworkCore.PostgreSQL"
+          - "Microsoft.Data.Sqlite*"
+          - "Npgsql*"
+      aspnetcore:
+        patterns:
+          - "Microsoft.AspNetCore*"
+      microsoft-extensions:
+        patterns:
+          - "Microsoft.Extensions*"
+        exclude-patterns:
+          # Already covered by the entity-framework-core group above.
+          - "Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
