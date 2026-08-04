@@ -1747,9 +1747,10 @@
    * (0,1,3) vs (0,1,0) specificity reading in #1088. That was the row's own
    * unconditional `hover:bg-*` utility: same layer, and `:hover` at (0,1,1)
    * outranks the selected class at (0,1,0). The fix is to withhold the hover
-   * utility while the row is selected, which is what every selectable row in
-   * the app now does. Do not add `hover:bg-x` alongside `bg-x` to defeat this
-   * rule — it is a no-op against a default that already loses to utilities.
+   * utility while the row is selected, which is what every selectable table row
+   * whose only selection signal is a background now does. Do not add
+   * `hover:bg-x` alongside `bg-x` to defeat this rule — it is a no-op against a
+   * default that already loses to utilities.
    */
   table tbody tr:hover {
     background-color: var(--pf-hover-overlay);

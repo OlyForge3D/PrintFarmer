@@ -97,14 +97,54 @@ describe('selected rows keep their highlight under the pointer (#1088)', () => {
     // Guards against someone re-adding a hover alongside the ternary rather
     // than in place of it. Scoped to the `<tr>` opening tag, because these
     // files legitimately hover buttons and breadcrumbs elsewhere.
-    const inlineRowSites = [
-      'features/fileBrowser/components/ExplorerView.tsx',
-      'features/filamentManagement/components/OpenFilamentDbBrowserModal.tsx',
-    ] as const;
+    //
+    // Scanned rather than matched with a regex. A `<tr ... >` tag holds JSX
+    // expressions that contain both `>` (arrow functions) and quoted `>`, so no
+    // regex delimits the tag correctly: a lazy `[\s\S]*?\n\s*>` starting at a
+    // bare `<tr>` runs on until the next line-leading `>`, swallowing whatever
+    // sits between. This walks the tag, tracking quotes and brace depth, and
+    // stops at the first `>` outside both.
+    const openingTags = (source: string, tag: string): string[] => {
+      const found: string[] = [];
+      const start = new RegExp(`<${tag}\\b`, 'g');
 
-    it.each(inlineRowSites)('%s declares no unconditional hover on the row', (file) => {
-      const rowTags = [...read(file).matchAll(/<tr\b[\s\S]*?\n\s*>/g)].map((match) => match[0]);
-      expect(rowTags.length).toBeGreaterThan(0);
+      for (const match of source.matchAll(start)) {
+        let depth = 0;
+        let quote = '';
+
+        for (let i = match.index + match[0].length; i < source.length; i += 1) {
+          const char = source[i];
+
+          if (quote) {
+            if (char === '\\') i += 1;
+            else if (char === quote) quote = '';
+            continue;
+          }
+          if (char === '"' || char === "'" || char === '`') quote = char;
+          else if (char === '{') depth += 1;
+          else if (char === '}') depth -= 1;
+          else if (char === '>' && depth === 0) {
+            found.push(source.slice(match.index, i + 1));
+            break;
+          }
+        }
+      }
+
+      return found;
+    };
+
+    // Exact counts, not `> 0`. A scan that silently stops seeing a row would
+    // stay green forever, which is the failure mode a style gate cannot afford.
+    // Both files render one header row plus the selectable row; the filament
+    // browser has a second header row for its grouped columns.
+    const inlineRowSites: ReadonlyArray<[string, number]> = [
+      ['features/fileBrowser/components/ExplorerView.tsx', 2],
+      ['features/filamentManagement/components/OpenFilamentDbBrowserModal.tsx', 3],
+    ];
+
+    it.each(inlineRowSites)('%s declares no unconditional hover on the row', (file, expectedRows) => {
+      const rowTags = openingTags(read(file), 'tr');
+      expect(rowTags).toHaveLength(expectedRows);
 
       const offenders = rowTags.flatMap((tag) =>
         [...tag.matchAll(/hover:bg-[\w./[\]-]+/g)]
