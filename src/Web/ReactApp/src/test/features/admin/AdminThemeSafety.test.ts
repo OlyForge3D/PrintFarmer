@@ -211,30 +211,16 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * name. Checking the name directly reports `pf-card` and `pf-sidebar` as dead
  * when both paint correctly.
  *
- * This is the other half, written as a ratchet rather than a clean assertion.
- * The pre-existing offenders are pinned by name below and the comparison is an
- * exact set equality, so:
+ * This is the other half. It began as a ratchet: the pre-existing offenders were
+ * pinned by name and compared with exact set equality, so introducing a new dead
+ * utility failed (not in the list) and fixing a pinned one also failed, forcing
+ * its line to be deleted. The list could only shrink.
  *
- *   - introducing a new dead utility fails (it is not in the list), and
- *   - fixing a pinned one also fails, forcing its line to be deleted.
- *
- * The list can therefore only shrink. Burning it down is tracked separately —
- * it spans 105 call sites across features unrelated to any settings work, and
- * each one needs a human decision about which existing token it meant.
+ * It has now shrunk to nothing (#1046), so the ratchet is gone and this is the
+ * clean assertion it was always meant to become: no colour utility may name a
+ * token that does not exist.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
-  const KNOWN_DEAD = [
-    'pf-accent-dark',
-    'pf-bg-hover',
-    'pf-border-hover',
-    'pf-hover',
-    'pf-panel-hover',
-    'pf-primary',
-    'pf-primary-hover',
-    'pf-status-danger',
-    'pf-surface-hover',
-  ];
-
   const SRC = resolve(HERE, '../../..');
 
   /**
@@ -342,7 +328,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
     }
   });
 
-  it('introduces no new dead colour utility', () => {
-    expect(deadUtilities()).toEqual([...KNOWN_DEAD].sort());
+  it('has no dead colour utility', () => {
+    expect(deadUtilities()).toEqual([]);
   });
 });

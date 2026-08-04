@@ -92,7 +92,7 @@ export const MachineProfileStep: React.FC<MachineProfileStepProps> = ({
                 className={`flex items-center gap-3 p-4 rounded-lg border cursor-pointer transition-colors ${
                   isSelected
                     ? 'border-pf-accent bg-pf-accent/10'
-                    : 'border-pf-border hover:bg-pf-bg-hover'
+                    : 'border-pf-border hover:bg-pf-bg-2'
                 }`}
               >
                 <Checkbox

@@ -977,7 +977,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   placeholder="Search profiles by name, material, or manufacturer..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-pf-bg-0 border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-primary focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-2 bg-pf-bg-0 border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-accent focus:border-transparent"
                 />
               </div>
               <Button
@@ -1505,7 +1505,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           {/* Status Icon */}
           {reseedStatus === 'loading' && (
             <div className="animate-spin">
-              <TimerSandIcon className="h-12 w-12 text-pf-primary" />
+              <TimerSandIcon className="h-12 w-12 text-pf-accent" />
             </div>
           )}
           {reseedStatus === 'success' && (

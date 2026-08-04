@@ -486,7 +486,7 @@ export function PrinterMaintenancePage() {
       </p>
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-primary" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent" />
         </div>
       ) : (
         <div className="space-y-6">
@@ -638,7 +638,7 @@ export function PrinterMaintenancePage() {
             {/* Deployed Maintenance Plans */}
             <section className="bg-pf-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
-                <ClockIcon className="h-5 w-5 text-pf-primary" />
+                <ClockIcon className="h-5 w-5 text-pf-accent" />
                 Deployed Plans
               </h2>
               {scopedDeployments.length === 0 ? (
@@ -707,7 +707,7 @@ export function PrinterMaintenancePage() {
                           <div className="flex-1">
                             <span className="font-medium text-pf-text-primary">{log.taskName}</span>
                             {log.component && (
-                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-primary rounded-sm">
+                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-accent rounded-sm">
                                 {log.component}
                               </span>
                             )}
@@ -788,7 +788,7 @@ function StatCard({ icon: Icon, label, value, highlight }: StatCardProps) {
   return (
     <div className={`p-4 rounded-lg border ${highlight ? 'bg-pf-warning/10 border-pf-warning/30' : 'bg-pf-card border-pf-border'}`}>
       <div className="flex items-center gap-3">
-        <Icon className={`h-8 w-8 ${highlight ? 'text-pf-warning' : 'text-pf-primary'}`} />
+        <Icon className={`h-8 w-8 ${highlight ? 'text-pf-warning' : 'text-pf-accent'}`} />
         <div>
           <p className="text-2xl font-bold text-pf-text-primary">{value}</p>
           <p className="text-xs text-pf-text-tertiary">{label}</p>

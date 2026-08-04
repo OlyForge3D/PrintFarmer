@@ -121,7 +121,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       {/* Row 1: Printer name, Status, Started/Completed on same line */}
       <div className="flex items-center gap-6 mb-3">
         <div className="shrink-0">
-          <div className="text-lg font-bold text-pf-primary">{operation.printerName}</div>
+          <div className="text-lg font-bold text-pf-accent">{operation.printerName}</div>
         </div>
         <div className="shrink-0">
           <span className="text-sm font-medium text-pf-text-secondary">Status:</span>
@@ -277,7 +277,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       )}
 
       <div className="mb-2 shrink-0">
-        <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
+        <div className="text-md font-semibold text-pf-accent mb-1">Discovered Files</div>
         <div className="text-xs text-pf-text-muted mb-2">
           You can retry or skip failed files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>

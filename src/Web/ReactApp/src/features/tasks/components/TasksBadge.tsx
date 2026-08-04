@@ -23,7 +23,7 @@ export function TasksBadge() {
   return (
     <Link
       to="/dashboard"
-      className="relative flex items-center p-1.5 rounded-md hover:bg-pf-bg-hover transition-colors"
+      className="relative flex items-center p-1.5 rounded-md hover:bg-pf-bg-2 transition-colors"
       title={`${count} pending task${count !== 1 ? 's' : ''}`}
     >
       <AlertCircleIcon className="h-5 w-5 text-pf-warning" />

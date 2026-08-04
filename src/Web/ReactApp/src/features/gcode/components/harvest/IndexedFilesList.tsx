@@ -386,7 +386,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-8 text-pf-primary">
+      <div className="flex flex-col items-center justify-center gap-3 py-8 text-pf-accent">
         <svg className="w-8 h-8 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         <p className="font-medium">Loading files...</p>
         <p className="text-sm text-pf-text-secondary">Connecting to harvest operation</p>
@@ -422,7 +422,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   return (
     <div className="flex flex-col h-full">
       {!hideHeader && (
-        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-bg-1 z-20">Indexed Files</h4>
+        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-accent sticky top-0 bg-pf-bg-1 z-20">Indexed Files</h4>
       )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
@@ -454,7 +454,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                   <td className="p-2 border-b border-pf-border text-center">
                     <Checkbox checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
-                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.filePath}>
+                  <td className="p-2 border-b border-pf-border font-mono text-pf-accent" title={file.filePath}>
                     <div className="flex items-center gap-2">
                       {file.thumbnailUrl && (
                         <img
@@ -610,11 +610,11 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
         <Modal isOpen={!!errorModalFile} onClose={() => setErrorModalFile(null)} title="File Import Error" size="md">
           <div className="space-y-4">
             <div>
-              <h3 className="font-semibold text-pf-primary mb-2">File Name</h3>
+              <h3 className="font-semibold text-pf-accent mb-2">File Name</h3>
               <p className="text-pf-text-secondary font-mono text-sm">{errorModalFile.fileName}</p>
             </div>
             <div>
-              <h3 className="font-semibold text-pf-primary mb-2">Error Details</h3>
+              <h3 className="font-semibold text-pf-accent mb-2">Error Details</h3>
               <p className="text-pf-error bg-pf-error-bg rounded-sm px-3 py-2 text-sm">{errorModalFile.error || 'No error details available'}</p>
             </div>
             <div className="flex gap-2 justify-end pt-4">

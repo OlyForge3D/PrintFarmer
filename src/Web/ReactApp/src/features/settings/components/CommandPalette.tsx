@@ -563,7 +563,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                             <span className="mt-1 flex items-center gap-2 text-sm font-medium text-pf-text-primary">
                               <HighlightedFuzzyText text={result.item.label} matches={result.labelMatches} />
                               {isDestructive ? (
-                                <span className="rounded-md border border-pf-status-danger/40 bg-pf-status-danger/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pf-status-danger">
+                                <span className="rounded-md border border-pf-error/40 bg-pf-error/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-pf-error">
                                   Confirm
                                 </span>
                               ) : null}

@@ -248,7 +248,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                       variant="unstyled"
                       key={brand.id}
                       onClick={() => handleSelectBrand(brand)}
-                      className="flex items-center gap-2 p-3 rounded-lg border border-pf-border hover:bg-pf-surface-hover hover:border-pf-accent transition-colors text-left"
+                      className="flex items-center gap-2 p-3 rounded-lg border border-pf-border hover:bg-pf-bg-2 hover:border-pf-accent transition-colors text-left"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-sm text-pf-text-primary truncate">{brand.name}</div>
@@ -277,7 +277,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
                     variant="unstyled"
                     key={mat.id}
                     onClick={() => handleSelectMaterial(mat)}
-                    className="flex flex-col items-center justify-center p-4 rounded-lg border border-pf-border hover:bg-pf-surface-hover hover:border-pf-accent transition-colors"
+                    className="flex flex-col items-center justify-center p-4 rounded-lg border border-pf-border hover:bg-pf-bg-2 hover:border-pf-accent transition-colors"
                   >
                     <div className="font-medium text-sm text-pf-text-primary">{mat.material}</div>
                     <div className="text-xs text-pf-text-muted mt-1">{mat.filamentCount} filament{mat.filamentCount !== 1 ? 's' : ''}</div>
@@ -472,7 +472,7 @@ function OfdFilamentRow({
 
   return (
     <tr
-      className={`border-t border-pf-border cursor-pointer hover:bg-pf-surface-hover ${
+      className={`border-t border-pf-border cursor-pointer hover:bg-pf-bg-2 ${
         isSelected ? 'bg-pf-accent-bg/15' : ''
       }`}
       onClick={() => onToggle(entry)}

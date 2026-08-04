@@ -122,7 +122,7 @@ export const ExportMenu: React.FC<Props> = ({ days }) => {
               key={opt.type}
               ref={(el) => { itemRefs.current[i] = el; }}
               role="menuitem"
-              className="w-full px-3 py-1.5 text-left text-sm text-pf-text-primary hover:bg-pf-hover transition-colors"
+              className="w-full px-3 py-1.5 text-left text-sm text-pf-text-primary hover:bg-pf-bg-2 transition-colors"
               onClick={() => handleExport(opt.type)}
             >
               {opt.label}

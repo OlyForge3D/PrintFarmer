@@ -205,7 +205,7 @@ export const PrinterLocationDragDrop: React.FC<PrinterLocationDragDropProps> = (
                   key={location.id}
                   onDragOver={handleDragOver}
                   onDrop={(e) => handleDropOnLocation(e, location.id)}
-                  className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 shadow-sm hover:border-pf-primary transition-colors"
+                  className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 shadow-sm hover:border-pf-accent transition-colors"
                 >
                   <h3 className="text-lg font-semibold mb-2 text-pf-text-primary">{location.name}</h3>
                   {location.description && (
@@ -255,7 +255,7 @@ const PrinterCard: React.FC<PrinterCardProps> = ({ printer, onDragStart, isDragg
       onDragStart={onDragStart}
       className={`
         bg-pf-bg-1 border rounded-md p-3 cursor-move transition-all shadow-xs
-        ${isDragging ? 'opacity-50 scale-95 border-pf-accent' : 'border-pf-border hover:shadow-md hover:border-pf-primary'}
+        ${isDragging ? 'opacity-50 scale-95 border-pf-accent' : 'border-pf-border hover:shadow-md hover:border-pf-accent'}
       `}
     >
       <div className="flex items-center justify-between">

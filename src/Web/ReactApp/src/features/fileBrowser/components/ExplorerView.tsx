@@ -190,7 +190,7 @@ const FolderTreeItem = ({
     <li className="relative">
       <div
         className={`flex items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${
-          isDragOver ? 'bg-pf-accent-bg/20 border border-pf-primary' : ''
+          isDragOver ? 'bg-pf-accent-bg/20 border border-pf-accent' : ''
         } ${isCurrent ? 'bg-pf-accent-bg text-white' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
         style={{ paddingLeft: depth * 12 + 8 }}
         onDragOver={handleDragOver}
@@ -220,7 +220,7 @@ const FolderTreeItem = ({
         <Button
           type="button"
           variant="subtle"
-          className="flex-1 justify-start text-left p-0 h-auto focus-visible:ring-2 focus-visible:ring-pf-primary"
+          className="flex-1 justify-start text-left p-0 h-auto focus-visible:ring-2 focus-visible:ring-pf-accent"
           onClick={() => onNavigate(node.path)}
         >
           {displayName}

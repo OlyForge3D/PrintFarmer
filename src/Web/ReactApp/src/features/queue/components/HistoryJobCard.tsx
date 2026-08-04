@@ -111,7 +111,7 @@ export default function HistoryJobCard({
   };
 
   return (
-    <div className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-border-hover transition-colors">
+    <div className="bg-pf-bg-0 border border-pf-border rounded-lg p-4 hover:border-pf-border-strong transition-colors">
       {/* Header: Name and Status */}
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex-1">

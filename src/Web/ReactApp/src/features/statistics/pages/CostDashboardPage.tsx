@@ -83,7 +83,7 @@ export function CostDashboardContent({
             label="Material Cost %"
             value={`${materialCostPercentage}%`}
             loading={summaryLoading}
-            color="text-pf-primary"
+            color="text-pf-accent"
           />
           <KpiCard
             label="Energy Cost %"

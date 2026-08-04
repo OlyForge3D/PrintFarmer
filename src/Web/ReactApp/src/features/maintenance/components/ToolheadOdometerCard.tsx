@@ -61,7 +61,7 @@ export function ToolheadOdometerCard({
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-pf-text-primary truncate">{label}</div>
           <div className="mt-2 flex items-center gap-2 text-xs">
-            <ClockIcon className="h-4 w-4 shrink-0 text-pf-primary" aria-hidden />
+            <ClockIcon className="h-4 w-4 shrink-0 text-pf-accent" aria-hidden />
             <div className="min-w-0">
               <div className="text-pf-text-tertiary">Cumulative print hours</div>
               <div
