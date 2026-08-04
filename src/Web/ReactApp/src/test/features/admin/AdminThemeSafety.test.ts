@@ -219,6 +219,13 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * It has now shrunk to nothing (#1046), so the ratchet is gone and this is the
  * clean assertion it was always meant to become: no colour utility may name a
  * token that does not exist.
+ *
+ * One limit worth stating, because the previous version of this scan did not
+ * state its own and so read as a stronger guarantee than it gave: this checks
+ * *utilities*. A raw `var(--color-pf-x)` written into an inline style or a
+ * `style={{}}` prop is not a utility and is invisible here. `Slider.tsx` and
+ * `MmuControlBox.tsx` both do that today against tokens that do not exist; they
+ * are tracked separately rather than silently covered by this assertion.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
   const SRC = resolve(HERE, '../../..');
@@ -254,7 +261,22 @@ describe('colour utilities name a token that exists (#1023)', () => {
     return { declared, mapped };
   }
 
-  /** `pf-*` colour utilities used in source, excluding this file's own examples. */
+  /**
+   * `pf-*` colour utilities used in source, excluding this file's own examples.
+   *
+   * The prefix list has to cover every Tailwind utility that can name a colour
+   * token, not just the bare seven. A narrower pattern is not merely incomplete,
+   * it is misleading: it lets the assertion below report "no dead utilities"
+   * while `border-t-pf-bg-3`, `to-pf-accent-dark` and `ring-offset-pf-bg` are
+   * all live in the tree naming tokens that do not exist (found in review of
+   * #1046, after a narrower version of this scan certified the burn-down done).
+   *
+   * Covered beyond the bare colour prefixes:
+   *   - directional borders and dividers  `border-t-`, `divide-x-`
+   *   - gradient stops                    `from-`, `via-`, `to-`
+   *   - ring offset                       `ring-offset-`
+   *   - outline / shadow / accent / caret
+   */
   function usedUtilities(): Set<string> {
     const found = new Set<string>();
     const walk = (dir: string) => {
@@ -269,7 +291,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
         if (entry.name === 'AdminThemeSafety.test.ts') continue;
         const text = readFileSync(full, 'utf8');
         for (const m of text.matchAll(
-          /\b(?:bg|text|border|ring|fill|stroke|divide)-(pf-[a-z0-9-]+)/g,
+          /\b(?:(?:bg|text|border|ring|fill|stroke|divide|outline|shadow|accent|caret)(?:-(?:t|b|l|r|s|e|x|y|offset))?|from|via|to)-(pf-[a-z0-9-]+)/g,
         )) {
           found.add(m[1]);
         }

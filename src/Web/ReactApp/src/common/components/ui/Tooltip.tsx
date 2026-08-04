@@ -26,10 +26,10 @@ const positionClasses: Record<TooltipPosition, string> = {
 };
 
 const arrowClasses: Record<TooltipPosition, string> = {
-  top: 'top-full left-1/2 -translate-x-1/2 border-t-pf-bg-3 border-x-transparent border-b-transparent',
-  bottom: 'bottom-full left-1/2 -translate-x-1/2 border-b-pf-bg-3 border-x-transparent border-t-transparent',
-  left: 'left-full top-1/2 -translate-y-1/2 border-l-pf-bg-3 border-y-transparent border-r-transparent',
-  right: 'right-full top-1/2 -translate-y-1/2 border-r-pf-bg-3 border-y-transparent border-l-transparent',
+  top: 'top-full left-1/2 -translate-x-1/2 border-t-pf-bg-2 border-x-transparent border-b-transparent',
+  bottom: 'bottom-full left-1/2 -translate-x-1/2 border-b-pf-bg-2 border-x-transparent border-t-transparent',
+  left: 'left-full top-1/2 -translate-y-1/2 border-l-pf-bg-2 border-y-transparent border-r-transparent',
+  right: 'right-full top-1/2 -translate-y-1/2 border-r-pf-bg-2 border-y-transparent border-l-transparent',
 };
 
 export const Tooltip: React.FC<TooltipProps> = ({

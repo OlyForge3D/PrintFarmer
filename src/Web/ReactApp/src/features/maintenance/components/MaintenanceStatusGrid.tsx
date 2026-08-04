@@ -77,7 +77,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       className={`
         w-full text-left bg-pf-bg-1 border border-pf-border rounded-lg p-4
         hover:border-pf-accent/50 hover:shadow-md transition-all duration-200
-        focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg
+        focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg-0
       `}
       aria-label={`${printer.printerName} - ${status.label}`}
     >

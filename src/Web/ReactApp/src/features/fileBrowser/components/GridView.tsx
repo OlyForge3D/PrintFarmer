@@ -80,8 +80,8 @@ export const GridView = ({
                 <div
                   key={file.id}
                   className={`rounded-lg border overflow-hidden transition-all focus-within:ring-2 focus-within:ring-pf-accent group ${
-                    isSelected 
-                      ? 'border-pf-accent bg-pf-accent-bg/5 shadow-md' 
+                    isSelected
+                      ? 'border-pf-accent bg-pf-accent-bg/5 shadow-md'
                       : 'border-pf-border bg-pf-bg-0 hover:shadow-md hover:border-pf-accent/50'
                   }`}
                   role="group"

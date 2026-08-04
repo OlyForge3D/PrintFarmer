@@ -426,7 +426,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
       )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 bg-pf-bg-1 text-pf-text-secondary z-30">
+          <thead className="sticky top-0 bg-pf-bg-2 text-pf-text-secondary z-30">
             <tr>
               <th className="p-2 border-b border-pf-border whitespace-nowrap">
                 <Checkbox checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
@@ -447,7 +447,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
               return (
                 <tr
                   key={key}
-                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-1'} ${error ? 'border-l-4 border-pf-error' : ''}`}
+                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-[var(--pf-hover-overlay)]'} ${error ? 'border-l-4 border-pf-error' : ''}`}
                   tabIndex={0}
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
