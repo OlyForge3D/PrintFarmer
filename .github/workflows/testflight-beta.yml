@@ -26,7 +26,9 @@
 #     The .p8 private key file content (raw PEM or base64-encoded).
 #
 # OPTIONAL:
-#   SLACK_WEBHOOK_URL — Slack incoming webhook for build notifications.
+#   TESTFLIGHT_EXTERNAL_GROUPS
+#     Comma-separated TestFlight external group names. When unset, the build is
+#     uploaded without external distribution.
 #
 # =============================================================================
 
@@ -375,27 +377,6 @@ jobs:
           fi
 
           fastlane pilot upload "${PILOT_ARGS[@]}"
-
-      - name: Notify Slack
-        if: success()
-        uses: slackapi/slack-github-action@v4
-        with:
-          payload: |
-            {
-              "text": "✅ TestFlight Beta Build Uploaded",
-              "blocks": [
-                {
-                  "type": "section",
-                  "text": {
-                    "type": "mrkdwn",
-                    "text": "*TestFlight Beta Uploaded*\n*Version:* ${{ steps.version.outputs.version }}\n*Build:* ${{ steps.version.outputs.build_number }}\n*Tag:* ${{ steps.version.outputs.tag_name }}\n*Repo:* <https://github.com/OlyForge3D/PrintFarmer|OlyForge3D/PrintFarmer>"
-                  }
-                }
-              ]
-            }
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        continue-on-error: true
 
       - name: Create GitHub Release
         if: success()
