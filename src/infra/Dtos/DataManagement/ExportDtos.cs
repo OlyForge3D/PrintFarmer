@@ -222,19 +222,19 @@ public class PrinterExportDto
     public bool IsAvailable { get; set; }
 
     /// <summary>
-    /// API key for backend authentication (OctoPrint and some PrusaLink setups).
+    /// API key accepted during restore. Default exports never serialize this field.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? ApiKey { get; set; }
 
     /// <summary>
-    /// Username for Digest authentication (PrusaLink)
+    /// Username accepted during restore. Default exports never serialize this field.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Username { get; set; }
 
     /// <summary>
-    /// Password for Digest authentication (PrusaLink)
+    /// Password accepted during restore. Default exports never serialize this field.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     public string? Password { get; set; }

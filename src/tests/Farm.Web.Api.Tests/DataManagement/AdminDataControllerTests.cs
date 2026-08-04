@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Web.Api.Tests.TestInfrastructure;
@@ -11,6 +13,10 @@ namespace Farm.Web.Api.Tests.DataManagement;
 [Collection(IntegrationTestCollection.Name)]
 public class AdminDataControllerTests : IAsyncLifetime
 {
+    private const string ApiKeySentinel = "admin-data-api-key-sentinel";
+    private const string UsernameSentinel = "admin-data-username-sentinel";
+    private const string PasswordSentinel = "admin-data-password-sentinel";
+
     private CustomWebApplicationFactory? _factory;
     private HttpClient? _client;
 
@@ -33,21 +39,37 @@ public class AdminDataControllerTests : IAsyncLifetime
         }
     }
 
-    [Fact]
-    public async Task ExportFull_Unauthenticated_Returns401()
+    [Theory]
+    [InlineData("GET", "/api/admin/data/export/catalog")]
+    [InlineData("POST", "/api/admin/data/import/catalog")]
+    [InlineData("GET", "/api/admin/data/export/printers")]
+    [InlineData("GET", "/api/admin/data/export/full")]
+    [InlineData("POST", "/api/admin/data/import/full")]
+    [InlineData("POST", "/api/admin/data/seed/reload")]
+    public async Task Route_Unauthenticated_Returns401(string method, string route)
     {
         using HttpClient anon = _factory!.CreateClient();
-        HttpResponseMessage response = await anon.GetAsync("/api/admin/data/export/full");
+        using HttpRequestMessage request = new(new HttpMethod(method), route);
+        HttpResponseMessage response = await anon.SendAsync(request);
+
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    [Fact]
-    public async Task ExportFull_NonAdminRole_Returns403()
+    [Theory]
+    [InlineData("GET", "/api/admin/data/export/catalog")]
+    [InlineData("POST", "/api/admin/data/import/catalog")]
+    [InlineData("GET", "/api/admin/data/export/printers")]
+    [InlineData("GET", "/api/admin/data/export/full")]
+    [InlineData("POST", "/api/admin/data/import/full")]
+    [InlineData("POST", "/api/admin/data/seed/reload")]
+    public async Task Route_AuthenticatedWithoutAdminPermission_Returns403(string method, string route)
     {
         using HttpClient nonAdmin = await _factory!.CreateAuthenticatedClientAsync(
             username: "admin-data-nonadmin",
             email: "admin-data-nonadmin@example.com");
-        HttpResponseMessage response = await nonAdmin.GetAsync("/api/admin/data/export/full");
+        using HttpRequestMessage request = new(new HttpMethod(method), route);
+        HttpResponseMessage response = await nonAdmin.SendAsync(request);
+
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
@@ -100,6 +122,32 @@ public class AdminDataControllerTests : IAsyncLifetime
         List<PrinterExportDto>? printers = await response.Content.ReadFromJsonAsync<List<PrinterExportDto>>();
         printers.Should().NotBeNull();
         printers.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("/api/admin/data/export/printers")]
+    [InlineData("/api/admin/data/export/full")]
+    public async Task Export_DefaultPayload_OmitsPrinterCredentials(string route)
+    {
+        await SeedPrinterWithCredentialsAsync();
+
+        HttpResponseMessage response = await _client!.GetAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string payload = await response.Content.ReadAsStringAsync();
+        payload.Should().NotContain(ApiKeySentinel);
+        payload.Should().NotContain(UsernameSentinel);
+        payload.Should().NotContain(PasswordSentinel);
+
+        using JsonDocument document = JsonDocument.Parse(payload);
+        JsonElement printers = route.EndsWith("/full", StringComparison.Ordinal)
+            ? document.RootElement.GetProperty("printers")
+            : document.RootElement;
+        printers.GetArrayLength().Should().Be(1);
+        JsonElement printer = printers[0];
+        printer.TryGetProperty("apiKey", out _).Should().BeFalse();
+        printer.TryGetProperty("username", out _).Should().BeFalse();
+        printer.TryGetProperty("password", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -267,5 +315,39 @@ public class AdminDataControllerTests : IAsyncLifetime
         exportedCatalog.Should().NotBeNull();
         exportedCatalog!.Manufacturers.Should().Contain(m => m.Name == "Export Test Manufacturer");
         exportedCatalog.FilamentTypes.Should().Contain(f => f.Name == "Export Test Filament");
+    }
+
+    private async Task SeedPrinterWithCredentialsAsync()
+    {
+        await using AsyncServiceScope scope = _factory!.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var manufacturer = new Manufacturer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Admin Data Redaction Manufacturer"
+        };
+        var model = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            Name = "Admin Data Redaction Model",
+            Manufacturer = manufacturer,
+            ManufacturerId = manufacturer.Id
+        };
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Admin Data Redaction Printer",
+            ServerUrl = "http://admin-data-redaction.invalid",
+            BackendPort = 80,
+            Manufacturer = manufacturer,
+            ManufacturerId = manufacturer.Id,
+            Model = model,
+            ModelId = model.Id,
+            ApiKey = ApiKeySentinel,
+            Username = UsernameSentinel,
+            Password = PasswordSentinel
+        };
+        context.Printers.Add(printer);
+        await context.SaveChangesAsync();
     }
 }

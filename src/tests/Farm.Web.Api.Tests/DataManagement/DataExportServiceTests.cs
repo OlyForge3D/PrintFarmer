@@ -2,7 +2,6 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Infrastructure.Services.Security;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -14,7 +13,6 @@ public class DataExportServiceTests
 {
     private readonly AppDbContext _context;
     private readonly Mock<ILogger<DataExportService>> _loggerMock;
-    private readonly Mock<ISensitiveDataProtector> _sensitiveDataProtectorMock;
     private readonly DataExportService _exportService;
 
     public DataExportServiceTests()
@@ -25,21 +23,7 @@ public class DataExportServiceTests
         _context = new AppDbContext(options);
 
         _loggerMock = new Mock<ILogger<DataExportService>>();
-        _sensitiveDataProtectorMock = new Mock<ISensitiveDataProtector>();
-        _sensitiveDataProtectorMock
-            .Setup(x => x.Unprotect(It.IsAny<string?>()))
-            .Returns<string?>(s =>
-            {
-                if (string.IsNullOrEmpty(s))
-                {
-                    return s;
-                }
-
-                const string prefix = "prot:";
-                return s.StartsWith(prefix, StringComparison.Ordinal) ? s[prefix.Length..] : null;
-            });
-
-        _exportService = new DataExportService(_context, _loggerMock.Object, _sensitiveDataProtectorMock.Object);
+        _exportService = new DataExportService(_context, _loggerMock.Object);
     }
 
     [Fact]
@@ -111,6 +95,46 @@ public class DataExportServiceTests
 
         // Assert
         printers.Should().BeEmpty(); // No actual printer instances, just models
+    }
+
+    [Fact]
+    public async Task ExportPrintersAsync_WithStoredCredentials_OmitsCredentials()
+    {
+        var manufacturer = new Manufacturer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Credential Redaction Manufacturer"
+        };
+        var model = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            Name = "Credential Redaction Model",
+            Manufacturer = manufacturer,
+            ManufacturerId = manufacturer.Id
+        };
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Credential Redaction Printer",
+            ServerUrl = "http://credential-redaction.invalid",
+            BackendPort = 80,
+            Manufacturer = manufacturer,
+            ManufacturerId = manufacturer.Id,
+            Model = model,
+            ModelId = model.Id,
+            ApiKey = "stored-api-key-sentinel",
+            Username = "stored-username-sentinel",
+            Password = "stored-password-sentinel"
+        };
+        _context.Printers.Add(printer);
+        await _context.SaveChangesAsync();
+
+        List<PrinterExportDto> printers = await _exportService.ExportPrintersAsync();
+
+        PrinterExportDto exportedPrinter = printers.Should().ContainSingle().Subject;
+        exportedPrinter.ApiKey.Should().BeNull();
+        exportedPrinter.Username.Should().BeNull();
+        exportedPrinter.Password.Should().BeNull();
     }
 
     [Fact]
