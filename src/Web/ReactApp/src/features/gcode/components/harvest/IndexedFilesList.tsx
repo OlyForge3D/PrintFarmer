@@ -447,7 +447,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
               return (
                 <tr
                   key={key}
-                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-[var(--pf-hover-overlay)]'} ${error ? 'border-l-4 border-pf-error' : ''}`}
+                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'} ${error ? 'border-l-4 border-pf-error' : ''}`}
                   tabIndex={0}
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
