@@ -49,6 +49,11 @@
   --color-pf-info: var(--pf-info);
   --color-pf-info-bg: var(--pf-info-bg);
   --color-pf-info-border: var(--pf-info-border);
+  /* Aliased to --pf-info-fg rather than declaring a --pf-info-text twin in all
+     seven themes. The success/error/warning families carry both, and the two
+     spellings have already drifted apart once (matrix.css success is #7fff96
+     as -fg but #7dffa0 as -text). One name, one value. */
+  --color-pf-info-text: var(--pf-info-fg);
   --color-pf-link: var(--pf-link);
   --color-pf-progress-track: var(--pf-progress-track);
   --color-pf-progress-fill: var(--pf-progress-fill);

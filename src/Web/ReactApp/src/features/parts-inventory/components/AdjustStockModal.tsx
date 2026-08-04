@@ -144,11 +144,11 @@ function AdjustStockFormBody({ part, bins, onClose }: AdjustStockFormBodyProps) 
       <div className="flex items-center justify-between rounded border border-pf-border bg-pf-bg-2 px-3 py-2">
         <div>
           <div className="text-sm text-pf-text-secondary">Current on-hand</div>
-          <div className="text-xl font-semibold text-pf-text">{part.onHand}</div>
+          <div className="text-xl font-semibold text-pf-text-primary">{part.onHand}</div>
         </div>
         <div className="text-right">
           <div className="text-sm text-pf-text-secondary">Projected</div>
-          <div className={`text-xl font-semibold ${willUnderflow ? 'text-pf-error' : 'text-pf-text'}`}>
+          <div className={`text-xl font-semibold ${willUnderflow ? 'text-pf-error' : 'text-pf-text-primary'}`}>
             {projectedOnHand}
           </div>
         </div>

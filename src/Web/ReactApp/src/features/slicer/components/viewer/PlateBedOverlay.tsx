@@ -84,10 +84,10 @@ const PlateActionButton: React.FC<PlateActionButtonProps> = ({
       disabled
         ? 'cursor-not-allowed border-pf-border/40 bg-pf-surface/40 text-pf-text-muted/40'
         : danger
-          ? 'border-pf-border/60 bg-pf-surface/80 text-pf-text hover:border-red-500 hover:bg-red-500/20 hover:text-red-300'
+          ? 'border-pf-border/60 bg-pf-surface/80 text-pf-text-primary hover:border-red-500 hover:bg-red-500/20 hover:text-red-300'
           : active
             ? 'border-pf-accent bg-pf-accent/20 text-pf-accent'
-            : 'border-pf-border/60 bg-pf-surface/80 text-pf-text hover:border-pf-accent hover:bg-pf-accent/15',
+            : 'border-pf-border/60 bg-pf-surface/80 text-pf-text-primary hover:border-pf-accent hover:bg-pf-accent/15',
     ].join(' ')}
   />
 );
@@ -177,7 +177,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
                 if (e.key === 'Enter') commit();
                 if (e.key === 'Escape') setEditing(false);
               }}
-              className="w-32 rounded border border-pf-accent bg-pf-surface px-1.5 py-0.5 text-sm text-pf-text outline-none"
+              className="w-32 rounded border border-pf-accent bg-pf-surface px-1.5 py-0.5 text-sm text-pf-text-primary outline-none"
             />
           ) : (
             <Button
@@ -192,7 +192,7 @@ export const PlateBedOverlay: React.FC<PlateBedOverlayProps> = ({
               }}
               className={[
                 'max-w-[8rem] truncate rounded px-1 text-sm font-medium hover:bg-pf-surface/60',
-                active ? 'text-pf-text' : 'text-pf-text-muted',
+                active ? 'text-pf-text-primary' : 'text-pf-text-muted',
               ].join(' ')}
             />
           )}

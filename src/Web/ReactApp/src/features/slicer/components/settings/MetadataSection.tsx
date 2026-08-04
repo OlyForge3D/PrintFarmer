@@ -62,7 +62,7 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
     <div className="flex items-center gap-1.5 py-0.5">
       <div className="w-[46%] shrink-0 truncate">
         <span
-          className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text'}`}
+          className={`text-xs font-medium ${anyModified ? 'text-pf-warning' : 'text-pf-text-primary'}`}
           title={label}
         >
           {label}
@@ -87,7 +87,7 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
                 <input
                   type="number"
                   title={meta.tooltip || `${label} ${meta.label || ''}`}
-                  className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
+                  className="w-full py-1 px-2 bg-pf-panel border border-pf-border text-pf-text-primary text-xs text-right rounded-l-lg rounded-r-none border-r-0 hover:border-pf-border-light focus:border-pf-accent-2 focus:outline-hidden"
                   value={numVal}
                   min={meta.min}
                   max={meta.max}

@@ -403,7 +403,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   }
   if (!files.length) {
     return (
-      <div className="flex items-center gap-2 text-pf-muted bg-pf-bg-1 rounded-sm px-3 py-2">
+      <div className="flex items-center gap-2 text-pf-text-muted bg-pf-bg-1 rounded-sm px-3 py-2">
         <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         Discovering files... Files will appear here as they are found.
       </div>
@@ -426,7 +426,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
       )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
+          <thead className="sticky top-0 bg-pf-bg-1 text-pf-text-secondary z-30">
             <tr>
               <th className="p-2 border-b border-pf-border whitespace-nowrap">
                 <Checkbox checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
@@ -476,14 +476,14 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                             ariaLabel={`${file.fileName} import progress`}
                             showPercent={false}
                           />
-                          <span className="text-xs text-pf-muted">
+                          <span className="text-xs text-pf-text-muted">
                             {file.progress.percent}% ({(file.progress.bytesCopied / 1024 / 1024).toFixed(1)}MB / {(file.progress.totalBytes / 1024 / 1024).toFixed(1)}MB)
                           </span>
                         </div>
                       )}
                     </td>
                   )}
-                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
+                  <td className="p-2 border-b border-pf-border text-right text-pf-text-muted">
                     <span className="text-xs">{(file.fileSizeBytes / 1024).toFixed(1)} KB</span>
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
@@ -541,7 +541,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
               </Select>
             </div>
           </div>
-          <span className="text-pf-muted text-xs">
+          <span className="text-pf-text-muted text-xs">
             Showing {files.length === 0 ? 0 : startIdx + 1}-{Math.min(endIdx, files.length)} of {files.length} files
           </span>
           {totalPages > 1 && (
@@ -564,7 +564,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 title="Previous page"
                 iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
               />
-              <span className="text-pf-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
+              <span className="text-pf-text-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
               <Button
                 variant="secondary"
                 size="sm"

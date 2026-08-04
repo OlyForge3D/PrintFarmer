@@ -147,7 +147,7 @@ export function BinsTab() {
             <tbody className="divide-y divide-pf-border">
               {filtered.map((bin) => (
                 <tr key={bin.id} className={bin.isActive ? '' : 'opacity-60'}>
-                  <td className="px-3 py-2 font-mono text-pf-text">{bin.code}</td>
+                  <td className="px-3 py-2 font-mono text-pf-text-primary">{bin.code}</td>
                   <td className="px-3 py-2">{bin.name}</td>
                   <td className="px-3 py-2 text-pf-text-secondary">{bin.location ?? '—'}</td>
                   <td className="px-3 py-2 text-pf-text-secondary">{bin.notes ?? '—'}</td>

@@ -149,7 +149,7 @@ export function PartsTab() {
             <tbody className="divide-y divide-pf-border">
               {filtered.map((part) => (
                 <tr key={part.id} className={part.isActive ? '' : 'opacity-60'}>
-                  <td className="px-3 py-2 font-mono text-pf-text">{part.sku}</td>
+                  <td className="px-3 py-2 font-mono text-pf-text-primary">{part.sku}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{part.name}</div>
                     {part.description && (

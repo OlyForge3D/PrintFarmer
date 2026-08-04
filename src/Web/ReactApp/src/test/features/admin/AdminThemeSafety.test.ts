@@ -237,9 +237,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
     'pf-bg-tertiary',
     'pf-border-hover',
     'pf-hover',
-    'pf-info-text',
     'pf-input',
-    'pf-muted',
     'pf-panel-hover',
     'pf-panel-secondary',
     'pf-primary',
@@ -250,11 +248,6 @@ describe('colour utilities name a token that exists (#1023)', () => {
     'pf-surface-hover',
     'pf-surface-secondary',
     'pf-surface-tertiary',
-    'pf-table-header',
-    'pf-table-header-text',
-    'pf-text',
-    'pf-text-0',
-    'pf-text-1',
   ];
 
   const SRC = resolve(HERE, '../../..');

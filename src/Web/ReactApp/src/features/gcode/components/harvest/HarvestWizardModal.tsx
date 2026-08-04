@@ -427,7 +427,7 @@ export function HarvestWizardModal({
           <div className="space-y-4">
             {/* Stats row */}
             <div className="flex flex-wrap gap-2">
-              <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
+              <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-primary text-xs font-semibold flex items-center justify-center px-2">
                 Found <span className="font-bold ml-1">{filesFound}</span>
               </div>
               <div className="h-7 rounded-sm bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
