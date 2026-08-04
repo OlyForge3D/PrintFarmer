@@ -552,6 +552,41 @@ public class PrinterExpressionParser
 
 The slicing pipeline downloads models, generates config files, executes OrcaSlicer, and uploads results.
 
+### Secure Model Downloads
+
+Workers resolve model bytes only through the claim-scoped routes emitted by the
+slicer API:
+
+- `/api/slice/{jobId}/model`
+- `/api/slice/{jobId}/models/{modelIndex}`
+
+The worker combines those relative routes with the explicitly configured
+`SlicerApi:BaseUrl`. Absolute, protocol-relative, `file://`, metadata, loopback,
+private-host, and other caller-selected locations are rejected because they do
+not match the claim route. Redirect following is disabled, so a trusted endpoint
+cannot redirect a worker to another host.
+
+`SlicerApi:BaseUrl` must be an absolute HTTP(S) address without embedded
+credentials, a query, or a fragment. Worker startup fails when the setting is
+missing or invalid. Private or loopback API addresses remain supported only when
+they are explicitly configured as this trusted base, which is required for local
+and container deployments.
+
+Each response is streamed with a byte limit and timeout. Configure the limits in
+`appsettings.json` or with the corresponding environment variables:
+
+| Setting | Environment variable | Default |
+|---|---|---:|
+| `Worker:ModelDownloadMaxBytes` | `Worker__ModelDownloadMaxBytes` | `536870912` (512 MiB) |
+| `Worker:ModelDownloadTimeoutSeconds` | `Worker__ModelDownloadTimeoutSeconds` | `120` |
+
+The timeout must be from 1 through 3600 seconds, and the byte limit must be a
+positive integer. Invalid values fail worker construction rather than falling
+back silently. Partial files are removed after failed, oversized, or timed-out
+downloads. Model names must be bare filenames; traversal and absolute paths are
+rejected before any request or file is opened, and the final absolute path is
+verified to remain directly inside the per-job working directory.
+
 ### Pipeline Service
 
 **File**: `src/orcaslicer-worker/Services/OrcaSlicingPipelineService.cs`
@@ -604,7 +639,14 @@ orcaslicer --slice 0 \
 // Key services
 builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
 builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>();
-builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>();
+builder.Services
+    .AddHttpClient<OrcaSlicingPipelineService>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false
+    });
+builder.Services.AddScoped<ISlicingPipelineService>(
+    services => services.GetRequiredService<OrcaSlicingPipelineService>());
 builder.Services.AddSingleton<ISlicerProfilesService>(sp => sp.GetRequiredService<CachedOrcaProfilesService>());
 
 // Background services

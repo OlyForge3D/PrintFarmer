@@ -38,13 +38,17 @@ public static class Program
         // HTTP clients (for API communication, artifact upload, and slicing pipeline)
         _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
-        _ = builder.Services.AddHttpClient<OrcaSlicingPipelineService>(); // engine-specific pipeline
+        _ = builder.Services
+            .AddHttpClient<OrcaSlicingPipelineService>(client =>
+                client.Timeout = Timeout.InfiniteTimeSpan)
+            .ConfigurePrimaryHttpMessageHandler(CreateModelDownloadHandler);
         _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
 
         // Worker services (shared core + engine specific)
         _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
         _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
-        _ = builder.Services.AddScoped<ISlicingPipelineService, OrcaSlicingPipelineService>(); // engine pipeline implements shared interface
+        _ = builder.Services.AddScoped<ISlicingPipelineService>(
+            serviceProvider => serviceProvider.GetRequiredService<OrcaSlicingPipelineService>());
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
         _ = builder.Services.AddSingleton<WorkerCapabilityProvider>(); // versioned capability advertising (issue #578)
@@ -250,4 +254,9 @@ public static class Program
 
         await app.RunAsync();
     }
+
+    internal static SocketsHttpHandler CreateModelDownloadHandler() => new()
+    {
+        AllowAutoRedirect = false,
+    };
 }
