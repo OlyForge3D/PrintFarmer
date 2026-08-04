@@ -99,7 +99,7 @@ public class StaleWorkerCleanupHostedService : BackgroundService
         _serviceMonitor?.ReportStopped(ServiceId);
     }
 
-    private async Task CleanupStaleWorkersAsync(StaleWorkerCleanupSettings settings)
+    internal async Task CleanupStaleWorkersAsync(StaleWorkerCleanupSettings settings)
     {
         try
         {
@@ -133,6 +133,8 @@ public class StaleWorkerCleanupHostedService : BackgroundService
             {
                 await MarkStaleWorkersOfflineAsync(workerRepository, staleWorkers);
             }
+
+            await workerRepository.SaveChangesAsync();
         }
         catch (Exception ex)
         {

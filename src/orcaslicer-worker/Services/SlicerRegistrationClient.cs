@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Headers;
+﻿using System.Net;
 using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
@@ -7,6 +7,13 @@ using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Worker.Core;
 
 namespace Farm.OrcaSlicer.Worker.Services;
+
+public enum SlicerHeartbeatResult
+{
+    Succeeded,
+    Retry,
+    ReRegister,
+}
 
 /// <summary>
 /// Client for registering this worker with the central slicer registry API
@@ -28,8 +35,8 @@ public interface ISlicerRegistrationClient
     /// <param name="freeSlots">Number of available job slots.</param>
     /// <param name="status">Current service status.</param>
     /// <param name="cancellationToken">Cancellation token for async operation.</param>
-    /// <returns>True if heartbeat was acknowledged; otherwise, false.</returns>
-    Task<bool> HeartbeatAsync(Guid serviceId, string apiKey, int freeSlots, string status = "Online", CancellationToken cancellationToken = default);
+    /// <returns>The action the registration loop should take after the heartbeat.</returns>
+    Task<SlicerHeartbeatResult> HeartbeatAsync(Guid serviceId, string apiKey, int freeSlots, string status = "Online", CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Deregister from the API (called on shutdown)
@@ -190,7 +197,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         }
     }
 
-    public async Task<bool> HeartbeatAsync(Guid serviceId, string apiKey, int freeSlots, string status = "Online", CancellationToken cancellationToken = default)
+    public async Task<SlicerHeartbeatResult> HeartbeatAsync(Guid serviceId, string apiKey, int freeSlots, string status = "Online", CancellationToken cancellationToken = default)
     {
         try
         {
@@ -212,19 +219,29 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
+            if (response.StatusCode is HttpStatusCode.Unauthorized
+                or HttpStatusCode.Forbidden
+                or HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning(
+                    "Heartbeat registration was rejected with {StatusCode}; the worker will register a new identity",
+                    response.StatusCode);
+                return SlicerHeartbeatResult.ReRegister;
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Heartbeat failed: {StatusCode}", response.StatusCode);
-                return false;
+                return SlicerHeartbeatResult.Retry;
             }
 
             _logger.LogDebug("Heartbeat sent successfully. FreeSlots: {FreeSlots}, Status: {Status}", freeSlots, status);
-            return true;
+            return SlicerHeartbeatResult.Succeeded;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to send heartbeat");
-            return false;
+            return SlicerHeartbeatResult.Retry;
         }
     }
 

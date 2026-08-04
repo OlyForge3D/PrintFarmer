@@ -67,9 +67,11 @@ random GUID. Docker deployments leave it unset for both single and scaled
 workers. Even if two callers present the same value and host, registration
 issues separate service GUIDs and keys and preserves both worker records.
 
-Offline and deregistered workers cannot authenticate to worker-only routes.
-Deregistration clears the registry-issued worker key immediately, and stale
-worker rows are deleted by default after the configured cleanup threshold.
+Offline and deregistered workers cannot authenticate to service-lifecycle or
+worker-only routes. A worker discards an identity rejected by the registry and
+registers a new one. Deregistration clears the registry-issued worker key
+immediately, and stale cleanup deletes both the worker row and its paired
+service identity by default after the configured threshold.
 
 ### Registry routes
 

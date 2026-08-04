@@ -153,6 +153,36 @@ public sealed class SlicerRegistrationClientTests
         }
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.OK, SlicerHeartbeatResult.Succeeded)]
+    [InlineData(HttpStatusCode.ServiceUnavailable, SlicerHeartbeatResult.Retry)]
+    [InlineData(HttpStatusCode.Unauthorized, SlicerHeartbeatResult.ReRegister)]
+    [InlineData(HttpStatusCode.Forbidden, SlicerHeartbeatResult.ReRegister)]
+    [InlineData(HttpStatusCode.NotFound, SlicerHeartbeatResult.ReRegister)]
+    public async Task HeartbeatAsync_MapsResponseToRegistrationAction(
+        HttpStatusCode statusCode,
+        SlicerHeartbeatResult expected)
+    {
+        CapturingHandler handler = new(_ => new HttpResponseMessage(statusCode));
+        using HttpClient httpClient = new(handler);
+        IConfiguration configuration = CreateConfiguration(
+            new KeyValuePair<string, string?>("SlicerApi:BaseUrl", "http://api:5245"),
+            new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "test-registration-key"));
+        SlicerRegistrationClient client = new(
+            httpClient,
+            configuration,
+            new StubBinaryDetector(),
+            NullLogger<SlicerRegistrationClient>.Instance,
+            new WorkerCapabilityProvider(configuration));
+
+        SlicerHeartbeatResult result = await client.HeartbeatAsync(
+            Guid.NewGuid(),
+            "service-key",
+            freeSlots: 1);
+
+        _ = result.Should().Be(expected);
+    }
+
     private static IConfiguration CreateConfiguration(params KeyValuePair<string, string?>[] values)
     {
         return new ConfigurationBuilder()

@@ -268,6 +268,15 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {
+            if (Guid.TryParse(worker.ServiceId, out Guid serviceId))
+            {
+                SlicerService? service = await _context.SlicerServices.FindAsync(serviceId);
+                if (service != null)
+                {
+                    _ = _context.SlicerServices.Remove(service);
+                }
+            }
+
             _ = _context.Workers.Remove(worker);
         }
     }

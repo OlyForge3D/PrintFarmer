@@ -20,7 +20,8 @@ public sealed class SlicerApiKeyValidatorTests
             new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "the-key"));
         SlicerApiKeyValidator validator = new SlicerApiKeyValidator(
             configuration,
-            Mock.Of<ISlicersRepository>());
+            Mock.Of<ISlicersRepository>(),
+            Mock.Of<IWorkerRepository>());
 
         bool result = await validator.ValidateSharedKeyAsync("the-key");
 
@@ -38,7 +39,8 @@ public sealed class SlicerApiKeyValidatorTests
             new KeyValuePair<string, string?>(legacyPath, "legacy-key"));
         SlicerApiKeyValidator validator = new SlicerApiKeyValidator(
             configuration,
-            Mock.Of<ISlicersRepository>());
+            Mock.Of<ISlicersRepository>(),
+            Mock.Of<IWorkerRepository>());
 
         bool result = await validator.ValidateSharedKeyAsync("legacy-key");
 
@@ -51,9 +53,77 @@ public sealed class SlicerApiKeyValidatorTests
         IConfiguration configuration = CreateConfiguration();
         SlicerApiKeyValidator validator = new(
             configuration,
-            Mock.Of<ISlicersRepository>());
+            Mock.Of<ISlicersRepository>(),
+            Mock.Of<IWorkerRepository>());
 
         bool result = await validator.ValidateSharedKeyAsync(apiKey: null);
+
+        _ = result.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(WorkerStatus.Online, false, true)]
+    [InlineData(WorkerStatus.Busy, false, true)]
+    [InlineData(WorkerStatus.Offline, false, false)]
+    [InlineData(WorkerStatus.Online, true, false)]
+    public async Task ValidateServiceKeyAsync_RequiresActiveWorkerWithMatchingKey(
+        string workerStatus,
+        bool isDisabled,
+        bool expected)
+    {
+        Guid serviceId = Guid.NewGuid();
+        var slicersRepository = new Mock<ISlicersRepository>();
+        _ = slicersRepository
+            .Setup(repository => repository.GetByIdAsync(serviceId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SlicerService
+            {
+                Id = serviceId,
+                ApiKey = "service-key",
+            });
+        var workerRepository = new Mock<IWorkerRepository>();
+        _ = workerRepository
+            .Setup(repository => repository.GetByServiceIdAsync(serviceId.ToString()))
+            .ReturnsAsync(new Worker
+            {
+                ServiceId = serviceId.ToString(),
+                ApiKey = "service-key",
+                Status = workerStatus,
+                IsDisabled = isDisabled,
+            });
+        SlicerApiKeyValidator validator = new(
+            CreateConfiguration(
+                new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "bootstrap-key")),
+            slicersRepository.Object,
+            workerRepository.Object);
+
+        bool result = await validator.ValidateServiceKeyAsync(serviceId, "service-key");
+
+        _ = result.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ValidateServiceKeyAsync_MissingWorker_RejectsServiceKey()
+    {
+        Guid serviceId = Guid.NewGuid();
+        var slicersRepository = new Mock<ISlicersRepository>();
+        _ = slicersRepository
+            .Setup(repository => repository.GetByIdAsync(serviceId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SlicerService
+            {
+                Id = serviceId,
+                ApiKey = "service-key",
+            });
+        var workerRepository = new Mock<IWorkerRepository>();
+        _ = workerRepository
+            .Setup(repository => repository.GetByServiceIdAsync(serviceId.ToString()))
+            .ReturnsAsync((Worker?)null);
+        SlicerApiKeyValidator validator = new(
+            CreateConfiguration(
+                new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "bootstrap-key")),
+            slicersRepository.Object,
+            workerRepository.Object);
+
+        bool result = await validator.ValidateServiceKeyAsync(serviceId, "service-key");
 
         _ = result.Should().BeFalse();
     }

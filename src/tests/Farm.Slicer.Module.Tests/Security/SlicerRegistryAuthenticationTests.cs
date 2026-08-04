@@ -144,6 +144,36 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ServiceRoutes_OfflineWorkerCredential_ReturnsUnauthorized()
+    {
+        using HttpClient client = _factory.CreateClient();
+        RegisteredService registered = await RegisterAsync(client, "offline-service");
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            Worker worker = db.Set<Worker>().Single(w => w.ServiceId == registered.Id.ToString());
+            worker.Status = WorkerStatus.Offline;
+            await db.SaveChangesAsync();
+        }
+
+        using HttpRequestMessage heartbeat = new(
+            HttpMethod.Post,
+            $"/api/slicers/{registered.Id}/heartbeat")
+        {
+            Content = JsonContent.Create(new HeartbeatDto
+            {
+                Status = WorkerStatus.Online,
+                FreeSlots = 1,
+            }),
+        };
+        heartbeat.Headers.Add("X-Slicer-Service-Api-Key", registered.ApiKey);
+
+        HttpResponseMessage response = await client.SendAsync(heartbeat);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task WorkerRoutes_DeregisteredWorkerCredential_ReturnsUnauthorized()
     {
         using HttpClient client = _factory.CreateClient();

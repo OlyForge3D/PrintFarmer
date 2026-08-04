@@ -7,10 +7,12 @@ using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.HostedServices;
 using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -384,6 +386,56 @@ public class SlicersServiceWorkerSyncTests
     public void StaleWorkerCleanup_Should_Default_To_AutoDelete()
     {
         _ = new StaleWorkerCleanupSettings().AutoDelete.Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Stale worker cleanup deletes the paired service identity")]
+    public async Task StaleWorkerCleanup_Should_Delete_Paired_Service_Identity()
+    {
+        using SlicerDbContext db = CreateDb();
+        Guid serviceId = Guid.NewGuid();
+        DateTime staleHeartbeat = DateTime.UtcNow.AddHours(-2);
+        _ = await db.Set<SlicerService>().AddAsync(new SlicerService
+        {
+            Id = serviceId,
+            Name = "stale-service",
+            ApiKey = "stale-key",
+            LastSeen = staleHeartbeat,
+        });
+        _ = await db.Set<Worker>().AddAsync(new Worker
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = serviceId.ToString(),
+            Name = "stale-worker",
+            EndpointUrl = "http://stale-worker.internal",
+            Status = WorkerStatus.Offline,
+            ApiKey = "stale-key",
+            LastHeartbeat = staleHeartbeat,
+            RegisteredAt = staleHeartbeat,
+            CreatedAt = staleHeartbeat,
+            UpdatedAt = staleHeartbeat,
+        });
+        await db.SaveChangesAsync();
+
+        ServiceCollection services = new();
+        _ = services.AddSingleton<IWorkerRepository>(new EfWorkerRepository(db));
+        using ServiceProvider serviceProvider = services.BuildServiceProvider();
+        StaleWorkerCleanupSettings settings = new()
+        {
+            AutoDelete = true,
+            StaleAfterMinutes = 60,
+        };
+        var settingsMonitor = new Mock<IOptionsMonitor<StaleWorkerCleanupSettings>>();
+        _ = settingsMonitor.SetupGet(monitor => monitor.CurrentValue).Returns(settings);
+        StaleWorkerCleanupHostedService cleanup = new(
+            serviceProvider,
+            NullLogger<StaleWorkerCleanupHostedService>.Instance,
+            settingsMonitor.Object);
+
+        await cleanup.CleanupStaleWorkersAsync(settings);
+
+        db.ChangeTracker.Clear();
+        _ = db.Set<Worker>().Should().BeEmpty();
+        _ = db.Set<SlicerService>().Should().BeEmpty();
     }
 
     private static Worker CreateWorker(

@@ -10,12 +10,14 @@ namespace Farm.Slicer.Module.Api.Services;
 /// <summary>Validates shared registration keys and service-bound lifecycle keys.</summary>
 public sealed class SlicerApiKeyValidator(
     IConfiguration configuration,
-    ISlicersRepository slicersRepository) : ISlicerApiKeyValidator
+    ISlicersRepository slicersRepository,
+    IWorkerRepository workerRepository) : ISlicerApiKeyValidator
 {
     private readonly string? _sharedKey =
         WorkerAuthConfiguration.ResolveSharedKey(configuration)?.Value;
 
     private readonly ISlicersRepository _slicersRepository = slicersRepository;
+    private readonly IWorkerRepository _workerRepository = workerRepository;
 
     /// <inheritdoc />
     public Task<bool> ValidateSharedKeyAsync(
@@ -38,7 +40,16 @@ public sealed class SlicerApiKeyValidator(
         CancellationToken ct = default)
     {
         SlicerService? service = await _slicersRepository.GetByIdAsync(serviceId, ct);
-        return service is not null && FixedTimeEquals(service.ApiKey, apiKey);
+        if (service is null || !FixedTimeEquals(service.ApiKey, apiKey))
+        {
+            return false;
+        }
+
+        Worker? worker = await _workerRepository.GetByServiceIdAsync(serviceId.ToString());
+        return worker is not null &&
+               !worker.IsDisabled &&
+               worker.Status != WorkerStatus.Offline &&
+               FixedTimeEquals(worker.ApiKey, apiKey);
     }
 
     private static bool FixedTimeEquals(string? expected, string? presented)
