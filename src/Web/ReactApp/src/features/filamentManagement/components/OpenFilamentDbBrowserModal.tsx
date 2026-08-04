@@ -472,8 +472,11 @@ function OfdFilamentRow({
 
   return (
     <tr
-      className={`border-t border-pf-border cursor-pointer hover:bg-pf-bg-2 ${
-        isSelected ? 'bg-pf-accent-bg/15' : ''
+      className={`border-t border-pf-border cursor-pointer ${
+        // Hover is withheld while selected: `hover:bg-*` scores (0,1,1) against
+        // the selected class's (0,1,0) in the same utilities layer, so an
+        // unconditional hover erased the highlight. #1088
+        isSelected ? 'bg-pf-accent-bg/15' : 'hover:bg-pf-bg-2'
       }`}
       onClick={() => onToggle(entry)}
     >
