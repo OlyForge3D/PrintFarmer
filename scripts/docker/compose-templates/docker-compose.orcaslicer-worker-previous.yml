@@ -74,7 +74,7 @@ services:
       # and refuses to accept jobs pinned to a different version.
       - Worker__EngineVersion=${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
       - Worker__VerifyBinaryVersion=true
-      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
     volumes: *orca-previous-volumes
     depends_on:
       api:

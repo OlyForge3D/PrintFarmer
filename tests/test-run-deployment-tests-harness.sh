@@ -389,23 +389,31 @@ fi
 pass "Static: configure_additional preserves pre-loaded ENABLE_SPOOLMAN in NON_INTERACTIVE mode"
 
 # ----------------------------------------------------------------------------
-# Static regression: generate_slicer_worker_api_keys must reuse
-# WORKER_SHARED_API_KEY as the primary worker's key so slicer-host ↔ worker
-# auth (WORKER_SHARED_API_KEY) matches the SlicerRegistry__ApiKey the primary
-# worker registers with. Otherwise two different values are written into .env
-# under WORKER_SHARED_API_KEY / SlicerRegistry__ApiKey and worker job-claim
-# auth fails after registration.
+# Static regression: deployment config supplies only the bootstrap key. Worker
+# registration must not fan that secret out into per-replica aliases.
 # ----------------------------------------------------------------------------
 
-read -r ws_start ws_end <<<"$(function_range generate_slicer_worker_api_keys "$DEPLOY_SCRIPT")"
+read -r ws_start ws_end <<<"$(function_range generate_slicer_worker_identities "$DEPLOY_SCRIPT")"
 if [[ "$ws_start" == "0" ]]; then
-    fail "generate_slicer_worker_api_keys not found in $DEPLOY_SCRIPT"
+    fail "generate_slicer_worker_identities not found in $DEPLOY_SCRIPT"
 fi
 ws_body=$(sed -n "${ws_start},${ws_end}p" "$DEPLOY_SCRIPT")
-if ! echo "$ws_body" | grep -qE 'WORKER_SHARED_API_KEY'; then
-    fail "generate_slicer_worker_api_keys does not reference WORKER_SHARED_API_KEY; primary worker key will diverge from the shared job-claim key."
+if echo "$ws_body" | grep -qE 'WORKER_SHARED_API_KEY|SLICER_WORKER_API_KEY'; then
+    fail "generate_slicer_worker_identities must not generate or copy worker secrets."
 fi
-pass "Static: generate_slicer_worker_api_keys reuses WORKER_SHARED_API_KEY for the primary worker"
+pass "Static: worker identity generation does not fan out bootstrap secrets"
+
+for compose_file in \
+    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml" \
+    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml"; do
+    if ! grep -q 'WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}' "$compose_file"; then
+        fail "$(basename "$compose_file") does not map the canonical WorkerAuth__SharedKey."
+    fi
+    if grep -qE 'WorkerAuth__SharedApiKey|Worker__SharedKey' "$compose_file"; then
+        fail "$(basename "$compose_file") still contains a deprecated worker-auth alias."
+    fi
+done
+pass "Static: worker compose templates use only WorkerAuth__SharedKey"
 
 echo ""
 printf '%sAll run-deployment-tests harness regressions passed%s\n' "$GREEN" "$NC"

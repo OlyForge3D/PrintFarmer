@@ -3,18 +3,17 @@ using System.Text;
 using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services.Configuration;
 
 namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>Validates shared registration keys and service-bound lifecycle keys.</summary>
 public sealed class SlicerApiKeyValidator(
     IConfiguration configuration,
-    IHostEnvironment environment,
     ISlicersRepository slicersRepository) : ISlicerApiKeyValidator
 {
-    private readonly string? _sharedKey = SlicerApiKeyConfiguration.ResolveSharedKey(configuration);
-    private readonly bool _allowInsecureDevelopmentRegistration =
-        SlicerApiKeyConfiguration.IsInsecureDevelopmentRegistrationAllowed(configuration, environment);
+    private readonly string? _sharedKey =
+        WorkerAuthConfiguration.ResolveSharedKey(configuration)?.Value;
 
     private readonly ISlicersRepository _slicersRepository = slicersRepository;
 
@@ -26,7 +25,7 @@ public sealed class SlicerApiKeyValidator(
         _ = ct;
         if (string.IsNullOrWhiteSpace(_sharedKey))
         {
-            return Task.FromResult(_allowInsecureDevelopmentRegistration);
+            return Task.FromResult(false);
         }
 
         return Task.FromResult(FixedTimeEquals(_sharedKey, apiKey));

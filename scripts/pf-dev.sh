@@ -30,6 +30,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC_DIR="$ROOT_DIR/src"
 API_DIR="$SRC_DIR/api"
 REACT_DIR="$SRC_DIR/Web/ReactApp"
+source "$ROOT_DIR/scripts/lib_worker_auth.sh"
 
 API_URL=${API_URL:-http://localhost:5245}
 SPA_DEV_URL=${SPA_DEV_URL:-http://localhost:3000}
@@ -93,8 +94,8 @@ start_services(){
   local foreground=${FOREGROUND:-0} free_ports=${FREE_PORTS:-1}
   mkdir -p "$LOG_DIR" "$PID_DIR"
   rm -f "$API_LOG" "$VITE_LOG" "$META_PID_FILE"
+  ensure_worker_auth_shared_key
   export ASPNETCORE_ENVIRONMENT=Development
-  export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
   export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-"$SPA_DEV_URL"}
   export ASPNETCORE_URLS="$API_URL"
   export DEPLOYMENT_MODE=monolithic

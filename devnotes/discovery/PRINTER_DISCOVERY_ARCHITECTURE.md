@@ -355,8 +355,8 @@ Discovery__MaxConcurrentProbes=50
 # Logging
 Logging__LogLevel__Default=Information
 
-# API Security (if needed)
-SLICER_REGISTRATION_KEY=slicer-dev-key
+# Slicer worker bootstrap authentication
+WorkerAuth__SharedKey=<bootstrap-secret>
 ```
 
 ### Docker Deployment
@@ -864,4 +864,3 @@ curl http://localhost:5245/api/printers
 The Printer Discovery Service provides a clean, scalable solution to the network discovery problem while maintaining secure service isolation. By leveraging a dual-network topology and supporting both automatic and manual discovery modes, it offers flexibility for different deployment scenarios.
 
 The architecture is production-ready and maintainable, with clear separation of concerns and extensibility for future enhancements like mDNS support and real-time progress updates.
-

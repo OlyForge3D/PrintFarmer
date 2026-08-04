@@ -66,7 +66,7 @@ services:
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
-      - Worker__SharedKey=${WORKER_SHARED_API_KEY:-}
+      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
       # Inject the immutable image digest after build/pull. It cannot be embedded while
       # constructing the image because doing so would change the digest itself.
       - Worker__ContainerDigest=${ORCASLICER_CONTAINER_DIGEST:-}
@@ -74,7 +74,6 @@ services:
       - Worker__ModelDownloadMaxBytes=${WORKER_MODEL_DOWNLOAD_MAX_BYTES:-536870912}
       - Worker__ModelDownloadTimeoutSeconds=${WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS:-120}
       - Worker__MaxMemoryMb=1024
-      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
     volumes: *worker-volumes
     depends_on:
       api:

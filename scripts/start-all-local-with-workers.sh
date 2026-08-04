@@ -34,6 +34,8 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC_DIR="$ROOT_DIR/src"
 API_DIR="$SRC_DIR/api"
 REACT_DIR="$SRC_DIR/Web/ReactApp"
+source "$ROOT_DIR/scripts/lib_worker_auth.sh"
+ensure_worker_auth_shared_key
 
 API_URL=${API_URL:-http://localhost:5245}
 REACT_URL=${REACT_URL:-http://localhost:3000}
@@ -450,7 +452,6 @@ if [[ $API_ONLY -eq 1 ]]; then
   # Start API server
   info "Starting API server at $API_URL..."
   export ASPNETCORE_ENVIRONMENT=Development
-  export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
   export DEPLOYMENT_MODE=monolithic
   export ASPNETCORE_URLS="$API_URL"
   export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"
@@ -748,44 +749,21 @@ fi
 # Start OrcaSlicer worker
 if [[ $NO_ORCA -eq 0 ]]; then
   ORCA_CONTAINER_NAME="printfarmer-orca-worker"
-  info "Ensuring OrcaSlicer worker container is running..."
-  if cid=$(docker ps -q --filter "name=^/${ORCA_CONTAINER_NAME}$"); then
-    if [[ -n "$cid" ]]; then
-      success "OrcaSlicer worker container already running (ID: ${cid:0:12})"
-      ORCA_CONTAINER_ID="$cid"
-    else
-      # If container exists but is stopped, start it
-      cid=$(docker ps -a -q --filter "name=^/${ORCA_CONTAINER_NAME}$")
-      if [[ -n "$cid" ]]; then
-        info "Starting existing stopped OrcaSlicer worker container..."
-        docker start "$ORCA_CONTAINER_NAME" >/dev/null
-        ORCA_CONTAINER_ID="$cid"
-      else
-        # Create new container
-        info "Creating new OrcaSlicer worker container..."
-        ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
-          -p ${ORCA_WORKER_URL##*:}:8080 \
-          -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
-          -e Worker__WorkingDirectory="/app/temp" \
-          -e ASPNETCORE_URLS="http://+:8080" \
-          printfarmer/orcaslicer-worker)
-        if [[ -z "$ORCA_CONTAINER_ID" ]]; then
-          error "Failed to start OrcaSlicer worker container"
-        fi
-      fi
-    fi
-  else
-    # Create new container
-    info "Creating new OrcaSlicer worker container..."
-    ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
-      -p ${ORCA_WORKER_URL##*:}:8080 \
-      -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
-      -e Worker__WorkingDirectory="/app/temp" \
-      -e ASPNETCORE_URLS="http://+:8080" \
-      printfarmer/orcaslicer-worker)
-    if [[ -z "$ORCA_CONTAINER_ID" ]]; then
-      error "Failed to start OrcaSlicer worker container"
-    fi
+  existing_cid=$(docker ps -a -q --filter "name=^/${ORCA_CONTAINER_NAME}$")
+  if [[ -n "$existing_cid" ]]; then
+    info "Recreating OrcaSlicer worker with the current bootstrap credential..."
+    docker rm -f "$ORCA_CONTAINER_NAME" >/dev/null
+  fi
+
+  ORCA_CONTAINER_ID=$(docker run -d --name "$ORCA_CONTAINER_NAME" \
+    -p ${ORCA_WORKER_URL##*:}:8080 \
+    -e WorkerAuth__SharedKey="$WorkerAuth__SharedKey" \
+    -e Worker__StorageEndpoint="http://host.docker.internal:5245" \
+    -e Worker__WorkingDirectory="/app/temp" \
+    -e ASPNETCORE_URLS="http://+:8080" \
+    printfarmer/orcaslicer-worker)
+  if [[ -z "$ORCA_CONTAINER_ID" ]]; then
+    error "Failed to start OrcaSlicer worker container"
   fi
   success "OrcaSlicer worker container ready (ID: ${ORCA_CONTAINER_ID:0:12})"
 else
@@ -807,7 +785,6 @@ ensure_postgres_container
 
 # Environment setup for API with distributed slicing enabled
 export ASPNETCORE_ENVIRONMENT=Development
-export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
 export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"

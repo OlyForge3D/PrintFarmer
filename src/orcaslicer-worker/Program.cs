@@ -3,9 +3,11 @@ using System.Text.Json;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Worker.Core; // shared worker core abstractions (IWorkerStateService, WorkerStateService, IProgressReporter, HttpProgressReporter, GracefulShutdownService, ISlicingPipelineService)
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Logging;
 
@@ -36,16 +38,19 @@ public static class Program
         _ = builder.Services.AddControllers();
 
         // HTTP clients (for API communication, artifact upload, and slicing pipeline)
-        _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
-        _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
+        _ = builder.Services.AddTransient<WorkerApiAuthenticationHandler>();
+        _ = builder.Services
+            .AddHttpClient(WorkerApiHttpClient.Name)
+            .AddHttpMessageHandler<WorkerApiAuthenticationHandler>();
+        _ = builder.Services
+            .AddHttpClient<IProgressReporter, HttpProgressReporter>()
+            .AddHttpMessageHandler<WorkerApiAuthenticationHandler>();
         AddSlicingPipelineServices(builder.Services);
-        _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
+        _ = builder.Services.AddHttpClient<ISlicerRegistrationClient, SlicerRegistrationClient>();
 
         // Worker services (shared core + engine specific)
         _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
         _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
-        _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
-        _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
         _ = builder.Services.AddSingleton<WorkerCapabilityProvider>(); // versioned capability advertising (issue #578)
 
         // Profile services - use SQLite-cached service for fast queries
@@ -69,6 +74,10 @@ public static class Program
             .AddCheck<OrcaBinaryHealthCheck>("orca_binary");
 
         WebApplication app = builder.Build();
+        ValidateWorkerAuthenticationConfiguration(
+            app.Configuration,
+            app.Environment,
+            app.Logger);
         ValidateSlicingPipelineConfiguration(app.Services);
 
         if (app.Environment.IsDevelopment())
@@ -255,8 +264,10 @@ public static class Program
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.TryAddTransient<WorkerApiAuthenticationHandler>();
         _ = services
             .AddHttpClient<OrcaSlicingPipelineService>(ConfigureModelDownloadClient)
+            .AddHttpMessageHandler<WorkerApiAuthenticationHandler>()
             .ConfigurePrimaryHttpMessageHandler(CreateModelDownloadHandler);
         _ = services.AddScoped<ISlicingPipelineService>(
             serviceProvider => serviceProvider.GetRequiredService<OrcaSlicingPipelineService>());
@@ -268,6 +279,32 @@ public static class Program
 
         using IServiceScope scope = services.CreateScope();
         _ = scope.ServiceProvider.GetRequiredService<ISlicingPipelineService>();
+    }
+
+    internal static void ValidateWorkerAuthenticationConfiguration(
+        IConfiguration configuration,
+        IHostEnvironment environment,
+        ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        WorkerAuthKeyResolution? resolution =
+            WorkerAuthConfiguration.ResolveSharedKey(configuration);
+        if (resolution is null)
+        {
+            throw new InvalidOperationException(
+                "The OrcaSlicer worker requires a registration key. Configure " +
+                $"{WorkerAuthConfiguration.SharedKeyPath} through configuration or a secret provider.");
+        }
+
+        logger.LogInformation(
+            "Worker registration authentication configured from {ConfigurationPath} via " +
+            "{ConfigurationSource} for environment {EnvironmentName}; key material is not logged.",
+            WorkerAuthConfiguration.SharedKeyPath,
+            resolution.Source,
+            environment.EnvironmentName);
     }
 
     internal static void ConfigureModelDownloadClient(HttpClient client)

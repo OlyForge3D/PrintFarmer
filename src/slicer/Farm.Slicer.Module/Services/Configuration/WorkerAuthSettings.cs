@@ -3,8 +3,7 @@
 namespace Farm.Slicer.Module.Services.Configuration;
 
 /// <summary>
-/// Configuration for worker API key authentication.
-/// Single shared key is sufficient for initial rollout; future enhancement may introduce per-worker keys.
+/// Configuration for bootstrapping slicer worker registration.
 /// </summary>
 public sealed class WorkerAuthSettings
 {
@@ -12,16 +11,9 @@ public sealed class WorkerAuthSettings
     public const string SectionName = "WorkerAuth";
 
     /// <summary>
-    /// Shared API key value that workers must present via X-Worker-Key header.
-    /// The slicer host fails startup when this is empty unless the explicit
-    /// development-only registration bypass is enabled.
+    /// Shared key used only to register a worker. Successful registration issues
+    /// a distinct service identity and key for worker-only requests.
     /// </summary>
     [MaxLength(256)]
     public string? SharedKey { get; set; }
-
-    /// <summary>
-    /// Allows unauthenticated slicer registration only when the host environment
-    /// is Development. This unsafe option is rejected in every other environment.
-    /// </summary>
-    public bool AllowInsecureDevelopmentRegistration { get; set; }
 }

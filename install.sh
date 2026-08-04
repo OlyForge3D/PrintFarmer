@@ -113,10 +113,7 @@ read_slicer_shared_key() {
     local name value
     for name in \
         WORKER_SHARED_API_KEY \
-        WorkerAuth__SharedKey \
-        WorkerAuth__SharedApiKey \
-        SlicerRegistry__ApiKey \
-        SLICER_REGISTRATION_KEY; do
+        WorkerAuth__SharedKey; do
         value="$(read_env_value "$env_file" "$name")"
         if [[ -n "$value" ]]; then
             printf '%s' "$value"

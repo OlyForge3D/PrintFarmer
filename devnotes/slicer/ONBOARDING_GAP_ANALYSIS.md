@@ -203,8 +203,10 @@ public class SlicerService {
     "ServiceName": "orcaslicer-worker",
     "Version": "1.0.0",
     "Host": "http://orcaslicer-worker:8080",
-    "HeartbeatIntervalSeconds": 30,
-    "ApiKey": "${SLICER_REGISTRATION_KEY}"
+    "HeartbeatIntervalSeconds": 30
+  },
+  "WorkerAuth": {
+    "SharedKey": "${WORKER_AUTH_SHARED_KEY}"
   },
   "Worker": {
     "MaxConcurrentJobs": 1

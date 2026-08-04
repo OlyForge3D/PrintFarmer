@@ -1,4 +1,4 @@
-﻿using Farm.Slicer.Module.Api.Services;
+﻿using Farm.Slicer.Module.Services.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.HostedServices;
@@ -11,33 +11,21 @@ internal sealed class SlicerApiKeyStartupValidationService(
     public Task StartAsync(CancellationToken cancellationToken)
     {
         _ = cancellationToken;
-        bool insecureDevelopmentRegistrationEnabled = configuration.GetValue(
-            SlicerApiKeyConfiguration.AllowInsecureDevelopmentRegistrationPath,
-            false);
-
-        if (insecureDevelopmentRegistrationEnabled && !environment.IsDevelopment())
-        {
-            throw new InvalidOperationException(
-                $"{SlicerApiKeyConfiguration.AllowInsecureDevelopmentRegistrationPath} " +
-                "may only be enabled in the Development environment.");
-        }
-
-        if (!string.IsNullOrWhiteSpace(SlicerApiKeyConfiguration.ResolveSharedKey(configuration)))
-        {
-            return Task.CompletedTask;
-        }
-
-        if (!insecureDevelopmentRegistrationEnabled)
+        WorkerAuthKeyResolution? resolution =
+            WorkerAuthConfiguration.ResolveSharedKey(configuration);
+        if (resolution is null)
         {
             throw new InvalidOperationException(
                 "The slicer module requires a shared API key. Configure " +
-                $"{SlicerApiKeyConfiguration.SharedKeyPath} through configuration or a secret provider.");
+                $"{WorkerAuthConfiguration.SharedKeyPath} through configuration or a secret provider.");
         }
 
-        logger.LogCritical(
-            "INSECURE DEVELOPMENT MODE: slicer registration API-key validation is disabled. " +
-            "Never enable {ConfigurationPath} outside local development.",
-            SlicerApiKeyConfiguration.AllowInsecureDevelopmentRegistrationPath);
+        logger.LogInformation(
+            "Worker registration authentication configured from {ConfigurationPath} via " +
+            "{ConfigurationSource} for environment {EnvironmentName}; key material is not logged.",
+            WorkerAuthConfiguration.SharedKeyPath,
+            resolution.Source,
+            environment.EnvironmentName);
 
         return Task.CompletedTask;
     }

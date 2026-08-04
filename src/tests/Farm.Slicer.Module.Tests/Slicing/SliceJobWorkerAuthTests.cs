@@ -75,6 +75,10 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
     [Fact(DisplayName = "Claim endpoint returns 401 when worker key header is invalid")]
     public async Task Claim_Returns_401_When_Header_Invalid()
     {
+        Guid serviceId = await _factory.RegisterWorkerAsync(
+            "registered-worker-key",
+            "Wrong Key Worker");
+
         // Arrange - create a queued job first
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
@@ -93,7 +97,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
 
         ClaimJobRequest request = new ClaimJobRequest
         {
-            WorkerId = Guid.NewGuid(),
+            WorkerId = serviceId,
             Capabilities = new[] { "orcaslicer" }
         };
 
@@ -103,6 +107,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "wrong-key-value");
+        requestMessage.Headers.Add("X-Worker-Id", serviceId.ToString());
         HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert
@@ -146,6 +151,10 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
     [Fact(DisplayName = "Progress endpoint returns 401 when worker key header is invalid")]
     public async Task Progress_Returns_401_When_Header_Invalid()
     {
+        Guid serviceId = await _factory.RegisterWorkerAsync(
+            "registered-worker-key",
+            "Wrong Key Worker");
+
         // Arrange - create a processing job
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
@@ -176,6 +185,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
             Content = JsonContent.Create(request)
         };
         requestMessage.Headers.Add("X-Worker-Key", "wrong-key-value");
+        requestMessage.Headers.Add("X-Worker-Id", serviceId.ToString());
         HttpResponseMessage response = await _client.SendAsync(requestMessage);
 
         // Assert

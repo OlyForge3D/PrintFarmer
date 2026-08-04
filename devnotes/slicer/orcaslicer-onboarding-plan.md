@@ -62,7 +62,9 @@ Additional registry & auth details
 
 - SignalR hub: `/hubs/slicers` with events `SlicerRegistered`, `SlicerHeartbeat`, `SlicerDeregistered` (see `docs/slicer/hub-contract.md`).
 
-- Optional lightweight auth (Phase 1): set environment variable `SLICER_REGISTRATION_KEY` on the API host to require header `X-Slicer-ApiKey` for register/heartbeat/deregister.
+- Current authentication contract: configure required `WorkerAuth__SharedKey` on
+  the API host and worker. Registration sends `X-Slicer-Api-Key`; subsequent
+  lifecycle and worker-only calls use the registry-issued per-service key.
 
 Acceptance criteria
 - Services can register and appear in `/api/slicers`
@@ -529,6 +531,5 @@ Update log
 - 2025-10-19: Phase 2 marked COMPLETE with comprehensive hardening (retry, metrics, pull model, tests)
 - 2025-10-19: Added overall progress summary and recommended next steps
 - 2025-10-12: Created and committed initial plan. Branch: `feature/orcaslicer-reimplementation`.
-
 
 

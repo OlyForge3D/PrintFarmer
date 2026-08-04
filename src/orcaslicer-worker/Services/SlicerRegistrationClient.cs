@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Worker.Core;
 
 namespace Farm.OrcaSlicer.Worker.Services;
@@ -51,6 +52,8 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
     private readonly string _serviceName;
     private readonly string _serviceVersion;
     private readonly string _serviceHost;
+    private readonly string _workerInstanceId;
+    private readonly string _registrationApiKey;
 
     /// <summary>Path of the image attestation describing the installed OrcaSlicer binary.</summary>
     private readonly string? _binaryAttestationPath;
@@ -82,6 +85,11 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
         _serviceName = configuration["SlicerRegistry:ServiceName"] ?? Environment.GetEnvironmentVariable("HOSTNAME") ?? "orcaslicer-worker";
         _serviceVersion = configuration["SlicerRegistry:Version"] ?? WorkerConstants.SlicerVersion;
         _serviceHost = configuration["SlicerRegistry:Host"] ?? "http://orcaslicer-worker:8080";
+        _workerInstanceId = Normalize(configuration["Worker:InstanceId"]) ?? WorkerIdentity.Create();
+        _registrationApiKey = ResolveRegistrationApiKey(configuration)
+            ?? throw new InvalidOperationException(
+                "The OrcaSlicer worker requires a registration key. Configure " +
+                $"{WorkerAuthConfiguration.SharedKeyPath} through configuration or a secret provider.");
 
         // Identity comes from what the image actually installed, attested by the build. The declared
         // build argument alone never establishes it, because the stub fallback does not honour it.
@@ -132,7 +140,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 }),
                 MaxConcurrentJobs = _configuration.GetValue("Worker:MaxConcurrentJobs", 1),
                 Tags = "orcaslicer,production",
-                InstanceId = _configuration["Worker:InstanceId"]
+                InstanceId = _workerInstanceId
             };
 
             string json = JsonSerializer.Serialize(registrationDto);
@@ -143,11 +151,7 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
                 Content = content
             };
 
-            string? apiKey = ResolveRegistrationApiKey(_configuration);
-            if (!string.IsNullOrWhiteSpace(apiKey))
-            {
-                request.Headers.Add("X-Slicer-ApiKey", apiKey);
-            }
+            request.Headers.Add("X-Slicer-Api-Key", _registrationApiKey);
 
             HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
 
@@ -266,16 +270,6 @@ public class SlicerRegistrationClient : ISlicerRegistrationClient
 
     internal static string? ResolveRegistrationApiKey(IConfiguration configuration)
     {
-        return FirstNonBlank(
-            configuration["WorkerAuth:SharedKey"],
-            configuration["WorkerAuth:SharedApiKey"],
-            configuration["SlicerRegistry:ApiKey"],
-            Environment.GetEnvironmentVariable("WORKER_SHARED_API_KEY"),
-            Environment.GetEnvironmentVariable("SLICER_REGISTRATION_KEY"));
-    }
-
-    private static string? FirstNonBlank(params string?[] candidates)
-    {
-        return candidates.FirstOrDefault(candidate => !string.IsNullOrWhiteSpace(candidate));
+        return WorkerAuthConfiguration.ResolveSharedKey(configuration)?.Value;
     }
 }

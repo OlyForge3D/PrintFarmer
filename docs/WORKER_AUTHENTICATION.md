@@ -6,7 +6,7 @@ container network.
 
 | Credential | Header | Scope |
 |---|---|---|
-| Shared registry key | `X-Slicer-Api-Key` | Registry list and registration |
+| Bootstrap registration key | `X-Slicer-Api-Key` | Registry list and registration |
 | Registry-issued service key | `X-Slicer-Service-Api-Key` | One registered service's lifecycle routes |
 | Registry-issued worker service key | `X-Worker-Key` and `X-Worker-Id` | Worker-only job, model, and artifact routes |
 
@@ -15,26 +15,20 @@ case-insensitive, but the hyphen placement must match.
 
 ### Configuration
 
-The API or standalone slicer host reads the shared secret from
-`WorkerAuth:SharedKey`, normally supplied as `WorkerAuth__SharedKey`. It also
-supports the process environment variable `WORKER_SHARED_API_KEY`.
+The API, standalone slicer host, and OrcaSlicer worker read the bootstrap secret
+only from `WorkerAuth:SharedKey`, normally supplied as
+`WorkerAuth__SharedKey`. `WORKER_SHARED_API_KEY` is the deployment script's
+secret input; Docker Compose maps it to the canonical .NET configuration path
+for every participating service.
 
-The OrcaSlicer worker reads the shared registration secret in this order:
+The bootstrap value is used only for registration. After registration, the
+worker keeps the returned per-service key in memory and uses it for lifecycle
+and worker-only requests.
 
-1. `SlicerRegistry:ApiKey` for registration.
-2. `Worker:SharedKey`.
-3. `Worker:SharedApiKey` for compatibility.
-4. `WORKER_SHARED_API_KEY`.
-
-The Docker deployment templates set `WorkerAuth__SharedKey` on the API/slicer
-host and `Worker__SharedKey` on the worker from the same
-`WORKER_SHARED_API_KEY` value. This shared value only bootstraps registration.
-After registration, the worker keeps the returned per-service key in memory and
-uses it for lifecycle and worker-only requests.
-
-Production must configure a non-empty shared registration key. A missing
-registration key only bypasses registry validation in the `Testing`
-environment. Worker-only routes never bypass registry-issued key validation.
+Every worker-facing process refuses to start when `WorkerAuth:SharedKey` is
+missing or blank, including `Development` and `Testing`. Startup logs identify
+the resolved configuration path and provider type, but never log the key or a
+key prefix. There is no environment bypass.
 
 ### Registration and service identity
 
@@ -64,6 +58,11 @@ They are sent as `X-Worker-Id` and `X-Worker-Key` on every worker-only request.
 PrintFarmer resolves that GUID to the internal enabled worker record and
 validates the key bound to that record. A key issued to one service cannot be
 paired with another service's GUID.
+
+`Worker:InstanceId` may provide a stable deployment identity for one worker.
+When it is unset, each worker process derives its own identity from its machine
+and process identity. Scaled Docker replicas intentionally leave the setting
+unset so they cannot overwrite one another's registration.
 
 ### Registry routes
 
@@ -103,6 +102,11 @@ Every worker-only request requires both headers:
 X-Worker-Key: <registry-issued-service-key>
 X-Worker-Id: 46df3648-8d62-4f70-b455-bb721db0c360
 ```
+
+The worker's `SlicerWorkerApi` named HTTP client uses an authentication handler
+that reads the current registered identity for every request and replaces both
+headers. Requests are rejected locally until registration has supplied a
+service ID and key.
 
 The protected routes are:
 
@@ -162,7 +166,7 @@ storage paths, or raw slicer failure details.
 
 ### Rotation and operations
 
-- Rotate the deployment shared key by updating `WORKER_SHARED_API_KEY` for the
+- Rotate the deployment bootstrap key by updating `WORKER_SHARED_API_KEY` for the
   API/slicer host and every worker, then restart the affected services
   together. This controls future registration; already registered workers use
   their per-service keys.
