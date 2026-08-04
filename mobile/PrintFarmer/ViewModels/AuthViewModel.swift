@@ -235,6 +235,16 @@ final class AuthViewModel {
         isLoading = true
         errorMessage = nil
 
+        // Registering a real backend always wins over demo mode. If demo
+        // services are still wired up, `DemoAuthService` would accept any URL
+        // and any credentials, return the mock user, and never contact
+        // `serverURL` — silently stranding the user in demo data. Leaving demo
+        // mode here guarantees this attempt hits the real server.
+        if DemoMode.shared.isActive {
+            DemoMode.shared.deactivate()
+            services.switchToReal()
+        }
+
         do {
             let outcome = try await services.authService.login(
                 serverURL: serverURL,

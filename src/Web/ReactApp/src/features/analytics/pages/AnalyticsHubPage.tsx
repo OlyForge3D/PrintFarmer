@@ -237,7 +237,7 @@ export function AnalyticsHubPage() {
           </div>
         </section>
 
-        <Tabs activeTab={activeLens} onTabChange={handleLensChange} className="overflow-hidden rounded-xl border border-pf-border bg-pf-bg-1">
+        <Tabs activeTab={activeLens} onTabChange={handleLensChange} className="overflow-hidden rounded-md border border-pf-border bg-pf-bg-1">
           <Tabs.List className="border-b border-pf-border bg-pf-bg-1 px-3 pt-3">
             {lensTabs.map((lensTab) => (
               <Tabs.Tab key={lensTab.id} id={lensTab.id} icon={lensTab.icon}>

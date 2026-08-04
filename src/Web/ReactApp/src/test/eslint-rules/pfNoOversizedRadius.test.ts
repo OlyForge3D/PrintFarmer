@@ -42,6 +42,18 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     { code: '<div className="pf-animate-spin rounded-full h-12 w-12" />' },
     { code: '<span className="animate-ping absolute h-full w-full rounded-full" />' },
 
+    // Shape evidence is matched within its own variant scope, so a scoped
+    // radius is judged against the evidence that applies where it applies.
+    // Real slider thumbs look exactly like this (Slider.tsx, SettingRow.tsx).
+    {
+      code: '<input className="[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full" />',
+    },
+    // An unconditional square is square in every scope, so unprefixed evidence
+    // excuses a scoped radius.
+    { code: '<div className="aspect-square md:rounded-full" />' },
+    // Same scope, so both apply together or neither does.
+    { code: '<div className="md:aspect-square md:rounded-full" />' },
+
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
 
@@ -77,8 +89,8 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       output: '<div className="rounded-lg border" />',
       errors: [{ messageId: 'oversized', data: { token: 'rounded-xl', px: 12 } }],
     },
-    // ...but it is legal under a raised ceiling, which is how the repo-wide
-    // registration grandfathers the existing rounded-xl usage.
+    // ...but it is legal under a raised ceiling. `maxPx` is what made the
+    // staged migration possible, and it is still the knob for any future one.
     {
       code: '<div className="rounded-2xl" />',
       options: [{ maxPx: 12 }],
@@ -265,6 +277,19 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         {
           messageId: 'fullRound',
           suggestions: [{ messageId: 'replaceWithLg', output: '<div className="md:aspect-square rounded-lg px-4" />' }],
+        },
+      ],
+    },
+    // Evidence is paired by exact variant prefix, so two different states never
+    // combine into a circle: `hover:w-4` and `focus:h-4` are not equal axes.
+    {
+      code: '<div className="hover:w-4 focus:h-4 hover:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="hover:w-4 focus:h-4 hover:rounded-lg" />' },
+          ],
         },
       ],
     },

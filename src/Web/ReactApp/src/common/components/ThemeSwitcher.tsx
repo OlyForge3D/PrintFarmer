@@ -188,7 +188,7 @@ function ThemePreview({ option }: { option: ThemeOption }) {
                   <div className="text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">Printer card</div>
                   <div className="mt-1 text-sm font-semibold">Voron 2.4</div>
                 </div>
-                <div className="rounded-full bg-[var(--preview-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--preview-accent)]">
+                <div className="rounded-xs bg-[var(--preview-accent-soft)] px-2 py-1 text-[10px] font-semibold text-[var(--preview-accent)]">
                   Active
                 </div>
               </div>
@@ -198,8 +198,8 @@ function ThemePreview({ option }: { option: ThemeOption }) {
                   <span>Current job</span>
                   <span>Layer 182 / 244</span>
                 </div>
-                <div className="h-2 rounded-full bg-white/8">
-                  <div className="h-full w-[74%] rounded-full bg-[var(--preview-accent)]" />
+                <div data-pf-progress-track className="h-2 rounded-full bg-white/8">
+                  <div data-pf-progress-fill className="h-full w-[74%] rounded-full bg-[var(--preview-accent)]" />
                 </div>
               </div>
             </div>
@@ -236,8 +236,8 @@ function ThemePreview({ option }: { option: ThemeOption }) {
                   {[58, 32, 76].map((value) => (
                     <div key={value} className="flex items-center gap-2">
                       <span className="w-8 text-[10px] uppercase tracking-[0.16em] text-[var(--preview-muted)]">{value}</span>
-                      <div className="h-1.5 flex-1 rounded-full bg-white/8">
-                        <div className="h-full rounded-full bg-[var(--preview-accent)]" style={{ width: `${value}%` }} />
+                      <div data-pf-progress-track className="h-1.5 flex-1 rounded-full bg-white/8">
+                        <div data-pf-progress-fill className="h-full rounded-full bg-[var(--preview-accent)]" style={{ width: `${value}%` }} />
                       </div>
                     </div>
                   ))}

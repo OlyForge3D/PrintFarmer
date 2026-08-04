@@ -256,7 +256,7 @@ function QueueJobCommon({
         }
       }}
       className={clsx(
-        "rounded-xl border border-pf-border bg-pf-bg-1/95 hover:bg-pf-bg-2/60 transition-all duration-200 p-3",
+        "rounded-lg border border-pf-border bg-pf-bg-1/95 hover:bg-pf-bg-2/60 transition-all duration-200 p-3",
         "shadow-[0_8px_22px_rgba(0,0,0,0.14)] motion-safe:hover:-translate-y-px motion-safe:hover:shadow-[0_14px_28px_rgba(0,0,0,0.2)]",
         deadlineState === "due-soon" && "bg-pf-warning/5",
         deadlineState === "overdue" && "bg-pf-error/10"
@@ -276,7 +276,7 @@ function QueueJobCommon({
               <h3 className="text-sm font-medium text-pf-text-primary truncate">{fileName}</h3>
               <p className="text-xs text-pf-text-secondary truncate">{printerName}</p>
             </div>
-            <span className={clsx("inline-flex px-2 py-0.5 rounded-full text-xs font-medium shrink-0", getStatusColor(status))}>
+            <span className={clsx("inline-flex px-2 py-0.5 rounded-xs text-xs font-medium shrink-0", getStatusColor(status))}>
               {status}
             </span>
           </div>

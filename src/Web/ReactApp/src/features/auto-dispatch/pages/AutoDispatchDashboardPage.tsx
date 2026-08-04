@@ -100,7 +100,7 @@ function FarmStatusBar({ stats, globalEnabled }: { stats: FarmStats; globalEnabl
   ];
 
   return (
-    <div className="relative mb-6 rounded-xl border border-pf-border bg-pf-bg-1/40 backdrop-blur-sm overflow-hidden">
+    <div className="relative mb-6 rounded-lg border border-pf-border bg-pf-bg-1/40 backdrop-blur-sm overflow-hidden">
       {/* Subtle animated scan line across the top */}
       <div className="absolute top-0 left-0 right-0 h-[1px] overflow-hidden">
         <div className={clsx('h-full w-1/3 bg-gradient-to-r from-transparent via-pf-accent/40 to-transparent', globalEnabled && 'ad-scan-line')} />
@@ -283,7 +283,7 @@ export function AutoDispatchDashboardPage() {
       <style>{COMMAND_CENTER_STYLES}</style>
 
       {!status?.printers || status.printers.length === 0 ? (
-        <div className="rounded-xl border border-pf-border bg-pf-bg-1/50 p-12 text-center">
+        <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-12 text-center">
           <PlayIcon className="w-14 h-14 mx-auto mb-4 text-pf-text-muted opacity-30" />
           <p className="text-lg font-semibold text-pf-text-primary mb-1">No Printers Configured</p>
           <p className="text-sm text-pf-text-secondary">Configure printers to enable auto-dispatch queue management.</p>
@@ -345,7 +345,7 @@ export function AutoDispatchDashboardPage() {
           </div>
 
           {filteredPrinters.length === 0 ? (
-            <div className="rounded-xl border border-pf-border bg-pf-bg-1/50 p-8 text-center">
+            <div className="rounded-lg border border-pf-border bg-pf-bg-1/50 p-8 text-center">
               <p className="text-sm text-pf-text-secondary">No printers match the current filter.</p>
             </div>
           ) : (
@@ -475,7 +475,7 @@ function PrinterStatusCard({
   return (
     <div
       className={clsx(
-        'ad-animate-in relative flex flex-col min-h-[240px] rounded-xl border bg-pf-bg-1/70 backdrop-blur-sm transition-all overflow-hidden group',
+        'ad-animate-in relative flex flex-col min-h-[240px] rounded-lg border bg-pf-bg-1/70 backdrop-blur-sm transition-all overflow-hidden group',
         config.border,
         config.glow,
         !printer.enabled && 'opacity-50 grayscale-[40%]',

@@ -13,7 +13,8 @@ interface PrinterItem {
     manufacturerName?: string;
     isOnline?: boolean;
     nozzleDiameter?: number;
-    motionType?: number;
+    /** Wire contract is a string (MotionType); number tolerated for legacy cached data. */
+    motionType?: number | string;
 }
 
 interface PrinterSelectorModalProps {

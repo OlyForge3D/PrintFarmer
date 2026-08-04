@@ -14,6 +14,10 @@ namespace Farm.OrcaSlicer.Worker.Services;
 
 public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 {
+    private const int DownloadBufferSize = 81920;
+    private const long DefaultMaxModelDownloadBytes = 512L * 1024L * 1024L;
+    private const int DefaultModelDownloadTimeoutSeconds = 120;
+    private const int MaxModelDownloadTimeoutSeconds = 3600;
     private readonly HttpClient _httpClient;
     private readonly IProgressReporter _progressReporter;
     private readonly ILogger<OrcaSlicingPipelineService> _logger;
@@ -22,6 +26,16 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly string _orcaSlicerBinaryPath;
     private readonly string _engineVersion;
     private readonly Uri _apiBaseUri;
+    private readonly long _maxModelDownloadBytes;
+    private readonly TimeSpan _modelDownloadTimeout;
+
+    internal Uri ApiBaseUri => _apiBaseUri;
+
+    internal long ModelDownloadMaxBytes => _maxModelDownloadBytes;
+
+    internal TimeSpan ModelDownloadTimeout => _modelDownloadTimeout;
+
+    internal TimeSpan ModelDownloadHttpClientTimeout => _httpClient.Timeout;
 
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
     {
@@ -37,20 +51,71 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _engineVersion = (configuration["Worker:EngineVersion"]
             ?? configuration["SlicerRegistry:Version"]
             ?? WorkerConstants.SlicerVersion).Trim();
-        string apiBaseUrl = configuration["SlicerApi:BaseUrl"]
+        string? apiBaseUrl = configuration["SlicerApi:BaseUrl"]
             ?? configuration["Worker:ApiBaseUrl"]
-            ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
-            ?? "http://localhost:5245";
-        if (!Uri.TryCreate(apiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? apiBaseUri))
+            ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL");
+        if (string.IsNullOrWhiteSpace(apiBaseUrl))
         {
-            throw new InvalidOperationException($"The slicer API base URL '{apiBaseUrl}' is not a valid absolute URI.");
+            throw new InvalidOperationException(
+                "A trusted slicer API base address is required. Configure SlicerApi:BaseUrl.");
+        }
+
+        if (!Uri.TryCreate(apiBaseUrl.TrimEnd('/') + "/", UriKind.Absolute, out Uri? apiBaseUri)
+            || (apiBaseUri.Scheme != Uri.UriSchemeHttp && apiBaseUri.Scheme != Uri.UriSchemeHttps)
+            || string.IsNullOrWhiteSpace(apiBaseUri.Host)
+            || apiBaseUri.AbsolutePath != "/"
+            || !string.IsNullOrEmpty(apiBaseUri.UserInfo)
+            || !string.IsNullOrEmpty(apiBaseUri.Query)
+            || !string.IsNullOrEmpty(apiBaseUri.Fragment))
+        {
+            throw new InvalidOperationException(
+                $"The slicer API base URL '{apiBaseUrl}' must be an absolute HTTP(S) origin without credentials, query, or fragment.");
         }
 
         _apiBaseUri = apiBaseUri;
+        _maxModelDownloadBytes = ReadPositiveSetting(
+            configuration,
+            "Worker:ModelDownloadMaxBytes",
+            DefaultMaxModelDownloadBytes);
+        long timeoutSeconds = ReadPositiveSetting(
+            configuration,
+            "Worker:ModelDownloadTimeoutSeconds",
+            DefaultModelDownloadTimeoutSeconds);
+        if (timeoutSeconds > MaxModelDownloadTimeoutSeconds)
+        {
+            throw new InvalidOperationException(
+                $"Worker:ModelDownloadTimeoutSeconds must be between 1 and {MaxModelDownloadTimeoutSeconds}.");
+        }
+
+        _modelDownloadTimeout = TimeSpan.FromSeconds(timeoutSeconds);
         if (!Directory.Exists(_workingDirectory))
         {
             _ = Directory.CreateDirectory(_workingDirectory);
         }
+    }
+
+    private static long ReadPositiveSetting(
+        IConfiguration configuration,
+        string key,
+        long defaultValue)
+    {
+        string? configuredValue = configuration[key];
+        if (string.IsNullOrWhiteSpace(configuredValue))
+        {
+            return defaultValue;
+        }
+
+        if (!long.TryParse(
+                configuredValue,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out long value)
+            || value <= 0)
+        {
+            throw new InvalidOperationException($"{key} must be a positive integer.");
+        }
+
+        return value;
     }
 
     public async Task<SlicingResult> ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
@@ -69,6 +134,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 await _progressReporter.ReportProgressAsync(job.Id, job.ClaimToken, 5, $"Downloading {job.ModelFileUrls.Count} model files", cancellationToken);
                 modelFilePaths = await FetchMultipleModelsAsync(
+                    job.Id,
                     job.ModelFileUrls,
                     job.ClaimToken,
                     job.LeaseToken,
@@ -145,21 +211,22 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    private async Task<string> FetchStlFileAsync(DistributedSlicingJob job, string workDir, CancellationToken cancellationToken)
+    internal async Task<string> FetchStlFileAsync(
+        DistributedSlicingJob job,
+        string workDir,
+        CancellationToken cancellationToken)
     {
+        string stlFilePath = ResolveModelDestinationPath(workDir, job.ModelFileName);
+        string modelRoute = ResolveClaimModelRoute(job.ModelFileUrl);
         using HttpRequestMessage request =
             CreateModelDownloadRequest(
-                job.ModelFileUrl.ToString(),
+                modelRoute,
+                job.Id,
+                null,
                 job.ClaimToken,
                 job.LeaseToken,
                 job.LeaseFence);
-        HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
-        _ = response.EnsureSuccessStatusCode();
-        string stlFilePath = Path.Combine(workDir, SanitizeModelFileName(job.ModelFileName));
-        await using (FileStream fileStream = File.Create(stlFilePath))
-        {
-            await response.Content.CopyToAsync(fileStream, cancellationToken);
-        }
+        await DownloadModelAsync(request, stlFilePath, cancellationToken);
 
         // The model digest published with the claim is authoritative: refuse anything else.
         if (!string.IsNullOrWhiteSpace(job.ModelSha256))
@@ -167,12 +234,36 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             string actual = await ComputeFileSha256Async(stlFilePath, cancellationToken);
             if (!string.Equals(actual, job.ModelSha256.Trim(), StringComparison.OrdinalIgnoreCase))
             {
+                DeletePartialModelFile(stlFilePath);
                 throw new InvalidOperationException("The downloaded model does not match the digest published with the claim.");
             }
         }
 
         job.InputFileSizeBytes = new FileInfo(stlFilePath).Length;
         return stlFilePath;
+    }
+
+    private string ResolveClaimModelRoute(Uri modelFileUri)
+    {
+        if (!modelFileUri.IsAbsoluteUri)
+        {
+            return modelFileUri.OriginalString;
+        }
+
+        bool isTrustedOrigin = Uri.Compare(
+            _apiBaseUri,
+            modelFileUri,
+            UriComponents.SchemeAndServer,
+            UriFormat.Unescaped,
+            StringComparison.OrdinalIgnoreCase) == 0;
+
+        if (!isTrustedOrigin || !string.IsNullOrEmpty(modelFileUri.Fragment))
+        {
+            throw new InvalidOperationException(
+                "Model URL must use the configured slicer API origin and an exact claim-scoped model route.");
+        }
+
+        return modelFileUri.PathAndQuery;
     }
 
     /// <summary>
@@ -188,18 +279,57 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         return Convert.ToHexString(hash);
     }
 
+    internal static string ResolveModelDestinationPath(string workDir, string fileName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workDir);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+
+        string normalizedFileName = fileName.Replace('\\', '/');
+        bool hasWindowsDrivePrefix = normalizedFileName.Length >= 2
+            && char.IsAsciiLetter(normalizedFileName[0])
+            && normalizedFileName[1] == ':';
+        string baseName = Path.GetFileName(normalizedFileName);
+        if (hasWindowsDrivePrefix
+            || Path.IsPathFullyQualified(normalizedFileName)
+            || normalizedFileName.Contains('/')
+            || !string.Equals(baseName, normalizedFileName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("The model file name must be a bare file name.");
+        }
+
+        string sanitizedFileName = SanitizeModelFileName(baseName);
+        if (string.IsNullOrWhiteSpace(sanitizedFileName) || sanitizedFileName is "." or "..")
+        {
+            throw new InvalidOperationException("The model file name does not contain a safe file name.");
+        }
+
+        string fullWorkDirectory = Path.GetFullPath(workDir);
+        string destinationPath = Path.GetFullPath(Path.Combine(fullWorkDirectory, sanitizedFileName));
+        string? destinationDirectory = Path.GetDirectoryName(destinationPath);
+        StringComparison pathComparison =
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (destinationDirectory is null
+            || !string.Equals(
+                Path.TrimEndingDirectorySeparator(destinationDirectory),
+                Path.TrimEndingDirectorySeparator(fullWorkDirectory),
+                pathComparison))
+        {
+            throw new InvalidOperationException("The model destination must remain inside the job working directory.");
+        }
+
+        return destinationPath;
+    }
+
     private static string SanitizeModelFileName(string fileName)
     {
-        string normalized = (fileName ?? string.Empty).Replace('\\', '/');
-        string baseName = Path.GetFileName(normalized);
-        string sanitized = string.Concat(baseName.Select(character =>
+        return string.Concat(fileName.Select(character =>
             char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_'
                 ? character
                 : '_'));
-        return string.IsNullOrWhiteSpace(sanitized) ? "model.stl" : sanitized;
     }
 
-    private async Task<List<string>> FetchMultipleModelsAsync(
+    internal async Task<List<string>> FetchMultipleModelsAsync(
+        Guid jobId,
         List<string> modelUrls,
         Guid claimToken,
         Guid leaseToken,
@@ -231,20 +361,17 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             fileName = SanitizeModelFileName(fileName);
 
             // Ensure unique filenames when multiple models share the same name
-            string destPath = Path.Combine(workDir, fileName);
+            string destPath = ResolveModelDestinationPath(workDir, fileName);
             if (File.Exists(destPath))
             {
                 string baseName = Path.GetFileNameWithoutExtension(fileName);
                 string ext = Path.GetExtension(fileName);
-                destPath = Path.Combine(workDir, $"{baseName}_{i}{ext}");
+                destPath = ResolveModelDestinationPath(workDir, $"{baseName}_{i}{ext}");
             }
 
             using HttpRequestMessage request =
-                CreateModelDownloadRequest(url, claimToken, leaseToken, leaseFence);
-            HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
-            _ = response.EnsureSuccessStatusCode();
-            await using FileStream fileStream = File.Create(destPath);
-            await response.Content.CopyToAsync(fileStream, cancellationToken);
+                CreateModelDownloadRequest(url, jobId, i, claimToken, leaseToken, leaseFence);
+            await DownloadModelAsync(request, destPath, cancellationToken);
             downloadedPaths.Add(destPath);
             _logger.LogInformation("Downloaded model {Index}/{Total}: {Path}", i + 1, modelUrls.Count, destPath);
         }
@@ -253,12 +380,33 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     }
 
     internal HttpRequestMessage CreateModelDownloadRequest(
-        string modelUrl,
+        string modelRoute,
+        Guid jobId,
+        int? modelIndex,
         Guid claimToken,
         Guid leaseToken,
         long leaseFence)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(modelUrl);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelRoute);
+        if (jobId == Guid.Empty)
+        {
+            throw new InvalidOperationException("A model download requires a valid job identity.");
+        }
+
+        if (modelIndex is < 0)
+        {
+            throw new InvalidOperationException("A model download index cannot be negative.");
+        }
+
+        string expectedRoute = modelIndex is null
+            ? $"/api/slice/{jobId:D}/model"
+            : $"/api/slice/{jobId:D}/models/{modelIndex.Value}";
+        if (!string.Equals(modelRoute, expectedRoute, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The claimed model location must be the exact API-relative route for this job.");
+        }
+
         if (claimToken == Guid.Empty || leaseToken == Guid.Empty || leaseFence <= 0)
         {
             throw new InvalidOperationException("Active claim and lease credentials are required to download a model.");
@@ -271,26 +419,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new InvalidOperationException("Authenticated worker identity is unavailable.");
         }
 
-        Uri requestUri;
-        if (modelUrl.StartsWith("//", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Protocol-relative model download URLs are not supported.");
-        }
-
-        if (modelUrl.StartsWith('/')
-            || !Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri))
-        {
-            requestUri = new Uri(_apiBaseUri, modelUrl);
-        }
-        else if (absoluteUri.Scheme == Uri.UriSchemeHttp || absoluteUri.Scheme == Uri.UriSchemeHttps)
-        {
-            requestUri = absoluteUri;
-        }
-        else
-        {
-            throw new InvalidOperationException("Model download URLs must use HTTP or HTTPS.");
-        }
-
+        Uri requestUri = new(_apiBaseUri, expectedRoute);
         var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
         request.Headers.Add(WorkerLeaseHeaders.WorkerKey, workerState.RegisteredServiceApiKey);
         request.Headers.Add(WorkerLeaseHeaders.WorkerId, serviceId.Value.ToString());
@@ -300,6 +429,100 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             WorkerLeaseHeaders.LeaseFence,
             leaseFence.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return request;
+    }
+
+    private async Task DownloadModelAsync(
+        HttpRequestMessage request,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        using CancellationTokenSource downloadCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        downloadCancellation.CancelAfter(_modelDownloadTimeout);
+
+        try
+        {
+            using HttpResponseMessage response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                downloadCancellation.Token);
+            int statusCode = (int)response.StatusCode;
+            if (statusCode is >= 300 and < 400)
+            {
+                throw new InvalidOperationException("Model download redirects are not allowed.");
+            }
+
+            _ = response.EnsureSuccessStatusCode();
+            if (response.Content.Headers.ContentLength is long contentLength
+                && contentLength > _maxModelDownloadBytes)
+            {
+                throw new InvalidDataException(
+                    $"The model response exceeds the configured {_maxModelDownloadBytes}-byte limit.");
+            }
+
+            await using Stream contentStream =
+                await response.Content.ReadAsStreamAsync(downloadCancellation.Token);
+            await using FileStream fileStream = new(
+                destinationPath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                DownloadBufferSize,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            byte[] buffer = new byte[DownloadBufferSize];
+            long downloadedBytes = 0;
+            while (true)
+            {
+                int bytesRead = await contentStream.ReadAsync(
+                    buffer.AsMemory(),
+                    downloadCancellation.Token);
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                if (downloadedBytes > _maxModelDownloadBytes - bytesRead)
+                {
+                    throw new InvalidDataException(
+                        $"The model response exceeds the configured {_maxModelDownloadBytes}-byte limit.");
+                }
+
+                await fileStream.WriteAsync(
+                    buffer.AsMemory(0, bytesRead),
+                    downloadCancellation.Token);
+                downloadedBytes += bytesRead;
+            }
+
+            await fileStream.FlushAsync(downloadCancellation.Token);
+        }
+        catch (OperationCanceledException ex)
+            when (!cancellationToken.IsCancellationRequested && downloadCancellation.IsCancellationRequested)
+        {
+            DeletePartialModelFile(destinationPath);
+            throw new TimeoutException(
+                $"The model download exceeded the configured {_modelDownloadTimeout.TotalSeconds:0}-second timeout.",
+                ex);
+        }
+        catch
+        {
+            DeletePartialModelFile(destinationPath);
+            throw;
+        }
+    }
+
+    private void DeletePartialModelFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "Failed to remove partial model download {Path}", path);
+        }
     }
 
     /// <summary>

@@ -59,7 +59,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
   const totalAlreadyImported = importedMachineCount + importedProcessCount + importedFilamentCount;
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
       <h3 className="text-lg font-semibold text-pf-text-primary mb-4">Review &amp; Import</h3>
 
       <div className="space-y-4">

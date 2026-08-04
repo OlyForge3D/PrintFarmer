@@ -10,6 +10,7 @@ struct RootView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @State private var connectionMonitor = ConnectionMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
@@ -84,6 +85,10 @@ struct RootView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            resumeConnectivityAfterForeground()
+        }
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
@@ -110,6 +115,23 @@ struct RootView: View {
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
         }
+    }
+
+    /// Re-arms live connectivity when the app returns to the foreground.
+    ///
+    /// iOS suspends the app in the background: the SignalR WebSocket is torn
+    /// down by the system and the connectivity poll loop stops advancing. With
+    /// nothing observing `scenePhase`, the first thing the user saw on re-open
+    /// was whatever stale sample the monitor last took — typically a failed one,
+    /// hence the red offline banner that only a manual pull-to-refresh cleared.
+    ///
+    /// The actual recovery sequence lives on ``ConnectionMonitor`` because the
+    /// network-path observer triggers the identical sequence; this hook only
+    /// decides *whether* the app is in a state where resuming makes sense.
+    @MainActor
+    private func resumeConnectivityAfterForeground() {
+        guard isShowingMainContent, !DemoMode.shared.isActive else { return }
+        connectionMonitor.requestResume()
     }
 
     /// True only when the authenticated `ContentView` shell is actually on

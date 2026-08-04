@@ -50,7 +50,7 @@ export function selectMaintenanceEligibleToolheads(
     });
 }
 
-function normalizeToolheadType(value: unknown): 'Physical' | 'MmuGate' | 'Unknown' {
+export function normalizeToolheadType(value: unknown): 'Physical' | 'MmuGate' | 'Unknown' {
   if (typeof value === 'string') {
     if (value === 'Physical' || value === 'MmuGate') return value;
     if (value === '0') return 'Physical';

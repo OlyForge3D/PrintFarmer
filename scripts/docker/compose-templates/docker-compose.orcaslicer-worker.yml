@@ -71,6 +71,8 @@ services:
       # constructing the image because doing so would change the digest itself.
       - Worker__ContainerDigest=${ORCASLICER_CONTAINER_DIGEST:-}
       - Worker__MaxConcurrentJobs=1
+      - Worker__ModelDownloadMaxBytes=${WORKER_MODEL_DOWNLOAD_MAX_BYTES:-536870912}
+      - Worker__ModelDownloadTimeoutSeconds=${WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS:-120}
       - Worker__MaxMemoryMb=1024
       - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
     volumes: *worker-volumes

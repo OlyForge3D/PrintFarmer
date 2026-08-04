@@ -90,7 +90,7 @@ function DueStateChip({ state }: { state: ToolheadDueState }) {
   return (
     <span
       className={clsx(
-        'inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium',
+        'inline-flex shrink-0 items-center gap-1 rounded-xs border px-2 py-0.5 text-xs font-medium',
         meta.className
       )}
       data-testid={`due-state-${state}`}

@@ -183,7 +183,7 @@ function InfillPatternDropdown({
         aria-activedescendant={isOpen ? `${listboxId}-option-${highlightIndex}` : undefined}
         aria-labelledby={ariaLabelledBy ? `${ariaLabelledBy} ${selectedValueId}` : selectedValueId}
         aria-describedby={ariaDescribedBy}
-        className="flex w-full items-center gap-2.5 rounded-xl border border-pf-border bg-pf-bg-1/70 px-3 py-2 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
+        className="flex w-full items-center gap-2.5 rounded-sm border border-pf-border bg-pf-bg-1/70 px-3 py-2 text-left text-pf-text-primary transition-colors hover:border-pf-border-hover hover:bg-pf-bg-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent"
         onClick={() => {
           if (isOpen) {
             setIsOpen(false);

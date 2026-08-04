@@ -132,6 +132,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
               <div 
                 key={tag} 
                 className="inline-flex items-center gap-1 px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full" 
+                data-pf-radius="full"
                 role="status" 
                 aria-label={`Tag: ${tag}`}
               >
@@ -226,6 +227,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
             <span 
               key={tag} 
               className="inline-flex px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full"
+              data-pf-radius="full"
             >
               {tag}
             </span>

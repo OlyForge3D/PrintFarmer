@@ -255,7 +255,7 @@ const SliderControl: React.FC<SliderSettingProps & { id: string }> = ({
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
           disabled={disabled}
-          className="w-full h-2 bg-pf-border rounded-full appearance-none cursor-pointer
+          className="w-full h-2 bg-pf-border rounded-lg appearance-none cursor-pointer
                      [&::-webkit-slider-thumb]:appearance-none
                      [&::-webkit-slider-thumb]:w-5
                      [&::-webkit-slider-thumb]:h-5

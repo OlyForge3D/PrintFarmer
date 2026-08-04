@@ -67,7 +67,10 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
           {node.description || '-'}
         </td>
         <td className="px-6 py-3 whitespace-nowrap text-sm">
-          <span className="inline-flex items-center justify-center px-3 py-1 rounded-full text-sm font-medium bg-pf-accent-bg text-white">
+          {/* Printer count. `px-3 py-1` makes this a text-width pill, not a
+              circle, so it takes the status-pill radius like every other count
+              badge rather than claiming a circular waiver it cannot honour. */}
+          <span className="inline-flex items-center justify-center px-3 py-1 rounded-xs text-sm font-medium bg-pf-accent-bg text-white">
             {node.printerCount}
           </span>
           {node.totalPrinterCount > node.printerCount && (

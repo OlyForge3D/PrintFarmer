@@ -51,7 +51,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
 
   return (
     <div
-      className={`bg-pf-bg-1 border border-pf-border rounded-xl hover:shadow-lg transition-all duration-200 flex flex-col h-full w-full focus:outline-hidden focus:ring-2 focus:ring-pf-accent ${compact ? 'gap-1 p-3 text-xs' : 'gap-3 p-5 text-base'}`}
+      className={`bg-pf-bg-1 border border-pf-border rounded-lg hover:shadow-lg transition-all duration-200 flex flex-col h-full w-full focus:outline-hidden focus:ring-2 focus:ring-pf-accent ${compact ? 'gap-1 p-3 text-xs' : 'gap-3 p-5 text-base'}`}
       tabIndex={0}
       role="group"
       aria-label={`Printer card: ${printer.name}`}

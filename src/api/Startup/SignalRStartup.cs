@@ -20,6 +20,13 @@ public static class SignalRStartup
         {
             // Ensure single parallel invocation to prevent race conditions
             options.MaximumParallelInvocationsPerClient = 1;
+
+            // Keepalive margin for mobile clients. The iOS app pings every 15s;
+            // against the stock 30s client timeout that leaves zero margin, so a
+            // single ping delayed by iOS scheduling pressure drops the connection.
+            // A 60s timeout gives the 15s ping a 4x margin.
+            options.KeepAliveInterval = TimeSpan.FromSeconds(15);
+            options.ClientTimeoutInterval = TimeSpan.FromSeconds(60);
         })
         .AddJsonProtocol(options =>
         {

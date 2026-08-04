@@ -461,20 +461,35 @@ export interface PrinterFast extends
   backendUrl: string;
 }
 
+/**
+ * Printer backend type.
+ *
+ * WIRE CONTRACT: string, not number. `PrinterBackendJsonConverter.Write`
+ * (src/infra/Json/EnumJsonConverters.cs:57) emits `value.ToString()`, i.e. the
+ * PascalCase member name. Declaring this numeric made every
+ * `printer.backend === PrinterBackend.X` comparison silently false.
+ */
 export enum PrinterBackend {
-  Unknown = 0,
-  Moonraker = 1,
-  PrusaLink = 2,
-  SDCP = 3,
-  OctoPrint = 4,
-  FlashForge = 5,
+  Unknown = 'Unknown',
+  Moonraker = 'Moonraker',
+  PrusaLink = 'PrusaLink',
+  SDCP = 'SDCP',
+  OctoPrint = 'OctoPrint',
+  FlashForge = 'FlashForge',
 }
 
+/**
+ * Printer motion/kinematics type.
+ *
+ * WIRE CONTRACT: string. Serialized by the global `JsonStringEnumConverter`
+ * registered with no naming policy (src/api/Startup/ControllerStartup.cs:36),
+ * so C# member names arrive verbatim in PascalCase.
+ */
 export enum MotionType {
-  Cartesian = 0,
-  CoreXY = 1,
-  Delta = 2,
-  Unknown = 99,
+  Cartesian = 'Cartesian',
+  CoreXY = 'CoreXY',
+  Delta = 'Delta',
+  Unknown = 'Unknown',
 }
 
 // String enum types for API responses (enums are serialized as strings)
@@ -817,12 +832,12 @@ export interface UpdateModelAliasesRequest {
  * Nozzle material type for toolheads
  */
 export enum NozzleType {
-  Brass = 0,
-  HardenedSteel = 1,
-  StainlessSteel = 2,
-  TungstenCarbide = 3,
-  Abrasive = 4,
-  Unknown = 99
+  Brass = 'Brass',
+  HardenedSteel = 'HardenedSteel',
+  StainlessSteel = 'StainlessSteel',
+  TungstenCarbide = 'TungstenCarbide',
+  Abrasive = 'Abrasive',
+  Unknown = 'Unknown'
 }
 
 export const NozzleTypeLabels: Record<NozzleType, string> = {
@@ -853,8 +868,8 @@ export const NozzleTypeStringLabels: Record<string, string> = {
  * Backend serializes enums as strings via JsonStringEnumConverter.
  */
 export enum ToolheadType {
-  Physical = 0,
-  MmuGate = 1,
+  Physical = 'Physical',
+  MmuGate = 'MmuGate',
 }
 
 /**
@@ -873,23 +888,23 @@ export const ToolheadTypeLabels: Record<string, string> = {
  */
 export enum NozzleInterfaceType {
   /** Unknown or unspecified nozzle interface */
-  Unknown = 0,
+  Unknown = 'Unknown',
   /** E3D V6 standard thread (M6 x 1.0) - most common. Used by V6, Dragon, Rapido, Mosquito, CHC, most budget hotends */
-  V6 = 1,
+  V6 = 'V6',
   /** E3D Volcano extended length (M6 x 1.0, longer melt zone) - for high-flow applications */
-  Volcano = 2,
+  Volcano = 'Volcano',
   /** E3D Revo quick-change system - no threading, magnetic/snap-fit */
-  Revo = 3,
+  Revo = 'Revo',
   /** Prusa Nextruder interface - proprietary for MK4/MK3.9S/CORE One */
-  Nextruder = 4,
+  Nextruder = 'Nextruder',
   /** BIQU H2 interface - proprietary for H2 hotend system */
-  H2 = 5,
+  H2 = 'H2',
   /** Microswiss FlowTech interface - proprietary across their FlowTech line */
-  FlowTech = 6,
+  FlowTech = 'FlowTech',
   /** Bambu Lab proprietary interface - for X1/P1/A1 series */
-  BambuLab = 7,
+  BambuLab = 'BambuLab',
   /** Proprietary interface unique to a specific manufacturer/model */
-  Proprietary = 99
+  Proprietary = 'Proprietary'
 }
 
 /** Labels for nozzle interface types */
@@ -1662,9 +1677,17 @@ export interface ResolveHostnameResponse {
 }
 
 // G-code file DTOs
+/**
+ * Origin of a stored G-code file.
+ *
+ * WIRE CONTRACT: string. Mirrors `GcodeSource` (src/infra/Domain/CoreEnums.cs:14).
+ * NOTE: the member was previously named `Harvest`, which did not match the C#
+ * member `Harvested`, and `Generated` was missing entirely.
+ */
 export enum GcodeSource {
-  Upload = 0,
-  Harvest = 1,
+  Upload = 'Upload',
+  Harvested = 'Harvested',
+  Generated = 'Generated',
 }
 
 // Full G-code library file (domain model with metadata)
@@ -1894,12 +1917,27 @@ export interface GcodeUploadSettings {
 }
 
 // Job queue system
-export enum JobQueueStatus {
-  Pending = 0,
-  InProgress = 1,
-  Completed = 2,
-  Failed = 3,
-  Cancelled = 4,
+/**
+ * Wire contract for `JobQueuePrintJobDto.Status` (infra/Dtos/QueueDtos.cs).
+ *
+ * The DTO field is a C# `PrintJobStatus?` (infra/Dtos/PrintJobDtos.cs:12), and
+ * `PrintJobStatusJsonConverter.Write` (EnumJsonConverters.cs:~92) emits
+ * `value.ToString()`, so it arrives as a PascalCase member-name string.
+ *
+ * This was previously declared as a numeric `JobQueueStatus` with an entirely
+ * different member set (Pending/InProgress/...), which matched neither the
+ * names nor the ordinals the API sends. It had no comparison sites, so the
+ * mismatch was latent rather than user-visible.
+ */
+export enum PrintJobStatus {
+  Queued = 'Queued',
+  Assigned = 'Assigned',
+  Starting = 'Starting',
+  Printing = 'Printing',
+  Paused = 'Paused',
+  Completed = 'Completed',
+  Failed = 'Failed',
+  Cancelled = 'Cancelled',
 }
 
 export interface JobQueuePrintJob {
@@ -1910,7 +1948,7 @@ export interface JobQueuePrintJob {
   printerName?: string;
   gcodeFileId: string;
   gcodeFileName: string;
-  status: JobQueueStatus;
+  status?: PrintJobStatus;
   priority: number;
   estimatedDuration?: number;
   queuedAt: Date;
@@ -2306,18 +2344,18 @@ export interface AuxiliaryTotals {
 
 // File Consistency Types
 export enum FileHealthStatus {
-  Unknown = 0,
-  Healthy = 1,
-  Missing = 2,
-  Corrupted = 3,
-  Inaccessible = 4,
+  Unknown = 'Unknown',
+  Healthy = 'Healthy',
+  Missing = 'Missing',
+  Corrupted = 'Corrupted',
+  Inaccessible = 'Inaccessible',
 }
 
 export enum FileAuditType {
-  Model3D = 0,
-  GcodeFile = 1,
-  OrphanedFiles = 2,
-  FullAudit = 3,
+  Model3D = 'Model3D',
+  GcodeFile = 'GcodeFile',
+  OrphanedFiles = 'OrphanedFiles',
+  FullAudit = 'FullAudit',
 }
 
 export interface FileHealthSummaryDto {

@@ -57,7 +57,7 @@ export const MachineProfileStep: React.FC<MachineProfileStepProps> = ({
   }
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-pf-text-primary">
@@ -103,7 +103,7 @@ export const MachineProfileStep: React.FC<MachineProfileStepProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-pf-text-primary">{machine.name}</span>
                     {isImported && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-pf-success/10 text-pf-success">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-xs bg-pf-success/10 text-pf-success">
                         <CheckCircle className="h-3 w-3" />
                         Imported
                       </span>

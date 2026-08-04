@@ -90,7 +90,7 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
                   <ServerIcon className="w-4 h-4 text-pf-text-muted" />
                   <span className="font-semibold text-sm">{worker.name}</span>
                   <span
-                    className={`text-xs px-2 py-0.5 rounded-full text-white ${getWorkerStatusColor(worker.status)}`}
+                    className={`text-xs px-2 py-0.5 rounded-xs text-white ${getWorkerStatusColor(worker.status)}`}
                   >
                     {worker.status}
                   </span>

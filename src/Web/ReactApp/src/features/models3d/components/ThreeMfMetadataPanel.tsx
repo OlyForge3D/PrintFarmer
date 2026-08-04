@@ -71,6 +71,7 @@ export function ThreeMfMetadataPanel({ metadata, autoTags, existingTagNames = []
                     key={tag}
                     variant="unstyled"
                     onClick={() => onAcceptTag?.(tag)}
+                    data-pf-radius="full"
                     className="inline-flex items-center gap-1 rounded-full bg-pf-accent-bg/10 px-2.5 py-0.5 text-xs font-medium text-pf-accent hover:bg-pf-accent-bg/20 transition-colors cursor-pointer border border-pf-accent/30"
                     title={`Apply tag "${tag}"`}
                   >

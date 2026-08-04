@@ -1,5 +1,6 @@
 import React from 'react';
 import { PrinterBackend } from '@/types/api';
+import { toPrinterBackend } from '@/common/utils/enumHelpers';
 import moonrakerIcon from '@/assets/moonraker.svg';
 import prusalinkIcon from '@/assets/prusalink.svg';
 import octoprintIcon from '@/assets/octoprint.svg';
@@ -12,34 +13,7 @@ import octoprintIcon from '@/assets/octoprint.svg';
  * @returns A React element containing the backend icon
  */
 export function getBackendIcon(backend: PrinterBackend | number | string) {
-  let backendValue: PrinterBackend | undefined = undefined;
-
-  // Handle numeric values
-  if (typeof backend === 'number') {
-    backendValue = backend;
-  }
-  // Handle string values (case-insensitive)
-  else if (typeof backend === 'string') {
-    switch (backend.toLowerCase()) {
-      case 'moonraker':
-        backendValue = PrinterBackend.Moonraker;
-        break;
-      case 'prusalink':
-        backendValue = PrinterBackend.PrusaLink;
-        break;
-      case 'sdcp':
-        backendValue = PrinterBackend.SDCP;
-        break;
-      case 'octoprint':
-        backendValue = PrinterBackend.OctoPrint;
-        break;
-      case 'flashforge':
-        backendValue = PrinterBackend.FlashForge;
-        break;
-      default:
-        backendValue = undefined;
-    }
-  }
+  const backendValue: PrinterBackend | undefined = toPrinterBackend(backend);
 
   switch (backendValue) {
     case PrinterBackend.Moonraker:

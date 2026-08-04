@@ -73,6 +73,7 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
 
   return (
     <div
+      data-pf-radius="full"
       className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium transition-all duration-200 ${
         disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md cursor-default'
       } ${className}`}

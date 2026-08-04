@@ -1286,6 +1286,56 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         return sub
     }
 
+    /// `ensureConnected()` must NOT resurrect a service the user
+    /// deliberately disconnected (logout / server switch). The
+    /// foreground hook in `RootView` calls it on every `.active`
+    /// transition, so a missing `intentionalDisconnect` guard would
+    /// silently reconnect a signed-out session's hub.
+    func testEnsureConnected_afterIntentionalDisconnect_doesNotReconnect() async throws {
+        let counter = NegotiateCounter()
+        mockSession.requestHandler = { request in
+            _ = counter.increment()
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let service = SignalRService(
+            serverURL: testURL,
+            session: session,
+            tokenProvider: { nil },
+            reconnectBackoff: { _ in 0.001 }
+        )
+
+        let recorder = LifecycleStateObserver()
+        let sub = recordStates(service, into: recorder)
+        _ = sub
+
+        // `disconnect()` sets the intent flag and publishes `.disconnected`
+        // without ever attempting a connect, so the negotiate counter stays
+        // at zero and gives us an unambiguous baseline.
+        await service.disconnect()
+        await recorder.waitFor(state: .disconnected)
+        let baseline = counter.value()
+
+        await service.ensureConnected()
+
+        XCTAssertEqual(
+            counter.value(),
+            baseline,
+            "ensureConnected() must not negotiate after an intentional disconnect"
+        )
+        XCTAssertEqual(
+            service.connectionState,
+            .disconnected,
+            "an intentionally disconnected service must stay disconnected"
+        )
+    }
+
     /// Test A — negotiate always fails; the reconnect loop is proved
     /// to have attempted at least two retries via the injected
     /// sleeper gates, then `disconnect()` halts the loop. `.connected`
@@ -2325,10 +2375,16 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
         }
     }
 
-    /// r12 blocker #4 proof: repeated failed reconnects reach the
-    /// bounded deterministic terminal (`reconnectAttempt >= 10 →
+    /// r12 blocker #4 proof: repeated failed reconnects reach a
+    /// bounded deterministic terminal (`reconnectAttempt >= cap →
     /// publish `.disconnected`, stop retrying`) required by #777 —
     /// **without** the test manually disconnecting to end the loop.
+    ///
+    /// NOTE: production now runs the ladder **unbounded** (see
+    /// `SignalRService.maxReconnectAttempts`) because the old fixed
+    /// cap of 10 permanently bricked the connection after ~3 minutes
+    /// offline. This test injects `maxReconnectAttempts: 10` to keep
+    /// exercising the terminal branch and its teardown invariants.
     ///
     /// A driver task auto-releases the sleeper on every enrollment
     /// so the retry loop can advance under always-failing negotiate.
@@ -2355,7 +2411,10 @@ final class SignalRServiceRealTransportLifecycleTests: XCTestCase {
             session: session,
             tokenProvider: { nil },
             reconnectBackoff: { _ in 0.001 }, // ignored, sleeper is injected
-            reconnectSleeper: sleeper.makeSleeper()
+            reconnectSleeper: sleeper.makeSleeper(),
+            // Production is unbounded; inject a finite cap so the terminal
+            // branch is reachable deterministically.
+            maxReconnectAttempts: 10
         )
 
         let recorder = LifecycleStateObserver()
@@ -4644,9 +4703,61 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         }
     }
 
+    /// A `.connected` state whose socket has received nothing recently is a
+    /// lie: iOS tears the WebSocket down while the app is suspended, and a
+    /// NAT/AP timeout can half-open it silently. In both cases
+    /// `URLSessionWebSocketTask` only surfaces the failure when a pending
+    /// read eventually errors — asynchronously, and often *after* the app has
+    /// already foregrounded. If `ensureConnected()` trusted the state it
+    /// would return immediately, the banner would go green, and the user
+    /// would sit on a dead socket receiving nothing.
+    ///
+    /// Non-vacuity: with the staleness check removed `connect()`'s
+    /// already-live guard short-circuits and socketB is never driven, so
+    /// the ceiling below fails the test instead of hanging.
+    func testEnsureConnected_whenConnectedButSocketIsStale_reconnects() async throws {
+        let socketA = MockSignalRWebSocket()
+        let socketB = MockSignalRWebSocket()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socketA, socketB]),
+            // Any elapsed time counts as stale, so the branch is reached
+            // deterministically without sleeping for 45s.
+            inboundStalenessThreshold: -1
+        )
+
+        let result = await connect(
+            service,
+            socket: socketA,
+            handshake: .data(makeSignalRHandshakeData())
+        )
+        try result.get()
+        XCTAssertEqual(service.connectionState, .connected)
+
+        await FailureCeiling.awaitOrFail(
+            seconds: 10,
+            label: "ensureConnected must supersede a stale socket",
+            testCase: self
+        ) {
+            let reconnect = Task { await service.ensureConnected() }
+            // A fresh socket being driven to handshake is the positive
+            // witness that the stale connection was superseded, not trusted.
+            await socketB.waitForReceiveCall()
+            socketB.completeReceive(with: .data(makeSignalRHandshakeData()))
+            await reconnect.value
+        }
+
+        XCTAssertEqual(
+            service.connectionState,
+            .connected,
+            "the replacement socket must complete its handshake"
+        )
+        await service.disconnect()
+    }
+
     private func makeService(
         sockets: MockWebSocketSwitcher,
-        sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper()
+        sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper(),
+        inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold
     ) -> SignalRService {
         installNegotiateHandler()
         return SignalRService(
@@ -4655,6 +4766,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             tokenProvider: { nil },
             reconnectBackoff: { _ in 1 },
             reconnectSleeper: sleeper.makeSleeper(),
+            inboundStalenessThreshold: inboundStalenessThreshold,
             webSocketFactory: { _ in sockets.next() }
         )
     }

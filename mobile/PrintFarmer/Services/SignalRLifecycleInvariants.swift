@@ -56,10 +56,11 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
         /// INSIDE the (single) reconnect-owner loop. This is the
         /// non-vacuity witness for retry-chain tests: with a single
         /// sequential retry-owner, `reconnectOwnerEnterCount == 1`
-        /// but `reconnectAttemptCount` can be 1..10 (bounded terminal
-        /// = 10). Every attempt is bracketed by a
-        /// `recordReconnectAttempt()` call at the top of the retry
-        /// iteration.
+        /// but `reconnectAttemptCount` grows with each retry. Production
+        /// runs the ladder unbounded; tests inject a finite
+        /// `maxReconnectAttempts` cap to reach the terminal branch. Every
+        /// attempt is bracketed by a `recordReconnectAttempt()` call at
+        /// the top of the retry iteration.
         let reconnectAttemptCount: Int
     }
 
@@ -183,7 +184,8 @@ final class SignalRLifecycleInvariants: @unchecked Sendable {
     /// `enterReconnectOwner()`, which is called ONCE per retry chain.
     /// Together the two make the retry-chain proof non-vacuous:
     /// `reconnectOwnerEnterCount == 1` guarantees no overlap (structural),
-    /// `reconnectAttemptCount == 10` (bounded terminal) or `>= 3`
+    /// `reconnectAttemptCount == 10` (bounded terminal, via an injected
+    /// `maxReconnectAttempts` cap) or `>= 3`
     /// (repeated-failed-reconnects) guarantees the retry loop actually
     /// iterated.
     func recordReconnectAttempt() {

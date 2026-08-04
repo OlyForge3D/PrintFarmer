@@ -18,7 +18,7 @@ export function isMultiToolhead(printer: PrinterForSlicing | null | undefined): 
 export function getPhysicalToolheads(printer: PrinterForSlicing | null | undefined): ToolheadDto[] {
   if (!printer?.toolheads || printer.toolheads.length === 0) return [];
   const physical = printer.toolheads.filter(
-    t => !t.toolheadType || t.toolheadType === 'Physical' || t.toolheadType === 0
+    t => !t.toolheadType || t.toolheadType === 'Physical'
   );
   // If none are explicitly Physical, return all (backward compat for printers without toolheadType set)
   return physical.length > 0 ? physical : printer.toolheads;

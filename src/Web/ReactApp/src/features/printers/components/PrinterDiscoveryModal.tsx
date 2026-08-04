@@ -370,11 +370,11 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                           <h5 className="font-medium text-pf-text-primary">
                             {printer.name || `${printer.manufacturer || 'Unknown'} Printer`}
                           </h5>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getBackendColor(printer.backend)}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium ${getBackendColor(printer.backend)}`}>
                             {PrinterBackend[printer.backend]}
                           </span>
                           {hasConfig && (
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium ${
                               hasModelConfig ? 'bg-pf-success-bg text-pf-status-online-text border border-pf-status-online-border' : 'bg-pf-warning text-pf-warning-text border border-pf-border-medium'
                             }`}>
                               {hasModelConfig ? 'Fully Configured' : 'Manufacturer Set'}

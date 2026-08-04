@@ -28,6 +28,7 @@ import { Select } from '@/common/components/ui/Select';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
+import { getPrinterBackendName } from '@/common/utils/enumHelpers';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
@@ -54,11 +55,9 @@ function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number
   return 3;                                         // Idle / other online
 }
 
-// Helper function to get backend name from enum value
+// Helper function to get backend name from a wire or legacy value
 function getBackendName(backend: PrinterBackend | string | number): string {
-  if (typeof backend === 'string') return backend;
-  // Map enum value to name by looking up the enum
-  return PrinterBackend[backend as number] || '';
+  return getPrinterBackendName(backend);
 }
 
 export function PrintersPage() {
@@ -397,7 +396,7 @@ export function PrintersPage() {
           <div className="pf-skeleton pf-animate-skeleton h-8 w-48 rounded-sm mb-6" />
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="pf-skeleton pf-animate-skeleton h-24 rounded-xl" />
+              <div key={i} className="pf-skeleton pf-animate-skeleton h-24 rounded-lg" />
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">

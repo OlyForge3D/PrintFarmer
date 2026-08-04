@@ -30,6 +30,7 @@ public sealed class SlicingMetadataTests : IDisposable
                 ["Worker:EngineVersion"] = workerVersion,
                 ["SlicerRegistry:Version"] = registryVersion,
                 ["Worker:WorkingDirectory"] = _workingDirectory,
+                ["SlicerApi:BaseUrl"] = "http://slicer-host:5246",
             })
             .Build();
         var service = new OrcaSlicingPipelineService(

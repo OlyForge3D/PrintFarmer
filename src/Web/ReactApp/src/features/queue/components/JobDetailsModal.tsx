@@ -219,7 +219,7 @@ function JobDetailsContent({ jobDetailsPromise, isOpen, onClose, onSave }: JobDe
               {displayDetails.name || <span className="italic text-pf-text-muted">Unknown</span>}
             </h2>
             <span
-              className={`shrink-0 inline-flex px-2.5 py-1 text-xs font-semibold rounded-full ${
+              className={`shrink-0 inline-flex px-2.5 py-1 text-xs font-semibold rounded-xs ${
                 displayDetails.status.toLowerCase() === 'completed' ? 'bg-pf-success/20 text-pf-success' :
                 displayDetails.status.toLowerCase() === 'printing' ? 'bg-pf-accent/20 text-pf-accent' :
                 displayDetails.status.toLowerCase() === 'queued' ? 'bg-pf-warning/20 text-pf-warning' :

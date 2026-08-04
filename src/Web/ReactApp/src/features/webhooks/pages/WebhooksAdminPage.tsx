@@ -189,7 +189,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  <div className="flex items-center gap-2">
  <h3 className="font-medium text-pf-text-primary truncate">{webhook.name}</h3>
  <span
- className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+ className={`inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium ${
  webhook.isActive
  ? 'bg-pf-success/10 text-pf-success'
  : 'bg-pf-bg-1 text-pf-text-secondary'
@@ -198,7 +198,7 @@ function WebhookCard({ webhook, onEdit, onDelete, onTest, onToggleActive, onView
  {webhook.isActive ? 'Active' : 'Inactive'}
  </span>
  {hasFailures && (
- <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-pf-error/10 text-pf-error">
+ <span className="inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium bg-pf-error/10 text-pf-error">
  {webhook.consecutiveFailures}/{webhook.maxConsecutiveFailures} failures
  </span>
  )}

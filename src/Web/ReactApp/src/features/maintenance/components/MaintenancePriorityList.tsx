@@ -328,7 +328,7 @@ export function MaintenancePriorityList({
 
   if (alerts.length === 0) {
     return (
-      <div className={`bg-pf-success/10 border border-pf-success/30 rounded-xl p-6 text-center ${className}`}>
+      <div className={`bg-pf-success/10 border border-pf-success/30 rounded-lg p-6 text-center ${className}`}>
         <CheckCircleIcon className="h-10 w-10 mx-auto text-pf-success mb-3" aria-hidden="true" />
         <p className="font-medium text-pf-success">All Clear!</p>
         <p className="text-sm text-pf-success mt-1">

@@ -62,7 +62,7 @@ function BedTypeBadge({ name, color }: { name: string; color?: string | null }) 
   return (
     <span
       ref={ref}
-      className="text-xs px-1.5 py-0.5 rounded-full border text-pf-text-secondary"
+      className="text-xs px-1.5 py-0.5 rounded-xs border text-pf-text-secondary"
       title={`Bed type: ${name}`}
     >
       {name}
@@ -208,12 +208,12 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
   return (
     <article
-      className="group relative rounded-xl border border-white/10 bg-pf-card shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
+      className="group relative rounded-lg border border-white/10 bg-pf-card shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
       style={{ transform: 'translateZ(0)' }}
     >
       {/* Bed clear banner — overlay on top of card */}
       {autoDispatchStatus && isPendingReady && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-black/75">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-black/75">
           <div className="w-[90%]">
             <BedClearBanner
               printerId={printer.id}
@@ -224,13 +224,13 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         </div>
       )}
       {/* Colored header — background tinted by printer state */}
-      <div className={`px-3 pt-3 pb-2 rounded-t-xl ${headerClassName}`}>
+      <div className={`px-3 pt-3 pb-2 rounded-t-lg ${headerClassName}`}>
           {/* Top row: Name + Status Pill + failure-detection status */}
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
           </div>
-          <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+          <div className="inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
               {statusLabel}
             </span>
@@ -247,7 +247,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
           {printer.hasCatalogUpdate && (
             <span
               title="A catalog model update is available. Open printer details to apply."
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 border border-blue-400/40 text-blue-300 shrink-0 cursor-default"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xs text-xs font-medium bg-blue-500/20 border border-blue-400/40 text-blue-300 shrink-0 cursor-default"
             >
               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -265,6 +265,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
             {printerTags.map(tag => (
               <span
                 key={tag.id}
+                data-pf-radius="full"
                 className="text-xs px-1.5 py-0.5 rounded-full bg-black/30 border border-white/10 text-pf-text-secondary"
               >
                 {tag.name}
@@ -474,7 +475,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                     </span>
                   )}
                   <span
-                    className="shrink-0 w-8 h-4 rounded-full border border-white/20 overflow-hidden"
+                    className="shrink-0 w-8 h-4 rounded-sm border border-white/20 overflow-hidden"
                     title={printer.spoolInfo.filamentName ?? printer.spoolInfo.material ?? 'Filament color'}
                   >
                     <svg className="h-full w-full" viewBox="0 0 32 16" aria-hidden="true" focusable="false">
