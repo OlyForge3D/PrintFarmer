@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type {
@@ -181,10 +181,36 @@ beforeEach(() => {
   autoDispatchStatusMock = null;
 });
 
+// The components under test are loaded once in `beforeAll` rather than with an
+// `await import(...)` inside each test body (#1084).
+//
+// These are large module graphs. When the import was awaited inside a test, a
+// slow transform under full-suite CPU contention could exceed the 5s default
+// `testTimeout`. Vitest then aborts and fails that test and runs its `afterEach`
+// (which calls the global `cleanup()` in src/test/setup.ts) while nothing is yet
+// mounted -- and the aborted test's continuation later resumes and calls
+// `render(...)`, mounting a card *during the next test*. The next query then
+// matches two elements, e.g. "Found multiple elements with the role button and
+// name Show camera preview".
+//
+// Loading here keeps every test body synchronous, so no test can be interrupted
+// between its `await` and its `render`. That makes the leak structurally
+// impossible rather than merely rare -- adding another `afterEach(cleanup)`
+// would not help, because the stray render happens *after* cleanup has run.
+let CompactPrinterCard: typeof import('@/features/printers/components/CompactPrinterCard')['CompactPrinterCard'];
+let DetailedPrinterCard: typeof import('@/features/printers/components/DetailedPrinterCard')['DetailedPrinterCard'];
+let ShieldIcon: typeof import('@/common/components/icons/MdiIcons')['ShieldIcon'];
+
+beforeAll(async () => {
+  ({ CompactPrinterCard } = await import('@/features/printers/components/CompactPrinterCard'));
+  ({ DetailedPrinterCard } = await import('@/features/printers/components/DetailedPrinterCard'));
+  ({ ShieldIcon } = await import('@/common/components/icons/MdiIcons'));
+}, 60_000);
+
 // ── FailureDetectionEvent type shape test ──
 
 describe('FailureDetectionEvent type', () => {
-  it('should have the correct shape when used as an object', async () => {
+  it('should have the correct shape when used as an object', () => {
     const event = {
       printerId: 'abc-123',
       printerName: 'My Printer',
@@ -220,20 +246,13 @@ describe('FailureDetectionEvent type', () => {
 // ── ShieldIcon tests ──
 
 describe('ShieldIcon', () => {
-  beforeEach(() => {
-    vi.resetModules();
-  });
-
-  it('renders without errors', async () => {
-    // Import directly — ShieldIcon is a simple SVG component
-    const { ShieldIcon } = await import('@/common/components/icons/MdiIcons');
+  it('renders without errors', () => {
     render(<ShieldIcon />);
     const svg = screen.getByRole('img');
     expect(svg).toBeTruthy();
   });
 
-  it('renders with custom ariaLabel', async () => {
-    const { ShieldIcon } = await import('@/common/components/icons/MdiIcons');
+  it('renders with custom ariaLabel', () => {
     render(<ShieldIcon ariaLabel="ML Monitoring Active" />);
     const svg = screen.getByLabelText('ML Monitoring Active');
     expect(svg).toBeTruthy();
@@ -274,11 +293,7 @@ function makeFailureDetectionStatus(
 // ── CompactPrinterCard monitoring badge tests ──
 
 describe('CompactPrinterCard monitoring badge', () => {
-  it('shows guarding badge when printer is actively monitored', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('shows guarding badge when printer is actively monitored', () => {
     const printer = makePrinter({
       obicoEnabled: true,
       state: 'Printing',
@@ -301,11 +316,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
-  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', () => {
     const printer = makePrinter({
       obicoEnabled: false,
       state: 'Printing',
@@ -322,11 +333,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(screen.queryByText('Guarding')).toBeNull();
   });
 
-  it('shows a ready badge when monitoring is enabled but the printer is idle', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('shows a ready badge when monitoring is enabled but the printer is idle', () => {
     const printer = makePrinter({
       obicoEnabled: true,
       state: 'Idle',
@@ -360,11 +367,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Ready'));
   });
 
-  it('shows the bed-clear overlay when auto-dispatch status is PendingReady', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('shows the bed-clear overlay when auto-dispatch status is PendingReady', () => {
     const printer = makePrinter({
       state: 'Idle',
       isOnline: true,
@@ -392,11 +395,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(banner.parentElement?.parentElement).toHaveClass('absolute', 'inset-0', 'z-10');
   });
 
-  it('shows the bed-clear overlay when the bulk status row exposes a failed bed-clear gate even if state is stale', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('shows the bed-clear overlay when the bulk status row exposes a failed bed-clear gate even if state is stale', () => {
     const printer = makePrinter({
       state: 'Idle',
       isOnline: true,
@@ -433,11 +432,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(banner.parentElement?.parentElement).toHaveClass('absolute', 'inset-0', 'z-10');
   });
 
-  it('does not show attention on the camera preview while a dispatched print is starting', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('does not show attention on the camera preview while a dispatched print is starting', () => {
     const printer = makePrinter({
       state: 'Starting...',
       isOnline: true,
@@ -472,11 +467,7 @@ describe('CompactPrinterCard monitoring badge', () => {
     expect(screen.queryByText(/Needs attention/)).not.toBeInTheDocument();
   });
 
-  it('shows a recent failure badge when a matching failure event arrives', async () => {
-    const { CompactPrinterCard } = await import(
-      '@/features/printers/components/CompactPrinterCard'
-    );
-
+  it('shows a recent failure badge when a matching failure event arrives', () => {
     const printer = makePrinter({
       obicoEnabled: true,
       state: 'Printing',
@@ -510,11 +501,7 @@ describe('CompactPrinterCard monitoring badge', () => {
 // ── DetailedPrinterCard monitoring badge tests ──
 
 describe('DetailedPrinterCard monitoring badge', () => {
-  it('shows guarding badge when printer is actively monitored', async () => {
-    const { DetailedPrinterCard } = await import(
-      '@/features/printers/components/DetailedPrinterCard'
-    );
-
+  it('shows guarding badge when printer is actively monitored', () => {
     const printer = makePrinter({
       obicoEnabled: true,
       state: 'Printing',
@@ -536,11 +523,7 @@ describe('DetailedPrinterCard monitoring badge', () => {
     expect(screen.getByRole('button', { name: /open spaghetti detection details/i })).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 
-  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', async () => {
-    const { DetailedPrinterCard } = await import(
-      '@/features/printers/components/DetailedPrinterCard'
-    );
-
+  it('does NOT show guarding badge when printer does not have Obico monitoring enabled', () => {
     const printer = makePrinter({
       obicoEnabled: false,
       state: 'Printing',
@@ -556,11 +539,7 @@ describe('DetailedPrinterCard monitoring badge', () => {
     expect(screen.queryByText('Guarding')).toBeNull();
   });
 
-  it('shows a detailed failure operations panel when a matching failure event arrives', async () => {
-    const { DetailedPrinterCard } = await import(
-      '@/features/printers/components/DetailedPrinterCard'
-    );
-
+  it('shows a detailed failure operations panel when a matching failure event arrives', () => {
     const printer = makePrinter({
       obicoEnabled: true,
       state: 'Printing',
