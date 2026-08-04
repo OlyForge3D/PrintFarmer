@@ -24,5 +24,5 @@ public class StaleWorkerCleanupSettings
 
     /// <summary>Automatically delete stale workers (if false, just marks them offline).</summary>
     [JsonPropertyName("autoDelete")]
-    public bool AutoDelete { get; set; }
+    public bool AutoDelete { get; set; } = true;
 }

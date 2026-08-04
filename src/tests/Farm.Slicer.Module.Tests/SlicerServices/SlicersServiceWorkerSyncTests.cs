@@ -1,11 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics.Metrics;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Slicer.Module.Api.Hubs;
 using Farm.Slicer.Module.Api.Services;
+using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
@@ -274,8 +276,8 @@ public class SlicersServiceWorkerSyncTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact(DisplayName = "DeregisterAsync marks Worker Offline")]
-    public async Task DeregisterAsync_Should_Mark_Worker_Offline()
+    [Fact(DisplayName = "DeregisterAsync revokes and disables Worker credentials")]
+    public async Task DeregisterAsync_Should_Revoke_Worker_Credentials()
     {
         using SlicerDbContext db = CreateDb();
         EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
@@ -311,10 +313,102 @@ public class SlicersServiceWorkerSyncTests
         _ = worker.Should().NotBeNull();
         _ = worker!.Status.Should().Be(WorkerStatus.Offline);
         _ = worker.OfflineAt.Should().NotBeNull();
+        _ = worker.IsDisabled.Should().BeTrue();
+        _ = worker.DisabledReason.Should().Be("Slicer service deregistered");
+        _ = worker.ApiKey.Should().BeNull();
 
         clientProxy.Verify(p => p.SendCoreAsync(
             It.Is<string>(s => s == SlicerHubEvents.SlicerDeregistered),
             It.IsAny<object[]>(),
             It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "Capacity gauges exclude offline and disabled workers")]
+    public async Task CapacityGauges_Should_Exclude_Offline_And_Disabled_Workers()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new(db);
+        EfWorkerRepository workerRepo = new(db);
+        Worker[] workers =
+        [
+            CreateWorker("online", WorkerStatus.Online, totalSlots: 4, activeJobs: 1),
+            CreateWorker("busy", WorkerStatus.Busy, totalSlots: 2, activeJobs: 2),
+            CreateWorker("draining", WorkerStatus.Draining, totalSlots: 3, activeJobs: 1),
+            CreateWorker("offline", WorkerStatus.Offline, totalSlots: 100, activeJobs: 50),
+            CreateWorker("disabled", WorkerStatus.Online, totalSlots: 100, activeJobs: 50, isDisabled: true),
+        ];
+        await db.Set<Worker>().AddRangeAsync(workers);
+        await db.SaveChangesAsync();
+
+        using SlicerServiceMetrics metrics = CreateMetrics();
+        using HttpClient httpClient = CreateMockHttpClient();
+        _ = new SlicersService(
+            slicerRepo,
+            workerRepo,
+            CreateMockProfileRepository().Object,
+            CreateMockFilamentProfileRepository().Object,
+            CreateMockMachineProfileRepository().Object,
+            CreateMockMachineModelProfileRepository().Object,
+            CreateMockCatalogService().Object,
+            CreateMockAliasService().Object,
+            CreateMockSettingsService().Object,
+            CreateMockHub(out _).Object,
+            metrics,
+            httpClient,
+            CreateMockLogger(),
+            CreateMockSlicerSettings());
+
+        Dictionary<string, int> observed = new();
+        using MeterListener listener = new();
+        listener.InstrumentPublished = (instrument, meterListener) =>
+        {
+            if (ReferenceEquals(instrument, metrics.ServiceTotalCapacity) ||
+                ReferenceEquals(instrument, metrics.ServiceAvailableCapacity) ||
+                ReferenceEquals(instrument, metrics.ServiceActiveJobs))
+            {
+                meterListener.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<int>((instrument, measurement, _, _) =>
+            observed[instrument.Name] = measurement);
+        listener.Start();
+
+        listener.RecordObservableInstruments();
+
+        _ = observed["printfarmer.slicer.service_total_capacity"].Should().Be(9);
+        _ = observed["printfarmer.slicer.service_available_capacity"].Should().Be(3);
+        _ = observed["printfarmer.slicer.service_active_jobs"].Should().Be(4);
+    }
+
+    [Fact(DisplayName = "Stale worker cleanup deletes expired identities by default")]
+    public void StaleWorkerCleanup_Should_Default_To_AutoDelete()
+    {
+        _ = new StaleWorkerCleanupSettings().AutoDelete.Should().BeTrue();
+    }
+
+    private static Worker CreateWorker(
+        string name,
+        string status,
+        int totalSlots,
+        int activeJobs,
+        bool isDisabled = false)
+    {
+        DateTime now = DateTime.UtcNow;
+        return new Worker
+        {
+            Id = Guid.NewGuid(),
+            ServiceId = Guid.NewGuid().ToString(),
+            Name = name,
+            EndpointUrl = $"http://{name}.internal",
+            Status = status,
+            TotalSlots = totalSlots,
+            ActiveJobs = activeJobs,
+            LastHeartbeat = now,
+            RegisteredAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+            ApiKey = $"key-{name}",
+            IsDisabled = isDisabled,
+        };
     }
 }

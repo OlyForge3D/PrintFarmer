@@ -67,6 +67,10 @@ random GUID. Docker deployments leave it unset for both single and scaled
 workers. Even if two callers present the same value and host, registration
 issues separate service GUIDs and keys and preserves both worker records.
 
+Offline and deregistered workers cannot authenticate to worker-only routes.
+Deregistration clears the registry-issued worker key immediately, and stale
+worker rows are deleted by default after the configured cleanup threshold.
+
 ### Registry routes
 
 The shared registry key protects:

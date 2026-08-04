@@ -2,7 +2,9 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
+using Farm.Slicer.Module.Domain;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Slicer.Module.Tests.Security;
 
@@ -122,6 +124,44 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
         await AssertWorkerCredentialAcceptedAsync(client, second);
     }
 
+    [Fact]
+    public async Task WorkerRoutes_OfflineWorkerCredential_ReturnsUnauthorized()
+    {
+        using HttpClient client = _factory.CreateClient();
+        RegisteredService registered = await RegisterAsync(client, "offline-worker");
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+            Worker worker = db.Set<Worker>().Single(w => w.ServiceId == registered.Id.ToString());
+            worker.Status = WorkerStatus.Offline;
+            await db.SaveChangesAsync();
+        }
+
+        await AssertWorkerCredentialStatusAsync(
+            client,
+            registered,
+            HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task WorkerRoutes_DeregisteredWorkerCredential_ReturnsUnauthorized()
+    {
+        using HttpClient client = _factory.CreateClient();
+        RegisteredService registered = await RegisterAsync(client, "deregistered-worker");
+        using HttpRequestMessage deregister = new(
+            HttpMethod.Post,
+            $"/api/slicers/{registered.Id}/deregister");
+        deregister.Headers.Add("X-Slicer-Service-Api-Key", registered.ApiKey);
+
+        HttpResponseMessage deregisterResponse = await client.SendAsync(deregister);
+
+        _ = deregisterResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        await AssertWorkerCredentialStatusAsync(
+            client,
+            registered,
+            HttpStatusCode.Unauthorized);
+    }
+
     private static async Task<RegisteredService> RegisterAsync(
         HttpClient client,
         string name,
@@ -146,6 +186,17 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
         HttpClient client,
         RegisteredService registered)
     {
+        await AssertWorkerCredentialStatusAsync(
+            client,
+            registered,
+            HttpStatusCode.NoContent);
+    }
+
+    private static async Task AssertWorkerCredentialStatusAsync(
+        HttpClient client,
+        RegisteredService registered,
+        HttpStatusCode expectedStatus)
+    {
         using HttpRequestMessage request = new(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(new ClaimJobRequest
@@ -159,7 +210,7 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
 
         HttpResponseMessage response = await client.SendAsync(request);
 
-        _ = response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        _ = response.StatusCode.Should().Be(expectedStatus);
     }
 
     private static HttpRequestMessage CreateRegistrationRequest(
