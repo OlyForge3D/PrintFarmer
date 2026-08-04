@@ -222,20 +222,34 @@ describe('FailureDetectionEvent type', () => {
 // ── ShieldIcon tests ──
 
 describe('ShieldIcon', () => {
-  beforeEach(() => {
-    vi.resetModules();
+  // Loaded once here rather than awaited inside each test body (#1098), matching
+  // the treatment the card components already get below.
+  //
+  // Vitest's timeout wrapper does not cancel the promise it gave up on. If an
+  // `await import(...)` inside a test body exceeds the budget, Vitest fails that
+  // test and runs its `afterEach` while nothing is mounted yet — then the
+  // abandoned continuation resumes and calls `render(...)` during the *next*
+  // test, so the next query matches two elements. Cleanup cannot prevent that,
+  // because the stray render happens after cleanup has already run.
+  //
+  // The `vi.resetModules()` that used to sit in a `beforeEach` here is gone with
+  // it: its only purpose was to force these imports to re-resolve, which made
+  // these two tests pay the full transform cost on *every* run and left them the
+  // most exposed in the file. ShieldIcon is a stateless SVG, so nothing depends
+  // on the module being re-evaluated.
+  let ShieldIcon: (typeof import('@/common/components/icons/MdiIcons'))['ShieldIcon'];
+
+  beforeAll(async () => {
+    ({ ShieldIcon } = await import('@/common/components/icons/MdiIcons'));
   });
 
-  it('renders without errors', async () => {
-    // Import directly — ShieldIcon is a simple SVG component
-    const { ShieldIcon } = await import('@/common/components/icons/MdiIcons');
+  it('renders without errors', () => {
     render(<ShieldIcon />);
     const svg = screen.getByRole('img');
     expect(svg).toBeTruthy();
   });
 
-  it('renders with custom ariaLabel', async () => {
-    const { ShieldIcon } = await import('@/common/components/icons/MdiIcons');
+  it('renders with custom ariaLabel', () => {
     render(<ShieldIcon ariaLabel="ML Monitoring Active" />);
     const svg = screen.getByLabelText('ML Monitoring Active');
     expect(svg).toBeTruthy();
