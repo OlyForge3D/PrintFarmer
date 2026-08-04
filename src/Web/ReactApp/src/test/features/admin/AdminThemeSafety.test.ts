@@ -226,6 +226,15 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * `style={{}}` prop is not a utility and is invisible here. `Slider.tsx` and
  * `MmuControlBox.tsx` both do that today against tokens that do not exist; they
  * are tracked separately rather than silently covered by this assertion.
+ *
+ * The same blind spot covers Tailwind arbitrary values, and this repo now has
+ * five of them: a class written as an arbitrary value puts a bracket where the
+ * pattern below needs the token name, so it never anchors. Those five name
+ * `--pf-hover-overlay`, which is defined in all seven colour themes today, but
+ * nothing here would notice if one theme dropped it -- the hover would simply
+ * stop rendering in that theme alone. Tracked with the two sites above in
+ * #1086, which proposes resolving every `var()` reference against every theme
+ * as a separate check, since it needs a different mechanism from this one.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
   const SRC = resolve(HERE, '../../..');
