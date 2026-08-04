@@ -151,7 +151,6 @@ internal sealed class PinnedOrcaWorkerContainer : IAsyncDisposable
             // Runtime-only injection: the digest cannot be embedded while the image is being built.
             "--env", $"Worker__ContainerDigest={containerDigest}",
             "--env", $"WorkerAuth__SharedKey={registrationKey}",
-            "--env", $"WorkerAuth__SharedApiKey={registrationKey}",
             "--env", "Worker__PollIntervalSeconds=2",
             "--env", "Worker__MaxConcurrentJobs=1",
             "--env", "Worker__LeaseDurationSeconds=600",

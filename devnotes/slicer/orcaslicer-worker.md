@@ -43,7 +43,8 @@ The worker now registers itself with the central slicer registry API on startup:
 | `SlicerRegistry__Version`           | Version string for this worker           | `1.0.0`                |
 | `SlicerRegistry__Host`              | Worker's public URL                      | `http://orcaslicer-worker:8080` |
 | `SlicerRegistry__HeartbeatIntervalSeconds` | Heartbeat frequency (seconds)     | `30`                   |
-| `SlicerRegistry__ApiKey`            | Optional API key for authentication      | (empty)                |
+| `WorkerAuth__SharedKey`             | Required bootstrap registration secret   | (none)                 |
+| `Worker__InstanceId`                | Optional diagnostic process identifier   | Random per process     |
 
 ## Health Endpoints
 
@@ -62,6 +63,7 @@ docker build -f Dockerfile.orcaslicer -t printfarmer/orcaslicer-worker .
 # Run (example)
 docker run --rm -p 8081:8080 \
   -e ConnectionStrings__Redis=host.docker.internal:6379 \
+  -e WorkerAuth__SharedKey='<bootstrap-secret>' \
   -e Worker__StorageEndpoint=http://host.docker.internal:5245 \
   printfarmer/orcaslicer-worker
 ```

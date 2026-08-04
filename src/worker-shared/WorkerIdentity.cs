@@ -2,5 +2,5 @@
 
 public static class WorkerIdentity
 {
-    public static string Create() => Environment.MachineName + "-" + Environment.ProcessId;
+    public static string Create() => Guid.NewGuid().ToString("N");
 }

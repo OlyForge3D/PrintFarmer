@@ -36,6 +36,7 @@ if [[ ! -f "$SCRIPT_DIR/common-utils.sh" ]]; then
   exit 1
 fi
 source "$SCRIPT_DIR/common-utils.sh"
+source "$SCRIPT_DIR/lib_worker_auth.sh"
 
 # Parse command line options
 FOREGROUND=0
@@ -435,8 +436,8 @@ cd "$SRC_DIR"
 REDIS_CONTAINER_ID=""
 
 # Environment setup
+ensure_worker_auth_shared_key
 export ASPNETCORE_ENVIRONMENT=Development
-export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
 export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"

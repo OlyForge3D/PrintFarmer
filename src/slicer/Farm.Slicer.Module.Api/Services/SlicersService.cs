@@ -124,9 +124,11 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         try
         {
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
-            IReadOnlyList<SlicerService> services = _repo.ListAsync(CancellationToken.None).GetAwaiter().GetResult();
+            IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
-            return services.Sum(s => s.MaxConcurrentJobs);
+            return workers
+                .Where(IsLiveWorker)
+                .Sum(w => w.TotalSlots);
         }
         catch
         {
@@ -141,7 +143,9 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
             IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
-            return workers.Sum(w => w.FreeSlots);
+            return workers
+                .Where(w => IsLiveWorker(w) && w.Status != WorkerStatus.Draining)
+                .Sum(w => w.FreeSlots);
         }
         catch
         {
@@ -156,12 +160,21 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 #pragma warning disable VSTHRD002 // Avoid problematic synchronous waits
             IReadOnlyList<Worker> workers = _workerRepo.GetAllAsync(limit: 1000).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
-            return workers.Sum(w => w.ActiveJobs);
+            return workers
+                .Where(IsLiveWorker)
+                .Sum(w => w.ActiveJobs);
         }
         catch
         {
             return 0;
         }
+    }
+
+    private static bool IsLiveWorker(Worker worker)
+    {
+        return !worker.IsDisabled &&
+               worker.Status != WorkerStatus.Offline &&
+               worker.Status != WorkerStatus.Error;
     }
 
     /// <summary>
@@ -199,64 +212,34 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         int maxJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs));
 
-        // Look for an existing service by stable instance ID to handle container restarts
-        SlicerService? svc = !string.IsNullOrWhiteSpace(dto.InstanceId)
-            ? await _repo.GetByInstanceIdAsync(dto.InstanceId, ct)
-            : null;
-
-        bool isReregistration = svc != null;
-
-        if (svc != null)
+        // Every registration receives fresh credentials. InstanceId is diagnostic metadata,
+        // never proof of ownership and never a key-recovery mechanism.
+        SlicerService svc = new()
         {
-            // Re-registration: update existing service in place
-            _logger.LogInformation(
-                "Re-registering existing slicer service {ServiceId} with InstanceId {InstanceId} (container restart detected)",
-                svc.Id, svc.InstanceId);
+            Id = Guid.NewGuid(),
+            Name = dto.Name ?? "orca-service",
+            SlicerType = dto.SlicerType,
+            Version = dto.Version,
+            Host = dto.Host,
+            UiManifestUrl = dto.UiManifestUrl,
+            CapabilitiesJson = dto.CapabilitiesJson,
+            MaxConcurrentJobs = maxJobs,
+            Status = "Online",
+            LastSeen = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Tags = dto.Tags,
+            InstanceId = dto.InstanceId,
+            ApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_'),
+        };
 
-            svc.Name = dto.Name ?? svc.Name;
-            svc.Version = dto.Version;
-            svc.UiManifestUrl = dto.UiManifestUrl;
-            svc.CapabilitiesJson = dto.CapabilitiesJson;
-            svc.MaxConcurrentJobs = maxJobs;
-            svc.Status = "Online";
-            svc.LastSeen = DateTime.UtcNow;
-            svc.UpdatedAt = DateTime.UtcNow;
-            svc.Tags = dto.Tags;
-            svc.Host = dto.Host;
-
-            // Keep existing ApiKey so the worker doesn't need to re-auth
-        }
-        else
-        {
-            // Fresh registration
-            svc = new SlicerService
-            {
-                Id = Guid.NewGuid(),
-                Name = dto.Name ?? "orca-service",
-                SlicerType = dto.SlicerType,
-                Version = dto.Version,
-                Host = dto.Host,
-                UiManifestUrl = dto.UiManifestUrl,
-                CapabilitiesJson = dto.CapabilitiesJson,
-                MaxConcurrentJobs = maxJobs,
-                Status = "Online",
-                LastSeen = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Tags = dto.Tags,
-                InstanceId = dto.InstanceId
-            };
-
-            svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
-
-            await _repo.AddAsync(svc, ct);
-        }
+        await _repo.AddAsync(svc, ct);
 
         // Synchronize to Worker table for dispatcher
-        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
-            ?? (!string.IsNullOrWhiteSpace(svc.Host)
-                ? await _workerRepo.GetByEndpointUrlAsync(svc.Host)
-                : null);
+        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
 
         if (worker != null)
         {
@@ -513,7 +496,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     }
 
     /// <summary>
-    /// Deregisters a slicer worker service and marks it as offline in the system.
+    /// Deregisters a slicer worker service and revokes its worker credentials.
     /// </summary>
     /// <param name="id">The unique identifier of the slicer worker to deregister</param>
     /// <param name="ct">Cancellation token for async operation</param>
@@ -521,7 +504,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     /// <remarks>
     /// This method performs the following operations:
     /// - Removes the slicer service from active registration
-    /// - Synchronizes worker status to offline in the Worker table
+    /// - Revokes the worker key and disables its Worker record
     /// - Records metrics for service deregistration
     /// - Broadcasts deregistration events to all connected clients via SignalR
     /// - Preserves worker history for audit trails
@@ -539,26 +522,19 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         string slicerTypeName = GetSlicerTypeName(svc.SlicerType);
 
+        Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
+        if (worker != null)
+        {
+            worker.Status = WorkerStatus.Offline;
+            worker.OfflineAt = DateTime.UtcNow;
+            worker.UpdatedAt = DateTime.UtcNow;
+            worker.IsDisabled = true;
+            worker.DisabledReason = "Slicer service deregistered";
+            worker.ApiKey = null;
+        }
+
         await _repo.RemoveAsync(svc, ct);
         await _repo.SaveChangesAsync(ct);
-
-        // Synchronize to Worker table - mark as offline or remove
-        try
-        {
-            Worker? worker = await _workerRepo.GetByServiceIdAsync(id.ToString());
-            if (worker != null)
-            {
-                worker.Status = WorkerStatus.Offline;
-                worker.OfflineAt = DateTime.UtcNow;
-                worker.UpdatedAt = DateTime.UtcNow;
-                await _repo.SaveChangesAsync(ct); // Worker entity tracked by same DbContext
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log but don't fail deregistration if Worker sync fails
-            _logger.LogWarning("[DeregisterAsync] Failed to sync Worker deregistration: {ExMessage}", ex.Message);
-        }
 
         // Record metrics
         _metrics.RecordServiceDeregistration(slicerTypeName, id.ToString(), "normal");

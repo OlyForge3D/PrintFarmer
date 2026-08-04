@@ -1405,34 +1405,21 @@ test_installer_fails_without_secure_entropy() {
     pass_test
 }
 
-assert_development_api_block_opt_in() {
-    local block="$1"
+assert_development_launcher_configures_worker_auth() {
+    local script_content="$1"
     local label="$2"
-    local expected='export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true'
-    assert_contains "$block" "ASPNETCORE_ENVIRONMENT=Development" "$label should set the Development environment"
-    assert_contains "$block" "$expected" "$label should explicitly enable the Development-only registration bypass"
-    assert_contains "$block" "dotnet run --project api/Farm.Web.Api.csproj" "$label should contain an API start path"
+    assert_contains "$script_content" "ASPNETCORE_ENVIRONMENT=Development" "$label should set the Development environment"
+    assert_contains "$script_content" "lib_worker_auth.sh" "$label should source the secure worker-auth helper"
+    assert_contains "$script_content" "ensure_worker_auth_shared_key" "$label should configure the canonical worker registration key"
+    assert_not_contains "$script_content" "AllowInsecureDevelopmentRegistration" "$label must not bypass worker registration auth"
 }
 
-# Test: every supported Development API-start path explicitly selects the bypass.
-test_development_launchers_opt_in_to_insecure_registration() {
-    start_test "development API start paths explicitly opt in to insecure slicer registration"
+test_development_launchers_configure_worker_auth() {
+    start_test "development API start paths configure fail-closed worker authentication"
 
-    local pf_dev_block
-    pf_dev_block=$(sed -n '/^start_services()/,/^stop_services()/p' "$REPO_ROOT/scripts/pf-dev.sh")
-    assert_development_api_block_opt_in "$pf_dev_block" "pf-dev.sh start"
-
-    local start_all_block
-    start_all_block=$(sed -n '/# Environment setup/,/# Start Printer Discovery service/p' "$REPO_ROOT/scripts/start-all-local.sh")
-    assert_development_api_block_opt_in "$start_all_block" "start-all-local.sh"
-
-    local workers_api_only_block
-    workers_api_only_block=$(sed -n '/# Early exit for API-only mode:/,/^[[:space:]]*exit 0/p' "$REPO_ROOT/scripts/start-all-local-with-workers.sh")
-    assert_development_api_block_opt_in "$workers_api_only_block" "start-all-local-with-workers.sh --api-only"
-
-    local workers_full_block
-    workers_full_block=$(sed -n '/# Environment setup for API with distributed slicing enabled/,/# Start React dev server/p' "$REPO_ROOT/scripts/start-all-local-with-workers.sh")
-    assert_development_api_block_opt_in "$workers_full_block" "start-all-local-with-workers.sh full startup"
+    assert_development_launcher_configures_worker_auth "$(cat "$REPO_ROOT/scripts/pf-dev.sh")" "pf-dev.sh"
+    assert_development_launcher_configures_worker_auth "$(cat "$REPO_ROOT/scripts/start-all-local.sh")" "start-all-local.sh"
+    assert_development_launcher_configures_worker_auth "$(cat "$REPO_ROOT/scripts/start-all-local-with-workers.sh")" "start-all-local-with-workers.sh"
 
     pass_test
 }
@@ -1485,19 +1472,13 @@ EOF
     local env_content
     env_content=$(cat "$env_file")
 
-    # Verify API keys are generated and present in the env file
-    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and workers with a shared worker key"
-    assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include primary SlicerRegistry__ApiKey for worker registration"
+    # Verify one bootstrap key is generated without deprecated aliases.
+    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and workers with a bootstrap key"
+    assert_not_contains "$env_content" "SlicerRegistry__ApiKey=" "Should not emit the removed registry-key alias"
+    assert_not_contains "$env_content" "SLICER_WORKER_API_KEY" "Should not emit per-replica bootstrap keys"
+    assert_not_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Scaled replicas must derive distinct runtime identities"
     assert_contains "$env_content" "DISCOVERY_SHARED_API_KEY=" "Should configure authenticated discovery event ingestion"
-    
-    # For scaled workers (count > 1), verify individual worker keys are generated
-    assert_contains "$env_content" "SlicerRegistry__ApiKey__orcaslicer_worker" "Should include individual API keys for scaled workers"
 
-    # Verify the key has actual content (not just the key name)
-    local key_line
-    key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
-    local key_value
-    key_value=$(echo "$key_line" | cut -d'=' -f2-)
     local shared_key_line
     shared_key_line=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1)
     local shared_key_value
@@ -1507,9 +1488,18 @@ EOF
     local discovery_key_value
     discovery_key_value=$(echo "$discovery_key_line" | cut -d'=' -f2-)
     
-    assert_not_equals "$key_value" "" "API key value should not be empty"
-    assert_equals "$shared_key_value" "$key_value" "Registry and worker authentication should use the generated shared key"
+    assert_not_equals "$shared_key_value" "" "Bootstrap key value should not be empty"
+    assert_not_contains "$output" "$shared_key_value" "Deployment output must not expose bootstrap key material"
     assert_not_equals "$discovery_key_value" "" "Discovery service key should not be empty"
+
+    # A second run must recover the original bootstrap key before rewriting either file.
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    local second_output
+    second_output=$(get_output)
+    local preserved_key_value
+    preserved_key_value=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1 | cut -d'=' -f2-)
+    assert_equals "$shared_key_value" "$preserved_key_value" "Redeploy should preserve the worker bootstrap key"
+    assert_not_contains "$second_output" "$preserved_key_value" "Redeploy output must not expose preserved bootstrap key material"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true
@@ -1565,22 +1555,18 @@ EOF
     local env_content
     env_content=$(cat "$env_file")
 
-    # Verify API key is present for single worker
-    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and worker with a shared worker key"
-    assert_contains "$env_content" "SlicerRegistry__ApiKey=" "Should include SlicerRegistry__ApiKey for single worker"
+    # Verify the canonical bootstrap input is present without a reusable process identity.
+    assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and worker with a bootstrap key"
+    assert_not_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Single workers must derive fresh runtime identities"
+    assert_not_contains "$env_content" "SlicerRegistry__ApiKey=" "Should not emit the removed registry-key alias"
 
-    # Verify the key has actual content (not just the key name)
-    local key_line
-    key_line=$(grep "^SlicerRegistry__ApiKey=" "$env_file" | head -1)
-    local key_value
-    key_value=$(echo "$key_line" | cut -d'=' -f2-)
     local shared_key_line
     shared_key_line=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1)
     local shared_key_value
     shared_key_value=$(echo "$shared_key_line" | cut -d'=' -f2-)
     
-    assert_not_equals "$key_value" "" "API key value should not be empty"
-    assert_equals "$shared_key_value" "$key_value" "Registry and worker authentication should use the generated shared key"
+    assert_not_equals "$shared_key_value" "" "Bootstrap key value should not be empty"
+    assert_not_contains "$output" "$shared_key_value" "Deployment output must not expose bootstrap key material"
 
     # Clean up
     rm -f .deploy-config "$env_file" || true
@@ -1681,7 +1667,7 @@ run_all_tests() {
     test_installer_upgrade_adds_slicer_worker_key
     test_installer_env_write_is_atomic
     test_installer_fails_without_secure_entropy
-    test_development_launchers_opt_in_to_insecure_registration
+    test_development_launchers_configure_worker_auth
     test_slicer_worker_api_key_generation
     test_slicer_worker_api_key_single_worker
     test_postgres_password_authentication_integration

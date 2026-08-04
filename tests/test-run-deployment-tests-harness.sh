@@ -389,23 +389,90 @@ fi
 pass "Static: configure_additional preserves pre-loaded ENABLE_SPOOLMAN in NON_INTERACTIVE mode"
 
 # ----------------------------------------------------------------------------
-# Static regression: generate_slicer_worker_api_keys must reuse
-# WORKER_SHARED_API_KEY as the primary worker's key so slicer-host ↔ worker
-# auth (WORKER_SHARED_API_KEY) matches the SlicerRegistry__ApiKey the primary
-# worker registers with. Otherwise two different values are written into .env
-# under WORKER_SHARED_API_KEY / SlicerRegistry__ApiKey and worker job-claim
-# auth fails after registration.
+# Static regression: deployment config supplies only the bootstrap key, while
+# every worker process derives a fresh identity at runtime.
 # ----------------------------------------------------------------------------
 
-read -r ws_start ws_end <<<"$(function_range generate_slicer_worker_api_keys "$DEPLOY_SCRIPT")"
-if [[ "$ws_start" == "0" ]]; then
-    fail "generate_slicer_worker_api_keys not found in $DEPLOY_SCRIPT"
+for compose_file in \
+    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml" \
+    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml"; do
+    if ! grep -q 'WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}' "$compose_file"; then
+        fail "$(basename "$compose_file") does not map the canonical WorkerAuth__SharedKey."
+    fi
+    if grep -qE 'WorkerAuth__SharedApiKey|Worker__SharedKey' "$compose_file"; then
+        fail "$(basename "$compose_file") still contains a deprecated worker-auth alias."
+    fi
+    if grep -q 'Worker__InstanceId' "$compose_file"; then
+        fail "$(basename "$compose_file") pins a reusable worker process identity."
+    fi
+done
+pass "Static: worker compose templates use only WorkerAuth__SharedKey and runtime identities"
+
+# The bootstrap key must be resolved before save_deployment_config persists the
+# config and before generate_env_file truncates .env.
+main_start=$(grep -n '^main[[:space:]]*()' "$DEPLOY_SCRIPT" | head -1 | cut -d: -f1 || true)
+resolve_line=$(awk -v start="$main_start" 'NR > start && /resolve_worker_shared_api_key/ { print NR; exit }' "$DEPLOY_SCRIPT")
+save_line=$(awk -v start="$main_start" 'NR > start && /save_deployment_config/ { print NR; exit }' "$DEPLOY_SCRIPT")
+if [[ -z "$resolve_line" || -z "$save_line" || "$resolve_line" -ge "$save_line" ]]; then
+    fail "main must resolve WORKER_SHARED_API_KEY before save_deployment_config."
 fi
-ws_body=$(sed -n "${ws_start},${ws_end}p" "$DEPLOY_SCRIPT")
-if ! echo "$ws_body" | grep -qE 'WORKER_SHARED_API_KEY'; then
-    fail "generate_slicer_worker_api_keys does not reference WORKER_SHARED_API_KEY; primary worker key will diverge from the shared job-claim key."
+
+read -r env_start env_end <<<"$(function_range generate_env_file "$DEPLOY_SCRIPT")"
+if [[ "$env_start" == "0" ]]; then
+    fail "generate_env_file not found in $DEPLOY_SCRIPT"
 fi
-pass "Static: generate_slicer_worker_api_keys reuses WORKER_SHARED_API_KEY for the primary worker"
+env_body=$(sed -n "${env_start},${env_end}p" "$DEPLOY_SCRIPT")
+env_resolve_line=$(echo "$env_body" | grep -n 'resolve_worker_shared_api_key' | head -1 | cut -d: -f1 || true)
+env_truncate_line=$(echo "$env_body" | grep -n 'cat > "\$ENV_FILE"' | head -1 | cut -d: -f1 || true)
+if [[ -z "$env_resolve_line" || -z "$env_truncate_line" || "$env_resolve_line" -ge "$env_truncate_line" ]]; then
+    fail "generate_env_file must recover WORKER_SHARED_API_KEY before truncating .env."
+fi
+pass "Static: worker bootstrap key is resolved before config and environment rewrites"
+
+# Exercise the resolver twice without Docker: the first pass generates and
+# persists a key, and the second process-style pass must recover the same value
+# before the environment file is truncated.
+key_test_script="$TMP_ROOT/test-worker-key-resolution.sh"
+{
+    echo '#!/bin/bash'
+    echo 'set -euo pipefail'
+    echo 'print_info() { printf "%s\n" "$*"; }'
+    for function_name in get_kv_from_file generate_slicer_api_key resolve_worker_shared_api_key; do
+        read -r function_start function_end <<<"$(function_range "$function_name" "$DEPLOY_SCRIPT")"
+        if [[ "$function_start" == "0" ]]; then
+            fail "$function_name not found in $DEPLOY_SCRIPT"
+        fi
+        function_end=$((function_end - 1))
+        sed -n "${function_start},${function_end}p" "$DEPLOY_SCRIPT"
+    done
+    cat <<'EOF'
+CONFIG_FILE="$1/.deploy-config"
+ENV_FILE="$1/.env"
+resolve_worker_shared_api_key
+first_key="$WORKER_SHARED_API_KEY"
+printf 'WORKER_SHARED_API_KEY=%s\n' "$first_key" > "$CONFIG_FILE"
+printf 'WORKER_SHARED_API_KEY=%s\n' "$first_key" > "$ENV_FILE"
+unset WORKER_SHARED_API_KEY
+resolve_worker_shared_api_key
+second_key="$WORKER_SHARED_API_KEY"
+[[ "$second_key" == "$first_key" ]]
+: > "$ENV_FILE"
+printf 'WORKER_SHARED_API_KEY=%s\n' "$second_key" > "$ENV_FILE"
+[[ "$(get_kv_from_file "$ENV_FILE" WORKER_SHARED_API_KEY)" == "$first_key" ]]
+EOF
+} > "$key_test_script"
+chmod +x "$key_test_script"
+
+key_test_output="$TMP_ROOT/worker-key-resolution.out"
+if ! bash "$key_test_script" "$TMP_ROOT" > "$key_test_output" 2>&1; then
+    cat "$key_test_output"
+    fail "Worker bootstrap key changed across two resolution passes."
+fi
+resolved_key=$(grep '^WORKER_SHARED_API_KEY=' "$TMP_ROOT/.env" | tail -1 | cut -d= -f2-)
+if grep -Fq "$resolved_key" "$key_test_output"; then
+    fail "Worker bootstrap key resolver emitted secret material."
+fi
+pass "Dynamic: worker bootstrap key survives two resolution passes without log disclosure"
 
 echo ""
 printf '%sAll run-deployment-tests harness regressions passed%s\n' "$GREEN" "$NC"

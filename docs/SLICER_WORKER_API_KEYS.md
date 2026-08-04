@@ -8,21 +8,18 @@ contains:
 
 ```dotenv
 WORKER_SHARED_API_KEY=<generated-secret>
-SlicerRegistry__ApiKey=<same-generated-secret>
 ```
 
 `WORKER_SHARED_API_KEY` is the canonical deployment value. Compose templates
 pass it to:
 
 - the API or slicer host as `WorkerAuth__SharedKey`;
-- OrcaSlicer workers as `Worker__SharedKey`.
+- every OrcaSlicer worker as `WorkerAuth__SharedKey`.
 
-`SlicerRegistry__ApiKey` is retained as a direct worker-configuration alias.
-Scaled-worker aliases may also be emitted for compatibility, but resource
-identity does not come from those aliases. Each successful registration
-receives a unique service GUID and a separate per-service key. The worker uses
-that returned key for both lifecycle calls and worker-only job routes; the
-shared deployment key cannot impersonate another registered service.
+`WorkerAuth:SharedKey` is the only .NET configuration path. Each successful
+registration receives a unique service GUID and separate per-service key. The
+worker uses that returned key for lifecycle calls and worker-only job routes;
+the bootstrap deployment key cannot impersonate a registered service.
 
 See [Slicer worker authentication](WORKER_AUTHENTICATION.md) for the complete
 header, route, ownership, and failure contracts.
@@ -49,8 +46,10 @@ and run:
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
-The script preserves configured worker values where supported and writes
-secrets to the ignored `.env` file. Do not commit that file.
+The script preserves the bootstrap key and single-worker identity where
+supported and writes secrets to the ignored `.env` file. Scaled replicas derive
+distinct runtime identities rather than sharing one configured instance ID.
+Do not commit `.env`.
 
 ### Provide a key manually
 
@@ -61,35 +60,26 @@ random bytes and configure the same value on the API/slicer host and workers:
 WORKER_SHARED_API_KEY=<random-secret>
 ```
 
-Equivalent .NET configuration variables are:
+The equivalent .NET configuration variable for both sides is:
 
 ```dotenv
 WorkerAuth__SharedKey=<random-secret>
-Worker__SharedKey=<same-random-secret>
 ```
 
-The worker may instead set `SlicerRegistry__ApiKey` for registration. The
-shared value is not sent to worker-only job routes; those routes use the
-per-service key returned by successful registration.
+The bootstrap value is not sent to worker-only job routes. Those routes use
+the per-service key returned by successful registration.
 
 ### Startup requirements
 
 When the slicer module is loaded, the API or slicer host refuses to start
-without a shared registration key. Configure `WorkerAuth:SharedKey` through
-environment variables, user secrets, or the deployment secret store. A missing
-validator or invalid request key always returns `401`; missing configuration
-never disables authentication implicitly.
+without a bootstrap registration key. The worker performs the same startup
+check. Configure `WorkerAuth:SharedKey` through environment variables, user
+secrets, or the deployment secret store. Missing configuration fails startup
+in every environment, including `Development` and `Testing`; there is no
+authentication bypass.
 
-Local development can explicitly opt into unauthenticated registration:
-
-```dotenv
-PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
-```
-
-This flag is accepted only when the host environment is `Development`. It is
-rejected at startup in every other environment and emits a critical startup
-log when active. The repository's local launch scripts set this opt-in for their
-Development processes. Never configure it in a deployed environment.
+Repository local launch scripts generate one ephemeral key for their API and
+worker child processes without displaying or persisting it.
 
 ### Verify configuration
 
@@ -105,7 +95,7 @@ Do not print secret values while verifying. Check only that variables are
 present:
 
 ```bash
-grep -E '^(WORKER_SHARED_API_KEY|SlicerRegistry__ApiKey)=' .env |
+grep -E '^WORKER_SHARED_API_KEY=' .env |
   sed 's/=.*/=<configured>/'
 ```
 

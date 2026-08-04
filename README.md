@@ -85,6 +85,7 @@ cd ./Web/ReactApp && npm install && cd ../../
 dotnet build ./farm-web.sln -c Debug
 
 # Terminal 1: Start API server
+export WorkerAuth__SharedKey="$(openssl rand -hex 32)"
 dotnet run --project ./api/Farm.Web.Api.csproj
 
 # Terminal 2: Start React dev server

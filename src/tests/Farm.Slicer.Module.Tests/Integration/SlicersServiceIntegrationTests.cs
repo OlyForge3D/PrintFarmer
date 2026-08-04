@@ -412,7 +412,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DeregisterAsync_MarksWorkerAsOffline()
+    public async Task DeregisterAsync_RevokesWorkerCredentials()
     {
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -438,6 +438,8 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         worker.Should().NotBeNull();
         worker!.Status.Should().Be("Offline");
         worker.OfflineAt.Should().NotBeNull();
+        worker.IsDisabled.Should().BeTrue();
+        worker.ApiKey.Should().BeNull();
     }
 
     #endregion

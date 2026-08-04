@@ -92,7 +92,8 @@ public abstract class HttpJobPollerService(
                     continue;
                 }
 
-                using HttpClient httpClient = _httpClientFactory.CreateClient();
+                using HttpClient httpClient =
+                    _httpClientFactory.CreateClient(WorkerApiHttpClient.Name);
                 httpClient.BaseAddress = new Uri(apiBaseUrl);
 
                 // A real slice routinely exceeds 30s; the request timeout must exceed the slice

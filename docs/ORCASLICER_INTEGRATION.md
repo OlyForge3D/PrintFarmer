@@ -88,8 +88,8 @@ current worker release.
 
 ### Deploying a second (previous) worker
 
-1. Set `Worker__EngineVersion=2.3.1` (or your previous version), and set **distinct** values for `SlicerRegistry__Host`, `Worker__WorkerId`, `Worker__InstanceId`, and `SlicerRegistry__ServiceName` so `SlicersService.UpsertAsync` doesn't collapse the two workers into one row.
-2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` does exactly this. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
+1. Set `Worker__EngineVersion=2.3.1` (or your previous version) and use a distinct `SlicerRegistry__ServiceName` for operational clarity. Each worker process receives a fresh registry-issued service GUID and key; shared endpoint URLs and diagnostic instance metadata do not merge worker records.
+2. The bundled compose template `scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml` configures the previous engine and its service name. Enable it in generated stacks with `ENABLE_ORCA_WORKER_PREVIOUS=yes` when running `scripts/docker/compose-generator.sh` (default is off, so single-engine installs are unchanged).
 3. The Dockerfile (`scripts/docker/dockerfiles/Dockerfile.multistage`) restores and publishes both `Farm.Slicers.OrcaSlicer.v2_4_0` and `Farm.Slicers.OrcaSlicer.v2_3_1` plugins into the shared plugin drop that the host loads via `Slicer:PluginsPath`.
 
 ### Lifecycle policy

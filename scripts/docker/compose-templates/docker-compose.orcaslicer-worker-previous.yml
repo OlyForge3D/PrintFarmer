@@ -4,8 +4,8 @@
 # (default 2.3.1) alongside the current engine so version-pinned slice jobs
 # can be routed to a compatible worker.
 #
-# Registration uses a distinct Host / ServiceName / WorkerId / InstanceId so
-# SlicersService.RegisterAsync does not upsert onto the current worker's row.
+# Registration receives a fresh service identity and key, while the distinct
+# Host / ServiceName / WorkerId values keep operations and routing clear.
 
 x-orcaslicer-previous-build: &orcaslicer-previous-build
   context: .
@@ -57,7 +57,7 @@ services:
       - ASPNETCORE_URLS=http://+:8080
       - SlicerApi__BaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
       - SlicerRegistry__ApiBaseUrl=${SLICER_SERVICE_URL:-http://slicer-host:5246}
-      # Distinct identity so SlicersService does not upsert onto the current worker's row.
+      # The registry issues a distinct service identity and key to each worker process.
       - SlicerRegistry__ServiceName=orcaslicer-worker-previous
       - SlicerRegistry__Host=http://orcaslicer-worker-previous:8080
       - SlicerRegistry__Version=${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
@@ -66,7 +66,6 @@ services:
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-previous-1
-      - Worker__InstanceId=${ORCA_WORKER_PREVIOUS_INSTANCE_ID:-orcaslicer-worker-previous-1}
       - Worker__MaxConcurrentJobs=1
       - Worker__ModelDownloadMaxBytes=${WORKER_MODEL_DOWNLOAD_MAX_BYTES:-536870912}
       - Worker__ModelDownloadTimeoutSeconds=${WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS:-120}
@@ -75,7 +74,7 @@ services:
       # and refuses to accept jobs pinned to a different version.
       - Worker__EngineVersion=${ORCASLICER_VERSION_PREVIOUS:-2.3.1}
       - Worker__VerifyBinaryVersion=true
-      - WorkerAuth__SharedApiKey=${WORKER_SHARED_API_KEY:-}
+      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
     volumes: *orca-previous-volumes
     depends_on:
       api:

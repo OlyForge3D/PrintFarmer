@@ -28,6 +28,7 @@ public sealed class WorkerAuthService(IWorkerRepository workerRepository) : IWor
         Worker? worker = await _workerRepository.GetByServiceIdAsync(serviceId.ToString());
         if (worker is null ||
             worker.IsDisabled ||
+            worker.Status == WorkerStatus.Offline ||
             string.IsNullOrEmpty(worker.ApiKey) ||
             string.IsNullOrEmpty(presentedKey))
         {

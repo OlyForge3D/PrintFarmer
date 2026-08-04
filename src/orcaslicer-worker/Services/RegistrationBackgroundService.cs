@@ -96,18 +96,22 @@ public class RegistrationBackgroundService : BackgroundService
                 int freeSlots = Math.Max(0, _maxConcurrentJobs - state.ActiveJobs);
                 string status = state.IsShuttingDown ? "Draining" : "Online";
 
-                bool success = await _registrationClient.HeartbeatAsync(
+                SlicerHeartbeatResult heartbeatResult = await _registrationClient.HeartbeatAsync(
                     _serviceId,
                     _apiKey,
                     freeSlots,
                     status,
                     stoppingToken);
 
-                if (!success)
+                if (heartbeatResult == SlicerHeartbeatResult.ReRegister)
                 {
-                    _logger.LogWarning("Heartbeat failed. May need to re-register on next cycle.");
-
-                    // Don't immediately mark as unregistered - could be temporary network issue
+                    _logger.LogWarning("Registered identity is no longer accepted. Re-registering on the next cycle.");
+                    _isRegistered = false;
+                    _workerState.ClearRegisteredService();
+                }
+                else if (heartbeatResult == SlicerHeartbeatResult.Retry)
+                {
+                    _logger.LogWarning("Heartbeat failed transiently. Retaining the current registered identity.");
                 }
             }
             catch (OperationCanceledException)

@@ -32,13 +32,6 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
     }
 
     /// <inheritdoc/>
-    public async Task<Worker?> GetByEndpointUrlAsync(string endpointUrl)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(endpointUrl);
-        return await _context.Workers.FirstOrDefaultAsync(w => w.EndpointUrl == endpointUrl);
-    }
-
-    /// <inheritdoc/>
     public async Task<IReadOnlyList<Worker>> GetAllAsync(int limit = 100, int offset = 0)
     {
         return await _context.Workers
@@ -275,6 +268,15 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
         Worker? worker = await _context.Workers.FindAsync(id);
         if (worker != null)
         {
+            if (Guid.TryParse(worker.ServiceId, out Guid serviceId))
+            {
+                SlicerService? service = await _context.SlicerServices.FindAsync(serviceId);
+                if (service != null)
+                {
+                    _ = _context.SlicerServices.Remove(service);
+                }
+            }
+
             _ = _context.Workers.Remove(worker);
         }
     }
