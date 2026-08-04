@@ -148,10 +148,10 @@ export default function HistoryFiltersBar({
                     className={`px-2 py-1 text-xs font-medium ${
                       selectedStatuses.includes(status)
                         ? status === "completed"
-                          ? "bg-pf-success text-white hover:bg-pf-success"
+                          ? "bg-pf-success text-[var(--pf-text-inverse)] hover:bg-pf-success"
                           : status === "failed"
-                          ? "bg-pf-error text-white hover:bg-pf-error"
-                          : "bg-pf-warning text-white hover:bg-pf-warning"
+                          ? "bg-pf-error text-[var(--pf-text-inverse)] hover:bg-pf-error"
+                          : "bg-pf-warning text-[var(--pf-text-inverse)] hover:bg-pf-warning"
                         : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
                     }`}
                   >
