@@ -450,6 +450,7 @@ if [[ $API_ONLY -eq 1 ]]; then
   # Start API server
   info "Starting API server at $API_URL..."
   export ASPNETCORE_ENVIRONMENT=Development
+  export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
   export DEPLOYMENT_MODE=monolithic
   export ASPNETCORE_URLS="$API_URL"
   export ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING"

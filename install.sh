@@ -86,13 +86,19 @@ yn_no()  { local v; v="$(lc "${1:-}")"; [[ "$v" == "n" || "$v" == "no" ]]; }
 
 generate_secret() {
     local length="${1:-48}"
-    local raw
+    local raw=""
     if command -v openssl >/dev/null 2>&1; then
-        raw="$(openssl rand -base64 256 2>/dev/null)"
-    else
-        raw="$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | base64 2>/dev/null || echo "fallback$(date +%s)$$")"
+        raw="$(openssl rand -base64 256 2>/dev/null || true)"
+    fi
+    if [[ -z "$raw" && -r /dev/urandom ]] \
+        && command -v dd >/dev/null 2>&1 \
+        && command -v base64 >/dev/null 2>&1; then
+        raw="$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | base64 2>/dev/null || true)"
     fi
     raw="${raw//[\/+=[:space:]]/}"
+    if [[ ${#raw} -lt $length ]]; then
+        die "Unable to generate a secure secret. Install OpenSSL or provide a working /dev/urandom and base64."
+    fi
     printf '%s' "${raw:0:$length}"
 }
 
@@ -899,9 +905,22 @@ info "Writing configuration..."
 
 if [[ "$DB_ENGINE" == "postgres" ]]; then
     DB_PASSWORD="${DB_PASSWORD:-$(generate_secret 32)}"
+fi
+GENERATED_AT="$(date '+%Y-%m-%d %H:%M:%S')"
+ENV_TEMP_FILE="$(mktemp "$INSTALL_DIR/.env.tmp.XXXXXX")"
+chmod 600 "$ENV_TEMP_FILE"
+cleanup_generated_env() {
+    if [[ -n "${ENV_TEMP_FILE:-}" && -f "$ENV_TEMP_FILE" ]]; then
+        rm -f "$ENV_TEMP_FILE"
+    fi
+}
+trap cleanup_generated_env EXIT
+trap 'cleanup_generated_env; exit 1' INT TERM HUP
+
+if [[ "$DB_ENGINE" == "postgres" ]]; then
     CONNSTR="${CONNSTR_PRESERVED:-Host=database;Port=5432;Database=printfarmer;Username=printfarmer;Password=${DB_PASSWORD}}"
-    cat > "$INSTALL_DIR/.env" <<ENVEOF
-# PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
+    cat > "$ENV_TEMP_FILE" <<ENVEOF
+# PrintFarmer — generated ${GENERATED_AT}
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
@@ -931,8 +950,8 @@ ENVEOF
 else
     # SQLite — no database container needed
     CONNSTR="${CONNSTR_PRESERVED:-Data Source=/data/printfarmer.db}"
-    cat > "$INSTALL_DIR/.env" <<ENVEOF
-# PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
+    cat > "$ENV_TEMP_FILE" <<ENVEOF
+# PrintFarmer — generated ${GENERATED_AT}
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
@@ -957,11 +976,10 @@ PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
 fi
-chmod 600 "$INSTALL_DIR/.env"
 
 # Append ARM platform overrides if running on ARM
 if [[ "$IS_ARM" == "true" ]]; then
-    cat >> "$INSTALL_DIR/.env" <<ARMEOF
+    cat >> "$ENV_TEMP_FILE" <<ARMEOF
 
 # ARM Platform — 3D model and slicing features disabled
 PFARM__Slicer__Enabled=false
@@ -985,6 +1003,10 @@ ARMEOF
 PLATFORMEOF
     dimtext "Created appsettings.Platform.json for bare-metal .NET deployments"
 fi
+
+mv "$ENV_TEMP_FILE" "$INSTALL_DIR/.env"
+ENV_TEMP_FILE=""
+trap - EXIT INT TERM HUP
 
 ok "Environment config"
 

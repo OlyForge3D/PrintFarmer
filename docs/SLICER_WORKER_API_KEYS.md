@@ -2,7 +2,9 @@
 
 `install.sh` and `scripts/deploy-docker.sh` generate a cryptographically random
 shared registration key. Reinstalls and in-place upgrades preserve the existing
-key. The generated `.env` contains:
+key. The installer aborts if no cryptographically secure random source is
+available rather than writing a predictable fallback. The generated `.env`
+contains:
 
 ```dotenv
 WORKER_SHARED_API_KEY=<generated-secret>
