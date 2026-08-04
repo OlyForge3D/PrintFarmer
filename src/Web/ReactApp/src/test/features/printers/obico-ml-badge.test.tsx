@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type {
   AutoDispatchStatus,
@@ -180,6 +180,8 @@ beforeEach(() => {
   failureDetectionPrinterStatusMock = undefined;
   autoDispatchStatusMock = null;
 });
+
+afterEach(cleanup);
 
 // ── FailureDetectionEvent type shape test ──
 
