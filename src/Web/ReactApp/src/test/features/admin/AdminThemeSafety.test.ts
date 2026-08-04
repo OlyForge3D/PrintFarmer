@@ -227,14 +227,19 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * `MmuControlBox.tsx` both do that today against tokens that do not exist; they
  * are tracked separately rather than silently covered by this assertion.
  *
- * The same blind spot covers Tailwind arbitrary values, and this repo now has
- * five of them: a class written as an arbitrary value puts a bracket where the
- * pattern below needs the token name, so it never anchors. Those five name
- * `--pf-hover-overlay`, which is defined in all seven colour themes today, but
- * nothing here would notice if one theme dropped it -- the hover would simply
- * stop rendering in that theme alone. Tracked with the two sites above in
- * #1086, which proposes resolving every `var()` reference against every theme
- * as a separate check, since it needs a different mechanism from this one.
+ * The same blind spot covers Tailwind arbitrary values: a class written as an
+ * arbitrary value puts a bracket where the pattern below needs the token name,
+ * so it never anchors. This repo had five such usages, all naming
+ * `--pf-hover-overlay`. Rather than document that hole, it was closed: the
+ * token is now mapped in `@theme` as `--color-pf-hover-overlay` and all five
+ * sites use the ordinary `hover:bg-pf-hover-overlay`, so they are governed by
+ * the assertion below like any other utility. Verified by removing the mapping,
+ * which turns this suite red naming `pf-hover-overlay`.
+ *
+ * Zero arbitrary-value colour usages remain. The inline-`var()` sites above are
+ * the only surviving instance of the blind spot, and #1086 tracks resolving
+ * every `var()` reference against every theme as a separate check, since that
+ * needs a different mechanism from this one.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
   const SRC = resolve(HERE, '../../..');
