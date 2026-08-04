@@ -72,7 +72,9 @@ export function FailureDetectionMonitoringBadge({
         variant="unstyled"
         onClick={() => setIsDetailsOpen(true)}
         className={clsx(
-          'p-1 rounded-full transition-colors',
+          // p-1 around a 16px icon makes a 24px square: a circular icon button,
+          // which DESIGN-LANGUAGE sanctions as fully round.
+          'size-6 p-1 rounded-full transition-colors',
           'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-offset-2',
           'hover:bg-white/10',
           className

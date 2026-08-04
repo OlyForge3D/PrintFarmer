@@ -120,7 +120,7 @@ export default function ModelFiltersBar({
               onClick={() => handleStatusToggle(status)}
               disabled={isLoading}
               variant="subtle"
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+              className={`px-3 py-1 rounded-sm text-sm font-medium transition-colors ${
                 selectedStatuses.includes(status)
                   ? status === "queued"
                     ? "bg-pf-info text-white"

@@ -172,7 +172,7 @@ export const FilamentProfileStep: React.FC<FilamentProfileStepProps> = ({
   const filteredSelectedCount = filteredFilaments.filter((f) => selectedFilaments.has(f.name)).length;
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-pf-text-primary">Select Filament Profiles</h3>

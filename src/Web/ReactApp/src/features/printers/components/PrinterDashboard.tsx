@@ -60,7 +60,7 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
   };
 
   const card = (
-    <div className={`bg-pf-bg-1 overflow-hidden border border-pf-border rounded-xl shadow-lg ${linkTo ? 'hover:border-pf-accent transition-colors cursor-pointer' : ''}`}>
+    <div className={`bg-pf-bg-1 overflow-hidden border border-pf-border rounded-lg shadow-lg ${linkTo ? 'hover:border-pf-accent transition-colors cursor-pointer' : ''}`}>
       <div className="p-5">
         <div className="flex items-center">
           <div className="shrink-0">

@@ -218,7 +218,7 @@ function StatCard({ label, value, colorClass, headline, tooltip, delay }: StatCa
             "linear-gradient(135deg, color-mix(in srgb, var(--pf-accent) 8%, transparent) 0%, transparent 55%)",
         }),
       }}
-      className="pf-card-in bg-pf-bg-1/95 backdrop-blur-sm border border-pf-border rounded-xl p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)]"
+      className="pf-card-in bg-pf-bg-1/95 backdrop-blur-sm border border-pf-border rounded-lg p-4 shadow-[0_8px_20px_rgba(0,0,0,0.14)]"
     >
       <p className="text-sm font-medium text-pf-text-secondary">{label}</p>
       <p className={`font-bold tracking-tight ${headline ? "text-4xl mt-0.5" : "text-3xl"} ${colorClass}`}>
@@ -638,7 +638,7 @@ export default function QueueTimelineTab({ stats, dateFrom, dateTo }: QueueTimel
           tabIndex={0}
           onKeyDown={handleChartKey}
           className={[
-            "border border-pf-border rounded-xl bg-pf-bg-1/95 overflow-hidden",
+            "border border-pf-border rounded-lg bg-pf-bg-1/95 overflow-hidden",
             "shadow-[0_12px_28px_rgba(0,0,0,0.16)] backdrop-blur-sm",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pf-accent",
             isFullscreen ? "flex-1 flex flex-col min-h-0 overflow-hidden" : "",

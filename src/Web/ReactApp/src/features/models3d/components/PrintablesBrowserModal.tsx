@@ -41,7 +41,7 @@ function PrintablesModelCard({
   const modelUrl = getModelUrl(model);
 
   return (
-    <article className="rounded-xl border border-pf-border bg-pf-bg-1 p-3">
+    <article className="rounded-lg border border-pf-border bg-pf-bg-1 p-3">
       <div className="flex gap-3">
         {model.thumbnailUrl ? (
           <img
@@ -104,7 +104,7 @@ function PrintablesCollectionCard({
   const isLoadingCollectionModels = isExpanded && collectionModelsQuery.isFetching && collectionModels.length === 0;
 
   return (
-    <section className="rounded-xl border border-pf-border bg-pf-bg-1 p-3">
+    <section className="rounded-lg border border-pf-border bg-pf-bg-1 p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h4 className="text-sm font-semibold text-pf-text-primary">{collection.name}</h4>

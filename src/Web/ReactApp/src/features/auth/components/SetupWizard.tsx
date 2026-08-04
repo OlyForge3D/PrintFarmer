@@ -791,7 +791,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   return (
     <div className="min-h-screen bg-pf-bg-0 flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-xl p-8">
+      <div className="w-full max-w-2xl bg-pf-bg-1 border border-pf-border shadow-xl rounded-lg p-8">
         {initializing ? (
           // Show initialization spinner
           (<div className="text-center py-16">

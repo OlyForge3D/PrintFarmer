@@ -50,6 +50,9 @@ export const Toggle: React.FC<ToggleProps> = ({
         {...rest}
       />
       <div
+        // A switch track is a pill by definition — the thumb travels the length
+        // of it and has to sit flush at both ends.
+        data-pf-radius="full"
         className={clsx(
           'rounded-full transition-colors',
           sizeClasses[size].track,
@@ -61,7 +64,9 @@ export const Toggle: React.FC<ToggleProps> = ({
       >
         <div
           className={clsx(
-            'absolute top-0.5 left-0.5 rounded-full bg-pf-bg-0 shadow-sm transition-transform',
+            // The thumb's w/h pair comes from the lookup below, which the
+            // radius lint cannot read; it is square at every size.
+            'absolute top-0.5 left-0.5 aspect-square rounded-full bg-pf-bg-0 shadow-sm transition-transform',
             sizeClasses[size].thumb,
             checked && sizeClasses[size].translate
           )}

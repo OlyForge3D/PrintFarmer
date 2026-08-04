@@ -157,10 +157,12 @@ function UsageMeter({ label, value, details }: UsageMeterProps) {
         aria-valuemax={100}
         aria-valuenow={Number(normalizedValue.toFixed(1))}
         aria-valuetext={`${formatPercent(normalizedValue)} used`}
+        data-pf-progress-track
         className="h-3 overflow-hidden rounded-full border border-pf-border bg-pf-progress-track"
       >
         <div
           aria-hidden="true"
+          data-pf-progress-fill
           className={clsx('h-full rounded-full transition-[width]', getMeterFillClassName(normalizedValue))}
           style={{ width: `${normalizedValue}%` }}
         />

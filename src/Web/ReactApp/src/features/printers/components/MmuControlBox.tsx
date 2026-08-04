@@ -287,7 +287,7 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
 
   // Action status badge
   const actionBadge: ReactNode = mmuStatus.action && mmuStatus.action !== 'Idle' ? (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-pf-accent-bg/15 text-pf-accent">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-xs text-[10px] font-bold bg-pf-accent-bg/15 text-pf-accent">
       <span className="w-1.5 h-1.5 rounded-full bg-pf-accent animate-pulse" />
       {mmuStatus.action}
     </span>

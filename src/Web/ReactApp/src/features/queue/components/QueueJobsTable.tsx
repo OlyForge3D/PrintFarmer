@@ -384,7 +384,7 @@ export function QueueJobsTable({
                 <div className="flex flex-col items-center gap-1">
                   <span
                     className={clsx(
-                      "inline-block px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap",
+                      "inline-block px-2 py-0.5 rounded-xs text-xs font-medium whitespace-nowrap",
                       getStatusColor(status),
                     )}
                   >
@@ -480,12 +480,12 @@ export function QueueJobsTable({
                       {deadlineDisplay}
                     </span>
                     {deadlineState === "overdue" && (
-                      <span className="inline-flex items-center rounded-full bg-pf-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-pf-error">
+                      <span className="inline-flex items-center rounded-xs bg-pf-error/15 px-1.5 py-0.5 text-[10px] font-semibold text-pf-error">
                         Overdue
                       </span>
                     )}
                     {deadlineState === "due-soon" && (
-                      <span className="inline-flex items-center rounded-full bg-pf-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-pf-warning">
+                      <span className="inline-flex items-center rounded-xs bg-pf-warning/20 px-1.5 py-0.5 text-[10px] font-semibold text-pf-warning">
                         Due soon
                       </span>
                     )}

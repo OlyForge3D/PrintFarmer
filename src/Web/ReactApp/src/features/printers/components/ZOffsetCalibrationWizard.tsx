@@ -459,7 +459,9 @@ function FirstLayerVisualGuide() {
                 aria-label={`${ex.label}: ${ex.description}`}
               >
                 {[0, 1, 2].map((i) => (
-                  <div key={i} className={clsx('rounded-full', ex.color, ex.height)} />
+                  // Each bar depicts an extruded bead of filament, which is
+                  // genuinely capsule-shaped — not a UI pill.
+                  <div key={i} data-pf-radius="full" className={clsx('rounded-full', ex.color, ex.height)} />
                 ))}
               </div>
               <div className="text-xs text-pf-text-secondary">{ex.description}</div>

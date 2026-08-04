@@ -275,7 +275,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                         <h4 className="text-sm font-medium text-pf-text-primary truncate">
                           {job.filename}
                         </h4>
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(job.status)}`}>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-xs ${getStatusColor(job.status)}`}>
                           {job.status}
                         </span>
                       </div>

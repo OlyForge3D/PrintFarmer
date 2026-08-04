@@ -71,7 +71,10 @@ export function FilamentCoverageBadge({
     ? `${visibleLabel} — ${ariaContext}`
     : visibleLabel;
   const classes = [
-    "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-medium leading-none",
+    // A `role="status"` pill, which the design language puts at `xs`; the full
+    // round is reserved for tag chips, and this is not one. Built as an array
+    // literal rather than a `className` attribute, so the radius rule never saw it.
+    "inline-flex items-center gap-1 rounded-xs border px-1.5 py-0.5 text-[11px] font-medium leading-none",
     STATUS_CLASSES[status],
     className ?? "",
   ]
@@ -140,7 +143,7 @@ export function RunoutRiskChip({
       aria-label={title}
       title={title}
       className={[
-        "inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-200",
+        "inline-flex items-center gap-1 rounded-xs border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[11px] font-medium text-amber-200",
         className ?? "",
       ]
         .join(" ")

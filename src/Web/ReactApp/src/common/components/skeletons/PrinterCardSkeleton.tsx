@@ -1,7 +1,7 @@
 import React from 'react';
 
 export const PrinterCardSkeleton: React.FC = () => (
-  <div className="bg-pf-bg-1 border border-pf-border rounded-xl shadow-lg overflow-hidden pf-animate-skeleton" aria-busy="true" aria-label="Loading printer">
+  <div className="bg-pf-bg-1 border border-pf-border rounded-lg shadow-lg overflow-hidden pf-animate-skeleton" aria-busy="true" aria-label="Loading printer">
     <div className="h-40 bg-pf-bg-2 pf-skeleton pf-animate-skeleton" />
     <div className="p-4 space-y-3">
       <div className="pf-skeleton pf-animate-skeleton h-4 w-40" />

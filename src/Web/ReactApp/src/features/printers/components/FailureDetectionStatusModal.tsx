@@ -246,7 +246,7 @@ export function FailureDetectionStatusModal({
     >
       <div className="space-y-5">
         {/* Status header — always full width */}
-        <div className="rounded-xl border border-pf-border bg-pf-bg-0 p-4">
+        <div className="rounded-lg border border-pf-border bg-pf-bg-0 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
@@ -381,7 +381,7 @@ export function FailureDetectionStatusModal({
                               {incidentContext.map((context) => (
                                 <span
                                   key={`${event.id ?? event.detectedAt}-${context.label}`}
-                                  className="inline-flex items-center gap-1 rounded-full bg-pf-bg-1 px-2.5 py-1"
+                                  className="inline-flex items-center gap-1 rounded-xs bg-pf-bg-1 px-2.5 py-1"
                                 >
                                   <span className="text-xs font-semibold uppercase tracking-[0.12em] text-pf-text-secondary">
                                     {context.label}

@@ -23,7 +23,7 @@ export function SpoolCard({ spool, isSelected, onToggleSelect, onEdit, onClone, 
 
   return (
     <div
-      className={`bg-pf-bg-1 border rounded-xl p-4 hover:bg-pf-bg-secondary transition-colors ${
+      className={`bg-pf-bg-1 border rounded-lg p-4 hover:bg-pf-bg-secondary transition-colors ${
         isSelected ? 'border-pf-accent ring-1 ring-pf-accent/30' : (spool.remainingWeightG ?? Infinity) <= 10 ? 'border-pf-error' : (spool.remainingWeightG ?? Infinity) <= 50 ? 'border-pf-warning' : 'border-pf-border'
       }`}
     >

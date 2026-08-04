@@ -135,17 +135,17 @@ export function SliceProgressOverlay({ jobId, progress, onNewJob, onRetry, filam
         {(progress.estimatedPrintTimeSeconds != null || progress.filamentUsedGrams != null) && (
           <div className="flex flex-wrap gap-3 justify-center">
             {progress.estimatedPrintTimeSeconds != null && progress.estimatedPrintTimeSeconds > 0 && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-xs text-white/80">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-white/10 text-xs text-white/80">
                 🕐 {sliceJobService.formatPrintTime(progress.estimatedPrintTimeSeconds)}
               </span>
             )}
             {progress.filamentUsedGrams != null && progress.filamentUsedGrams > 0 && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-xs text-white/80">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-white/10 text-xs text-white/80">
                 🧵 {sliceJobService.formatFilamentUsed(progress.filamentUsedGrams)}
               </span>
             )}
             {materialCostFormatted && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-xs text-white/80">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xs bg-white/10 text-xs text-white/80">
                 💰 {materialCostFormatted}
                 {costSource && (
                   <span className="text-[10px] opacity-60">

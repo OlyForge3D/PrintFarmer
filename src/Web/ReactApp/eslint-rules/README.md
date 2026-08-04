@@ -58,7 +58,8 @@ substring match can.
 ### Options
 
 ```js
-'local/pf-no-oversized-radius': ['error', { maxPx: 12, checkFullRound: false }]
+// eslint.config.js — the whole registration, repo-wide.
+'local/pf-no-oversized-radius': ['error', { maxPx: 8, checkFullRound: true }]
 ```
 
 | Option | Default | Meaning |
@@ -66,32 +67,42 @@ substring match can.
 | `maxPx` | `8` | Largest permitted radius in px. `8` is the documented `--pf-radius-lg` ceiling. |
 | `checkFullRound` | `false` | Also report non-circular `rounded-full`. |
 
-### Current configuration, and how to finish the migration
+### Current configuration
 
-The repo is linted in two tiers, because the two families have very different migration costs:
+One tier, repo-wide: `maxPx: 8`, `checkFullRound: true` — the documented rule, applied everywhere.
 
-- **Repo-wide:** `maxPx: 12`, `checkFullRound: false`. This blocks everything that is
-  unambiguously outside the scale (`2xl` and above, oversized arbitrary values) while
-  grandfathering the ~80 existing `rounded-xl` call sites.
-- **`features/admin`, `features/settings`, `design-system`:** `maxPx: 8`,
-  `checkFullRound: true` — the actual documented rule, applied to the areas migrated by
-  epic #1005.
+It ran in two tiers while the backlog was cleared. A grandfathered 12px ceiling held the line
+repo-wide, and the real setting applied only to the areas epic #1005 had already migrated, because
+turning the strict settings on everywhere would have emitted ~170 reports at once — which would have
+buried the signal and trained everyone to ignore it. 77 of those were `rounded-xl` and the rule
+autofixed them; the other 93 were `rounded-full`, four of which were the rule's own blind spot,
+leaving 89 that each needed a human decision about whether the shape is meant to be round. #1022
+did that work, so the override block is gone and the ceiling is the one in DESIGN-LANGUAGE.
 
-The tiering is deliberate: the lint baseline is zero errors *and* zero warnings, and it is
-worth keeping that way. Turning the strict settings on repo-wide today would emit ~90
-`rounded-full` reports at once — each needing a human decision about whether the shape is
-meant to be round — which would bury the signal and train everyone to ignore it.
+Adjudicating `rounded-full` meant deciding per site what the element actually is. Most were already
+excused by shape evidence the rule can see for itself (`size-*`, matching `w-`/`h-`, `aspect-square`,
+spinner animations). The rest were either genuine circles, which got that evidence or an explicit
+`data-pf-radius="full"`, or rectangles wearing a pill, which became `rounded-xs`.
 
-To finish the job: adjudicate the remaining `rounded-full` sites (mark the genuine pills with
-`data-pf-radius="full"`, flatten the rest), migrate the `rounded-xl` sites, then drop the
-repo-wide config to `{ maxPx: 8, checkFullRound: true }` and delete the override block.
+Shape evidence is matched within its own variant scope. The slider thumbs in `Slider.tsx` and
+`SettingRow.tsx` are circles declared entirely inside a variant —
+`[&::-webkit-slider-thumb]:w-4` paired with `:h-4` and `:rounded-full` — and gathering evidence
+across the whole element without regard to scope read them as pills. Evidence is now bucketed by
+raw variant prefix and matched by string equality, so `hover:w-4` never pairs with `focus:h-4`.
+There is no understanding of what a variant *means*, which is what keeps it small.
+
+Unprefixed evidence counts in every scope, because an unconditional square is square at every
+breakpoint and in every state, so `aspect-square md:rounded-full` is a circle. Prefixed evidence
+counts only in its own scope, which preserves the case this check has always had to catch:
+`md:aspect-square` with a bare `rounded-full` is a rectangle below `md`, and still reports.
 
 ### Reading class names
 
 Class strings are collected recursively, so the rule sees radii inside `clsx()`/`cn()` calls,
 nested arrays and object keys, template literal quasis, and plain `className` strings.
-Responsive and state variants are stripped before matching, so `md:rounded-2xl` and
-`hover:rounded-2xl` are caught. Side-specific utilities are handled explicitly — `rounded-l`
+Responsive and state variants are stripped before matching the radius itself, so `md:rounded-2xl`
+and `hover:rounded-2xl` are caught. The prefix is kept, though, and used to scope the circularity
+evidence as described above. Side-specific utilities are handled explicitly — `rounded-l`
 is the left side, not a size.
 
 Arbitrary values in units the rule cannot resolve statically (e.g. `rounded-[var(--x)]`) are

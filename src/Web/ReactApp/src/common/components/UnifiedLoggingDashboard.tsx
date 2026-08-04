@@ -181,7 +181,7 @@ export const UnifiedLoggingDashboard: React.FC<UnifiedLoggingDashboardProps> = (
                 {filteredLogs.reverse().map((log, index) => (
                   <div key={`${log.timestamp.getTime()}-${index}`} className="p-3 hover:bg-pf-bg-2">
                     <div className="flex items-start space-x-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getLevelColor(log.level)}`}>
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-xs text-xs font-medium ${getLevelColor(log.level)}`}>
                         {log.level.toUpperCase()}
                       </span>
                       

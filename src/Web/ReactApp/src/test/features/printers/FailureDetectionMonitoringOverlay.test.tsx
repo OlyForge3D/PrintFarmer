@@ -195,7 +195,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
     const trigger = container.querySelector('button') as HTMLElement;
     expect(trigger.className).toContain('custom-test-class');
     expect(trigger.className).toContain('inline-flex');
-    expect(trigger.className).toContain('rounded-full');
+    expect(trigger.className).toContain('rounded-xs');
     expect(trigger.className).toContain('pointer-events-auto');
   });
 

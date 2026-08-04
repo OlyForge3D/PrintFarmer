@@ -116,7 +116,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
   };
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-6">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-pf-text-primary">Select Printer Model</h3>
