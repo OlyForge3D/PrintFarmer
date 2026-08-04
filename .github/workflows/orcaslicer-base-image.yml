@@ -228,6 +228,10 @@ jobs:
               ln -sf /opt/orcaslicer/orca-slicer /usr/local/bin/orca-slicer 2>/dev/null || \
               ln -sf /opt/orcaslicer/OrcaSlicer /usr/local/bin/orca-slicer 2>/dev/null || \
               ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orca-slicer 2>/dev/null
+
+          # Preserve AppRun's relative libexec/resource lookup for worker runtime.
+          RUN test -x /opt/orcaslicer/AppRun && \
+              ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer
           
           # Set library path (include bin/ and usr/lib)
           ENV LD_LIBRARY_PATH=/opt/orcaslicer/bin:/opt/orcaslicer/usr/lib:/opt/orcaslicer/lib:/opt/orcaslicer
@@ -239,7 +243,7 @@ jobs:
               echo "=== bin/ contents ===" && \
               ls -la /opt/orcaslicer/bin/ 2>/dev/null || echo "No bin/ directory" && \
               echo "=== Binary check ===" && \
-              /opt/orcaslicer/bin/orca-slicer --help 2>&1 | head -5 || echo "Binary check complete"
+              /usr/local/bin/orcaslicer --help 2>&1 | head -5 || echo "Binary check complete"
           
           LABEL org.opencontainers.image.description="OrcaSlicer base image with extracted binaries"
           LABEL org.opencontainers.image.source="https://github.com/OrcaSlicer/OrcaSlicer"

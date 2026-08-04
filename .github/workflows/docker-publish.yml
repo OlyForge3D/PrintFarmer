@@ -500,6 +500,14 @@ jobs:
               test -s /opt/orcaslicer/orcaslicer.sha256 && \
               test "$(cat /opt/orcaslicer/orcaslicer.version)" = "${{ env.ORCA_VERSION }}" && \
               test "$(cat /opt/orcaslicer/orcaslicer.sha256)" = "${{ env.ORCA_SHA256 }}"
+
+          RUN set -e; \
+              test -x /opt/orcaslicer/AppRun; \
+              install -d -m 0755 /etc/printfarmer; \
+              cp /opt/orcaslicer/orcaslicer.version /etc/printfarmer/orcaslicer.version; \
+              cp /opt/orcaslicer/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
+              chmod 0644 /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256; \
+              ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer
           
           # Install .NET runtime
           RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -519,7 +527,10 @@ jobs:
           COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           
           ENV ASPNETCORE_URLS=http://+:8080
-          ENV ORCASLICER_PATH=/opt/orcaslicer
+          ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+          ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
+          ENV Worker__EngineVersion=${{ env.ORCA_VERSION }}
+          ENV SlicerRegistry__Version=${{ env.ORCA_VERSION }}
           EXPOSE 8080
           
           ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]

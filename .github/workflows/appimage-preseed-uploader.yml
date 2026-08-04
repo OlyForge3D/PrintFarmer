@@ -8,9 +8,9 @@ on:
         required: true
         default: 'orca'
       version:
-        description: 'Version string (for Prusa: 2.8.0 or for Orca: v2.4.2). If empty, script will attempt to use latest release.'
+        description: 'Version string (for Prusa: 2.8.0 or for Orca: v2.4.2). If empty, Orca uses the repository pin and Prusa uses its latest stable release.'
         required: false
-        default: 'v2.4.2'
+        default: ''
 
 env:
   ORCASLICER_VERSION: v2.4.2
@@ -33,9 +33,12 @@ jobs:
           INPUT_SLICER: ${{ github.event.inputs.slicer }}
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          SLICER="$INPUT_SLICER"
+          SLICER="${INPUT_SLICER:-orca}"
           VERSION_IN="$INPUT_VERSION"
-          if [ -z "$SLICER" ]; then echo "slicer=prusa" >> $GITHUB_OUTPUT; else echo "slicer=$SLICER" >> $GITHUB_OUTPUT; fi
+          if [ "$SLICER" = "orca" ] && [ -z "$VERSION_IN" ]; then
+            VERSION_IN="$ORCASLICER_VERSION"
+          fi
+          echo "slicer=$SLICER" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION_IN" >> $GITHUB_OUTPUT
 
       - name: Fetch release info and download AppImage
@@ -73,7 +76,7 @@ jobs:
             fi
             release_entry=$(echo "$releases_json" | jq -r --arg tag "$tag_match" '.[] | select(.tag_name==($tag) or .name==($tag) ) | .')
           else
-            release_entry=$(echo "$releases_json" | jq -r '.[] | select(.prerelease==false) | .[0]' | head -n1)
+            release_entry=$(echo "$releases_json" | jq -r '[.[] | select(.prerelease == false and .draft == false)][0]')
           fi
 
           if [ -z "$release_entry" ] || [ "$release_entry" = "null" ]; then

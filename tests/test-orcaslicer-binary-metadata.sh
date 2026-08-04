@@ -22,40 +22,65 @@ setup() {
 #!/bin/bash
 set -euo pipefail
 
-if [[ "${1:-}" != "image" || "${2:-}" != "inspect" ]]; then
-    exit 2
-fi
-
-if [[ "${MOCK_IMAGE_EXISTS:-true}" != "true" ]]; then
-    exit 1
-fi
-
-if [[ "${3:-}" != "--format" ]]; then
-    printf '{}\n'
-    exit 0
-fi
-
-case "${4:-}" in
-    *orcaslicer.version*)
-        if [[ "${MOCK_VERSION_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-            printf '<no value>\n'
-        else
-            printf '%s\n' "$MOCK_VERSION_LABEL"
+case "${1:-}" in
+    image)
+        if [[ "${2:-}" != "inspect" || "${MOCK_IMAGE_EXISTS:-true}" != "true" ]]; then
+            exit 1
         fi
+        if [[ "${3:-}" != "--format" ]]; then
+            printf '{}\n'
+            exit 0
+        fi
+        case "${4:-}" in
+            *orcaslicer.version*)
+                if [[ "${MOCK_VERSION_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                    printf '<no value>\n'
+                else
+                    printf '%s\n' "$MOCK_VERSION_LABEL"
+                fi
+                ;;
+            *orcaslicer.sha256*)
+                if [[ "${MOCK_SHA_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                    printf '<no value>\n'
+                else
+                    printf '%s\n' "$MOCK_SHA_LABEL"
+                fi
+                ;;
+            *orcaslicer.allow_stub*)
+                if [[ "${MOCK_ALLOW_STUB_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                    printf '<no value>\n'
+                else
+                    printf '%s\n' "$MOCK_ALLOW_STUB_LABEL"
+                fi
+                ;;
+            *)
+                exit 2
+                ;;
+        esac
         ;;
-    *orcaslicer.sha256*)
-        if [[ "${MOCK_SHA_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-            printf '<no value>\n'
-        else
-            printf '%s\n' "$MOCK_SHA_LABEL"
-        fi
+    create)
+        printf 'mock-container\n'
         ;;
-    *orcaslicer.allow_stub*)
-        if [[ "${MOCK_ALLOW_STUB_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-            printf '<no value>\n'
-        else
-            printf '%s\n' "$MOCK_ALLOW_STUB_LABEL"
-        fi
+    cp)
+        case "${2:-}" in
+            *orcaslicer.version)
+                if [[ "${MOCK_EMBEDDED_VERSION:-__MISSING__}" == "__MISSING__" ]]; then
+                    exit 1
+                fi
+                printf '%s' "$MOCK_EMBEDDED_VERSION" > "$3"
+                ;;
+            *orcaslicer.sha256)
+                if [[ "${MOCK_EMBEDDED_SHA:-__MISSING__}" == "__MISSING__" ]]; then
+                    exit 1
+                fi
+                printf '%s' "$MOCK_EMBEDDED_SHA" > "$3"
+                ;;
+            *)
+                exit 2
+                ;;
+        esac
+        ;;
+    rm)
         ;;
     *)
         exit 2
@@ -73,8 +98,12 @@ run_validation() {
     local version_label="$1"
     local sha_label="$2"
     local allow_stub_label="${3:-false}"
+    local embedded_version="${4:-2.4.2}"
+    local embedded_sha="${5:-d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd}"
     (
         export PATH="$MOCK_BIN:$PATH"
+        export MOCK_EMBEDDED_VERSION="$embedded_version"
+        export MOCK_EMBEDDED_SHA="$embedded_sha"
         if [[ "$allow_stub_label" != "__MISSING__" ]]; then
             export MOCK_ALLOW_STUB_LABEL="$allow_stub_label"
         fi
@@ -105,6 +134,27 @@ assert_validation_rejected() {
 
     assert_not_equals "0" "$exit_code" "Invalid cached image should be rejected"
     assert_contains "$output" "$expected_message" "Rejection should explain the metadata failure"
+}
+
+assert_embedded_validation_rejected() {
+    local embedded_version="$1"
+    local embedded_sha="$2"
+    local expected_message="$3"
+    local output
+    local exit_code
+
+    set +e
+    output=$(run_validation \
+        "2.4.2" \
+        "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" \
+        "false" \
+        "$embedded_version" \
+        "$embedded_sha" 2>&1)
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Image with invalid embedded metadata should be rejected"
+    assert_contains "$output" "$expected_message" "Rejection should explain the embedded metadata failure"
 }
 
 test_matching_metadata_is_accepted() {
@@ -195,6 +245,50 @@ test_missing_strict_attestation_is_rejected() {
     pass_test
 }
 
+test_missing_embedded_metadata_is_rejected() {
+    start_test "missing embedded OrcaSlicer metadata is rejected"
+
+    assert_embedded_validation_rejected \
+        "__MISSING__" \
+        "__MISSING__" \
+        "missing embedded version/checksum metadata"
+
+    pass_test
+}
+
+test_stale_embedded_version_is_rejected() {
+    start_test "stale embedded OrcaSlicer version is rejected"
+
+    assert_embedded_validation_rejected \
+        "2.3.2" \
+        "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" \
+        "embedded version '2.3.2' does not match requested '2.4.2'"
+
+    pass_test
+}
+
+test_missing_embedded_checksum_is_rejected() {
+    start_test "missing embedded OrcaSlicer checksum is rejected"
+
+    assert_embedded_validation_rejected \
+        "2.4.2" \
+        "__MISSING__" \
+        "missing embedded version/checksum metadata"
+
+    pass_test
+}
+
+test_stale_embedded_checksum_is_rejected() {
+    start_test "stale embedded OrcaSlicer checksum is rejected"
+
+    assert_embedded_validation_rejected \
+        "2.4.2" \
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" \
+        "embedded checksum 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' does not match the configured checksum"
+
+    pass_test
+}
+
 test_build_and_deploy_paths_enforce_metadata() {
     start_test "OrcaSlicer build and deploy paths enforce metadata"
 
@@ -205,6 +299,8 @@ test_build_and_deploy_paths_enforce_metadata() {
     local registry_pull_script
     local publish_workflow
     local base_workflow
+    local preseed_workflow
+    local worker_compose
     multistage=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
     base_dockerfile=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries")
     deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
@@ -212,6 +308,8 @@ test_build_and_deploy_paths_enforce_metadata() {
     registry_pull_script=$(cat "$REPO_ROOT/scripts/pull-from-registry.sh")
     publish_workflow=$(cat "$REPO_ROOT/.github/workflows/docker-publish.yml")
     base_workflow=$(cat "$REPO_ROOT/.github/workflows/orcaslicer-base-image.yml")
+    preseed_workflow=$(cat "$REPO_ROOT/.github/workflows/appimage-preseed-uploader.yml")
+    worker_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml")
 
     assert_contains "$multistage" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Multistage binary layer should label its version"
     assert_contains "$multistage" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Multistage binary layer should label its checksum"
@@ -228,9 +326,14 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$registry_pull_script" 'validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"' "Registry cache images should be validated before retagging"
     assert_contains "$publish_workflow" 'ACTUAL_VERSION=$(docker image inspect' "Publishing should inspect cached image metadata"
     assert_contains "$publish_workflow" 'Refusing OrcaSlicer base image' "Publishing should fail closed on stale metadata"
+    assert_contains "$publish_workflow" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Published workers should launch through AppRun"
+    assert_contains "$publish_workflow" 'Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256' "Published workers should expose binary attestation"
     assert_contains "$base_workflow" 'Rejecting cached image' "Base image workflow should reject stale metadata"
     assert_contains "$base_workflow" 'cat /opt/orcaslicer/orcaslicer.version' "Base image workflow should verify embedded version metadata"
     assert_contains "$base_workflow" 'sha256sum --check --strict' "Base image workflow should verify the pinned AppImage checksum"
+    assert_contains "$preseed_workflow" "default: ''" "Shared Prusa/Orca workflow should not apply an Orca version to Prusa"
+    assert_contains "$preseed_workflow" 'VERSION_IN="$ORCASLICER_VERSION"' "Default Orca preseed should use the repository-pinned release"
+    assert_contains "$worker_compose" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Compose should not bypass the AppRun launcher"
 
     pass_test
 }
@@ -260,6 +363,10 @@ run_tests() {
     test_stale_checksum_metadata_is_rejected
     test_stub_capable_image_is_rejected
     test_missing_strict_attestation_is_rejected
+    test_missing_embedded_metadata_is_rejected
+    test_stale_embedded_version_is_rejected
+    test_missing_embedded_checksum_is_rejected
+    test_stale_embedded_checksum_is_rejected
     test_build_and_deploy_paths_enforce_metadata
     test_stable_default_and_checksum_are_pinned
 }
