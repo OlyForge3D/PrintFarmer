@@ -36,6 +36,7 @@ public sealed class CustomWebApplicationFactoryTests
         "Jwt__Key",
         "Jwt__Issuer",
         "Jwt__Audience",
+        "WorkerAuth__SharedKey",
         "ForwardedHeaders__Enabled",
         "ForwardedHeaders__KnownProxies__0",
         "ForwardedHeaders__KnownProxies__1",
@@ -71,6 +72,7 @@ public sealed class CustomWebApplicationFactoryTests
             Assert.NotEqual(identities[0].JwtSigningKey, identities[1].JwtSigningKey);
             Assert.NotEqual(identities[0].JwtIssuer, identities[1].JwtIssuer);
             Assert.NotEqual(identities[0].JwtAudience, identities[1].JwtAudience);
+            Assert.NotEqual(identities[0].WorkerSharedKey, identities[1].WorkerSharedKey);
         }
         finally
         {
@@ -174,6 +176,7 @@ public sealed class CustomWebApplicationFactoryTests
                 Encoding.UTF8.GetString(jwtSigningKey.Key),
                 jwtOptions.TokenValidationParameters.ValidIssuer,
                 jwtOptions.TokenValidationParameters.ValidAudience,
+                configuration["WorkerAuth:SharedKey"],
                 jwtOptions.RequireHttpsMetadata,
                 factory.Services.GetService<TracerProvider>() is not null,
                 factory.Services.GetService<MeterProvider>() is not null,
@@ -203,6 +206,7 @@ public sealed class CustomWebApplicationFactoryTests
         Assert.Equal(factory.JwtSigningKey, identity.JwtSigningKey);
         Assert.Equal(factory.JwtIssuer, identity.JwtIssuer);
         Assert.Equal(factory.JwtAudience, identity.JwtAudience);
+        Assert.Equal(factory.WorkerSharedKey, identity.WorkerSharedKey);
         Assert.False(identity.JwtRequireHttpsMetadata);
         Assert.False(identity.TracerProviderRegistered);
         Assert.False(identity.MeterProviderRegistered);
@@ -326,6 +330,7 @@ public sealed class CustomWebApplicationFactoryTests
         string? JwtSigningKey,
         string? JwtIssuer,
         string? JwtAudience,
+        string? WorkerSharedKey,
         bool JwtRequireHttpsMetadata,
         bool TracerProviderRegistered,
         bool MeterProviderRegistered,

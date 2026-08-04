@@ -39,6 +39,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
         JwtSigningKey = $"test-integration-signing-key-{factoryId}";
         JwtIssuer = $"PrintFarmer-{factoryId}";
         JwtAudience = $"PrintFarmer-{factoryId}";
+        WorkerSharedKey = $"test-integration-worker-shared-key-{factoryId}";
         _hostConfiguration = new Dictionary<string, string?>
         {
             ["ConnectionStrings:Default"] = ConnectionString,
@@ -52,6 +53,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
             ["Jwt:Key"] = JwtSigningKey,
             ["Jwt:Issuer"] = JwtIssuer,
             ["Jwt:Audience"] = JwtAudience,
+            ["WorkerAuth:SharedKey"] = WorkerSharedKey,
         };
     }
 
@@ -59,6 +61,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>
     internal string JwtSigningKey { get; }
     internal string JwtIssuer { get; }
     internal string JwtAudience { get; }
+    internal string WorkerSharedKey { get; }
 
     public static CustomWebApplicationFactory CreateWithIsolatedDatabase(bool useInMemorySqlite = true)
     {
