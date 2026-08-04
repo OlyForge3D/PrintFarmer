@@ -31,6 +31,23 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
             .Should().Be("authentication_required");
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("incorrect-shared-key")]
+    public async Task ListAsync_MissingOrInvalidSharedKey_ReturnsUnauthorized(string? sharedKey)
+    {
+        using HttpClient client = _factory.CreateClient();
+        using HttpRequestMessage request = new(HttpMethod.Get, "/api/slicers");
+        if (!string.IsNullOrEmpty(sharedKey))
+        {
+            request.Headers.Add("X-Slicer-Api-Key", sharedKey);
+        }
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     [Fact]
     public async Task ServiceRoutes_KeyForDifferentService_ReturnUnauthorized()
     {

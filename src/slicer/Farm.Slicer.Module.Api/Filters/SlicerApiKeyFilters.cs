@@ -26,7 +26,7 @@ public sealed class RequireSlicerApiKeyAttribute : Attribute, IAsyncActionFilter
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 
@@ -61,7 +61,7 @@ public sealed class RequireSlicerServiceApiKeyAttribute : Attribute, IAsyncActio
         var validator = context.HttpContext.RequestServices.GetService<ISlicerApiKeyValidator>();
         if (validator is null)
         {
-            context.Result = SlicerApiProblems.AuthenticationUnavailable(context.HttpContext);
+            context.Result = SlicerApiProblems.AuthenticationRequired(context.HttpContext);
             return;
         }
 

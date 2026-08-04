@@ -17,6 +17,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api;
@@ -67,6 +68,8 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IProfilesService, ProfilesService>();
         _ = services.AddScoped<IWorkerAuthService, WorkerAuthService>();
         _ = services.AddScoped<ISlicerApiKeyValidator, SlicerApiKeyValidator>();
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IHostedService, SlicerApiKeyStartupValidationService>());
 
         // Artifact services
         _ = services.Configure<Farm.Infrastructure.Settings.ArtifactStorageSettings>(configuration.GetSection(Farm.Infrastructure.Settings.ArtifactStorageSettings.SectionName));
