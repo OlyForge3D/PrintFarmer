@@ -115,6 +115,7 @@ tools/installer/dist/
 *.png
 !src/Web/ReactApp/public/assets/orcaslicer/**/*.png
 !src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/lib/Assets/**/*.png
+!sample_profiles/orcaslicer/**/*.png
 !mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_moonrakerProfile.1.png
 !mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_flashForgeProfile.1.png
 !mobile/PrintFarmerTests/Views/__Snapshots__/PrinterControlsSectionSnapshotTests/test_snapshot_sdcpProfile.1.png

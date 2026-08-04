@@ -71,6 +71,32 @@ public class OrcaSlicerProfilesProviderTests
     }
 
     [Fact]
+    public void SampleProfileMirror_OrcaSlicer242Assets_HasCompleteBinaryInventory()
+    {
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        Dictionary<string, int> expectedAssets = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".png"] = 120,
+            [".stl"] = 78,
+            [".svg"] = 72,
+        };
+
+        foreach ((string extension, int expectedCount) in expectedAssets)
+        {
+            int actualCount = Directory.GetFiles(
+                sampleProfilesPath,
+                $"*{extension}",
+                SearchOption.AllDirectories).Length;
+
+            actualCount.Should().Be(
+                expectedCount,
+                $"the OrcaSlicer 2.4.2 fixture mirror should include every {extension} asset");
+        }
+    }
+
+    [Fact]
     public async Task ListOfficialProfiles_IncludesPrusaCoreOneProfiles()
     {
         // Use sample profiles from the repository (real OrcaSlicer structure)

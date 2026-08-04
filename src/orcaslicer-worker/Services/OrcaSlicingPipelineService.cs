@@ -108,13 +108,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 LayerCount = metadata.LayerCount,
                 Success = true
             };
-            result.Metadata["SlicerVersion"] = $"OrcaSlicer {_engineVersion}";
-            result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
-            result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
-            if (modelFilePaths.Count > 1)
-            {
-                result.Metadata["ModelCount"] = modelFilePaths.Count.ToString(CultureInfo.InvariantCulture);
-            }
+            PopulateResultMetadata(result, job, modelFilePaths.Count);
 
             preserveResultForUpload = true;
             return result;
@@ -134,6 +128,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
             }
+        }
+    }
+
+    internal void PopulateResultMetadata(SlicingResult result, DistributedSlicingJob job, int modelCount)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(job);
+
+        result.Metadata["SlicerVersion"] = $"OrcaSlicer {_engineVersion}";
+        result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
+        result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
+        if (modelCount > 1)
+        {
+            result.Metadata["ModelCount"] = modelCount.ToString(CultureInfo.InvariantCulture);
         }
     }
 

@@ -23,8 +23,10 @@ internal static class WorkerConstants
         ["orcaslicer", UpstreamDistributionCapability, "stl-processing", "gcode-generation"];
 }
 
-public static class Program
+public sealed class Program
 {
+    private Program() { }
+
     public static async Task Main(string[] args)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
