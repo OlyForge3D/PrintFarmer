@@ -1632,20 +1632,32 @@
    * Tailwind class a caller passes through `className` — displaces this block no
    * matter how specific the selector is.
    *
-   * As utilities they did the opposite. `[background:none]` was the `background`
-   * *shorthand*, so it reset `background-color` and `background-image` together,
-   * killing gradients as well as flat fills; and because Tailwind sorts colour
-   * utilities alphabetically it landed after every caller class and won. Measured
-   * in the built stylesheet: the ghost rule at offset 166233 against
+   * As utilities they did the opposite. The old default was the CSS `background`
+   * *shorthand* set to none, so it reset `background-color` and `background-image`
+   * together, killing gradients as well as flat fills; and because Tailwind sorts
+   * colour utilities alphabetically it landed after every caller class and won.
+   * Measured in the built stylesheet: the ghost rule at offset 166233 against
    * `.bg-pf-bg-0\/60` at 102730. Every background a ghost caller declared was
-   * dead, leaving `text-white` painting on the page surface — 1.07:1 measured in
-   * the light theme. `bg-transparent` is not a fix either: `.bg-transparent`
-   * (117611) still sorts after every `.bg-pf-*`.
+   * dead, leaving light text painting on the page surface — 1.07:1 measured in the
+   * light theme. Switching to the transparent background *utility* is not a fix
+   * either: it sorts at 117611, still after every `.bg-pf-*`. It would have
+   * rescued the gradient, since it never touches `background-image`, but it fails
+   * on flat fills and fails invisibly.
    *
    * The same trap applied to the other three defaults, which is why all of them
-   * moved: `text-inherit` beat `text-[var(--pf-on-accent)]`, `border-transparent`
-   * beat `border-pf-success-bg`, and `shadow-none` beat the caller's arbitrary
-   * `shadow-[...]`. See #1087.
+   * moved: the colour utility beat the caller's arbitrary `text-[var(...)]`, the
+   * border-colour utility beat `border-pf-success-bg`, and the shadow utility beat
+   * the caller's arbitrary inset shadow. See #1087.
+   *
+   * Do not write the removed utility class names literally in this file. Tailwind
+   * scans CSS as source, so naming a class even inside a comment is enough to make
+   * it emit the rule again — an explanation of the fix that quietly reinstates
+   * what it describes.
+   *
+   * CALLER CONTRACT: the hover below is a default, and it sits in this layer, so a
+   * caller that passes any `bg-*` utility overrides it in *both* states and the
+   * hover goes inert. If you give a ghost Button a background, give it a
+   * `hover:bg-*` too. See #1107.
    */
   [data-pf-button][data-pf-variant='ghost'] {
     color: inherit;

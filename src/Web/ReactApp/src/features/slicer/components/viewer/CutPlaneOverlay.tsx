@@ -383,7 +383,7 @@ export function CutPlaneOverlay({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="bg-pf-bg-2 border border-pf-border rounded px-2 py-1 text-xs min-w-12"
+                  className="bg-pf-bg-2 hover:bg-pf-bg-1 border border-pf-border rounded px-2 py-1 text-xs min-w-12"
                   onClick={() => {
                     const nextAxis = cutAxis === 'x' ? 'y' : cutAxis === 'y' ? 'z' : 'x';
                     setCutAxis(nextAxis);
