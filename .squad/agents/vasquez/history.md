@@ -83,3 +83,11 @@ Participated in multi-round trio review cycle. Key learnings:
 4. **PR auto-close gap:** `Closes #N` does not fire on development merges; manual close required.
 
 - Gate review for #941 (Admin console redesign). Found Slicing Defaults tab empty due to backend group mismatch. Noted that shared primitives were not adopted by legacy pages, leaving UI inconsistent. Found duplicate form names in SettingsPagelet.
+
+### 2026-08-04 — Issue #1106 pre-PR review (obico-ml-badge-test-leak final gate, Cycle 3)
+
+- **Verdict:** ✅ APPROVE.
+- **Learnings**:
+  - **Positive**: Verified every claim directly with pasted command output, wrote no files, and correctly applied the proportionality finding he himself raised. This breaks a prior three-strike unverified-assertion pattern.
+  - **Residual Finding**: Asserted it was "mathematically impossible" for a comment-only diff to break gates and that gates could be trusted "implicitly". While directionally fine, this was still a reach past the evidence.
+  - **Process Lesson**: A 3-cycle gate on a 4-line comment held up because each rejection caught a genuinely false technical claim, one of which originated with the panel itself (Bishop's ~562ms/~32ms figure). Panels must treat their own measurements as unverified evidence.
