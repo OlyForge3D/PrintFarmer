@@ -167,6 +167,27 @@ EOF
     pass_test
 }
 
+test_orcaslicer_checksum_follows_saved_version() {
+    start_test "OrcaSlicer checksum follows the saved version"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+ORCASLICER_VERSION=2.4.1
+ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
+EOF
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --batch 2>&1 || true"
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+
+    assert_contains "$persisted_config" "ORCASLICER_VERSION=2.4.1" "Config should retain the selected OrcaSlicer version"
+    assert_contains "$persisted_config" "ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402" "Config should persist the official checksum for the selected version"
+
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -174,6 +195,7 @@ run_all_tests() {
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
+    test_orcaslicer_checksum_follows_saved_version
     
     teardown
 }

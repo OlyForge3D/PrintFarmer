@@ -2536,13 +2536,33 @@ EOF
 CONFIG_FILE="$REPO_ROOT/.deploy-config"
 
 # Load previous configuration if it exists
+resolve_configured_orcaslicer_checksum() {
+    local pinned_checksum
+    pinned_checksum="$(orcaslicer_sha256_for_version "${ORCASLICER_VERSION:-}")"
+
+    if [[ -n "$pinned_checksum" ]]; then
+        ORCASLICER_SHA256="$pinned_checksum"
+    else
+        ORCASLICER_SHA256="${ORCASLICER_SHA256:-}"
+    fi
+
+    export ORCASLICER_VERSION ORCASLICER_SHA256
+}
+
 load_previous_config() {
     if [ -f "$CONFIG_FILE" ]; then
+        local initial_orcaslicer_version="${ORCASLICER_VERSION:-}"
+        local initial_orcaslicer_sha256="${ORCASLICER_SHA256:-}"
+
         print_info "Found previous deployment configuration"
         
         # Source the config file to load variables
         # shellcheck disable=SC1090
+        unset ORCASLICER_SHA256
         source "$CONFIG_FILE"
+        if [[ -z "${ORCASLICER_SHA256:-}" && "${ORCASLICER_VERSION:-}" == "$initial_orcaslicer_version" ]]; then
+            ORCASLICER_SHA256="$initial_orcaslicer_sha256"
+        fi
 
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.
@@ -2717,6 +2737,7 @@ ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
 ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
+ORCASLICER_SHA256=${ORCASLICER_SHA256:-}
 
 EOF
 
@@ -6775,7 +6796,12 @@ main() {
 
     configure_networking
     adjust_connection_strings_for_network_mode
+    local orcaslicer_version_before_configuration="${ORCASLICER_VERSION:-}"
     configure_slicing
+    if [[ "${ORCASLICER_VERSION:-}" != "$orcaslicer_version_before_configuration" ]]; then
+        ORCASLICER_SHA256=""
+    fi
+    resolve_configured_orcaslicer_checksum
     configure_external_storage
     configure_additional
     if ! validate_configuration; then

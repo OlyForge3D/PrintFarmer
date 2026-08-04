@@ -339,6 +339,9 @@ test_build_and_deploy_paths_enforce_metadata() {
     local strict_workflow
     local worker_compose
     local docker_utils
+    local api_docs
+    local ensure_orca_job
+    local global_workflow_permissions
     multistage=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
     base_dockerfile=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries")
     deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
@@ -350,6 +353,9 @@ test_build_and_deploy_paths_enforce_metadata() {
     strict_workflow=$(cat "$REPO_ROOT/.github/workflows/orcaslicer-strict-build.yml")
     worker_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml")
     docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
+    api_docs=$(cat "$REPO_ROOT/docs/API.md")
+    ensure_orca_job=$(sed -n '/^  ensure-orca-base:/,/^  build-containers:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
+    global_workflow_permissions=$(sed -n '/^permissions:/,/^jobs:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
 
     assert_contains "$multistage" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Multistage binary layer should label its version"
     assert_contains "$multistage" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Multistage binary layer should label its checksum"
@@ -365,6 +371,8 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$powershell_deploy_script" "Get-FileHash -Path \$resolvedAppImagePath -Algorithm SHA256" "PowerShell should verify cached AppImages"
     assert_contains "$registry_pull_script" 'validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"' "Registry cache images should be validated before retagging"
     assert_contains "$publish_workflow" 'source scripts/docker-utils.sh' "Publishing should use shared cache validation"
+    assert_contains "$ensure_orca_job" 'actions: write' "Base-image bootstrap should receive workflow-dispatch permission"
+    assert_not_contains "$global_workflow_permissions" 'actions: write' "Workflow-dispatch permission should not be granted to unrelated jobs"
     assert_contains "$publish_workflow" 'validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Publishing should fail closed on stale metadata"
     assert_contains "$publish_workflow" 'base_image: ${{ steps.verify.outputs.base_image }}' "Publishing should export only the verified base image"
     assert_contains "$publish_workflow" 'echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")"' "Publishing should resolve the verified image to an immutable digest"
@@ -385,6 +393,8 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$strict_workflow" 'ORCASLICER_VERSION: 2.4.2' "Calibration publication should track the latest supported worker"
     assert_contains "$strict_workflow" 'ORCASLICER_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd' "Calibration publication should pin the official checksum"
     assert_contains "$worker_compose" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Compose should not bypass the AppRun launcher"
+    assert_contains "$api_docs" '"requiredVersion": "2.4.2"' "Calibration API docs should track the latest supported worker"
+    assert_not_contains "$api_docs" '2.3.1' "Current calibration API docs should not advertise the previous worker version"
 
     pass_test
 }
