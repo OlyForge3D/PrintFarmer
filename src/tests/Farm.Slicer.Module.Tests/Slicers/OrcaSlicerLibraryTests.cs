@@ -85,10 +85,11 @@ public class OrcaSlicerProfilesProviderTests
 
         foreach ((string extension, int expectedCount) in expectedAssets)
         {
-            int actualCount = Directory.GetFiles(
-                sampleProfilesPath,
-                $"*{extension}",
-                SearchOption.AllDirectories).Length;
+            int actualCount = Directory
+                .EnumerateFiles(sampleProfilesPath, "*", SearchOption.AllDirectories)
+                .Count(path => Path.GetExtension(path).Equals(
+                    extension,
+                    StringComparison.OrdinalIgnoreCase));
 
             actualCount.Should().Be(
                 expectedCount,
