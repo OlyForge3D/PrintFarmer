@@ -1,4 +1,4 @@
-using Farm.OrcaSlicer.Worker.Services;
+﻿using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;

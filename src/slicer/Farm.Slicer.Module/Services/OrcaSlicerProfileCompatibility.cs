@@ -1,4 +1,4 @@
-namespace Farm.Slicer.Module.Services;
+﻿namespace Farm.Slicer.Module.Services;
 
 /// <summary>
 /// Defines OrcaSlicer versions whose upstream profile catalogs can be consumed by PrintFarmer.

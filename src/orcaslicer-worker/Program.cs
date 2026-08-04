@@ -25,7 +25,9 @@ internal static class WorkerConstants
 
 public sealed class Program
 {
-    private Program() { }
+    private Program()
+    {
+    }
 
     public static async Task Main(string[] args)
     {

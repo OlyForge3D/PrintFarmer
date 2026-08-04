@@ -1,4 +1,4 @@
-using Farm.Slicer.Module.Services;
+﻿using Farm.Slicer.Module.Services;
 using FluentAssertions;
 
 namespace Farm.Slicer.Module.Tests.Services;
