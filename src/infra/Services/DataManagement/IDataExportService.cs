@@ -13,12 +13,12 @@ public interface IDataExportService
     Task<CatalogExportDto> ExportCatalogAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Export printer configurations only
+    /// Export printer configurations without backend credentials
     /// </summary>
     Task<List<PrinterExportDto>> ExportPrintersAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Export full backup (catalog + printers + locations + settings)
+    /// Export full backup (catalog + printers + locations + settings) without backend credentials
     /// </summary>
     Task<FullBackupExportDto> ExportFullBackupAsync(CancellationToken ct = default);
 }

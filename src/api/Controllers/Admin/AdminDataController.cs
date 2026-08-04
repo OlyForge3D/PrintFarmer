@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -7,12 +8,14 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Web.Api.Controllers.Admin;
 
 /// <summary>
-/// Admin controller for data export/import and backup/restore operations
+/// Admin controller for data export/import and backup/restore operations.
+/// All operations require an authenticated principal with the <c>admin:execute</c> permission.
 /// </summary>
 [ApiController]
 [Route("api/admin/data")]
 [Tags("Admin - Data Management")]
-[Authorize(Roles = "farm_admin")]
+[Authorize]
+[RequirePermission("admin", "execute")]
 public class AdminDataController : ControllerBase
 {
     private readonly IDataExportService _exportService;
@@ -38,9 +41,13 @@ public class AdminDataController : ControllerBase
     /// <param name="ct">Cancellation token</param>
     /// <returns>Catalog export data as JSON</returns>
     /// <response code="200">Returns the catalog export data</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during export</response>
     [HttpGet("export/catalog")]
     [ProducesResponseType(typeof(CatalogExportDto), 200)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CatalogExportDto>> ExportCatalogAsync(CancellationToken ct)
     {
@@ -69,10 +76,14 @@ public class AdminDataController : ControllerBase
     /// <returns>Import response with statistics and any errors</returns>
     /// <response code="200">Returns the import response with statistics</response>
     /// <response code="400">If the request is invalid</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during import</response>
     [HttpPost("import/catalog")]
     [ProducesResponseType(typeof(ImportResponseDto), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<ImportResponseDto>> ImportCatalogAsync([FromBody] CatalogImportRequest request, CancellationToken ct)
     {
@@ -96,14 +107,18 @@ public class AdminDataController : ControllerBase
     }
 
     /// <summary>
-    /// Export printer configurations only
+    /// Export printer configurations without backend credentials
     /// </summary>
     /// <param name="ct">Cancellation token</param>
     /// <returns>List of printer export data</returns>
     /// <response code="200">Returns the printer export data</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during export</response>
     [HttpGet("export/printers")]
     [ProducesResponseType(typeof(List<PrinterExportDto>), 200)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<List<PrinterExportDto>>> ExportPrintersAsync(CancellationToken ct)
     {
@@ -125,14 +140,18 @@ public class AdminDataController : ControllerBase
     }
 
     /// <summary>
-    /// Export full backup (catalog + printers + locations) as JSON
+    /// Export full backup (catalog + printers + locations) without backend credentials as JSON
     /// </summary>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Full backup export data as JSON</returns>
     /// <response code="200">Returns the full backup export data</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during export</response>
     [HttpGet("export/full")]
     [ProducesResponseType(typeof(FullBackupExportDto), 200)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<FullBackupExportDto>> ExportFullBackupAsync(CancellationToken ct)
     {
@@ -161,10 +180,14 @@ public class AdminDataController : ControllerBase
     /// <returns>Import response with statistics and any errors</returns>
     /// <response code="200">Returns the import response with statistics</response>
     /// <response code="400">If the request is invalid</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during import</response>
     [HttpPost("import/full")]
     [ProducesResponseType(typeof(ImportResponseDto), 200)]
     [ProducesResponseType(400)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<ImportResponseDto>> ImportFullBackupAsync([FromBody] FullBackupImportRequest request, CancellationToken ct)
     {
@@ -192,9 +215,13 @@ public class AdminDataController : ControllerBase
     /// </summary>
     /// <returns>Success status</returns>
     /// <response code="200">Seed data reload completed successfully</response>
+    /// <response code="401">If the caller is not authenticated</response>
+    /// <response code="403">If the caller lacks the admin execute permission</response>
     /// <response code="500">If there was an error during seed reload</response>
     [HttpPost("seed/reload")]
     [ProducesResponseType(200)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(500)]
     public async Task<IActionResult> ReloadSeedDataAsync()
     {
