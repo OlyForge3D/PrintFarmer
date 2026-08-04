@@ -38,17 +38,12 @@ public static class Program
         // HTTP clients (for API communication, artifact upload, and slicing pipeline)
         _ = builder.Services.AddHttpClient(); // Required for HttpJobPollerService
         _ = builder.Services.AddHttpClient<HttpProgressReporter>(); // shared core implementation
-        _ = builder.Services
-            .AddHttpClient<OrcaSlicingPipelineService>(client =>
-                client.Timeout = Timeout.InfiniteTimeSpan)
-            .ConfigurePrimaryHttpMessageHandler(CreateModelDownloadHandler);
+        AddSlicingPipelineServices(builder.Services);
         _ = builder.Services.AddHttpClient<SlicerRegistrationClient>(); // registration client
 
         // Worker services (shared core + engine specific)
         _ = builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>(); // shared
         _ = builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>(); // engine specific
-        _ = builder.Services.AddScoped<ISlicingPipelineService>(
-            serviceProvider => serviceProvider.GetRequiredService<OrcaSlicingPipelineService>());
         _ = builder.Services.AddScoped<IProgressReporter, HttpProgressReporter>(); // shared
         _ = builder.Services.AddSingleton<ISlicerRegistrationClient, SlicerRegistrationClient>(); // registration
         _ = builder.Services.AddSingleton<WorkerCapabilityProvider>(); // versioned capability advertising (issue #578)
@@ -74,6 +69,7 @@ public static class Program
             .AddCheck<OrcaBinaryHealthCheck>("orca_binary");
 
         WebApplication app = builder.Build();
+        ValidateSlicingPipelineConfiguration(app.Services);
 
         if (app.Environment.IsDevelopment())
         {
@@ -253,6 +249,31 @@ public static class Program
         }
 
         await app.RunAsync();
+    }
+
+    internal static void AddSlicingPipelineServices(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        _ = services
+            .AddHttpClient<OrcaSlicingPipelineService>(ConfigureModelDownloadClient)
+            .ConfigurePrimaryHttpMessageHandler(CreateModelDownloadHandler);
+        _ = services.AddScoped<ISlicingPipelineService>(
+            serviceProvider => serviceProvider.GetRequiredService<OrcaSlicingPipelineService>());
+    }
+
+    internal static void ValidateSlicingPipelineConfiguration(IServiceProvider services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        using IServiceScope scope = services.CreateScope();
+        _ = scope.ServiceProvider.GetRequiredService<ISlicingPipelineService>();
+    }
+
+    internal static void ConfigureModelDownloadClient(HttpClient client)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        client.Timeout = Timeout.InfiniteTimeSpan;
     }
 
     internal static SocketsHttpHandler CreateModelDownloadHandler() => new()

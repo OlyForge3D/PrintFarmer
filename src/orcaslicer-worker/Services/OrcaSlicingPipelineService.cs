@@ -28,6 +28,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly long _maxModelDownloadBytes;
     private readonly TimeSpan _modelDownloadTimeout;
 
+    internal Uri ApiBaseUri => _apiBaseUri;
+
+    internal long ModelDownloadMaxBytes => _maxModelDownloadBytes;
+
+    internal TimeSpan ModelDownloadTimeout => _modelDownloadTimeout;
+
+    internal TimeSpan ModelDownloadHttpClientTimeout => _httpClient.Timeout;
+
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -197,9 +205,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         CancellationToken cancellationToken)
     {
         string stlFilePath = ResolveModelDestinationPath(workDir, job.ModelFileName);
+        string modelRoute = ResolveClaimModelRoute(job.ModelFileUrl);
         using HttpRequestMessage request =
             CreateModelDownloadRequest(
-                job.ModelFileUrl.ToString(),
+                modelRoute,
                 job.Id,
                 null,
                 job.ClaimToken,
@@ -220,6 +229,29 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
         job.InputFileSizeBytes = new FileInfo(stlFilePath).Length;
         return stlFilePath;
+    }
+
+    private string ResolveClaimModelRoute(Uri modelFileUri)
+    {
+        if (!modelFileUri.IsAbsoluteUri)
+        {
+            return modelFileUri.OriginalString;
+        }
+
+        bool isTrustedOrigin = Uri.Compare(
+            _apiBaseUri,
+            modelFileUri,
+            UriComponents.SchemeAndServer,
+            UriFormat.Unescaped,
+            StringComparison.OrdinalIgnoreCase) == 0;
+
+        if (!isTrustedOrigin || !string.IsNullOrEmpty(modelFileUri.Fragment))
+        {
+            throw new InvalidOperationException(
+                "Model URL must use the configured slicer API origin and an exact claim-scoped model route.");
+        }
+
+        return modelFileUri.PathAndQuery;
     }
 
     /// <summary>
@@ -284,7 +316,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 : '_'));
     }
 
-    private async Task<List<string>> FetchMultipleModelsAsync(
+    internal async Task<List<string>> FetchMultipleModelsAsync(
         Guid jobId,
         List<string> modelUrls,
         Guid claimToken,

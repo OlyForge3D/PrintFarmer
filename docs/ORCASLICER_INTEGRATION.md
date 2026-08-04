@@ -560,11 +560,13 @@ slicer API:
 - `/api/slice/{jobId}/model`
 - `/api/slice/{jobId}/models/{modelIndex}`
 
-The worker combines those relative routes with the explicitly configured
-`SlicerApi:BaseUrl`. Absolute, protocol-relative, `file://`, metadata, loopback,
-private-host, and other caller-selected locations are rejected because they do
-not match the claim route. Redirect following is disabled, so a trusted endpoint
-cannot redirect a worker to another host.
+The job poller combines those relative routes with the explicitly configured
+`SlicerApi:BaseUrl`. The download boundary accepts that poller-produced absolute
+form only after its scheme, host, and port exactly match the configured API
+origin, then verifies the path against the job's exact claim route. Absolute,
+protocol-relative, `file://`, metadata, loopback, private-host, and other
+caller-selected locations are rejected. Redirect following is disabled, so a
+trusted endpoint cannot redirect a worker to another host.
 
 `SlicerApi:BaseUrl` must be an absolute HTTP(S) address without embedded
 credentials, a query, or a fragment. Worker startup fails when the setting is
@@ -579,6 +581,9 @@ Each response is streamed with a byte limit and timeout. Configure the limits in
 |---|---|---:|
 | `Worker:ModelDownloadMaxBytes` | `Worker__ModelDownloadMaxBytes` | `536870912` (512 MiB) |
 | `Worker:ModelDownloadTimeoutSeconds` | `Worker__ModelDownloadTimeoutSeconds` | `120` |
+
+The Docker Compose worker templates expose the same settings as
+`WORKER_MODEL_DOWNLOAD_MAX_BYTES` and `WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS`.
 
 The timeout must be from 1 through 3600 seconds, and the byte limit must be a
 positive integer. Invalid values fail worker construction rather than falling
@@ -640,7 +645,8 @@ orcaslicer --slice 0 \
 builder.Services.AddSingleton<IWorkerStateService, WorkerStateService>();
 builder.Services.AddSingleton<IOrcaBinaryDetector, OrcaBinaryDetector>();
 builder.Services
-    .AddHttpClient<OrcaSlicingPipelineService>()
+    .AddHttpClient<OrcaSlicingPipelineService>(client =>
+        client.Timeout = Timeout.InfiniteTimeSpan)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
         AllowAutoRedirect = false

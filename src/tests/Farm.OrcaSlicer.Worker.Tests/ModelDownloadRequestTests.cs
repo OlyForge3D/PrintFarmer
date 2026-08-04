@@ -6,11 +6,13 @@ using Farm.Slicer.Module.Models;
 using Farm.Slicer.Worker.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace Farm.OrcaSlicer.Worker.Tests;
 
+[Collection("Model download environment")]
 public sealed class ModelDownloadRequestTests : IDisposable
 {
     private const string ApiBaseUrl = "https://slicer.example.test:5246";
@@ -202,6 +204,106 @@ public sealed class ModelDownloadRequestTests : IDisposable
     }
 
     [Fact]
+    public async Task FetchStlFileAsync_PollerAbsolutizedClaimRoute_DownloadsFromConfiguredOrigin()
+    {
+        byte[] payload = "solid poller"u8.ToArray();
+        var handler = new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(CreateOkResponse(payload)));
+        using var httpClient = new HttpClient(handler);
+        OrcaSlicingPipelineService service = CreateService(httpClient);
+        DistributedSlicingJob job = CreateJob("poller.stl");
+        job.ModelFileUrl = HttpJobPollerService.ResolveModelFileUri(
+            new Uri(ApiBaseUrl),
+            job.ModelFileUrl.OriginalString);
+
+        string path = await service.FetchStlFileAsync(
+            job,
+            _workingDirectory,
+            CancellationToken.None);
+
+        (await File.ReadAllBytesAsync(path)).Should().BeEquivalentTo(payload);
+        handler.LastRequestUri.Should().Be(job.ModelFileUrl);
+    }
+
+    [Fact]
+    public async Task FetchMultipleModelsAsync_ValidClaimRoutes_DownloadsEveryModel()
+    {
+        DistributedSlicingJob job = CreateJob();
+        List<string> routes =
+        [
+            $"/api/slice/{job.Id:D}/models/0",
+            $"/api/slice/{job.Id:D}/models/1",
+        ];
+        var handler = new StubHttpMessageHandler((request, _) =>
+        {
+            byte[] payload = request.RequestUri!.AbsolutePath.EndsWith("/0", StringComparison.Ordinal)
+                ? "solid zero"u8.ToArray()
+                : "solid one"u8.ToArray();
+            return Task.FromResult(CreateOkResponse(payload));
+        });
+        using var httpClient = new HttpClient(handler);
+        OrcaSlicingPipelineService service = CreateService(httpClient);
+
+        List<string> paths = await service.FetchMultipleModelsAsync(
+            job.Id,
+            routes,
+            job.ClaimToken,
+            job.LeaseToken,
+            job.LeaseFence,
+            _workingDirectory,
+            CancellationToken.None);
+
+        paths.Should().HaveCount(2);
+        (await File.ReadAllTextAsync(paths[0])).Should().Be("solid zero");
+        (await File.ReadAllTextAsync(paths[1])).Should().Be("solid one");
+        handler.RequestUris.Should().Equal(
+            new Uri($"{ApiBaseUrl}/api/slice/{job.Id:D}/models/0"),
+            new Uri($"{ApiBaseUrl}/api/slice/{job.Id:D}/models/1"));
+    }
+
+    [Fact]
+    public async Task FetchStlFileAsync_KnownContentLengthExceedsLimit_RejectsBeforeWriting()
+    {
+        byte[] payload = [1, 2, 3, 4, 5];
+        var handler = new StubHttpMessageHandler((_, _) =>
+        {
+            HttpResponseMessage response = CreateOkResponse(payload);
+            response.Content.Headers.ContentLength = payload.LongLength;
+            return Task.FromResult(response);
+        });
+        using var httpClient = new HttpClient(handler);
+        OrcaSlicingPipelineService service = CreateService(
+            httpClient,
+            maxDownloadBytes: "4");
+        DistributedSlicingJob job = CreateJob("known-oversized.stl");
+
+        Func<Task> fetch = () =>
+            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+
+        await fetch.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*4-byte limit*");
+        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task FetchStlFileAsync_DigestMismatch_DeletesDownloadedFile()
+    {
+        var handler = new StubHttpMessageHandler((_, _) =>
+            Task.FromResult(CreateOkResponse("solid digest"u8.ToArray())));
+        using var httpClient = new HttpClient(handler);
+        OrcaSlicingPipelineService service = CreateService(httpClient);
+        DistributedSlicingJob job = CreateJob("digest.stl");
+        job.ModelSha256 = new string('0', 64);
+
+        Func<Task> fetch = () =>
+            service.FetchStlFileAsync(job, _workingDirectory, CancellationToken.None);
+
+        await fetch.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not match the digest*");
+        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+    }
+
+    [Fact]
     public void CreateModelDownloadHandler_DefaultHandler_DisablesRedirects()
     {
         using SocketsHttpHandler handler = Program.CreateModelDownloadHandler();
@@ -245,6 +347,100 @@ public sealed class ModelDownloadRequestTests : IDisposable
         construct.Should().Throw<InvalidOperationException>();
     }
 
+    [Fact]
+    public void Constructor_OmittedDownloadLimits_UsesSecureDefaults()
+    {
+        using var httpClient = new HttpClient();
+        OrcaSlicingPipelineService service = CreateService(
+            httpClient,
+            maxDownloadBytes: null,
+            downloadTimeoutSeconds: null);
+
+        service.ModelDownloadMaxBytes.Should().Be(512L * 1024 * 1024);
+        service.ModelDownloadTimeout.Should().Be(TimeSpan.FromSeconds(120));
+    }
+
+    [Fact]
+    public void Constructor_MaximumDownloadTimeout_IsAccepted()
+    {
+        using var httpClient = new HttpClient();
+        OrcaSlicingPipelineService service = CreateService(
+            httpClient,
+            downloadTimeoutSeconds: "3600");
+
+        service.ModelDownloadTimeout.Should().Be(TimeSpan.FromHours(1));
+    }
+
+    [Fact]
+    public void Constructor_WorkerApiBaseEnvironmentOverride_IsTrustedOrigin()
+    {
+        const string variableName = "WORKER_API_BASE_URL";
+        const string environmentApiBaseUrl = "https://environment-api.example:8443";
+        string? previousValue = Environment.GetEnvironmentVariable(variableName);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(variableName, environmentApiBaseUrl);
+            using var httpClient = new HttpClient();
+            OrcaSlicingPipelineService service = CreateService(
+                httpClient,
+                apiBaseUrl: null);
+            DistributedSlicingJob job = CreateJob();
+
+            using HttpRequestMessage request = service.CreateModelDownloadRequest(
+                job.ModelFileUrl.OriginalString,
+                job.Id,
+                modelIndex: null,
+                job.ClaimToken,
+                job.LeaseToken,
+                job.LeaseFence);
+
+            service.ApiBaseUri.Should().Be(new Uri($"{environmentApiBaseUrl}/"));
+            request.RequestUri.Should().Be(
+                new Uri($"{environmentApiBaseUrl}/api/slice/{job.Id:D}/model"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(variableName, previousValue);
+        }
+    }
+
+    [Fact]
+    public void AddSlicingPipelineServices_InterfaceResolution_UsesConfiguredTypedClient()
+    {
+        ServiceCollection services = CreatePipelineServiceCollection(CreateConfiguration());
+        Program.AddSlicingPipelineServices(services);
+        using ServiceProvider provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateScopes = true });
+
+        Program.ValidateSlicingPipelineConfiguration(provider);
+        using IServiceScope scope = provider.CreateScope();
+        ISlicingPipelineService pipeline =
+            scope.ServiceProvider.GetRequiredService<ISlicingPipelineService>();
+        ISlicingPipelineService pipelineAgain =
+            scope.ServiceProvider.GetRequiredService<ISlicingPipelineService>();
+
+        pipelineAgain.Should().BeSameAs(pipeline);
+        pipeline.Should().BeOfType<OrcaSlicingPipelineService>();
+        var concrete = (OrcaSlicingPipelineService)pipeline;
+        concrete.ModelDownloadHttpClientTimeout.Should().Be(Timeout.InfiniteTimeSpan);
+    }
+
+    [Fact]
+    public void ValidateSlicingPipelineConfiguration_InvalidSettings_FailsEagerly()
+    {
+        ServiceCollection services = CreatePipelineServiceCollection(
+            CreateConfiguration(maxDownloadBytes: "0"));
+        Program.AddSlicingPipelineServices(services);
+        using ServiceProvider provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateScopes = true });
+
+        Action validate = () => Program.ValidateSlicingPipelineConfiguration(provider);
+
+        validate.Should().Throw<InvalidOperationException>()
+            .WithMessage("*ModelDownloadMaxBytes*");
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_workingDirectory))
@@ -256,9 +452,9 @@ public sealed class ModelDownloadRequestTests : IDisposable
     private OrcaSlicingPipelineService CreateService(
         HttpClient httpClient,
         WorkerStateService? state = null,
-        string apiBaseUrl = ApiBaseUrl,
-        string maxDownloadBytes = "1024",
-        string downloadTimeoutSeconds = "30")
+        string? apiBaseUrl = ApiBaseUrl,
+        string? maxDownloadBytes = "1024",
+        string? downloadTimeoutSeconds = "30")
     {
         state ??= new WorkerStateService();
         if (state.GetWorkerState().RegisteredServiceId is null)
@@ -266,21 +462,59 @@ public sealed class ModelDownloadRequestTests : IDisposable
             state.SetRegisteredService(Guid.NewGuid(), "worker-secret");
         }
 
-        IConfiguration configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["SlicerApi:BaseUrl"] = apiBaseUrl,
-                ["Worker:WorkingDirectory"] = _workingDirectory,
-                ["Worker:ModelDownloadMaxBytes"] = maxDownloadBytes,
-                ["Worker:ModelDownloadTimeoutSeconds"] = downloadTimeoutSeconds,
-            })
-            .Build();
+        IConfiguration configuration = CreateConfiguration(
+            apiBaseUrl,
+            maxDownloadBytes,
+            downloadTimeoutSeconds);
         return new OrcaSlicingPipelineService(
             httpClient,
             new NullProgressReporter(),
             NullLogger<OrcaSlicingPipelineService>.Instance,
             configuration,
             state);
+    }
+
+    private IConfiguration CreateConfiguration(
+        string? apiBaseUrl = ApiBaseUrl,
+        string? maxDownloadBytes = "1024",
+        string? downloadTimeoutSeconds = "30")
+    {
+        Dictionary<string, string?> values = new()
+        {
+            ["Worker:WorkingDirectory"] = _workingDirectory,
+        };
+
+        if (apiBaseUrl is not null)
+        {
+            values["SlicerApi:BaseUrl"] = apiBaseUrl;
+        }
+
+        if (maxDownloadBytes is not null)
+        {
+            values["Worker:ModelDownloadMaxBytes"] = maxDownloadBytes;
+        }
+
+        if (downloadTimeoutSeconds is not null)
+        {
+            values["Worker:ModelDownloadTimeoutSeconds"] = downloadTimeoutSeconds;
+        }
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
+    }
+
+    private ServiceCollection CreatePipelineServiceCollection(IConfiguration configuration)
+    {
+        var state = new WorkerStateService();
+        state.SetRegisteredService(Guid.NewGuid(), "worker-secret");
+
+        ServiceCollection services = new();
+        _ = services.AddLogging();
+        _ = services.AddSingleton(configuration);
+        _ = services.AddSingleton<IWorkerStateService>(state);
+        _ = services.AddScoped<IProgressReporter>(_ => new NullProgressReporter());
+        return services;
     }
 
     private static DistributedSlicingJob CreateJob(string fileName = "model.stl")
@@ -313,12 +547,15 @@ public sealed class ModelDownloadRequestTests : IDisposable
 
         public Uri? LastRequestUri { get; private set; }
 
+        public List<Uri> RequestUris { get; } = [];
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestCount++;
             LastRequestUri = request.RequestUri;
+            RequestUris.Add(request.RequestUri!);
             return responder(request, cancellationToken);
         }
     }
@@ -336,6 +573,9 @@ public sealed class ModelDownloadRequestTests : IDisposable
             return false;
         }
     }
+
+    [CollectionDefinition("Model download environment", DisableParallelization = true)]
+    public sealed class ModelDownloadEnvironmentCollection;
 
     private sealed class NullProgressReporter : IProgressReporter
     {
