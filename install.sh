@@ -84,6 +84,116 @@ lc() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
 yn_yes() { local v; v="$(lc "${1:-}")"; [[ "$v" == "y" || "$v" == "yes" ]]; }
 yn_no()  { local v; v="$(lc "${1:-}")"; [[ "$v" == "n" || "$v" == "no" ]]; }
 
+generate_secret() {
+    local length="${1:-48}"
+    local raw
+    if command -v openssl >/dev/null 2>&1; then
+        raw="$(openssl rand -base64 256 2>/dev/null)"
+    else
+        raw="$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | base64 2>/dev/null || echo "fallback$(date +%s)$$")"
+    fi
+    raw="${raw//[\/+=[:space:]]/}"
+    printf '%s' "${raw:0:$length}"
+}
+
+read_env_value() {
+    local env_file="$1"
+    local name="$2"
+    grep -m1 "^${name}=" "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true
+}
+
+read_slicer_shared_key() {
+    local env_file="$1"
+    local name value
+    for name in \
+        WORKER_SHARED_API_KEY \
+        WorkerAuth__SharedKey \
+        WorkerAuth__SharedApiKey \
+        SlicerRegistry__ApiKey \
+        SLICER_REGISTRATION_KEY; do
+        value="$(read_env_value "$env_file" "$name")"
+        if [[ -n "$value" ]]; then
+            printf '%s' "$value"
+            return 0
+        fi
+    done
+}
+
+upsert_env_value() {
+    local env_file="$1"
+    local name="$2"
+    local value="$3"
+    local temp_file
+    temp_file="$(mktemp "${env_file}.tmp.XXXXXX")"
+
+    if ! ENV_NAME="$name" ENV_VALUE="$value" awk '
+        BEGIN {
+            prefix = ENVIRON["ENV_NAME"] "="
+            value = ENVIRON["ENV_VALUE"]
+        }
+        index($0, prefix) == 1 {
+            if (!written) {
+                print prefix value
+                written = 1
+            }
+            next
+        }
+        { print }
+        END {
+            if (!written) {
+                print prefix value
+            }
+        }
+    ' "$env_file" > "$temp_file"; then
+        rm -f "$temp_file"
+        die "Could not update $env_file"
+    fi
+
+    chmod 600 "$temp_file"
+    mv "$temp_file" "$env_file"
+}
+
+ensure_upgrade_slicer_worker_key() {
+    local env_file="$1"
+    local compose_file="$2"
+
+    if ! grep -q 'container_name: printfarmer-monolith' "$compose_file"; then
+        return 0
+    fi
+    [[ -f "$env_file" ]] || die "Existing monolith installation is missing $env_file"
+
+    local worker_key
+    worker_key="$(read_slicer_shared_key "$env_file")"
+    if [[ -z "$worker_key" ]]; then
+        worker_key="$(generate_secret 64)"
+    fi
+    upsert_env_value "$env_file" "WORKER_SHARED_API_KEY" "$worker_key"
+
+    if ! grep -q 'WorkerAuth__SharedKey=' "$compose_file"; then
+        local temp_file
+        temp_file="$(mktemp "${compose_file}.tmp.XXXXXX")"
+        if ! awk '
+            { print }
+            /^[[:space:]]*- Jwt__Audience=/ && !inserted {
+                print "      - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY}"
+                inserted = 1
+            }
+            END {
+                if (!inserted) {
+                    exit 1
+                }
+            }
+        ' "$compose_file" > "$temp_file"; then
+            rm -f "$temp_file"
+            die "Could not add slicer worker authentication to $compose_file"
+        fi
+        chmod 600 "$temp_file"
+        mv "$temp_file" "$compose_file"
+    fi
+
+    info "Slicer worker authentication configuration is present"
+}
+
 # ─── Logging ────────────────────────────────────────────────────────────────
 info()    { printf "  ${BLUE}${ARROW}${NC} %s\n" "$*"; }
 ok()      { printf "  ${GREEN}${CHECK}${NC} %s\n" "$*"; }
@@ -462,6 +572,7 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
         fi
         info "Image tag → ${IMAGE_TAG}"
     fi
+    ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
     $COMPOSE_CMD up -d --remove-orphans 2>/dev/null
@@ -721,6 +832,7 @@ if [[ -n "$EXISTING_ENV" ]]; then
     _existing_profile=$(grep "^DEPLOY_PROFILE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_tag=$(grep "^IMAGE_TAG=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_spoolman=$(grep "^PFARM__Spoolman__BaseUrl=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_worker_key="$(read_slicer_shared_key "$EXISTING_ENV")"
 
     # Apply preserved values (CLI flags override where explicitly set)
     if [[ -n "$_existing_jwt" ]]; then
@@ -751,26 +863,19 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_spoolman" && -z "$SPOOLMAN_URL" ]]; then
         SPOOLMAN_URL="$_existing_spoolman"
     fi
+    if [[ -n "$_existing_worker_key" ]]; then
+        WORKER_SHARED_API_KEY_PRESERVED="$_existing_worker_key"
+    fi
 
     dimtext "Preserved: JWT key, DB credentials, connection string"
+    if [[ -n "$_existing_worker_key" ]]; then dimtext "Preserved: slicer worker key"; fi
     if [[ -n "$_existing_port" ]]; then dimtext "Port: $_existing_port"; fi
     if [[ -n "$_existing_profile" ]]; then dimtext "Profile: $_existing_profile"; fi
 fi
 
 # ─── Generate secrets ───────────────────────────────────────────────────────
-generate_secret() {
-    local length="${1:-48}"
-    local raw
-    if command -v openssl >/dev/null 2>&1; then
-        raw="$(openssl rand -base64 256 2>/dev/null)"
-    else
-        raw="$(dd if=/dev/urandom bs=256 count=1 2>/dev/null | base64 2>/dev/null || echo "fallback$(date +%s)$$")"
-    fi
-    raw="${raw//[\/+=[:space:]]/}"
-    printf '%s' "${raw:0:$length}"
-}
-
 JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
+WORKER_SHARED_API_KEY="${WORKER_SHARED_API_KEY:-${WORKER_SHARED_API_KEY_PRESERVED:-$(generate_secret 64)}}"
 
 # ─── Detect LAN IP ──────────────────────────────────────────────────────────
 detect_lan_ip() {
@@ -813,6 +918,7 @@ ConnectionStrings__Default=${CONNSTR}
 Jwt__Key=${JWT_KEY}
 Jwt__Issuer=PrintFarmer
 Jwt__Audience=PrintFarmer
+WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
@@ -840,6 +946,7 @@ ConnectionStrings__Default=${CONNSTR}
 Jwt__Key=${JWT_KEY}
 Jwt__Issuer=PrintFarmer
 Jwt__Audience=PrintFarmer
+WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
@@ -850,6 +957,7 @@ PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
 fi
+chmod 600 "$INSTALL_DIR/.env"
 
 # Append ARM platform overrides if running on ARM
 if [[ "$IS_ARM" == "true" ]]; then
@@ -1020,6 +1128,7 @@ services:
       - Jwt__Key=\${Jwt__Key}
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
+      - WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models

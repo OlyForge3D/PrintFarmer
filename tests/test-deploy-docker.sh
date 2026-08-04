@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy-docker.sh"
 COMPOSE_GENERATOR="$REPO_ROOT/scripts/docker/compose-generator.sh"
+INSTALL_SCRIPT="$REPO_ROOT/install.sh"
 
 # Source test framework
 source "$SCRIPT_DIR/test-framework.sh"
@@ -1217,6 +1218,121 @@ EOFTEST
     pass_test
 }
 
+# Create a Docker stub that satisfies install.sh prerequisite and upgrade calls.
+create_installer_docker_stub() {
+    local mock_bin="$1"
+    mkdir -p "$mock_bin"
+    cat > "$mock_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+    --version)
+        echo "Docker version 27.0.0, build test"
+        ;;
+    info)
+        exit 0
+        ;;
+    compose)
+        if [[ "${2:-}" == "version" ]]; then
+            echo "Docker Compose version v2.29.0"
+        fi
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$mock_bin/docker"
+}
+
+# Test: install.sh generates and preserves the lite monolith shared key.
+test_installer_lite_slicer_worker_key() {
+    start_test "installer lite profile configures slicer worker authentication"
+
+    local install_dir="$TEST_TEMP_DIR/installer-lite"
+    local mock_bin="$TEST_TEMP_DIR/installer-bin"
+    local expected_key="test-worker-shared-key-907"
+    create_installer_docker_stub "$mock_bin"
+
+    capture_output "PATH='$mock_bin:$PATH' WORKER_SHARED_API_KEY='$expected_key' '$INSTALL_SCRIPT' --non-interactive --profile lite --port 18907 --dir '$install_dir' --dry-run"
+    local output
+    output=$(get_output)
+
+    assert_file_exists "$install_dir/.env" "Lite installer should create .env"
+    assert_file_exists "$install_dir/docker-compose.yml" "Lite installer should create docker-compose.yml"
+    assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
+    assert_not_contains "$output" "$expected_key" "Installer output must not expose the shared key"
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --non-interactive --profile lite --port 18907 --dir '$install_dir' --reuse-config --dry-run"
+    local preserved_key
+    preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+    assert_equals "$expected_key" "$preserved_key" "Reinstall should preserve the shared key"
+
+    pass_test
+}
+
+# Test: install.sh upgrades old lite installs without rotating the generated key.
+test_installer_upgrade_adds_slicer_worker_key() {
+    start_test "installer upgrade adds stable slicer worker authentication"
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=latest
+DEPLOY_PROFILE=lite
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  printfarmer:
+    container_name: printfarmer-monolith
+    environment:
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+    local output
+    output=$(get_output)
+    local generated_key
+    generated_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+
+    assert_not_equals "" "$generated_key" "Upgrade should generate a shared key for an old lite install"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Upgrade should wire the generated key into the monolith"
+    assert_not_contains "$output" "$generated_key" "Upgrade output must not expose the generated key"
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+    local preserved_key
+    preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+    local key_count
+    key_count=$(grep -c '^WORKER_SHARED_API_KEY=' "$install_dir/.env")
+    local mapping_count
+    mapping_count=$(grep -c 'WorkerAuth__SharedKey=' "$install_dir/docker-compose.yml")
+
+    assert_equals "$generated_key" "$preserved_key" "Repeated upgrades should not rotate the shared key"
+    assert_equals "1" "$key_count" "Upgrade should keep one canonical shared-key entry"
+    assert_equals "1" "$mapping_count" "Upgrade should keep one monolith key mapping"
+
+    pass_test
+}
+
+# Test: supported local launchers explicitly select the Development-only bypass.
+test_development_launchers_opt_in_to_insecure_registration() {
+    start_test "development launchers explicitly opt in to insecure slicer registration"
+
+    local expected='export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true'
+    local launcher
+    for launcher in \
+        "$REPO_ROOT/scripts/pf-dev.sh" \
+        "$REPO_ROOT/scripts/start-all-local.sh" \
+        "$REPO_ROOT/scripts/start-all-local-with-workers.sh"; do
+        assert_contains "$(cat "$launcher")" "$expected" "$(basename "$launcher") should explicitly enable the Development-only registration bypass"
+    done
+
+    pass_test
+}
+
 # Test: Slicer worker API key generation
 test_slicer_worker_api_key_generation() {
     start_test "Slicer worker API key generation"
@@ -1457,6 +1573,9 @@ run_all_tests() {
     test_pfarm_network_discovery_subnets_in_env
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
+    test_installer_lite_slicer_worker_key
+    test_installer_upgrade_adds_slicer_worker_key
+    test_development_launchers_opt_in_to_insecure_registration
     test_slicer_worker_api_key_generation
     test_slicer_worker_api_key_single_worker
     test_postgres_password_authentication_integration

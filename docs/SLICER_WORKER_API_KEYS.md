@@ -1,8 +1,8 @@
 ## Slicer worker key generation
 
-`scripts/deploy-docker.sh` generates a cryptographically random shared
-registration key when OrcaSlicer workers are enabled. The generated `.env`
-contains:
+`install.sh` and `scripts/deploy-docker.sh` generate a cryptographically random
+shared registration key. Reinstalls and in-place upgrades preserve the existing
+key. The generated `.env` contains:
 
 ```dotenv
 WORKER_SHARED_API_KEY=<generated-secret>
@@ -33,8 +33,15 @@ Run deployment from the repository root:
 ./scripts/deploy-docker.sh
 ```
 
-Enable OrcaSlicer workers when prompted. In non-interactive environments,
-configure the worker count in `.deploy-config` and run:
+The one-command installer configures the lite monolith automatically:
+
+```bash
+./install.sh --profile lite
+```
+
+For the full deployment script, enable OrcaSlicer workers when prompted. In
+non-interactive environments, configure the worker count in `.deploy-config`
+and run:
 
 ```bash
 ./scripts/deploy-docker.sh --non-interactive
@@ -79,7 +86,8 @@ PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
 
 This flag is accepted only when the host environment is `Development`. It is
 rejected at startup in every other environment and emits a critical startup
-log when active. Never configure it in a deployed environment.
+log when active. The repository's local launch scripts set this opt-in for their
+Development processes. Never configure it in a deployed environment.
 
 ### Verify configuration
 

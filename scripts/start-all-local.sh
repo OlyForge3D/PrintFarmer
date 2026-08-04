@@ -436,6 +436,7 @@ REDIS_CONTAINER_ID=""
 
 # Environment setup
 export ASPNETCORE_ENVIRONMENT=Development
+export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
 export DEPLOYMENT_MODE=monolithic
 export ASPNETCORE_URLS="$API_URL"
 export ALLOWED_ORIGINS="$REACT_URL"
