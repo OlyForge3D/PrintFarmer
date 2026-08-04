@@ -18,7 +18,14 @@ namespace Farm.OrcaSlicer.Worker.Tests;
 public sealed class WorkerVersionEndpointTests : IDisposable
 {
     private const string ConfiguredEngineVersion = "9.8.7";
-    private readonly WorkerVersionApplicationFactory _factory = new();
+    private readonly string _workingDirectory =
+        Path.Combine(Path.GetTempPath(), $"printfarmer-worker-version-{Guid.NewGuid():N}");
+    private readonly WorkerVersionApplicationFactory _factory;
+
+    public WorkerVersionEndpointTests()
+    {
+        _factory = new WorkerVersionApplicationFactory(_workingDirectory);
+    }
 
     [Fact]
     public async Task GetVersionEndpoints_ConfiguredEngineVersion_ReturnExpectedVersion()
@@ -52,9 +59,14 @@ public sealed class WorkerVersionEndpointTests : IDisposable
     public void Dispose()
     {
         _factory.Dispose();
+        if (Directory.Exists(_workingDirectory))
+        {
+            Directory.Delete(_workingDirectory, recursive: true);
+        }
     }
 
-    private sealed class WorkerVersionApplicationFactory : WebApplicationFactory<Program>
+    private sealed class WorkerVersionApplicationFactory(string workingDirectory)
+        : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -63,6 +75,7 @@ public sealed class WorkerVersionEndpointTests : IDisposable
                 {
                     ["Worker:EngineVersion"] = ConfiguredEngineVersion,
                     ["Worker:VerifyBinaryVersion"] = "true",
+                    ["Worker:WorkingDirectory"] = workingDirectory,
                 }));
 
             _ = builder.ConfigureServices(services =>
