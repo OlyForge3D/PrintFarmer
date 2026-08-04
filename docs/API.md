@@ -181,8 +181,9 @@ same-origin paths and never disclose internal service addresses.
   `400` `artifact_hash_mismatch` or `artifact_size_mismatch` and no artifact
   row is created.
 - Completion returns the canonical authenticated download route
-  `/api/artifacts/{artifactId}` and verifies the profile digests the worker
-  reports against the profiles delivered with the claim.
+  `/api/artifacts/{artifactId}`. It verifies profile digests against native
+  profiles delivered with the claim, or records all three worker-computed
+  digests when a legacy named selection is resolved inside the worker.
 
 The `/api/slicer/slice`, `/api/slicer/slice-model/{modelId}` and
 `/api/slicer/jobs` routes are superseded. They keep working for existing

@@ -571,15 +571,28 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     /// Materializes profile files for a job that resolved its profiles from the worker's local
     /// profile cache instead of carrying native documents with the claim.
     /// </summary>
-    /// <param name="profile">The resolved profile set, including any per-extruder filaments.</param>
+    /// <param name="job">The claimed job with its resolved profile set.</param>
     /// <param name="workDir">The per-job working directory.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Absolute paths of the written machine, process and filament files.</returns>
-    private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(SlicerProfileDto? profile, string workDir, CancellationToken cancellationToken)
+    private static async Task<Dictionary<string, string>> GenerateProfileJsonFilesAsync(
+        DistributedSlicingJob job,
+        string workDir,
+        CancellationToken cancellationToken)
     {
-        if (profile == null)
+        SlicerProfileDto? profile = job.Profile;
+        if (profile is null)
         {
-            throw new ArgumentNullException(nameof(profile), "Profile is required for slicing");
+            throw new InvalidOperationException(
+                "The claimed job did not carry native profiles and its named profile selection could not be resolved.");
+        }
+
+        if (profile.MachineProfile is null ||
+            profile.ProcessProfile is null ||
+            (profile.FilamentProfile is null && profile.ExtruderFilamentProfiles is not { Count: > 0 }))
+        {
+            throw new InvalidOperationException(
+                "The claimed job's named profile selection did not resolve machine, process and filament settings.");
         }
 
         string machineJsonPath = Path.Combine(workDir, "machine.json");
@@ -602,6 +615,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         };
 
         // Multi-extruder: write one filament JSON per extruder, semicolon-separated for --load-filaments
+        var filamentJsonDocuments = new List<string>();
         if (profile.ExtruderFilamentProfiles is { Count: > 1 })
         {
             var filamentPaths = new List<string>();
@@ -611,6 +625,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 string json = SettingsDictToNativeJson(profile.ExtruderFilamentProfiles[i].Settings);
                 await File.WriteAllTextAsync(path, json, cancellationToken);
                 filamentPaths.Add(path);
+                filamentJsonDocuments.Add(json);
             }
 
             result["filament"] = string.Join(";", filamentPaths);
@@ -618,13 +633,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         else
         {
             string filamentJsonPath = Path.Combine(workDir, "filament.json");
-            string filamentJson = SettingsDictToNativeJson(profile.FilamentProfile?.Settings);
+            Dictionary<string, object> filamentSettings =
+                profile.ExtruderFilamentProfiles is { Count: 1 }
+                    ? profile.ExtruderFilamentProfiles[0].Settings
+                    : profile.FilamentProfile!.Settings;
+            string filamentJson = SettingsDictToNativeJson(filamentSettings);
             await File.WriteAllTextAsync(filamentJsonPath, filamentJson, cancellationToken);
             result["filament"] = filamentJsonPath;
+            filamentJsonDocuments.Add(filamentJson);
         }
+
+        job.MachineProfileSha256 = NativeSlicerProfiles.ComputeSha256(machineJson);
+        job.ProcessProfileSha256 = NativeSlicerProfiles.ComputeSha256(processJson);
+        job.FilamentProfileSha256 = ComputeProfileSetSha256(filamentJsonDocuments);
 
         return result;
     }
+
+    private static string ComputeProfileSetSha256(IEnumerable<string> profileJsonDocuments) =>
+        NativeSlicerProfiles.ComputeSha256(string.Join("\0", profileJsonDocuments));
 
     private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
@@ -640,9 +667,18 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         // Canonical jobs carry native profile documents with published digests; those are written
         // verbatim after verification. Jobs that resolved profiles from the worker's local cache
         // fall back to materializing them (including per-extruder filaments).
-        Dictionary<string, string> profilePaths = job.NativeProfiles is not null
-            ? await WriteNativeProfilesAsync(job.NativeProfiles, workDir, cancellationToken)
-            : await GenerateProfileJsonFilesAsync(job.Profile, workDir, cancellationToken);
+        Dictionary<string, string> profilePaths;
+        if (job.NativeProfiles is not null)
+        {
+            profilePaths = await WriteNativeProfilesAsync(job.NativeProfiles, workDir, cancellationToken);
+            job.MachineProfileSha256 = job.NativeProfiles.MachineSha256;
+            job.ProcessProfileSha256 = job.NativeProfiles.ProcessSha256;
+            job.FilamentProfileSha256 = job.NativeProfiles.FilamentSha256;
+        }
+        else
+        {
+            profilePaths = await GenerateProfileJsonFilesAsync(job, workDir, cancellationToken);
+        }
 
         string machineJson = profilePaths["machine"];
         string processJson = profilePaths["process"];

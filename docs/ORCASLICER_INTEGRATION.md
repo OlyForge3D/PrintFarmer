@@ -228,18 +228,18 @@ Wait for `GET /api/slicers/engines` to report `2.3.1` as
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Intended Data Flow (NOT VALIDATED)
+### Slicing Data Flow
 
 ```
 1. User selects model + profiles in NewSliceJobPage
-2. Submit creates DistributedSlicingJob in database
-3. Job queued to Redis
-4. OrcaSlicer worker polls Redis, claims job
-5. Worker downloads STL from storage
-6. Worker generates profile JSON files from job.Profile
-7. Worker executes: orcaslicer --slice 0 --load-settings "machine.json;process.json" --load-filaments "filament.json"
-8. Worker uploads G-code to storage
-9. Worker reports completion via HTTP callback to main API
+2. POST /api/slice stores the durable SliceJob
+3. OrcaSlicer worker claims the job through POST /api/slice/claim
+4. Claim delivers exact native profile JSON, or the legacy named selection
+5. Worker downloads the model through the claim-scoped API route
+6. Worker writes native machine/process/filament JSON and hashes exact bytes
+7. Worker invokes OrcaSlicer with the generated native profile files
+8. Worker uploads the produced G-code artifact
+9. Worker completes the job with the effective profile digests
 10. Main API broadcasts SignalR notification
 11. UI receives notification, refreshes job status
 12. User downloads G-code

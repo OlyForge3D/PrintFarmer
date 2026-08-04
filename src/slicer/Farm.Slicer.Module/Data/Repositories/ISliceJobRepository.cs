@@ -68,6 +68,9 @@ public interface ISliceJobRepository
         IEnumerable<Guid> artifactIds,
         int? estimatedPrintTimeSeconds = null,
         decimal? filamentUsedGrams = null,
+        string? machineProfileSha256 = null,
+        string? processProfileSha256 = null,
+        string? filamentProfileSha256 = null,
         CancellationToken ct = default);
 
     /// <summary>Fails a job only while the worker still owns an unexpired processing lease.</summary>

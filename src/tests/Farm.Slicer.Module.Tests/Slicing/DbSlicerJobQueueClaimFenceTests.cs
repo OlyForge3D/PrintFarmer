@@ -15,6 +15,36 @@ public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
         Path.Combine(Path.GetTempPath(), $"printfarmer-queue-fence-{Guid.NewGuid():N}.db");
 
     [Fact]
+    public async Task EnqueueAsync_WithNamedProfileSelection_PreservesSlicerProfileJson()
+    {
+        string connectionString = $"Data Source={_databasePath}";
+        string profileSelectionJson =
+            """{"machineProfileName":"Test Machine","processProfileName":"Test Process","filamentProfileName":"Test Filament"}""";
+        Guid jobId = Guid.NewGuid();
+
+        await using SlicerDbContext context = CreateContext(connectionString);
+        _ = await context.Database.EnsureCreatedAsync();
+        var queue = new DbSlicerJobQueue(new EfSliceJobRepository(context));
+
+        await queue.EnqueueAsync(new DistributedSlicingJob
+        {
+            Id = jobId,
+            UserId = Guid.NewGuid(),
+            ModelFileUrl = new Uri("file:///model.stl"),
+            ModelFileName = "model.stl",
+            EngineType = SlicerEngineType.OrcaSlicer,
+            SlicerProfileJson = profileSelectionJson,
+        });
+
+        SliceJob persisted = await context.SliceJobs.AsNoTracking().SingleAsync(job => job.Id == jobId);
+        DistributedSlicingJob? loaded = await queue.GetJobAsync(jobId);
+
+        _ = persisted.SlicerProfileJson.Should().Be(profileSelectionJson);
+        _ = loaded.Should().NotBeNull();
+        _ = loaded!.SlicerProfileJson.Should().Be(profileSelectionJson);
+    }
+
+    [Fact]
     public async Task WorkerMutations_SameWorkerStaleClaimAfterReclaim_AreRejected()
     {
         string connectionString = $"Data Source={_databasePath}";

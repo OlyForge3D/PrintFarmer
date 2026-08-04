@@ -65,6 +65,9 @@ public class DbSlicerJobQueue(
             [],
             estPrint,
             filament,
+            job.MachineProfileSha256 ?? job.NativeProfiles?.MachineSha256,
+            job.ProcessProfileSha256 ?? job.NativeProfiles?.ProcessSha256,
+            job.FilamentProfileSha256 ?? job.NativeProfiles?.FilamentSha256,
             cancellationToken);
         ThrowIfClaimLost(completed, job.Id);
     }
@@ -182,6 +185,7 @@ public class DbSlicerJobQueue(
             ModelFileName = sj.ModelFileName,
             EngineType = engine,
             SlicerEngine = engine.ToString(),
+            SlicerProfileJson = sj.SlicerProfileJson,
             WorkerId = sj.WorkerId?.ToString(),
             StartedAt = sj.StartedAt,
             CompletedAt = sj.CompletedAt,
@@ -196,6 +200,9 @@ public class DbSlicerJobQueue(
                 sj.MachineProfileSha256,
                 sj.ProcessProfileSha256,
                 sj.FilamentProfileSha256),
+            MachineProfileSha256 = sj.MachineProfileSha256,
+            ProcessProfileSha256 = sj.ProcessProfileSha256,
+            FilamentProfileSha256 = sj.FilamentProfileSha256,
         };
 
         return dsj;
@@ -238,14 +245,15 @@ public class DbSlicerJobQueue(
             ModelFileName = dj.ModelFileName,
             SlicerEngine = (int)dj.EngineType,
             SlicerEngineName = dj.EngineType.ToString(),
+            SlicerProfileJson = dj.SlicerProfileJson,
             CorrelationId = dj.CorrelationId == Guid.Empty ? null : dj.CorrelationId,
             Checksum = string.IsNullOrWhiteSpace(dj.Checksum) ? null : dj.Checksum,
             MachineProfileJson = dj.NativeProfiles?.MachineJson,
             ProcessProfileJson = dj.NativeProfiles?.ProcessJson,
             FilamentProfileJson = dj.NativeProfiles?.FilamentJson,
-            MachineProfileSha256 = dj.NativeProfiles?.MachineSha256,
-            ProcessProfileSha256 = dj.NativeProfiles?.ProcessSha256,
-            FilamentProfileSha256 = dj.NativeProfiles?.FilamentSha256,
+            MachineProfileSha256 = dj.MachineProfileSha256 ?? dj.NativeProfiles?.MachineSha256,
+            ProcessProfileSha256 = dj.ProcessProfileSha256 ?? dj.NativeProfiles?.ProcessSha256,
+            FilamentProfileSha256 = dj.FilamentProfileSha256 ?? dj.NativeProfiles?.FilamentSha256,
         };
     }
 }

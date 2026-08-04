@@ -573,6 +573,9 @@ public partial class SliceJobController(
             artifactIds,
             request.EstimatedPrintTimeSeconds,
             request.FilamentUsedGrams,
+            request.MachineProfileSha256,
+            request.ProcessProfileSha256,
+            request.FilamentProfileSha256,
             ct);
         if (!completionApplied)
         {
@@ -1263,10 +1266,31 @@ public partial class SliceJobController(
         }
     }
 
-    private static bool ProfileHashesMatch(SliceJob job, CompleteSliceJobRequest request) =>
-        HashMatches(job.MachineProfileSha256, request.MachineProfileSha256) &&
-        HashMatches(job.ProcessProfileSha256, request.ProcessProfileSha256) &&
-        HashMatches(job.FilamentProfileSha256, request.FilamentProfileSha256);
+    private static bool ProfileHashesMatch(SliceJob job, CompleteSliceJobRequest request)
+    {
+        string?[] expected =
+        [
+            job.MachineProfileSha256,
+            job.ProcessProfileSha256,
+            job.FilamentProfileSha256,
+        ];
+        string?[] reported =
+        [
+            request.MachineProfileSha256,
+            request.ProcessProfileSha256,
+            request.FilamentProfileSha256,
+        ];
+
+        if (expected.Any(value => !string.IsNullOrWhiteSpace(value)))
+        {
+            return expected.All(IsSha256) &&
+                   HashMatches(expected[0], reported[0]) &&
+                   HashMatches(expected[1], reported[1]) &&
+                   HashMatches(expected[2], reported[2]);
+        }
+
+        return reported.All(string.IsNullOrWhiteSpace) || reported.All(IsSha256);
+    }
 
     /// <summary>
     /// Compares an expected digest with the digest a worker reported.
@@ -1287,6 +1311,11 @@ public partial class SliceJobController(
         return !string.IsNullOrWhiteSpace(reported) &&
                string.Equals(expected.Trim(), reported.Trim(), StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsSha256(string? value) =>
+        value is not null &&
+        value.Trim() is { Length: 64 } trimmed &&
+        trimmed.All(char.IsAsciiHexDigit);
 
     /// <summary>
     /// Builds the canonical authenticated download route for an artifact.
