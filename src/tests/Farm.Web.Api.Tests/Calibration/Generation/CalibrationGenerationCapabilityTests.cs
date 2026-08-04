@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Domain;
+﻿using Farm.Infrastructure.PrinterCalibration;
+using Farm.Slicer.Module.Domain;
 using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 
@@ -318,7 +319,7 @@ public sealed class CalibrationGenerationCapabilityTests : IAsyncLifetime
         _ = pinned!.WorkerId.Should().Be(workerId);
         _ = pinned.ContainerDigest.Should().Be(CalibrationGenerationHarness.ContainerDigest);
         _ = pinned.BinarySha256.Should().Be(CalibrationGenerationHarness.BinaryDigest);
-        _ = pinned.Version.Should().Be("2.3.1");
+        _ = pinned.Version.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = pinned.Distribution.Should().Be("upstream");
     }
 }

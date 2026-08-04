@@ -1,4 +1,5 @@
-﻿using FluentAssertions;
+﻿using Farm.Infrastructure.PrinterCalibration;
+using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Calibration.Generation;
 
@@ -28,7 +29,7 @@ public sealed class PinnedOrcaPublicationTests
             .BeFalse("the algorithm prefix is part of the registry identity");
         _ = PinnedOrcaPublication.IsManifestDigest("sha512:" + new string('a', 64)).Should().BeFalse();
         _ = PinnedOrcaPublication.IsManifestDigest("sha256:" + new string('g', 64)).Should().BeFalse();
-        _ = PinnedOrcaPublication.IsManifestDigest("2.3.1").Should()
+        _ = PinnedOrcaPublication.IsManifestDigest(CalibrationContractConstants.SlicerVersion).Should()
             .BeFalse("a mutable tag is never an immutable identity");
     }
 
@@ -38,7 +39,7 @@ public sealed class PinnedOrcaPublicationTests
             .Be($"{Repository}@{ValidDigest}");
 
     [Theory(DisplayName = "A mutable or already-pinned repository is refused")]
-    [InlineData("ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:2.3.1")]
+    [InlineData(Repository + ":" + CalibrationContractConstants.SlicerVersion)]
     [InlineData("ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:deadbeef")]
     [InlineData("   ")]
     public void BuildImageReference_RejectsUnusableRepositories(string repository) =>
@@ -93,7 +94,7 @@ public sealed class PinnedOrcaPublicationTests
     {
         PinnedOrcaSmokeGate gate = PinnedOrcaPublication.ResolveGate(Environment(
             (PinnedOrcaPublication.ImageVariable, Repository),
-            (PinnedOrcaPublication.ImageDigestVariable, "2.3.1")));
+            (PinnedOrcaPublication.ImageDigestVariable, CalibrationContractConstants.SlicerVersion)));
 
         _ = gate.CanRun.Should().BeFalse();
         _ = gate.BlockReason.Should().Contain("sha256:");

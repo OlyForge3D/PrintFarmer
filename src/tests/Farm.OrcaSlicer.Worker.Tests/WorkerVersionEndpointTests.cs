@@ -1,5 +1,7 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.OrcaSlicer;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Worker.Core;
 using FluentAssertions;
@@ -37,6 +39,14 @@ public sealed class WorkerVersionEndpointTests : IDisposable
             response.StatusCode.Should().Be(HttpStatusCode.OK);
             body.RootElement.GetProperty(property).GetString().Should().Be(ConfiguredEngineVersion);
         }
+    }
+
+    [Fact]
+    public void VersionContracts_LatestWorkerAndCalibrationStayAligned()
+    {
+        WorkerConstants.SlicerVersion.Should().Be(OrcaSlicerVersionConstants.LatestSupported);
+        CalibrationContractConstants.SlicerVersion.Should().Be(WorkerConstants.SlicerVersion);
+        WorkerConstants.SlicerVersion.Should().Be("2.4.2");
     }
 
     public void Dispose()

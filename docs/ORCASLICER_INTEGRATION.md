@@ -947,7 +947,8 @@ To load bed STL models:
 ### Pinned Worker Publication & Mandatory Calibration Smoke Gate
 
 Calibration generation (issue #899) is only allowed to report itself operational after the **published,
-digest-pinned** OrcaSlicer 2.3.1 worker has completed a real calibration run. This is enforced by
+digest-pinned** latest supported OrcaSlicer worker (currently 2.4.2) has completed a real
+calibration run. This is enforced by
 `.github/workflows/orcaslicer-strict-build.yml`, which is manual-dispatch only and double-guarded.
 
 **Publication (`build-orcaslicer-strict`)**

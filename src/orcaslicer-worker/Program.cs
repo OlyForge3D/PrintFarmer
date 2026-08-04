@@ -1,5 +1,6 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
+using Farm.Infrastructure.OrcaSlicer;
 using Farm.OrcaSlicer.Worker.Health;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
@@ -13,7 +14,7 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public const string SlicerVersion = "2.4.2";
+    public const string SlicerVersion = OrcaSlicerVersionConstants.LatestSupported;
     public const string UpstreamDistributionCapability = "orcaslicer-upstream";
 
     // Legacy static capability list — retained for the diagnostic root endpoint.

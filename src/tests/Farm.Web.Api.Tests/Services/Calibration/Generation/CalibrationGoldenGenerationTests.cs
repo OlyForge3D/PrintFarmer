@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 
@@ -166,7 +167,7 @@ public sealed class CalibrationGoldenGenerationTests
             .Be(CalibrationCanonicalJson.ComputeTextSha256(annotated.Gcode));
         _ = annotated.Manifest.FirmwareFamily.Should().Be("Klipper");
         _ = annotated.Manifest.GcodeDialect.Should().Be("Klipper");
-        _ = annotated.Manifest.SlicerVersion.Should().Be("2.3.1");
+        _ = annotated.Manifest.SlicerVersion.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = annotated.Manifest.ResetCommands.Should().Contain("TURN_OFF_HEATERS");
         _ = annotated.Manifest.ResetCommands.Should().Contain("M84");
     }
@@ -370,7 +371,7 @@ public sealed class CalibrationGoldenGenerationTests
         _ = run.Problems.Should().BeEmpty();
         _ = run.Plan!.Manifest.SlicerEngine.Should().Be("OrcaSlicer");
         _ = run.Plan.Manifest.SlicerDistribution.Should().Be("upstream");
-        _ = run.Plan.Manifest.SlicerVersion.Should().Be("2.3.1");
+        _ = run.Plan.Manifest.SlicerVersion.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = run.Plan.Manifest.SlicerContainerDigest.Should()
             .Be(CalibrationGenerationTestData.ContainerDigest);
         _ = run.Plan.Manifest.SlicerBinarySha256.Should()
