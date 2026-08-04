@@ -24,6 +24,9 @@ final class ConnectionMonitor {
     private(set) var status: ConnectionStatus = .connecting
     private(set) var signalRState: SignalRConnectionState = .disconnected
     private(set) var isServerReachable = false
+    /// Number of reachability probes that have failed back-to-back. Reset to 0
+    /// by the first success. Exposed for tests and diagnostics.
+    private(set) var consecutiveReachabilityFailures = 0
 
     @ObservationIgnored private var apiClient: APIClient?
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
@@ -31,6 +34,17 @@ final class ConnectionMonitor {
 
     /// Interval between connectivity samples.
     @ObservationIgnored var pollInterval: Duration = .seconds(5)
+
+    /// Consecutive failed reachability probes required before the monitor
+    /// publishes the alarming `.offline` state.
+    ///
+    /// `APIClient.isReachable()` swallows every transport error and returns
+    /// `false`, so a single dropped packet, a Wi-Fi power-save wake, a DHCP
+    /// renewal, or an AP roam used to flip the global banner straight to red
+    /// while the user was sitting still. Requiring two back-to-back failures
+    /// (~one poll interval of genuine unreachability) filters those blips out
+    /// without meaningfully delaying a real outage.
+    @ObservationIgnored var offlineFailureThreshold = 2
 
     /// Pure state-resolution used by the poll loop (and unit tests).
     /// - Offline when the server is unreachable over REST.
@@ -43,6 +57,24 @@ final class ConnectionMonitor {
         case .connecting: return .connecting
         case .reconnecting, .disconnected: return .degraded
         }
+    }
+
+    /// Hysteresis-aware resolution.
+    ///
+    /// A failed probe only produces `.offline` once `consecutiveFailures` has
+    /// reached `threshold`. Below the threshold the failure is surfaced as
+    /// `.degraded` — honest (we have not confirmed the server is live) without
+    /// throwing up the full red offline banner for a one-sample blip.
+    static func resolve(
+        isServerReachable: Bool,
+        signalR: SignalRConnectionState,
+        consecutiveFailures: Int,
+        threshold: Int
+    ) -> ConnectionStatus {
+        if !isServerReachable && consecutiveFailures < max(threshold, 1) {
+            return .degraded
+        }
+        return resolve(isServerReachable: isServerReachable, signalR: signalR)
     }
 
     /// Points the monitor at the currently-active services. Safe to call again
@@ -83,14 +115,25 @@ final class ConnectionMonitor {
         status = .connecting
         signalRState = .disconnected
         isServerReachable = false
+        consecutiveReachabilityFailures = 0
     }
 
     /// Performs a single connectivity sample and updates ``status``.
     func refresh() async {
         let reachable = await apiClient?.isReachable() ?? false
         let signalR = signalRService?.connectionState ?? .disconnected
+        if reachable {
+            consecutiveReachabilityFailures = 0
+        } else {
+            consecutiveReachabilityFailures += 1
+        }
         isServerReachable = reachable
         signalRState = signalR
-        status = Self.resolve(isServerReachable: reachable, signalR: signalR)
+        status = Self.resolve(
+            isServerReachable: reachable,
+            signalR: signalR,
+            consecutiveFailures: consecutiveReachabilityFailures,
+            threshold: offlineFailureThreshold
+        )
     }
 }

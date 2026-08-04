@@ -55,6 +55,68 @@ final class ConnectionMonitorTests: XCTestCase {
         )
     }
 
+    // MARK: - hysteresis resolve() matrix
+
+    func testResolveToleratesSingleFailureBelowThreshold() {
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .connected,
+                consecutiveFailures: 1,
+                threshold: 2
+            ),
+            .degraded,
+            "A single failed probe must not publish the alarming offline banner"
+        )
+    }
+
+    func testResolveGoesOfflineAtThreshold() {
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .connected,
+                consecutiveFailures: 2,
+                threshold: 2
+            ),
+            .offline
+        )
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .connected,
+                consecutiveFailures: 7,
+                threshold: 2
+            ),
+            .offline
+        )
+    }
+
+    func testResolveHysteresisIsBypassedWhenReachable() {
+        // A stale failure count must never suppress a healthy sample.
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: true,
+                signalR: .connected,
+                consecutiveFailures: 5,
+                threshold: 2
+            ),
+            .connected
+        )
+    }
+
+    func testResolveThresholdOfZeroBehavesAsImmediateOffline() {
+        // Guard against a misconfigured threshold silently disabling offline.
+        XCTAssertEqual(
+            ConnectionMonitor.resolve(
+                isServerReachable: false,
+                signalR: .connected,
+                consecutiveFailures: 1,
+                threshold: 0
+            ),
+            .offline
+        )
+    }
+
     // MARK: - refresh() integration
 
     func testRefreshReportsConnectedWhenHealthyAndHubConnected() async {
@@ -85,6 +147,25 @@ final class ConnectionMonitorTests: XCTestCase {
         XCTAssertEqual(monitor.status, .degraded)
     }
 
+    func testSingleTransportErrorDoesNotGoOffline() async {
+        mockAPIClient.stubError(.cannotConnectToHost)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor()
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+
+        await monitor.refresh()
+
+        XCTAssertFalse(monitor.isServerReachable)
+        XCTAssertEqual(monitor.consecutiveReachabilityFailures, 1)
+        XCTAssertEqual(
+            monitor.status,
+            .degraded,
+            "One dropped probe must not paint the red offline banner"
+        )
+    }
+
     func testRefreshReportsOfflineOnTransportError() async {
         mockAPIClient.stubError(.cannotConnectToHost)
         let signalR = MockSignalRService()
@@ -93,6 +174,7 @@ final class ConnectionMonitorTests: XCTestCase {
         let monitor = ConnectionMonitor()
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
+        await monitor.refresh()
         await monitor.refresh()
 
         XCTAssertFalse(monitor.isServerReachable)
@@ -108,9 +190,33 @@ final class ConnectionMonitorTests: XCTestCase {
         monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
 
         await monitor.refresh()
+        await monitor.refresh()
 
         XCTAssertFalse(monitor.isServerReachable)
         XCTAssertEqual(monitor.status, .offline)
+    }
+
+    func testSuccessfulProbeResetsFailureStreak() async {
+        mockAPIClient.stubError(.cannotConnectToHost)
+        let signalR = MockSignalRService()
+        signalR.connectionState = .connected
+
+        let monitor = ConnectionMonitor()
+        monitor.configure(apiClient: mockAPIClient.apiClient, signalRService: signalR)
+
+        await monitor.refresh()
+        XCTAssertEqual(monitor.consecutiveReachabilityFailures, 1)
+
+        mockAPIClient.stubResponse(json: "{\"status\":\"ok\"}", statusCode: 200)
+        await monitor.refresh()
+        XCTAssertEqual(monitor.consecutiveReachabilityFailures, 0)
+        XCTAssertEqual(monitor.status, .connected)
+
+        // Recovery must fully re-arm the hysteresis: the next single failure is
+        // tolerated again rather than immediately tipping to offline.
+        mockAPIClient.stubError(.cannotConnectToHost)
+        await monitor.refresh()
+        XCTAssertEqual(monitor.status, .degraded)
     }
 
     // MARK: - stop() resets displayed state

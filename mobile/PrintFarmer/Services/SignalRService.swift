@@ -88,7 +88,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private let reconnectBackoff: @Sendable (Int) -> TimeInterval
 
     static let defaultReconnectBackoff: @Sendable (Int) -> TimeInterval = { attempt in
-        min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
+        let base = min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
+        // Full-width jitter on the top 25% of the interval. Without it an
+        // access-point blip makes every client on the farm retry in exact
+        // lockstep, which turns a transient outage into a synchronized
+        // thundering herd against the API. Never returns less than 0.5s.
+        let jitter = Double.random(in: 0...(base * 0.25))
+        return max(base - (base * 0.25) + jitter, 0.5)
     }
 
     /// Async reconnect sleeper (r9 blocker #4). Production sleeps via
@@ -280,6 +286,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         tokenProvider: @escaping @Sendable () async -> String?,
         reconnectBackoff: @escaping @Sendable (Int) -> TimeInterval = SignalRService.defaultReconnectBackoff,
         reconnectSleeper: @escaping SignalRReconnectSleeper = defaultSignalRReconnectSleeper,
+        maxReconnectAttempts: Int? = nil,
         webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil
     ) {
         self.serverURL = serverURL
@@ -287,6 +294,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.session = session
         self.reconnectBackoff = reconnectBackoff
         self.reconnectSleeper = reconnectSleeper
+        self.maxReconnectAttempts = maxReconnectAttempts
         // Capture `session` in a local Sendable so the closure escapes
         // safely into the actor-agnostic factory.
         let capturedSession = session
@@ -508,6 +516,39 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         }
         reconnect?.cancel()
         logger.info("Disconnected from SignalR hub")
+    }
+
+    /// Idempotent "make sure we're live" entry point.
+    ///
+    /// Safe to call repeatedly from lifecycle hooks (notably app
+    /// foregrounding). Does nothing when a connection is already live or
+    /// handshaking, and refuses to resurrect a service the user
+    /// intentionally disconnected (logout / server switch).
+    ///
+    /// When the service is `.disconnected` or `.reconnecting` this calls
+    /// `connect()`, which supersedes any in-flight reconnect owner. That
+    /// supersede is deliberate: foregrounding is a strong signal that the
+    /// network path just changed, and waiting out the remainder of a 30s
+    /// backoff sleep is exactly the "takes forever to go live" symptom this
+    /// exists to fix.
+    ///
+    /// Never throws — a failed attempt leaves the reconnect ladder running.
+    func ensureConnected() async {
+        let shouldConnect: Bool = lifecycleSync {
+            let state = self.connectionStateHub.snapshot()
+            if state == .connected || state == .connecting { return false }
+            // A deliberate disconnect (logout, server switch) must stay down
+            // until something calls `connect()` explicitly.
+            if self.intentionalDisconnect { return false }
+            return true
+        }
+        guard shouldConnect else { return }
+        do {
+            try await connect()
+        } catch {
+            // The reconnect ladder owns recovery from here.
+            logger.info("ensureConnected: connect attempt failed, reconnect ladder continues")
+        }
     }
 
     @discardableResult
@@ -1149,10 +1190,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// by `reconnectAttemptCount` (see
     /// `SignalRLifecycleInvariants.recordReconnectAttempt`) which is
     /// incremented at the top of every retry iteration, so a
-    /// bounded-terminal test observes `reconnectAttemptCount == 10`
-    /// with `reconnectOwnerEnterCount == 1`. Retry count (10),
-    /// backoff schedule, terminal `.disconnected` publish,
-    /// cancellation, and supersede semantics are unchanged.
+    /// bounded-terminal test can inject `maxReconnectAttempts: 10`
+    /// and observe `reconnectAttemptCount == 10` with
+    /// `reconnectOwnerEnterCount == 1`. Backoff schedule, terminal
+    /// `.disconnected` publish, cancellation, and supersede semantics
+    /// are unchanged.
     ///
     /// Immediate receive-failure on the success path (r15 Hicks item
     /// 3): a receive-error inside `makeReceiveTask` calls
@@ -1161,7 +1203,18 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// (e.g. an earlier type-7 already installed one), the second
     /// call drops. The reservation is owner-keyed by `taskToken` —
     /// no other owner or slot can consume this owner's state.
-    private static let maxReconnectAttempts: Int = 10
+    ///
+    /// **Production is UNBOUNDED (`nil`).** The previous fixed cap of
+    /// 10 attempts gave up permanently after roughly three minutes of
+    /// failures and published a terminal `.disconnected` that nothing
+    /// ever cleared — `connect()` is only invoked from the root view's
+    /// server-generation task, so a phone that spent a few minutes off
+    /// the network came back to an app that never went live again.
+    /// The backoff saturates at the 30s ceiling, so an unbounded chain
+    /// costs at most one negotiate every ~30s while the app is
+    /// foregrounded. Tests inject a finite bound to exercise the
+    /// terminal branch deterministically.
+    private let maxReconnectAttempts: Int?
 
     /// Result of the owner-completion watcher's atomic
     /// release/consume step. `.retry` yields a barrier the watcher
@@ -1342,7 +1395,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
             var currentGen = myGen0
             var attempt = 0
-            while attempt < Self.maxReconnectAttempts {
+            // `nil` cap == unbounded (production). Tests inject a finite cap.
+            let attemptCap = self.maxReconnectAttempts ?? Int.max
+            while attempt < attemptCap {
                 attempt += 1
                 // r15 (Hicks item 4/8): record every retry attempt so
                 // the retry-chain proof is non-vacuous even though
@@ -1449,9 +1504,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                 }
             }
 
-            // Bounded terminal: `maxReconnectAttempts` exhausted. Only
-            // publish `.disconnected` if we still own the slot AND the
-            // user hasn't already intentionally disconnected. Under
+            // Bounded terminal: a finite `maxReconnectAttempts` cap was
+            // injected and is now exhausted. Unreachable in production,
+            // where the cap is `nil` (unbounded) and the loop only exits
+            // via success, supersede, or cancellation. Only publish
+            // `.disconnected` if we still own the slot AND the user
+            // hasn't already intentionally disconnected. Under
             // lifecycleSync so publication order is preserved.
             self.lifecycleSync {
                 if self.reconnectToken == taskToken {
@@ -1471,7 +1529,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                     }
                 }
             }
-            self.logger.error("Gave up reconnecting after \(Self.maxReconnectAttempts) attempts")
+            self.logger.error("Gave up reconnecting after \(attempt) attempts")
         }
         // r21 (F4-L #777) owner-scoped completion watcher.
         //

@@ -10,6 +10,13 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     func connect() async throws
     func disconnect() async
 
+    /// Idempotent reconnect entry point. Does nothing when already connected
+    /// or handshaking; otherwise (re)establishes the hub connection. Never
+    /// throws. Called from app-foreground lifecycle hooks so a connection lost
+    /// while the app was suspended is re-armed immediately instead of waiting
+    /// out a backoff sleep.
+    func ensureConnected() async
+
     /// Register a connection-state observer.
     ///
     /// Returns a tuple containing the state snapshot captured at registration
@@ -65,4 +72,15 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
     /// `GET /api/printers/{printerId}/fallback-groups` and never persist
     /// any field of the payload as the canonical group state.
     func onFallbackGroupsUpdated(_ handler: @escaping @Sendable (FallbackGroupsUpdatedEvent) -> Void)
+}
+
+extension SignalRServiceProtocol {
+    /// Default: only connect when the hub is not already live or handshaking.
+    /// `SignalRService` overrides this with a lifecycle-queue-atomic version
+    /// that also honours an intentional disconnect.
+    func ensureConnected() async {
+        let state = connectionState
+        guard state != .connected, state != .connecting else { return }
+        try? await connect()
+    }
 }
