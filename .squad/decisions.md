@@ -45,65 +45,39 @@ Model upgrade enables deeper reasoning capability for complex backend code revie
 - Applied: Hicks history updated; used `gpt-5.6-sol/max` for 2026-07-13 #708 review.
 
 ---
-## Decision: Narrow Global Heading Typography Scope
+## Merged from Inbox: 2026-08-04T13:45:20-07:00
 
-| Field | Value |
-|-------|-------|
-| **Date** | 2026-06-03T12:42:57-07:00 |
-| **Agent** | Lambert |
-| **Status** | Proposed |
+## Decision: #715 r8 — Harvest reserved-prefix guard + migration script/collation deploy-safety
 
-## Decision
+**By:** Burke (r8 remediation author)
+**Date:** 2026-07-13
+**Issue:** #715 (F10 offline tolerance / write-queue persistent Idempotency-Key)
+**Cycle:** r8 (resolves r7's 2× REQUEST_CHANGES)
 
-Limit the shared display-heading rule in `src/Web/ReactApp/src/index.css` to `h1` and `h2`.
-Leave `h3` through `h6` on the default semantic typography path unless a surface opts into display styling explicitly.
+### What was decided/done
 
-## Rationale
+1. **B1/H3 — Harvest endpoint now rejects client-supplied reserved OperationKeys.** Added `[ReservedOperationKeyPrefix]` to `HarvestJobRequest.OperationKey` (DTO boundary) + defense-in-depth service guard in `PartHarvestService.HarvestJobAsync` (returns 400 InvalidRequest). Closes a cross-job harvest-key poisoning exploit (client writes `harvest:{otherJob:N}` verbatim → later autogeneration collides on the unique filtered index → victim job's harvest permanently broken). Server-side autogeneration path (`PartHarvestService.cs:181`) intentionally left unguarded — it bypasses DTO/service and must be able to emit `harvest:` keys.
 
-The previous global rule forced Bebas and uppercase styling onto every heading level,
-which made secondary headings overly loud on settings and unrelated pages.
-Narrowing the rule solves the issue at the design-system layer instead of relying on
-page-specific overrides.
+2. **H1a — SQL Server migration scripts are now single-batch safe.** `OnlineAwareCreateUniqueIndex` emits unique per-index variable names (`@online_{ix}`, `@sql_{ix}`) instead of repeated `DECLARE @online`/`@sql`, fixing Msg 134 ("variable already declared") under script-based deploys (SQLCMD/sqlpackage) where all `migrationBuilder.Sql()` calls collapse into one GO batch.
 
-## Impact
+3. **H1b — Down migrations are now catalog-collation-agnostic.** Replaced hardcoded `SQL_Latin1_General_CP1_CI_AS` reverts with dynamic SQL reading `DATABASEPROPERTYEX(DB_NAME(),'Collation')` (helper `RevertCollationToCatalogDefault`, uniquely-named `@coll_{table}_{column}` vars). Applies to 4 columns in `20260713235657` Down() + 3 columns in `20260713163813` Down(). Collation is captured at rollback time, not authoring time.
 
-Pages such as Settings and API Keys can use `h3`-`h6` without inheriting display
-heading treatment automatically.
-Teams that want display styling below `h2` should add it intentionally at the component
-or page level.
+### Notable deviations (for reviewers)
 
----
-## Decision: Phase 1 Settings IA Query Model
+- Task's recommended H1a/H1b "Option A" (inline `EXEC('...' + CASE/DATABASEPROPERTYEX + '...')`) is **invalid T-SQL** — `EXEC()` string concat rejects CASE/function operands. Used variable-based dynamic SQL with collision-free unique names (task's Option C style) instead.
+- `dotnet ef migrations script` requires FULL migration names (bare IDs fail).
+- Skipped the optional controller-level attribute test (no easy harness — `JobQueueControllerTests` mocks the service and bypasses model binding). Coverage mirrors the adjust DTO: service-guard tests + existing `ReservedOperationKeyPrefixAttributeTests` unit tests.
 
-| Field | Value |
-|-------|-------|
-| **Date** | 2026-06-06T08:58:45.350-07:00 |
-| **Agent** | Ripley |
-| **Requested by** | Jeff Papiez |
-| **Status** | Proposed |
-| **Scope** | React settings information architecture |
+### Validation
 
-## Recommendation
+- format (scoped) clean; build 0W/0E (warnings-as-errors); focused tests ×3 → 219 pass, deterministic.
+- has-pending-model-changes clean on BOTH providers (sqlserver + postgres).
+- Script-generation proof: UP + DOWN scripts have **zero** duplicate DECLARE in any GO batch; DOWN has 7 dynamic `DATABASEPROPERTYEX` collation reverts, **zero** hardcoded CI_AS.
+- Full suite: only the 4 pre-approved failures (3× OrcaSlicerAssetRegistry CRLF, 1× FilamentCoverage perf-budget). No regressions in idempotency/parts areas.
 
-Use a normalized query model inside the existing settings shell:
+### Preserved (untouched)
 
-- `scope=user|system|admin`
-- `tab=<category>`
-- `sub=<sub-page>`
-
-Keep the current `/settings` route alive for Phase 1, but resolve legacy `?tab=` links through shared navigation helpers so the shell can infer the correct scope and destination.
-
-## Why
-
-This lets the frontend ship the new User/System/Admin information architecture without moving page components or changing route ownership yet.
-It also keeps existing bookmarks working while the sidebar, command palette, and search all move onto the new scope-aware model.
-
-## Compatibility Notes
-
-- Legacy `tab=notifications` now resolves to User Settings → Profile → Notifications.
-- Legacy `tab=users&sub=api-keys` now resolves to User Settings → Profile → API Keys.
-- Legacy operational tabs such as `system`, `users`, and `data` continue to resolve into Admin categories.
-
+Frost r6 BIN2 Up(); Newt r7 WITH NOCHECK + EngineEdition ONLINE detection; Apone r5 NFKC; Ripley r4 attribute mechanism; Hudson r3 reclaim TOCTOU; Kane r1 IdempotencyRecords BIN2. No feature-flag / route / naturally-idempotent behavior changes.
 
 ---
 ## Decision: Lockout Policy Dropped for #785/#816/#817
@@ -117,7 +91,7 @@ Owner (jpapiez) has rescinded the #785/#816/#817 clean-room lockout policy. The 
 
 **New governing rules:**
 1. **No agent lockouts** on #785/#816/#817. No one is barred from implementing, revising, advising, contributing, or producing evidence.
-2. **Author owns all revisions, including post-REJECT.** On a trio REJECT, the SAME author revises their own branch (standard iterate-on-feedback). No forced handoff, no reviewer-authored-fix routing.
+2. **Author owns all revisions, including post-REJECT.** On a trio REJECT, the SAME author revises their own branch (standard iterate-on-feedback). No forced handoff, no reviewer-authored-fix workflow.
 3. **Clean-room isolation rescinded.** Prior-attempt learnings (Dietrich, Apone, Crowe, Morse, or any other source) may be shared and consulted freely if useful. Deriving criteria from acceptance criteria + iOS Review Rubric remains good hygiene, but is not a rule.
 4. **Findings-hygiene "describe properties not mechanisms" cancelled.** Reviewers may give direct, specific, actionable findings including concrete mechanism suggestions and fixes. Standard code-review posture.
 
@@ -151,7 +125,6 @@ Confirm local and remote alignment, then use the refreshed remote tip as the
 base for subsequent issue branches and immutable-SHA reviews.
 **Note**: currentUserRole + gate were already partially implemented on origin/development; this PR formalizes branch and adds explicit test coverage.
 
----
 ---
 date: 2026-07-25
 owner: Multiple
@@ -217,7 +190,7 @@ Both `POST /api/settings` (bulk) and `POST /api/settings/{keyName}` (per-key) no
 - **Command palette global mount** (#938): Moved from `SettingsShell` (route-scoped) to `GlobalCommandPaletteProvider` wrapping `<Outlet />` in `Layout.tsx`. Ctrl+K now works on every authenticated route.
 - **Admin UI primitives frozen** (#932): `AdminLoading`, `AdminEmpty`, `AdminError`, `AdminSaveBar`, `useDirtyState`, `adminToast`. All downstream pages adopt these; do NOT fork.
 - **Admin destination registry contract** (#934): Single typed source of truth (`src/Web/ReactApp/src/features/admin/registry/`). ALL admin UI consumes registry; hardcoded lists are banned.
-- **Admin overview endpoint** (#933): Composed from existing health checks; 8s timeout; no 500s (hub is what users hit when broken); graceful degradation on probe failure.
+- **Admin overview endpoint architectural notes** (#933): Composed from existing health checks; 8s timeout; no 500s (hub is what users hit when broken); graceful degradation on probe failure.
 - **Settings architecture documentation** (#940): `docs/SETTINGS_ARCHITECTURE.md` is canonical reference for future agents. Covers two-layer architecture, three routes/scopes, URL contract, deep-link sections, per-group save, essential manifest, global command palette, legacy redirects.
 - **Heading typography narrowed** (#941 gate finding): Global display-heading rule limited to `h1` and `h2`; `h3`-`h6` use default semantic path unless opted into display style explicitly.
 
@@ -232,98 +205,11 @@ Use normalized query inside existing shell: `scope=user|system|admin`, `tab=<cat
 Vasquez must use GPT-5.5 for all 3-way pre-PR reviews (user request from Jeff Papiez).
 
 ---
----
-date: 2026-06-02
-owner: Ash
-status: closed
-issue: 940
----
+## Decision: Admin Overview Endpoint Response Contract & Aggregation (#933)
 
-## Docs: Settings Architecture Canonical Reference (#940)
-
-Rewrote `docs/SETTINGS_ARCHITECTURE.md` as the authoritative admin-surface reference, covering:
-
-- Two-layer architecture (backend attribute discovery + frontend `SettingsShell`)
-- Three routes / three scopes (`/settings` user, `/settings?scope=system` system, `/admin` admin) plus `/admin` Control Center hub
-- URL contract: `?scope`, `?tab`, `?sub`, `?q`, `?field`
-- Tab-to-group `allowedGroups` map from `SettingsShell.tsx:109-194`
-- Per-group save model (no Save All button in production)
-- Essential vs Everything mode with silent-demotion rename gotcha
-- Section-qualified `?field=Section.Property` deep-link contract (bare property names collide because `Enabled` appears in 13 settings classes)
-- Global command palette mounted in `Layout.tsx`
-- Admin overview endpoint architectural notes (aggregation, 8s timeout, never 500, string-enum serialization)
-- Walkthrough for adding new settings section
-- Full 27-entry legacy redirect table from `legacyRedirects.ts`
-
-**Recommendation**: Treat `docs/SETTINGS_ARCHITECTURE.md` as canonical for future agents. Extend rather than create new admin/settings docs. Update tab-to-group map and legacy redirects table when new sub-pages ship.
-
-**Known limitations** (out of scope for #940):
-- `README.md:139` links non-existent `docs/DATABASE.md`
-- `README.md:147` links non-existent `docs/QUICK_REFERENCE.md`
-- `Job Queue` group in `HistorySeedingBackgroundService.cs` unreachable via UI (no tab lists it in `allowedGroups`)
-- Old design docs under `docs/design/` describe URLs that never shipped
-
-**Reminder**: Backend property rename must update `essential-manifest.ts` in same commit, or setting silently demotes to advanced. This is prominent in the new SETTINGS_ARCHITECTURE.md.
-
----
----
-date: 2026-06-06
-owner: Bishop
-status: closed
-issue: 931
----
-
-## Decision: Settings Navigation Restructure Scope (#931 Phase Planning)
-
-**Recommendation**: Two primary destinations: **Settings** (real settings only; default User Settings for all users; System Settings admin-only within Settings) and **Admin** (admin-only operations and management not configuration).
-
-**Proposed Structure**:
-- `/settings` → User Settings (theme, locale, items per page, API keys, notifications, passkeys)
-- `/settings?scope=system` → System Settings (farm identity, energy/cost defaults, slicing defaults, hardware, integrations, quotas)
-- `/admin` → Admin/Operations (system status, workers/jobs, user accounts, login audit, tags, data management)
-
-Separates ownership and intent: User Settings = account-scoped; System Settings = farm-wide; Admin = operations.
-
-**Migration Plan**: Five phases from new information architecture through redirects to legacy query-param cleanup.
-
-**Effort**: L-sized. Frontend composition + routing (high blast radius but no backend invention). Primarily touches sidebar nav, route guards, redirects, command palette/search, settings shell behavior, tests, user mental models.
-
----
----
-date: 2026-01-20
-owner: Newt
-status: closed
-issue: 932
----
-
-## Admin UI Primitives Decision (#932)
-
-**Shipped module**: Scoped `@/common/components/admin`. Barrel export only (no deep imports).
-
-**Components**: `AdminLoading`, `AdminEmpty`, `AdminError`, `AdminSaveBar`, `useDirtyState`, `adminToast`.
-
-**Design decisions frozen** (do NOT renegotiate):
-1. No auto-sync `useDirtyState` on prop change. Callers invoke `markPristine(next)` explicitly after successful save/fetch.
-2. `beforeunload` guard opt-in via `guardUnload` (default true).
-3. `AdminError` disclosure uses `<div>` not `<pre>` (lint rule forbids non-literal `<pre>` children).
-4. `AdminSaveBar` renders `null` when clean (no space reserved).
-5. `changedLabels` beats `changeCount` in `AdminSaveBar`.
-6. `onSave` return type `void | Promise<void>`. Parent owns promise; bar does NOT swallow errors.
-7. All primitives set correct ARIA roles up-front (`status`, `alert`, `region`).
-
-**Adopted**: LoginAuditPage (smoke test). All future admin pages adopt these; do NOT fork.
-
-**Downstream rules**: Do NOT add new loading/empty/error/save patterns; do NOT mount another `<Toaster />`; do NOT deep-import; do NOT wrap primitives in extra role containers; do NOT use raw `<pre>` for stringified errors; do NOT add `useDirtyState` auto-sync; do NOT commit anything under `.squad/`.
-
----
----
-date: 2026-07-25
-owner: Lambert
-status: closed
-issue: 933
----
-
-## Admin Overview Endpoint Response Contract & Aggregation (#933)
+**Date**: 2026-07-25
+**Agent**: Lambert
+**Status**: closed
 
 **Route**: `GET /api/admin/overview` (auth: `farm_admin`, no caching).
 
@@ -345,122 +231,11 @@ issue: 933
 **Client routing**: `actionRoute` always client route (`/admin/system`, `/printers`), never raw API URL.
 
 ---
----
-date: 2025-12-21
-owner: Ripley
-status: closed
-issue: 934
----
-
-## Admin Destination Registry Contract (#934)
-
-**Single source of truth**: `src/Web/ReactApp/src/features/admin/registry/` with `AdminDestination` type, destination table, and query helpers.
-
-**Files**: `adminDestinations.ts` (types + table + queries), `legacyRedirects.ts` (old-path → new-path), `index.ts` (barrel).
-
-**Type** (`AdminDestination`):
-- `id`: Stable, unique
-- `label`: Short nav/card/palette label
-- `description`: One sentence
-- `path`: Canonical route (may include `?query`)
-- `icon`: `ComponentType<{ className?: string }>` (MdiIcons)
-- `group`: `'overview' | 'operations' | 'users' | 'data' | 'hardware' | 'slicing' | 'integrations' | 'general' | 'automation' | 'quotas'`
-- `requiredRole`: `undefined` = `'farm_admin'` (default), `null` = no gate (any authenticated), else exact-role match
-- `requiredPermission`: `{ resource, action }` (checked **in addition** to role)
-- `keywords`: Palette fuzzy search
-- `isHubTile`: `true` = show as card on `/admin` (domain entry points only; deep destinations are palette-only)
-
-**Access gating** via `filterDestinationsByAccess(destinations, { hasRole, hasPermission })`.
-
-**Consumer patterns**:
-- Hub (#936): `getHubGroupedDestinations(access)` → grouped by category, filtered, hub-tiles only
-- Palette (#938): Iterate `ADMIN_DESTINATIONS`, fuzzy-match, group by category, show ALL (palette is where deep destinations become discoverable)
-
-**Legacy redirects** (28 entries): `from`, `to`, `description`, optional `notes`. Two custom App.tsx components remap query params (`/admin/workers?tab=X` → `?workerTab=X`, `/admin/system` branches on `?tab=`).
-
-**Non-negotiables**:
-1. Never delete a redirect; bookmarks depend on them.
-2. Never render admin destinations from hardcoded list; consume registry.
-3. New destinations MUST be added to registry.
-4. Icons from `@/common/components/icons/MdiIcons`.
-5. Default role is `farm_admin`; set `requiredRole: null` explicitly for non-admin surfaces.
-
----
----
-date: 2025-01-13
-owner: Ash
-status: closed
-issue: 940
----
-
-## Client-Side Manifest for Essential/Advanced Mode (#937)
-
-**Decision**: Essential/Everything toggle uses client-side manifest (`src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`) rather than extending backend `SettingDisplayAttribute`.
-
-**Why not backend**: Would require editing 15+ settings classes + metadata mapping + DTO (large surface). Would pull `dotnet build` into validation path for every tweak (product will iterate). "Essential" varies with audience (backend attribute is wrong place).
-
-**Why manifest is safe**:
-- Save and validation walk **full** metadata list. Manifest only filters rendering; hidden fields survive round-trips unchanged.
-- Section keys use backend `SectionName` value (not React/C# class names), so renames can't drift.
-- Missing sections gracefully return false from `isEssentialProperty`.
-
-**Search always searches everything**, independent of mode toggle.
-
-**Toggle is global** (`pf.settings.mode` storage key), not per-tab. Rationale: settings shell only mounts one `SettingsPage` at a time; per-tab preference would surprise users.
-
-**Compiler-rule avoidances**: All four `react-hooks` traps avoided; zero `eslint-disable` comments added.
-
----
----
-date: 2025-12-21
-owner: Ripley
-status: closed
-issue: 938
----
-
-## Command Palette Extension (#938)
-
-**Global mount via provider in `Layout.tsx`**: Moved ownership from `SettingsShell` (route-scoped) to `<GlobalCommandPaletteProvider>` wrapping `<Outlet />`. Only way Ctrl+K works on `/admin/manage` without per-shell listener.
-
-**Context + hook**: `useCommandPalette` and `CommandPaletteContext` in separate `commandPaletteContext.ts` file (shipping hook from component file fails `react-refresh/only-export-components`).
-
-**Settings metadata**: Via TanStack Query `['settings','metadata']` and `['settings','groups']` keys with 5-minute stale time, gated `enabled: Boolean(user) && isOpen` so fetch doesn't happen until palette opens.
-
-**Admin destinations source of truth**: Palette assembles from three sources: (1) `ADMIN_DESTINATIONS` filtered by role/permission, (2) `SETTINGS_NAVIGATION` restricted to `scopeId === 'user'`, (3) settings metadata → per-property items. Admin-scope settings entries would duplicate destinations (dropped).
-
-**Deep-linking a setting**: `?field=<propertyName>` bypasses Essential mode via URL (user's preference untouched). `SettingsPagelet` emits `data-setting-property="{sectionKey}.{propertyName}"`; RAF-scheduled `document.querySelector` scrolls field into view, applies `.pf-setting-focus` for 2s (respects `prefers-reduced-motion`). Uses suffix match because palette only knows property name, not section key. URL is copy-pasteable; Back returns to pre-focus mode.
-
-**Unified search**: Removed `<SettingsSearch>` from shell toolbar. Palette is single global settings search entry; in-page `q=` filter remains for local narrowing.
-
-**Curated destructive actions** gate on `window.confirm`: Sign out (destructive), Refresh admin overview (farm-admin only), Switch theme.
-
-**Validation**: 0 lint errors, 0 warnings. Build 11.68s. 2866 tests pass (added 1 file + 14 tests, deleted 3 SettingsSearch tests).
-
----
----
-date: 2026-06-03
-owner: Lambert
-status: closed
-issue: 941
----
-
-## Heading Typography Scope Narrowed (#941)
-
-**Decision**: Global display-heading rule in `src/Web/ReactApp/src/index.css` limited to `h1` and `h2`. `h3`-`h6` use default semantic typography path unless surface opts into display styling explicitly.
-
-**Rationale**: Previous global rule forced Bebas and uppercase onto every heading level, making secondary headings overly loud on settings and other pages.
-
-**Impact**: Settings, API Keys pages can use `h3`-`h6` without inheriting display styling. Teams wanting display styling below `h2` add it intentionally at component or page level.
-
----
----
-date: 2026-07-25
-owner: Newt
-status: closed
-issue: 931
----
-
 ## Team Decision: Bare Property-Name Lookups Are Bugs (#931)
+
+**Date**: 2026-07-25
+**Agent**: Newt
+**Status**: closed
 
 **Root cause across four defects**: Code treating bare property name as identifier when name is only unique inside its section.
 
@@ -481,9 +256,7 @@ Only safe global identifier: `` `${key}.${name}` ``. `SettingsPagelet.tsx:101` c
 
 **Related lesson**: Deliberate-break proofs mandatory for every new test. Revert fix, run test, confirm fail, restore. Six agents shipped green suite with real defects; agent doing proofs shipped clean. Cost under a minute per fix.
 
-
 ---
-
 # 2026-07-26: Reviewer-rejection author lockout — RESCINDED
 
 **By:** Jeff (repo owner) — directive, restated multiple times
@@ -539,3 +312,39 @@ on the roster and the escalation path was unavailable.
 Multi-reviewer consensus with fresh-hand rotation stays — it is genuinely effective and caught real
 defects across four gate rounds. What is dropped is only the part that **barred the author from
 their own fix**.
+
+---
+## Decision: 3-Way Review Consensus Verdict on Fix Obico ML Badge Test Leak
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-08-04T13:45:20-07:00 |
+| **Agent** | 3-Way Review Panel (Bishop/Hicks/Vasquez) |
+| **Requested by** | Jeff Papiez |
+| **Status** | REJECT (prose-accuracy only) |
+
+## Core Findings
+
+1. **Panel Gated on Its Own Defect**: The commit body and issue #1106 both cited "~562ms transform vs ~32ms import" as evidence, which Bishop produced during the FIRST gate cycle. This claim ("resetModules re-incurs the import tier, not the transform tier") is false, not merely misscoped. The reported "import" figure is summed file collection time in Vitest runner (`runner.importFile(...,"collect")`), so resetModules-induced re-imports land in the "tests" phase, never "import". Meanwhile, "transform" accumulates every fetch duration, including cached fetches, so the cache-miss re-fetch feeds "transform". Neither figure measures `MdiIcons` or the reset penalty.
+2. **Consistency of Review Standard**: Since the panel gated f2f0df88 for false mechanism claims in durable prose in the last cycle, consistency required a REJECT verdict on this cycle.
+3. **Imprecise Verb Choice**: The verb "re-resolve" in the proposed comment is incorrect. `vi.resetModules()` clears evaluation state but leaves the node in the module map; resolution is not cleared. The correct verb is "re-evaluate" or "re-execute".
+4. **Transform Cache Behavior Confirmed**: The core technical mechanism claim "resetModules clears evaluation state, not the transform cache" is true. This contrast with `invalidateModule`, which does clear transform state, was verified. The subsequent import correctly re-executes cached transformed code. `ShieldIcon` is a stateless pure SVG function.
+5. **Ruling on Land-vs-Close**: Unanimously ruled to **LAND** (do not close #1106 as churn). The false comment was already merged in development, so declining to correct it leaves an actively misleading explanation in mainline; correcting it is necessary to properly teach future maintainers.
+6. **Proportionality Finding Against the Panel**: The panel rejected a working fix over a comment, the code merged anyway via a concurrent actor (PR #1099), and the author opened a second PR purely to satisfy the panel. One bounded amendment is still justified because a false rationale in an unmerged commit body can be corrected cheaply now, but "approve with follow-up" cannot repair a merged commit body.
+
+---
+## Decision: 3-Way Review Consensus Verdict on Fix Obico ML Badge Test Leak (Cycle 3)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-08-04T14:17:07-07:00 |
+| **Agent** | 3-Way Review Panel (Bishop/Hicks/Vasquez) |
+| **Requested by** | Jeff Papiez |
+| **Status** | APPROVED |
+
+## Core Findings
+
+1. **Unanimous Approval**: Under Cycle 3, the panel unanimously APPROVED the comment-only correction (1 file, +4/-4) at HEAD `7aada99dd`, resolving the prose-accuracy issue of the previous cycles.
+2. **Technical Accuracy Verified**: The panel confirmed that the corrected text is accurate. Sharpest test applied: a post-reset re-import DOES fire fetchModule with `cached:true` (`vite/dist/node/module-runner.js:1083,1086`), the server returns 304 (`:1094`), and the round-trip duration IS added to `transformTime` (`vitest cli-api.B7PN_QUv.js:7296-7299`) — so "transform" is affected by the re-import. But the re-evaluation itself runs in `directRequest` (`module-runner.js:1101-1146`) inside test execution, outside both the timed fetch RPC and the collect phase. Therefore, "neither number measures this re-evaluation" is true of the evaluation cost.
+3. **Other Claims Validated**: "resets every non-mock evaluated module" is accurate (per `vitest utils.DvEY5TfP.js:22-35` which exempts Vitest internals, not only mocks). The quoted "pay the full transform cost on every run" is faithful to the removed lines. The diff is exactly one file / one commit whose parent is the base (clean rebase, nothing dropped or duplicated), and concurrent work remains intact.
+4. **Acceptable Maintainer Shorthand**: The panel declined to overrule the author's declared deviation (using "transform cache" rather than `transformResult`), ruling it as acceptable maintainer shorthand.

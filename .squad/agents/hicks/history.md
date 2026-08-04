@@ -126,3 +126,11 @@ Participated in multi-round trio review cycle. Key learnings:
 **Orchestration note:** Invalid attempt 1 created scratch `TestEnum/` + `test_enum.cs` artifacts during cleanliness check; coordinator removed and re-ran. Only valid retry verdict recorded above.
 
 **Lesson — Immutable-review contract:** When live branch changes mid-review, abort immediately and isolate at exact SHA. The review verdict is only valid for the exact commit SHA reviewed.
+
+### 2026-08-04 — Issue #1106 pre-PR review (obico-ml-badge-test-leak final gate, Cycle 3)
+
+- **Verdict:** ✅ APPROVE.
+- **Learnings**:
+  - **Lesson**: When your own prior finding is restated by an author, re-verify the restatement against the source rather than just recognizing your own words.
+  - **Rigor**: Always name the strongest counter-argument to your own APPROVE to maintain high standard of critique.
+  - **Process Lesson**: A 3-cycle gate on a 4-line comment held up because each rejection caught a genuinely false technical claim, one of which originated with the panel itself (Bishop's ~562ms/~32ms figure). Panels must treat their own measurements as unverified evidence.

@@ -123,3 +123,11 @@ Verified against code (not briefs):
 Follow-ups (non-blocking): (1) 3× `ActionRoute="/admin/system"` in AdminOverviewService take a redirect hop — point at canonical `/admin/manage?tab=operations&sub=status`. (2) `saveAllSettings` orphaned (API wrapper + tests only) — remove or wire. (3) The Job-Queue "guard" test only asserts 4 hardcoded keys exist; it does NOT dynamically cross-check `allowedGroups`↔`SETTINGS_GROUP_TO_LOCATION`, so it won't catch a FUTURE missing mapping — the two-sources-of-truth gap is still open. (4) `essential-manifest` silent-demotion on backend rename has no build-time guard.
 
 Process learning: a fully-green suite again hid nothing critical here, but the weak guard test (#3) is the clearest example this epic of a test that "passes" without actually enforcing the invariant it claims to protect. Read what the assertion binds to, not just that it's green.
+
+### 2026-08-04 — Issue #1106 pre-PR review (obico-ml-badge-test-leak final gate, Cycle 3)
+
+- **Verdict:** ✅ APPROVE.
+- **Learnings**:
+  - **Lesson**: When your own prior finding is restated by an author, re-verify the restatement against the source rather than just recognizing your own words.
+  - **Rigor**: Always name the strongest counter-argument to your own APPROVE to maintain high standard of critique.
+  - **Process Lesson**: A 3-cycle gate on a 4-line comment held up because each rejection caught a genuinely false technical claim, one of which originated with the panel itself (Bishop's ~562ms/~32ms figure). Panels must treat their own measurements as unverified evidence.
